@@ -80,7 +80,7 @@ CTRDrbg: struct {
     seeded: Bool,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             counter := self.counter.move()
             core.crypto.wipe(counter)
         }
@@ -104,7 +104,7 @@ ctr_drbg_new: fn() -> CTRDrbg Never! {
 
 /// The nonce length to draw at seeding; only before ctr_drbg_seed
 /// (mbedtls_ctr_drbg_set_nonce_len).
-ctr_drbg_set_nonce_len: fn(ctx: &CTRDrbg, len: Int) DrbgError! {
+ctr_drbg_set_nonce_len: fn(ctx: ^CTRDrbg, len: Int) DrbgError! {
     if ctx.seeded -> return Err(.EntropySourceFailed)
     if len < 0 || len > CTR_MAX_SEED_INPUT -> return Err(.InputTooBig)
     ctx.nonce_len = len
@@ -162,7 +162,7 @@ block_cipher_df: fn(data: [U8], len: Int) -> [U8] DrbgError! {
 
 /// `count` counter blocks after `ctr`, which ends at the last of them, each
 /// encrypted, appended to `out`.
-ctr_blocks: fn(ctx: &CTRDrbg, count: Int, out: &[U8]) Never! {
+ctr_blocks: fn(ctx: ^CTRDrbg, count: Int, out: ^[U8]) Never! {
     ctrs := cipher.zero_bytes(count * CTR_BLOCKSIZE)
     loop b in 0..<count {
         cipher.increment(ctx.counter, CTR_BLOCKSIZE)
@@ -173,7 +173,7 @@ ctr_blocks: fn(ctx: &CTRDrbg, count: Int, out: &[U8]) Never! {
 }
 
 /// CTR_DRBG_Update (SP 800-90A section 10.2.1.2) with CTR_SEEDLEN bytes.
-ctr_update_internal: fn(ctx: &CTRDrbg, data: [U8]) Never! {
+ctr_update_internal: fn(ctx: ^CTRDrbg, data: [U8]) Never! {
     tmp := [U8]{}
     ctr_blocks(ctx, CTR_SEEDLEN /% CTR_BLOCKSIZE, tmp)
     loop i in 0..<CTR_SEEDLEN -> tmp[i] = tmp[i] ~ data[i]
@@ -184,7 +184,7 @@ ctr_update_internal: fn(ctx: &CTRDrbg, data: [U8]) Never! {
 
 /// Mix `additional` into the state (mbedtls_ctr_drbg_update); empty input
 /// changes nothing.
-ctr_drbg_update: fn(ctx: &CTRDrbg, additional: [U8]) DrbgError! {
+ctr_drbg_update: fn(ctx: ^CTRDrbg, additional: [U8]) DrbgError! {
     if additional.len() == 0 {
         return
     }
@@ -193,7 +193,7 @@ ctr_drbg_update: fn(ctx: &CTRDrbg, additional: [U8]) DrbgError! {
     core.crypto.wipe(seed)
 }
 
-ctr_reseed_internal: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, additional: [U8], nonce_len: Int) DrbgError! {
+ctr_reseed_internal: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, additional: [U8], nonce_len: Int) DrbgError! {
     if ctx.entropy_len > CTR_MAX_SEED_INPUT -> return Err(.InputTooBig)
     if nonce_len > CTR_MAX_SEED_INPUT - ctx.entropy_len -> return Err(.InputTooBig)
     if additional.len() > CTR_MAX_SEED_INPUT - ctx.entropy_len - nonce_len {
@@ -224,14 +224,14 @@ ctr_reseed_internal: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, additional: [U8], no
 }
 
 /// Fresh entropy and `additional` (mbedtls_ctr_drbg_reseed).
-ctr_drbg_reseed: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, additional: [U8]) DrbgError! {
+ctr_drbg_reseed: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, additional: [U8]) DrbgError! {
     ctr_reseed_internal(ctx, entropy, additional, 0)
 }
 
 /// Instantiate from `entropy` with personalization `custom`
 /// (mbedtls_ctr_drbg_seed): entropy_len bytes of entropy, then a nonce of
 /// nonce_len bytes, or half the entropy when that is under 1.5 key lengths.
-ctr_drbg_seed: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, custom: [U8]) DrbgError! {
+ctr_drbg_seed: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, custom: [U8]) DrbgError! {
     ctx.seeded = true
     if ctx.entropy_len == 0 -> ctx.entropy_len = CTR_ENTROPY_LEN
     nonce_len: if {
@@ -246,7 +246,7 @@ ctr_drbg_seed: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, custom: [U8]) DrbgError! {
 /// `len` output bytes after mixing in `additional`, reseeding first when
 /// the interval is reached or prediction resistance is on
 /// (mbedtls_ctr_drbg_random_with_add).
-ctr_drbg_random_with_add: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, len: Int, additional: [U8]) -> [U8] DrbgError! {
+ctr_drbg_random_with_add: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, len: Int, additional: [U8]) -> [U8] DrbgError! {
     if len > CTR_MAX_REQUEST -> return Err(.RequestTooBig)
     if additional.len() > CTR_MAX_INPUT -> return Err(.InputTooBig)
     add_input := cipher.zero_bytes(CTR_SEEDLEN)
@@ -272,20 +272,20 @@ ctr_drbg_random_with_add: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, len: Int, addit
 }
 
 /// `len` output bytes (mbedtls_ctr_drbg_random).
-ctr_drbg_random: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, len: Int) -> [U8] DrbgError! {
+ctr_drbg_random: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, len: Int) -> [U8] DrbgError! {
     out: ctr_drbg_random_with_add(ctx, entropy, len, [U8]{})
     Ok(out)
 }
 
 /// The CTR_MAX_INPUT bytes mbedtls_ctr_drbg_write_seed_file stores.
-ctr_drbg_seed_bytes: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E) -> [U8] DrbgError! {
+ctr_drbg_seed_bytes: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E) -> [U8] DrbgError! {
     out: ctr_drbg_random(ctx, entropy, CTR_MAX_INPUT)
     Ok(out)
 }
 
 /// Mix a seed file's bytes into the state and give the bytes to store back
 /// (mbedtls_ctr_drbg_update_seed_file).
-ctr_drbg_update_seed: fn<E: RNG>(ctx: &CTRDrbg, entropy: &E, file: [U8]) -> [U8] DrbgError! {
+ctr_drbg_update_seed: fn<E: RNG>(ctx: ^CTRDrbg, entropy: ^E, file: [U8]) -> [U8] DrbgError! {
     if file.len() > CTR_MAX_INPUT -> return Err(.InputTooBig)
     if file.len() == 0 -> return Err(.FileIO)
     ctr_drbg_update(ctx, file)
@@ -320,7 +320,7 @@ HMACDrbg: struct {
     seeded: Bool,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             v := self.v.move()
             core.crypto.wipe(v)
         }
@@ -329,7 +329,7 @@ HMACDrbg: struct {
     /// A buffer-seeded HMAC_DRBG as a random source: it never reseeds, so it
     /// needs no entropy. ECDSA's RFC 6979 nonces draw from one.
     impl RNG {
-        fill: fn(&self, out: &[U8]) -> Bool Never! {
+        fill: fn(^self, out: ^[U8]) -> Bool Never! {
             none := NoEntropy{}
             bytes := hmac_drbg_random(self, none, out.len()) ?? return false
             loop i in 0..<out.len() -> out[i] = bytes[i]
@@ -356,7 +356,7 @@ hmac_drbg_new: fn(md: hashes.Md) -> HMACDrbg Never! {
 
 /// The initial working state (SP 800-90A section 10.1.2.3): K = 0x00..,
 /// V = 0x01...
-hmac_drbg_reset: fn(ctx: &HMACDrbg) Never! {
+hmac_drbg_reset: fn(ctx: ^HMACDrbg) Never! {
     size: hashes.md_size(ctx.md)
     ctx.key = hashes.hmac_key(ctx.md, cipher.zero_bytes(size))
     loop i in 0..<size -> ctx.v[i] = U8{1}
@@ -364,7 +364,7 @@ hmac_drbg_reset: fn(ctx: &HMACDrbg) Never! {
 
 /// HMAC_DRBG_Update (SP 800-90A section 10.1.2.2) with `data`
 /// (mbedtls_hmac_drbg_update): one round, or two when data is non-empty.
-hmac_drbg_update: fn(ctx: &HMACDrbg, data: [U8]) Never! {
+hmac_drbg_update: fn(ctx: ^HMACDrbg, data: [U8]) Never! {
     rounds: if data.len() > 0 -> 2 else -> 1
     loop sep in 0..<rounds {
         inner := hashes.hash_clone(ctx.key.inner)
@@ -382,12 +382,12 @@ hmac_drbg_update: fn(ctx: &HMACDrbg, data: [U8]) Never! {
 
 /// Instantiate from `data` alone, with no entropy source
 /// (mbedtls_hmac_drbg_seed_buf).
-hmac_drbg_seed_buf: fn(ctx: &HMACDrbg, data: [U8]) Never! {
+hmac_drbg_seed_buf: fn(ctx: ^HMACDrbg, data: [U8]) Never! {
     hmac_drbg_reset(ctx)
     hmac_drbg_update(ctx, data)
 }
 
-hmac_reseed_core: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, additional: [U8], use_nonce: Bool{false}) DrbgError! {
+hmac_reseed_core: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, additional: [U8], use_nonce: Bool{false}) DrbgError! {
     total: if use_nonce -> ctx.entropy_len * 3 /% 2 else -> ctx.entropy_len
     if additional.len() > HMAC_MAX_INPUT || total + additional.len() > HMAC_MAX_SEED_INPUT {
         return Err(.InputTooBig)
@@ -416,14 +416,14 @@ hmac_reseed_core: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, additional: [U8], use_
 }
 
 /// Fresh entropy and `additional` (mbedtls_hmac_drbg_reseed).
-hmac_drbg_reseed: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, additional: [U8]) DrbgError! {
+hmac_drbg_reseed: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, additional: [U8]) DrbgError! {
     hmac_reseed_core(ctx, entropy, additional)
 }
 
 /// Instantiate from `entropy` with personalization `custom`
 /// (mbedtls_hmac_drbg_seed). The default entropy length follows the digest's
 /// security strength: 16 bytes up to 160 bits, 24 up to 224, else 32.
-hmac_drbg_seed: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, custom: [U8]) DrbgError! {
+hmac_drbg_seed: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, custom: [U8]) DrbgError! {
     hmac_drbg_reset(ctx)
     ctx.seeded = true
     if ctx.entropy_len == 0 {
@@ -440,7 +440,7 @@ hmac_drbg_seed: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, custom: [U8]) DrbgError!
 /// `len` output bytes after mixing in `additional`, reseeding first when
 /// seeded from a source and the interval is reached or prediction
 /// resistance is on (mbedtls_hmac_drbg_random_with_add).
-hmac_drbg_random_with_add: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, len: Int, additional: [U8]) -> [U8] DrbgError! {
+hmac_drbg_random_with_add: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, len: Int, additional: [U8]) -> [U8] DrbgError! {
     if len > HMAC_MAX_REQUEST -> return Err(.RequestTooBig)
     if additional.len() > HMAC_MAX_INPUT -> return Err(.InputTooBig)
     use_add := additional.len() > 0
@@ -465,20 +465,20 @@ hmac_drbg_random_with_add: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, len: Int, add
 }
 
 /// `len` output bytes (mbedtls_hmac_drbg_random).
-hmac_drbg_random: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, len: Int) -> [U8] DrbgError! {
+hmac_drbg_random: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, len: Int) -> [U8] DrbgError! {
     out: hmac_drbg_random_with_add(ctx, entropy, len, [U8]{})
     Ok(out)
 }
 
 /// The HMAC_MAX_INPUT bytes mbedtls_hmac_drbg_write_seed_file stores.
-hmac_drbg_seed_bytes: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E) -> [U8] DrbgError! {
+hmac_drbg_seed_bytes: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E) -> [U8] DrbgError! {
     out: hmac_drbg_random(ctx, entropy, HMAC_MAX_INPUT)
     Ok(out)
 }
 
 /// Mix a seed file's bytes into the state and give the bytes to store back
 /// (mbedtls_hmac_drbg_update_seed_file).
-hmac_drbg_update_seed: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, file: [U8]) -> [U8] DrbgError! {
+hmac_drbg_update_seed: fn<E: RNG>(ctx: ^HMACDrbg, entropy: ^E, file: [U8]) -> [U8] DrbgError! {
     if file.len() > HMAC_MAX_INPUT -> return Err(.InputTooBig)
     if file.len() == 0 -> return Err(.FileIO)
     hmac_drbg_update(ctx, file)
@@ -489,6 +489,6 @@ hmac_drbg_update_seed: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, file: [U8]) -> [U
 /// The absent entropy source of a buffer-seeded generator.
 NoEntropy: struct {
     impl RNG {
-        fill: fn(&self, out: &[U8]) -> Bool Never! { false }
+        fill: fn(^self, out: ^[U8]) -> Bool Never! { false }
     }
 }

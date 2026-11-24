@@ -31,9 +31,9 @@ WasmValidator: struct {
         WasmError.new("func {self.function}: {message}", self.at)
     }
 
-    push: fn(&self, ty: Int) Never! { self.vals.push(ty) }
+    push: fn(^self, ty: Int) Never! { self.vals.push(ty) }
 
-    pop: fn(&self) -> Int WasmError! {
+    pop: fn(^self) -> Int WasmError! {
         top: self.frame_heights.len() - 1
         if self.vals.len() == self.frame_heights[top] {
             if self.frame_unreachable[top] -> return Ok(WASM_UNKNOWN)
@@ -43,7 +43,7 @@ WasmValidator: struct {
         Ok(top_value)
     }
 
-    pop_expect: fn(&self, expected: Int) -> Int WasmError! {
+    pop_expect: fn(^self, expected: Int) -> Int WasmError! {
         actual: self.pop()
         if actual != expected && actual != WASM_UNKNOWN && expected != WASM_UNKNOWN {
             return Err(self.fail("type mismatch: expected {wasm_type_name(expected)}, found {wasm_type_name(actual)}"))
@@ -51,7 +51,7 @@ WasmValidator: struct {
         Ok(if actual == WASM_UNKNOWN -> expected else -> actual)
     }
 
-    pop_all: fn(&self, types: [Int]) WasmError! {
+    pop_all: fn(^self, types: [Int]) WasmError! {
         k := types.len()
         loop k > 0 {
             k -= 1
@@ -59,11 +59,11 @@ WasmValidator: struct {
         }
     }
 
-    push_all: fn(&self, types: [Int]) Never! {
+    push_all: fn(^self, types: [Int]) Never! {
         loop ty in types -> self.vals.push(ty)
     }
 
-    push_frame: fn(&self, op: Int, params: [Int], results: [Int]) Never! {
+    push_frame: fn(^self, op: Int, params: [Int], results: [Int]) Never! {
         self.frame_ops.push(op)
         self.frame_params.push(params.copy())
         self.frame_results.push(results.copy())
@@ -73,7 +73,7 @@ WasmValidator: struct {
     }
 
     // Pops the innermost frame after checking its results; returns its results.
-    pop_frame: fn(&self) -> [Int] WasmError! {
+    pop_frame: fn(^self) -> [Int] WasmError! {
         if self.frame_ops.len() == 0 -> return Err(self.fail("control frames underflow"))
         top: self.frame_ops.len() - 1
         results: self.frame_results[top]
@@ -98,7 +98,7 @@ WasmValidator: struct {
         Ok(self.frame_results[index])
     }
 
-    unreachable: fn(&self) Never! {
+    unreachable: fn(^self) Never! {
         top: self.frame_heights.len() - 1
         loop self.vals.len() > self.frame_heights[top] -> _: self.vals.pop()
         self.frame_unreachable[top] = true
@@ -270,7 +270,7 @@ wasm_validate_limits: fn(limits: WasmLimits, ceiling: Int, what: String) WasmErr
     }
 }
 
-wasm_validate_imports: fn(v: &WasmValidator) WasmError! {
+wasm_validate_imports: fn(v: ^WasmValidator) WasmError! {
     loop entry in v.wm.imports {
         if entry.kind == WASM_EXTERN_FUNC {
             if entry.type_index >= v.wm.types.len() {
@@ -294,7 +294,7 @@ wasm_validate_imports: fn(v: &WasmValidator) WasmError! {
 
 // A constant initializer of type `expected`; `global.get` may name only the
 // first `visible` globals and only immutable ones.
-wasm_validate_const: fn(v: &WasmValidator, expr: WasmConstExpr, expected: Int, visible: Int) WasmError! {
+wasm_validate_const: fn(v: ^WasmValidator, expr: WasmConstExpr, expected: Int, visible: Int) WasmError! {
     op: expr.op
     ty := WASM_UNKNOWN
     if op == WASM_OP_I32_CONST -> ty = WASM_I32 else if op == WASM_OP_I64_CONST -> ty = WASM_I64 else if op == WASM_OP_F32_CONST {
@@ -321,7 +321,7 @@ wasm_validate_const: fn(v: &WasmValidator, expr: WasmConstExpr, expected: Int, v
     }
 }
 
-wasm_validate_body: fn(v: &WasmValidator, code: WasmCode, ty: WasmFuncType) WasmError! {
+wasm_validate_body: fn(v: ^WasmValidator, code: WasmCode, ty: WasmFuncType) WasmError! {
     v.locals = ty.params.copy()
     loop local in code.locals -> v.locals.push(local)
     v.results = ty.results
@@ -341,7 +341,7 @@ wasm_validate_body: fn(v: &WasmValidator, code: WasmCode, ty: WasmFuncType) Wasm
     if v.frame_ops.len() != 0 -> return Err(v.fail("unexpected end of function body"))
 }
 
-wasm_validate_instruction: fn(v: &WasmValidator, code: WasmCode, k: Int) WasmError! {
+wasm_validate_instruction: fn(v: ^WasmValidator, code: WasmCode, k: Int) WasmError! {
     op: code.op[k]
     a: code.a[k]
     b: code.b[k]

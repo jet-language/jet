@@ -332,7 +332,7 @@ SourceTable: struct {
 
     // Add a declaration when a CLI surface supplies a built-in native catalog
     // entry alongside project declarations. An existing name is kept.
-    ensure_decl: fn(&self, name: String, upstream: String, via: ProviderKind) Never! {
+    ensure_decl: fn(^self, name: String, upstream: String, via: ProviderKind) Never! {
         if self.named.has_key(name) {
             return
         }
@@ -340,7 +340,7 @@ SourceTable: struct {
     }
 
     // Set the authoring policy and raw source spelling for a declaration.
-    set_channel_metadata: fn(&self, name: String, policy: ChannelPolicy, raw: String) Never! {
+    set_channel_metadata: fn(^self, name: String, policy: ChannelPolicy, raw: String) Never! {
         if !self.named.has_key(name) {
             return
         }
@@ -382,7 +382,7 @@ SourceTable: struct {
     }
 
     // Replace one declared source's upstream after reading an exact lock entry.
-    set_upstream: fn(&self, name: String, upstream: String) Never! {
+    set_upstream: fn(^self, name: String, upstream: String) Never! {
         if !self.named.has_key(name) {
             return
         }

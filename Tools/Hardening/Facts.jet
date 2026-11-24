@@ -130,7 +130,7 @@ parse_core: fn(sources: [SourceFile]) -> ParsedCore Never! {
     out
 }
 
-parse_into: fn(out: &ParsedCore, module_name: String, file: SourceFile) Never! {
+parse_into: fn(out: ^ParsedCore, module_name: String, file: SourceFile) Never! {
     bytes: file.text.bytes()
     starts: parser_line_starts(bytes)
     lexed: lex_generated(bytes)
@@ -509,7 +509,7 @@ nominal_row: fn(id: String, module_name: String, name: String, core: ParsedCore,
 // Route the remaining rows through the verified special table. A row the table
 // names must exist, must lack every other route, and its needle must be in the
 // named file; otherwise the table is wrong and generation fails.
-apply_specials: fn(rows: &[SurfaceRow], errors: &[String], specials: [SpecialRoute], special_files: [SourceFile]) Never! {
+apply_specials: fn(rows: ^[SurfaceRow], errors: ^[String], specials: [SpecialRoute], special_files: [SourceFile]) Never! {
     keys := [String:Bool]{}
     loop special in specials {
         where: "{SPECIAL_ROUTES_PATH}:{special.row}"

@@ -75,7 +75,7 @@ JetCLITestReuseHow: enum {
 // `reuse` has them and its reads are unchanged, else a run whose reads are
 // logged for jet_cli_test_reuse_keep. No `reuse` runs the tests plainly. A
 // records file the run can't create, write or read sets `fault`.
-jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, how: &JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: &JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
+jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, how: ^JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: ^JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
     if reuse == .Val(store) {
         if jet_cli_test_reuse_lookup(store) == .Val(kept) {
             how = .Reused
@@ -222,14 +222,14 @@ jet_cli_test_reuse_group: fn(texts: [String]) -> String Never! {
     out
 }
 
-jet_cli_test_reuse_count: fn(cursor: &JetNativeTestCursor) -> Int? Never! {
+jet_cli_test_reuse_count: fn(cursor: ^JetNativeTestCursor) -> Int? Never! {
     line: jet_native_test_line(cursor) ?? return None
     count: Int.parse(line) ?? return None
     if count < 0 -> return None
     Val(count)
 }
 
-jet_cli_test_reuse_field: fn(cursor: &JetNativeTestCursor) -> String? Never! {
+jet_cli_test_reuse_field: fn(cursor: ^JetNativeTestCursor) -> String? Never! {
     length: jet_cli_test_reuse_count(cursor) ?? return None
     if length >= cursor.bytes.len() - cursor.at -> return None
     end: cursor.at + length
@@ -239,7 +239,7 @@ jet_cli_test_reuse_field: fn(cursor: &JetNativeTestCursor) -> String? Never! {
     Val(text)
 }
 
-jet_cli_test_reuse_fields: fn(cursor: &JetNativeTestCursor) -> [String]? Never! {
+jet_cli_test_reuse_fields: fn(cursor: ^JetNativeTestCursor) -> [String]? Never! {
     count: jet_cli_test_reuse_count(cursor) ?? return None
     texts := [String]{}
     loop _ in 0..<count {

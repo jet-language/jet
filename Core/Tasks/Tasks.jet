@@ -13,6 +13,7 @@ use {
     core: core
     time: core.time
     rt: jet.runtime.time
+    tasks_rt: jet.runtime.tasks
 }
 
 // Timer creation and scheduler identity are host cells. Scheduler channels
@@ -67,9 +68,9 @@ scheduler: module {
 }
 
 impl Condition {
-    notify_one: fn(self) Never! { core.tasks.__condition_notify_one(self) }
+    notify_one: fn(self) Never! { tasks_rt.condition_notify_one(self) }
 
-    notify_all: fn(self) Never! { core.tasks.__condition_notify_all(self) }
+    notify_all: fn(self) Never! { tasks_rt.condition_notify_all(self) }
 }
 
 yield_now: fn() -[Time.Wait]> Never! { host_yield() }
@@ -85,7 +86,7 @@ TaskID: struct {
     }
 }
 
-current_task: fn() -> TaskID Never! { TaskID{value: core.tasks.__task_identity()} }
+current_task: fn() -> TaskID Never! { TaskID{value: tasks_rt.task_identity()} }
 
 /// A task the runtime has submitted and no carrier runs yet, as a scheduler
 /// provider holds it. Only the runtime's hook makes one (`queued_task`, under
@@ -107,8 +108,8 @@ QueuedTask: struct {
 /// it links the program, so a spawn compiles to the same code under every
 /// scheduler and no call goes through a table.
 Scheduler: trait {
-    push: fn(&self, task: QueuedTask) Never!,
-    pop: fn(&self) -> QueuedTask? Never!,
+    push: fn(^self, task: QueuedTask) Never!,
+    pop: fn(^self) -> QueuedTask? Never!,
 }
 
 /// The task the runtime handed its scheduler hook as `handle`.
@@ -237,7 +238,7 @@ Semaphore: struct {
 /// A deterministic world has no CPU clock to control, so it rejects the read.
 cpu_ns: fn() -[Time]> Int Never! {
     rt.reject_uncontrolled("task CPU clock")
-    core.tasks.__task_cpu_ns()
+    tasks_rt.task_cpu_ns()
 }
 
 /// Receive from a scheduler channel: the next value, or None once the
@@ -271,7 +272,7 @@ waitany: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> {index: Int, value: T?} N
     {index: 0, value: recv(receivers[0])}
 }
 
-host_yield: fn() -[Time.Wait]> { core.tasks.__yield_now() }
+host_yield: fn() -[Time.Wait]> { tasks_rt.yield_now() }
 
 /// Joins the scheduler's carrier and timer threads, the safe step before a
 /// raw exec or fork that needs a single-threaded process. False, with nothing
@@ -280,7 +281,7 @@ host_yield: fn() -[Time.Wait]> { core.tasks.__yield_now() }
 /// each joined thread has left the process by the return, so a thread count
 /// read next sees none of them. The threads start again on the next task or
 /// timer.
-quiesce: fn() -[Exec]> Bool Never! { core.tasks.__quiesce() }
+quiesce: fn() -[Exec]> Bool Never! { tasks_rt.quiesce() }
 
 /// Receiver metadata is owned by the scheduler's typed handle.
 is_timer: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_timer() }

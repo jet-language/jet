@@ -53,7 +53,7 @@ pkg_bridge_foreign_host_target: fn() -[Env]> String Never! {
 // so a name cannot hold `=` while a value may: handle facts and descriptor
 // stamps are themselves `key=value;...` records. A field with several values
 // is written as repeated rows, never as one value that holds line breaks.
-pkg_bridge_append_line: fn(text: &String, name: String, value: String) ForeignBridgeError! {
+pkg_bridge_append_line: fn(text: ^String, name: String, value: String) ForeignBridgeError! {
     carriage_return: "\r"
     if name == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") {
         return Err(pkg_bridge_error("bridge provenance field names must be non-empty and hold no line break or `=`"))
@@ -74,7 +74,7 @@ pkg_bridge_field_value: fn(fields: [{name: String, value: String}], name: String
 pkg_bridge_bool_text: fn(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
 // The capability rows that follow every appended boundary row.
-pkg_bridge_append_capability_lines: fn(text: &String, root: String) ForeignBridgeError! {
+pkg_bridge_append_capability_lines: fn(text: ^String, root: String) ForeignBridgeError! {
     capability: pkg_foreign_boundary_capability(root)
     pkg_bridge_append_line(text, "boundary-mixed-debug", pkg_bridge_bool_text(capability.mixed_debug))
     pkg_bridge_append_line(text, "boundary-native-export", pkg_bridge_bool_text(capability.native_export))
@@ -146,7 +146,7 @@ pkg_bridge_write_provenance: fn(path: String, identity: String, fields: [{name: 
 
 // Append the canonical boundary row to a binder-owned provenance record.
 // A record that already carries a boundary row is left unchanged.
-pkg_bridge_append_boundary_provenance: fn(text: &String, descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) ForeignBridgeError! {
+pkg_bridge_append_boundary_provenance: fn(text: ^String, descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) ForeignBridgeError! {
     loop line in text.split("\n") {
         if line.starts_with("boundary-schema=") {
             return
@@ -161,7 +161,7 @@ pkg_bridge_append_boundary_provenance: fn(text: &String, descriptor: BinderDescr
 }
 
 // Append a boundary for an adapter that publishes a legacy text record.
-pkg_bridge_append_boundary_for_artifact: fn(text: &String, descriptor: BinderDescriptor, library: String, source: String, archive: String, toolchain: String) -[FS, Env, Exec, Time.Wait]> ForeignBridgeError! {
+pkg_bridge_append_boundary_for_artifact: fn(text: ^String, descriptor: BinderDescriptor, library: String, source: String, archive: String, toolchain: String) -[FS, Env, Exec, Time.Wait]> ForeignBridgeError! {
     source_digest: pkg_bridge_sha_file(source)
     archive_digest: pkg_bridge_sha_file(archive)
     archive_name: bridge_core_files.basename(archive)
@@ -275,14 +275,14 @@ pkg_bridge_local_archive_inputs: fn(library_dirs: [String], libraries: [String])
 }
 
 // Add local archive path/byte records to a binding identity.
-pkg_bridge_add_local_archive_inputs: fn(identity: &ForeignIdentityBuilder, library_dirs: [String], libraries: [String]) -[FS, Env]> {
+pkg_bridge_add_local_archive_inputs: fn(identity: ^ForeignIdentityBuilder, library_dirs: [String], libraries: [String]) -[FS, Env]> {
     pkg_bridge_add_archive_inputs(identity, pkg_bridge_local_archive_inputs(library_dirs, libraries))
 }
 
 // Add already-resolved archive records to an identity. Callers with a
 // provider-specific notion of local libraries use this without manufacturing
 // missing candidates for system or provisioned dependencies.
-pkg_bridge_add_archive_inputs: fn(identity: &ForeignIdentityBuilder, inputs: [ArchiveInput]) Never! {
+pkg_bridge_add_archive_inputs: fn(identity: ^ForeignIdentityBuilder, inputs: [ArchiveInput]) Never! {
     loop input in inputs {
         identity.field("linked_library", input.library.bytes())
         identity.field("linked_archive_path", input.path.bytes())

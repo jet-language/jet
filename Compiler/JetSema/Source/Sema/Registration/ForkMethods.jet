@@ -39,7 +39,7 @@ SemaForkParts: struct {
 }
 
 // The row of `name` in `types`, added empty when new.
-sema_fork_parts_row: fn(types: &SemaForkParts, name: String) -> Int Never! {
+sema_fork_parts_row: fn(types: ^SemaForkParts, name: String) -> Int Never! {
     row: name_index(name_intern(types.names, name))
     if row == types.parts.len() {
         types.parts.push(None)
@@ -50,7 +50,7 @@ sema_fork_parts_row: fn(types: &SemaForkParts, name: String) -> Int Never! {
 
 FORK_METHOD_NAME: "__fork"
 
-sema_fork_methods_expand: fn(items: &[Item]) Never! {
+sema_fork_methods_expand: fn(items: ^[Item]) Never! {
     types := SemaForkParts{}
     loop item in items {
         if item == {
@@ -146,7 +146,7 @@ sema_fork_methods_wanted: fn(name: String, type_params: [TypeParam], methods: [F
 // declares; the parameters `bound` of a generic type's parts name no type. A
 // `Shared` value is one handle on its state, and a function or trait value
 // has no parts a copy rebuilds, so none of them is walked.
-sema_fork_methods_names: fn(ty: Type, bound: [String], types: SemaForkParts, reached: &NameTable) Never! {
+sema_fork_methods_names: fn(ty: Type, bound: [String], types: SemaForkParts, reached: ^NameTable) Never! {
     if ty == {
         .Named(name) -> { sema_fork_methods_name(name, bound, types, reached) }
         .Apply(name, args) -> {
@@ -176,7 +176,7 @@ sema_fork_methods_names: fn(ty: Type, bound: [String], types: SemaForkParts, rea
     }
 }
 
-sema_fork_methods_name: fn(name: String, bound: [String], types: SemaForkParts, reached: &NameTable) Never! {
+sema_fork_methods_name: fn(name: String, bound: [String], types: SemaForkParts, reached: ^NameTable) Never! {
     if bound.contains(name) || name_find(reached, name) != None {
         return
     }

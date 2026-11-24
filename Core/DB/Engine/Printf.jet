@@ -127,9 +127,9 @@ FMT_INFO: [PrintfInfo]{
 // argument, which as a C string end at their first 0x00 byte, and returns
 // false for a NULL char*.
 PrintfArgs: trait {
-    int_arg: fn(&self) -> Int Never!,
-    double_arg: fn(&self) -> Float Never!,
-    next_text: fn(&self, out: &[U8]) -> Bool Never!,
+    int_arg: fn(^self) -> Int Never!,
+    double_arg: fn(^self) -> Float Never!,
+    next_text: fn(^self, out: ^[U8]) -> Bool Never!,
 }
 
 // The va_list of an engine-internal format: MEM_INT cells are integer
@@ -141,7 +141,7 @@ MemList: struct {
     used: Int,
 
     impl PrintfArgs {
-        int_arg: fn(&self) -> Int Never! {
+        int_arg: fn(^self) -> Int Never! {
             if self.used >= self.args.len() -> return 0
             self.used += 1
             m: self.args[self.used - 1]
@@ -149,7 +149,7 @@ MemList: struct {
             0
         }
 
-        double_arg: fn(&self) -> Float Never! {
+        double_arg: fn(^self) -> Float Never! {
             if self.used >= self.args.len() -> return Float{0}
             self.used += 1
             m: self.args[self.used - 1]
@@ -158,7 +158,7 @@ MemList: struct {
             Float{0}
         }
 
-        next_text: fn(&self, out: &[U8]) -> Bool Never! {
+        next_text: fn(^self, out: ^[U8]) -> Bool Never! {
             if self.used >= self.args.len() -> return false
             self.used += 1
             m: self.args[self.used - 1]
@@ -202,13 +202,13 @@ str_accum_init: fn(n: Int, mx: Int) -> StrAccum Never! {
 str_new: fn(mx: Int) -> StrAccum Never! { str_accum_init(0, mx) }
 
 // sqlite3StrAccumSetError.
-str_accum_set_error: fn(p: &StrAccum, e: Int) Never! {
+str_accum_set_error: fn(p: ^StrAccum, e: Int) Never! {
     p.acc_error = e
     if p.mx_alloc != 0 -> str_reset(p)
 }
 
 // sqlite3_str_reset.
-str_reset: fn(p: &StrAccum) Never! {
+str_reset: fn(p: ^StrAccum) Never! {
     p.printf_flags &= PRINTF_MALLOCED ~ 255
     p.n_alloc = 0
     p.text = [U8]{}
@@ -216,7 +216,7 @@ str_reset: fn(p: &StrAccum) Never! {
 
 // sqlite3StrAccumEnlarge: room for n more bytes; the bytes that may be
 // appended now, which can be fewer than n or zero.
-str_accum_enlarge: fn(p: &StrAccum, n: Int) -> Int Never! {
+str_accum_enlarge: fn(p: ^StrAccum, n: Int) -> Int Never! {
     if p.acc_error != 0 -> return 0
     if p.mx_alloc == 0 {
         str_accum_set_error(p, base.TOOBIG)
@@ -235,7 +235,7 @@ str_accum_enlarge: fn(p: &StrAccum, n: Int) -> Int Never! {
 }
 
 // sqlite3_str_appendchar: n copies of byte c.
-str_append_char: fn(p: &StrAccum, n_in: Int, c: Int) Never! {
+str_append_char: fn(p: ^StrAccum, n_in: Int, c: Int) Never! {
     n := n_in
     if p.text.len() + n >= p.n_alloc {
         n = str_accum_enlarge(p, n)
@@ -247,7 +247,7 @@ str_append_char: fn(p: &StrAccum, n_in: Int, c: Int) Never! {
 }
 
 // sqlite3_str_append: the n bytes of z from z[at].
-str_append: fn(p: &StrAccum, z: [U8], at: Int, n_in: Int) Never! {
+str_append: fn(p: ^StrAccum, z: [U8], at: Int, n_in: Int) Never! {
     n := n_in
     if p.text.len() + n >= p.n_alloc {
         n = str_accum_enlarge(p, n)
@@ -259,7 +259,7 @@ str_append: fn(p: &StrAccum, z: [U8], at: Int, n_in: Int) Never! {
 }
 
 // sqlite3_str_appendall.
-str_append_all: fn(p: &StrAccum, z: [U8]) Never! { str_append(p, z, 0, c_len(z)) }
+str_append_all: fn(p: ^StrAccum, z: [U8]) Never! { str_append(p, z, 0, c_len(z)) }
 
 // strlen of a C string: the bytes before the first 0x00.
 c_len: fn(z: [U8]) -> Int Never! {
@@ -270,7 +270,7 @@ c_len: fn(z: [U8]) -> Int Never! {
 
 // printfTempBuf: whether a conversion may use a temporary buffer of n
 // bytes; a size past both the buffer and the limit is SQLITE_TOOBIG.
-temp_buf_ok: fn(p: &StrAccum, n: Int) -> Bool Never! {
+temp_buf_ok: fn(p: ^StrAccum, n: Int) -> Bool Never! {
     if p.acc_error != 0 -> return false
     if n > p.n_alloc && n > p.mx_alloc {
         str_accum_set_error(p, base.TOOBIG)
@@ -290,7 +290,7 @@ to_c_int: fn(v: Int) -> Int Never! {
 }
 
 // sqlite3_str_vappendf: the format fmt rendered into p.
-str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
+str_vappendf: fn<A: PrintfArgs>(p: ^StrAccum, fmt: [U8], args: ^A) Never! {
     arg_list: p.printf_flags & PRINTF_SQLFUNC != 0
     at := 0
     loop at < fmt.len() && fmt[at] != (U8{0}) {
@@ -504,7 +504,7 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
 
 // The etDECIMAL/etRADIX/etORDINAL/etPOINTER conversion into out; false
 // when the temporary buffer it needs is refused.
-render_int: fn<A: PrintfArgs>(p: &StrAccum, args: &A, arg_list: Bool, info: PrintfInfo, xtype: Int, flag_long: Int, flag_prefix: Int, alt_in: Bool, flag_zeropad: Bool, thousand: Int, width: Int, precision_in: Int, out: &[U8]) -> Bool Never! {
+render_int: fn<A: PrintfArgs>(p: ^StrAccum, args: ^A, arg_list: Bool, info: PrintfInfo, xtype: Int, flag_long: Int, flag_prefix: Int, alt_in: Bool, flag_zeropad: Bool, thousand: Int, width: Int, precision_in: Int, out: ^[U8]) -> Bool Never! {
     longvalue := 0
     prefix := 0
     if info.flags & FLAG_SIGNED != 0 {
@@ -581,7 +581,7 @@ render_int: fn<A: PrintfArgs>(p: &StrAccum, args: &A, arg_list: Bool, info: Prin
 
 // The etFLOAT/etEXP/etGENERIC conversion of realvalue into out; false
 // when the temporary buffer it needs is refused.
-render_float: fn(p: &StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int, flag_prefix: Int, flag_alternateform: Bool, flag_altform2: Bool, flag_zeropad: Bool, flag_leftjustify: Bool, thousand: Int, width: Int, precision_in: Int, out: &[U8]) -> Bool Never! {
+render_float: fn(p: ^StrAccum, realvalue: Float, info: PrintfInfo, xtype_in: Int, flag_prefix: Int, flag_alternateform: Bool, flag_altform2: Bool, flag_zeropad: Bool, flag_leftjustify: Bool, thousand: Int, width: Int, precision_in: Int, out: ^[U8]) -> Bool Never! {
     precision := precision_in
     if precision < 0 -> precision = 6
     if precision > FP_PRECISION_LIMIT -> precision = FP_PRECISION_LIMIT

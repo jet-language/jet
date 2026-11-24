@@ -261,7 +261,7 @@ find_expression_selection: fn(tables: ASTTables, stmts: [StmtNode], target: Span
     scan.found
 }
 
-note_expression_selection: fn(tables: ASTTables, scan: &SelectionScan, body: [StmtNode], src: String) Never! {
+note_expression_selection: fn(tables: ASTTables, scan: ^SelectionScan, body: [StmtNode], src: String) Never! {
     if scan.found != None {
         return
     }
@@ -300,7 +300,7 @@ expression_selection_in_block: fn(tables: ASTTables, stmts: [StmtNode], target: 
 
 // Where a convergence step from the node at `scan.node_span` goes: after that
 // statement, or at the end of the branch body its pin names.
-find_exec_insertion: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: &InsertionScan) Never! {
+find_exec_insertion: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: ^InsertionScan) Never! {
     loop stmt in stmts {
         if scan.found != None || scan.problem != None {
             return
@@ -327,7 +327,7 @@ find_exec_insertion: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan:
     }
 }
 
-note_branch_insertion: fn(tables: ASTTables, scan: &InsertionScan, src: String, body: [StmtNode], owner: Span, selected: Bool) Never! {
+note_branch_insertion: fn(tables: ASTTables, scan: ^InsertionScan, src: String, body: [StmtNode], owner: Span, selected: Bool) Never! {
     if !selected || scan.found != None || scan.problem != None {
         return
     }
@@ -570,7 +570,7 @@ apply_remove_pattern_arm: fn(checker: LSPChecker, path: String, src: String, gra
 
 // The edit that adds an arm to the pattern branch drawn at `scan.node_span`.
 // A classic `if x == .V(…)` branch is rewritten whole into a switch.
-find_arm_insert: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: &ArmInsertScan) Never! {
+find_arm_insert: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: ^ArmInsertScan) Never! {
     loop stmt in stmts {
         if scan.found != None {
             return
@@ -661,7 +661,7 @@ dispatch_body_insert_offset: fn(src: String, span: Span) -> Int Never! {
 
 // The arm whose edit span is `scan.pattern_span`, the lines removing it take,
 // and whether it is the branch's only path.
-find_arm_span: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: &ArmSpanScan) Never! {
+find_arm_span: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: ^ArmSpanScan) Never! {
     loop stmt in stmts {
         if scan.found {
             return
@@ -732,7 +732,7 @@ apply_toggle_switch_state: fn(checker: LSPChecker, path: String, src: String, gr
     write_checked_formatted(checker, path, src, changed)
 }
 
-find_switched_node: fn(tables: ASTTables, stmts: [StmtNode], scan: &SwitchedScan) Never! {
+find_switched_node: fn(tables: ASTTables, stmts: [StmtNode], scan: ^SwitchedScan) Never! {
     loop stmt in stmts {
         if scan.marker != None || scan.nested {
             return
@@ -802,7 +802,7 @@ find_list_literal: fn(tables: ASTTables, body: [StmtNode], node_span: Span) -> L
     scan
 }
 
-note_list_literal: fn(tables: ASTTables, scan: &ListScan, expression: ExprNode) Never! {
+note_list_literal: fn(tables: ASTTables, scan: ^ListScan, expression: ExprNode) Never! {
     if scan.found {
         return
     }
@@ -962,7 +962,7 @@ find_func_containing_span: fn(tables: ASTTables, items: [Item], span: Span) -> C
 
 // ---- Statement spans ----
 
-collect_statement_locs: fn(tables: ASTTables, src: String, stmts: [StmtNode], block: &[Int], out: &[StatementLoc]) Never! {
+collect_statement_locs: fn(tables: ASTTables, src: String, stmts: [StmtNode], block: ^[Int], out: ^[StatementLoc]) Never! {
     loop (at, stmt) in stmts {
         path: loop step in block -> step
         out.push(StatementLoc{anchor: stmt_execution_anchor(tables, stmt), source: stmt_source_span(tables, stmt), full: stmt_text_span(tables, src, stmt), block: path, index: at, is_guard: stmt_is_switch(tables, stmt), is_expr: stmt_is_expr(tables, stmt), guard_span: stmt_guard_span(tables, stmt)})
@@ -972,7 +972,7 @@ collect_statement_locs: fn(tables: ASTTables, src: String, stmts: [StmtNode], bl
     }
 }
 
-collect_branch_locs: fn(tables: ASTTables, src: String, body: [StmtNode], block: &[Int], out: &[StatementLoc], branch: Int) Never! {
+collect_branch_locs: fn(tables: ASTTables, src: String, body: [StmtNode], block: ^[Int], out: ^[StatementLoc], branch: Int) Never! {
     block.push(branch)
     collect_statement_locs(tables, src, body, block, out)
     _: block.pop()

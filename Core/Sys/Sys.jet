@@ -15,6 +15,8 @@ use {
     files: core.files
     process_api: core.process
     rt: jet.runtime.encoding
+    sys_rt: jet.runtime.sys
+    files_rt: jet.runtime.files
     host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
     shared_bounds.[shared_range_valid, shared_word_valid, shared_word_fits]
@@ -67,7 +69,7 @@ set: fn(name: String, value: String) -[Env]> Never! {
         .Ok(_) -> {}
     }
     if has_nul(value) -> panic("core.sys.set: {EnvError.InvalidValue}")
-    if core.sys.__env_set(name, value) == {
+    if sys_rt.env_set(name, value) == {
         .Err(error) -> { panic("core.sys.set: {error}") }
         .Ok(_) -> {}
     }
@@ -75,7 +77,7 @@ set: fn(name: String, value: String) -[Env]> Never! {
 
 unset: fn(name: String) -[Env]> Bool EnvError! {
     validate_env_name(name)
-    core.sys.__env_remove(name)
+    sys_rt.env_remove(name)
 }
 
 vars: fn() -[Env]> [String] EnvError! { entry_names(__env_snapshot()) }
@@ -97,14 +99,14 @@ environment: fn() -[Env]> [String:String] Never! {
 }
 
 // Immutable host bytes are not the logical process environment.
-__startup_env: fn() -> [{name: [U8], value: [U8]}] Never! {
+priv __startup_env: fn() -> [{name: [U8], value: [U8]}] Never! {
     env_columns(core.sys.__startup_env_columns())
 }
 
 // Snapshot once, under the existing host cell's lock. No per-name rereads.
-__env_snapshot: fn() -> [{name: [U8], value: [U8]}] Never! { env_columns(core.sys.__env_columns()) }
+priv __env_snapshot: fn() -> [{name: [U8], value: [U8]}] Never! { env_columns(core.sys.__env_columns()) }
 
-__env_present: fn(name: String) -[Env]> Bool Never! { core.sys.__env_value(name) != None }
+priv __env_present: fn(name: String) -[Env]> Bool Never! { core.sys.__env_value(name) != None }
 
 env_columns: fn(columns: [[U8]]) -> [{name: [U8], value: [U8]}] Never! {
     entries := [{name: [U8], value: [U8]}]{}
@@ -118,7 +120,7 @@ env_columns: fn(columns: [[U8]]) -> [{name: [U8], value: [U8]}] Never! {
 
 // Prepare the child environment entirely in source. Explicit sets are applied
 // in order, then every removal.
-__env_compose: fn(
+priv __env_compose: fn(
     snapshot: [{name: [U8], value: [U8]}],
     clear: Bool,
     names: [String],
@@ -159,7 +161,7 @@ env_process_error: fn(name: String, error: EnvError) -> IOError Never! {
     )
 }
 
-remove_process_entries: fn(entries: &[{name: [U8], value: [U8]}], name: [U8]) Never! {
+remove_process_entries: fn(entries: ^[{name: [U8], value: [U8]}], name: [U8]) Never! {
     loop {
         if !remove_entry(entries, name) {
             return
@@ -192,14 +194,14 @@ read_entry: fn(entries: [{name: [U8], value: [U8]}], key: [U8]) -> String? Never
     Val(String.from_bytes(entries[index].value) ?? return None)
 }
 
-remove_entry: fn(entries: &[{name: [U8], value: [U8]}], key: [U8]) -> Bool Never! {
+remove_entry: fn(entries: ^[{name: [U8], value: [U8]}], key: [U8]) -> Bool Never! {
     index: entry_index(entries, key)
     if index < 0 -> return false
     _: entries.remove(index, .Slot)
     true
 }
 
-replace_entry: fn(entries: &[{name: [U8], value: [U8]}], key: [U8], value: [U8]) Never! {
+replace_entry: fn(entries: ^[{name: [U8], value: [U8]}], key: [U8], value: [U8]) Never! {
     _: remove_entry(entries, key)
     entries.push({name: key, value: value})
 }
@@ -308,9 +310,9 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 }
 
 current_dir: fn() -[FS, Env]> String IOError! {
-    if core.sys.__current_dir() == {
+    if sys_rt.current_dir() == {
         .Ok(path) -> Ok(path)
-        .Err(cause) -> Err(syscall_input(.Resolve, None, cause))
+        .Err(error) -> Err(syscall_input(.Resolve, None, error.message))
     }
 }
 
@@ -386,11 +388,11 @@ account_home: fn() -[Env, FS.Read]> String? Never! {
     Val((user_by_id(getuid()) ?? return None).home)
 }
 
-name: fn() -[Env]> String Never! { core.sys.__name_os() }
+name: fn() -[Env]> String Never! { sys_rt.name() }
 
-family: fn() -[Env]> String Never! { core.sys.__family_os() }
+family: fn() -[Env]> String Never! { sys_rt.family() }
 
-arch: fn() -[Env]> String Never! { core.sys.__arch_os() }
+arch: fn() -[Env]> String Never! { sys_rt.arch() }
 
 temp_dir: fn() -[Env]> String Never! {
     tmp: get("TMPDIR")
@@ -404,7 +406,7 @@ temp_dir: fn() -[Env]> String Never! {
 
 // The running program's path: the built binary, or under `jet run` the
 // script's absolute path. Launching it runs the program again either way.
-executable: fn() -[Env]> String Never! { core.sys.__executable() ?? "" }
+executable: fn() -[Env]> String Never! { sys_rt.executable() ?? "" }
 
 hostname: fn() -[Env, FS]> String Never! { net.gethostname() }
 
@@ -597,7 +599,7 @@ EnvScope: struct {
 /// bad := EnvLine{raw: "1X=y".bytes(), at: 0}
 /// env_line(bad, scope) != None // => true
 /// ```
-env_line: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
+env_line: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
     loop {
         env_blanks(line)
         if line.at >= line.raw.len() || line.raw[line.at] == (U8{35}) -> return None
@@ -620,7 +622,7 @@ env_line: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
 /// command := EnvLine{raw: "A=1 echo".bytes(), at: 0}
 /// env_command(command, scope) != None // => true
 /// ```
-env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
+env_command: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
     keyword: env_keyword(line)
     later := [{name: String, value: String?}]{}
     count := 0
@@ -685,7 +687,7 @@ env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
 /// assignment := EnvLine{raw: "export=1".bytes(), at: 0}
 /// env_keyword(assignment) == "" && assignment.at == 0 // => true
 /// ```
-env_keyword: fn(line: &EnvLine) -> String Never! {
+env_keyword: fn(line: ^EnvLine) -> String Never! {
     loop keyword in ([String]{"export", "readonly"}) {
         end: line.at + keyword.len()
         if end > line.raw.len() || slice_ascii(line.raw, line.at, end) != keyword -> next
@@ -704,7 +706,7 @@ env_keyword: fn(line: &EnvLine) -> String Never! {
 /// env_assign(scope, "A", "1") == None && scope.assigned.get("A") == Val("1") // => true
 /// env_assign(scope, "R", "1") == Val("R: readonly variable") // => true
 /// ```
-env_assign: fn(scope: &EnvScope, name: String, value: String) -> String? Never! {
+env_assign: fn(scope: ^EnvScope, name: String, value: String) -> String? Never! {
     if scope.readonly.contains(name) -> return Val("{name}: readonly variable")
     scope.assigned[name] = value
     None
@@ -725,7 +727,7 @@ env_assign: fn(scope: &EnvScope, name: String, value: String) -> String? Never! 
 /// joined := [U8]{}
 /// env_word(paths, scope, joined, true, false) == None && String.from_bytes_lossy(joined) == "/h/a:/h/b" && paths.at == 7 // => true
 /// ```
-env_word: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: Bool) -> String? Never! {
+env_word: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: Bool) -> String? Never! {
     first: line.at
     loop line.at < line.raw.len() {
         c: line.raw[line.at]
@@ -783,7 +785,7 @@ env_word: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: B
 /// user := EnvLine{raw: "~ada/x".bytes(), at: 0}
 /// env_tilde(user, scope, out, true, false) != None // => true
 /// ```
-env_tilde: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: Bool) -> String? Never! {
+env_tilde: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: Bool) -> String? Never! {
     line.at += 1
     if line.at < line.raw.len() {
         c: line.raw[line.at]
@@ -809,7 +811,7 @@ env_tilde: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: 
 /// open := EnvLine{raw: "no end".bytes(), at: 0}
 /// env_double(open, scope, out, true) != None // => true
 /// ```
-env_double: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
+env_double: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
     loop line.at < line.raw.len() {
         c: line.raw[line.at]
         if c == (U8{34}) {
@@ -845,7 +847,7 @@ env_double: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
 /// command := EnvLine{raw: "$(date)".bytes(), at: 0}
 /// env_dollar(command, scope, out, true) != None // => true
 /// ```
-env_dollar: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
+env_dollar: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
     after: if line.at + 1 < line.raw.len() -> line.raw[line.at + 1] else -> U8{32}
     if after == (U8{123}) {
         line.at += 2
@@ -891,7 +893,7 @@ env_dollar: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
 /// required := EnvLine{raw: "MISSING?is required}}".bytes(), at: 0}
 /// env_braced(required, scope, out, true) == Val("MISSING: is required") // => true
 /// ```
-env_braced: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
+env_braced: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
     forms: "only `${{NAME}}` and `${{NAME` with `:-`, `-`, `:=`, `=`, `:+`, `+`, `:?` or `?` and a word expand here"
     start: line.at
     argument: line.at < line.raw.len() && env_digit(line.raw[line.at])
@@ -948,7 +950,7 @@ env_braced: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
 /// scope := EnvScope{vars: [String: String]{"A": "env", "B": "env"}, assigned: [String: String]{"A": "file"}, readonly: [String]{}}
 /// env_lookup("A", scope) == Val("file") && env_lookup("B", scope) == Val("env") && env_lookup("C", scope) == None // => true
 /// ```
-env_lookup: fn(name: String, scope: &EnvScope) -> String? Never! {
+env_lookup: fn(name: String, scope: ^EnvScope) -> String? Never! {
     if scope.assigned.get(name) == .Val(value) -> return Val(value.copy())
     if scope.vars.get(name) == .Val(value) -> return Val(value.copy())
     None
@@ -961,7 +963,7 @@ env_lookup: fn(name: String, scope: &EnvScope) -> String? Never! {
 /// env_blanks(line)
 /// line.at // => 3
 /// ```
-env_blanks: fn(line: &EnvLine) Never! {
+env_blanks: fn(line: ^EnvLine) Never! {
     loop line.at < line.raw.len() && env_blank(line.raw[line.at]) -> line.at += 1
 }
 
@@ -981,10 +983,10 @@ env_digit: fn(byte: U8) -> Bool { byte >= (U8{48}) && byte <= (U8{57}) }
 
 pid: fn() -[Env]> Int Never! { getpid() }
 
-getpid: fn() -[Env]> Int Never! { core.sys.__pid_os() }
+getpid: fn() -[Env]> Int Never! { sys_rt.pid() }
 
 cpu_count: fn() -[Env]> Int Never! {
-    count: core.sys.__cpu_count() ?? 1
+    count: sys_rt.cpu_count() ?? 1
     if count < 1 -> return 1
     count
 }
@@ -1000,23 +1002,23 @@ TimingHost: enum {
 }
 
 timing_host: fn() -[Env]> TimingHost Never! {
-    if core.sys.__timing_host() == 1 -> TimingHost.Confirmed else -> TimingHost.Unconfirmed
+    if sys_rt.timing_host() == 1 -> TimingHost.Confirmed else -> TimingHost.Unconfirmed
 }
 
-getppid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
+getppid: fn() -[Env]> Int Never! { posix_identity(sys_rt.getppid()) }
 
-getuid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }
+getuid: fn() -[Env]> Int Never! { posix_identity(sys_rt.getuid()) }
 
-geteuid: fn() -[Env]> Int Never! { posix_identity(core.sys.__geteuid()) }
+geteuid: fn() -[Env]> Int Never! { posix_identity(sys_rt.geteuid()) }
 
-getgid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getgid()) }
+getgid: fn() -[Env]> Int Never! { posix_identity(sys_rt.getgid()) }
 
-getegid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
+getegid: fn() -[Env]> Int Never! { posix_identity(sys_rt.getegid()) }
 
-getpgrp: fn() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
+getpgrp: fn() -[Env]> Int Never! { posix_identity(sys_rt.getpgrp()) }
 
 #Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it")
-umask: fn(mask: Int) -[FS, Env]> Int Never! { core.sys.__umask(mask) ?? 0 }
+umask: fn(mask: Int) -[FS, Env]> Int Never! { sys_rt.umask(mask) ?? 0 }
 
 exitcode: fn(code: Int) -> Int Never! { code }
 
@@ -1031,9 +1033,9 @@ uptime: fn() -[Time, Env, FS]> Float Never! {
 }
 
 getgroups: fn() -[Env]> [Int] Never! {
-    count: core.sys.__groups_count() ?? return [Int]{}
+    count: sys_rt.groups_count() ?? return [Int]{}
     if count < 0 || count > 2147483647 -> return [Int]{}
-    row: core.sys.__groups_fill(count)
+    row: sys_rt.groups_fill(count)
     if row[0] < 0 -> return [Int]{}
     out := [Int]{}
     loop index in 0..<row[0] -> out.push(row[index + 1])
@@ -1041,7 +1043,7 @@ getgroups: fn() -[Env]> [Int] Never! {
 }
 
 loadavg: fn() -[Env]> [Float] Never! {
-    row: core.sys.__loadavg()
+    row: sys_rt.loadavg()
     if !row.available || row.count < 0 -> return [Float]{0.0, 0.0, 0.0}
     out := [Float]{}
     if row.count > 0 -> out.push(row.first)
@@ -1376,7 +1378,7 @@ priv process_errors: module {
     // IOError kinds.
     process_error: fn(kind: IOOperation, operation: String, errno: Int) -> IOError {
         if errno == 3 {
-            return IOError.NotFound(IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(core.sys.__errno_text(errno))})
+            return IOError.NotFound(IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(sys_rt.errno_text(errno))})
         }
         limit_error(kind, operation, errno)
     }
@@ -1422,7 +1424,7 @@ limit_duration: fn(raw: Int?) -> Duration? {
 
 limit_seconds: fn(value: Duration?, operation: String) -> Int? IOError! {
     span: value ?? return Ok(None)
-    if span.sign() < 0 {
+    if span.ns < 0 {
         return Err(
             IOError.InvalidInput(
                 IOContext{
@@ -1435,15 +1437,15 @@ limit_seconds: fn(value: Duration?, operation: String) -> Int? IOError! {
         )
     }
     // Whole seconds, rounded up when a fraction of a second is left over.
-    whole: span.total_seconds()
-    if (Duration.seconds(whole) ?? span).difference(span).is_zero() -> return Ok(Val(whole))
+    whole: span.ns /% 1000000000
+    if span.ns %% 1000000000 == 0 -> return Ok(Val(whole))
     Ok(Val(whole + 1))
 }
 
 // EPERM (raising a hard limit without privilege) and EINVAL (soft above
 // hard) get their own IOError kinds; the rest keep the errno text.
 limit_error: fn(kind: IOOperation, operation: String, errno: Int) -> IOError {
-    context: IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(core.sys.__errno_text(errno))}
+    context: IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(sys_rt.errno_text(errno))}
     if errno == 1 -> return IOError.PermissionDenied(context)
     if errno == 22 -> return IOError.InvalidInput(context)
     IOError.Other(context)
@@ -1482,15 +1484,15 @@ utime: fn(path: String, atime: Int, mtime: Int) -[FS, Env]> IOError! {
     call_unit(core.sys.__utime(path, atime, mtime), "utime", .Write, Val(path))
 }
 
-sync: fn() -[FS, Env]> Never! { core.sys.__sync_os() }
+sync: fn() -[FS, Env]> Never! { sys_rt.sync() }
 
 #Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary")
 stop: fn(code: Int) -[Env, Exec]> Never! { process_api.exit(code) }
 
 set_current_dir: fn(path: String) -[FS, Env]> IOError! {
-    if core.sys.__set_current_dir(path) == {
+    if sys_rt.set_current_dir(path) == {
         .Ok(_) -> { Ok() }
-        .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))
+        .Err(error) -> Err(syscall_input(.Resolve, Val(path), error.message))
     }
 }
 
@@ -1502,7 +1504,7 @@ pipe: fn() -[FS, Env]> [Int] IOError! {
 }
 
 #Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call")
-close_fd: fn(fd: Int) -[FS, Env]> Never! { core.sys.__close_fd_os(fd) }
+close_fd: fn(fd: Int) -[FS, Env]> Never! { sys_rt.close_fd(fd) }
 
 // An owned operating-system descriptor, closed exactly once when its owner
 // drops it. Descriptors arrive from `net.unix_receive`,
@@ -1515,33 +1517,33 @@ Fd: struct {
     priv token: Int,
 
     impl Close {
-        close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
+        close: fn(^^self) { sys_rt.fd_close(self.token) }
     }
 
     // At most `max` bytes, 1 B to 16 MiB, from byte `offset` of the file
     // (fewer at its end; none past it). Both bounds are in the types, so a
     // runtime value comes through `Int(lo..hi).from_int(n)?` first.
     read_at: fn(self, offset: Int(0..9223372036854775807), max: Int(1..16777216)) -[Env]> [U8] IOError! {
-        core.sys.__fd_read_at_raw(self.token, offset, max)
+        sys_rt.fd_read_at(self.token, offset, max)
     }
 
     // The size in bytes of the file behind the descriptor.
-    size: fn(self) -[Env]> Int IOError! { core.sys.__fd_size_raw(self.token) }
+    size: fn(self) -[Env]> Int IOError! { sys_rt.fd_size(self.token) }
 
     // A second descriptor for the same open file, owned on its own.
     duplicate: fn(self) -[Env]> Fd IOError! {
-        Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)})
+        Ok(Fd{token: sys_rt.fd_duplicate(self.token)})
     }
 
     // The foreground process group of the terminal the descriptor is open
     // on. A descriptor that is no terminal fails (ENOTTY).
-    process_group: fn(self) -[Env]> Int IOError! { core.sys.__fd_process_group_raw(self.token) }
+    process_group: fn(self) -[Env]> Int IOError! { sys_rt.fd_process_group(self.token) }
 
     // Makes `group`, a process group of this terminal's session, the
     // terminal's foreground group (job control: a shell hands it the
     // terminal, then takes it back).
     set_process_group: fn(self, group: Int(1..2147483647)) -[Env]> IOError! {
-        core.sys.__fd_set_process_group_raw(self.token, group)
+        sys_rt.fd_set_process_group(self.token, group)
     }
 
     // At most `max` bytes, 1 B to 16 MiB, read from a pipe or socket once
@@ -1549,7 +1551,7 @@ Fd: struct {
     // limit). Empty means the writer closed its end; a wait that runs out
     // fails with `.TimedOut`.
     read: fn(self, max: Int(1..16777216), timeout_ns: Int) -[Env]> [U8] IOError! {
-        core.sys.__fd_read_raw(self.token, max, timeout_ns)
+        sys_rt.fd_read(self.token, max, timeout_ns)
     }
 
     // Writes the first of `bytes`, at most 4096, once a pipe or socket has
@@ -1558,14 +1560,14 @@ Fd: struct {
     // wait that runs out fails with `.TimedOut`, a closed reader with
     // `.Closed`.
     write: fn(self, bytes: [U8], timeout_ns: Int) -[Env]> Int IOError! {
-        core.sys.__fd_write_raw(self.token, bytes, timeout_ns)
+        sys_rt.fd_write(self.token, bytes, timeout_ns)
     }
 }
 
 // A new pipe: its read end, then its write end. Both block, so either can
 // go to another process; `Fd.read` and `Fd.write` wait with a timeout.
 open_pipe: fn() -[Env]> [Fd] IOError! {
-    packed: core.sys.__fd_pipe_raw()
+    packed: sys_rt.fd_pipe()
     Ok([Fd]{Fd{token: packed_word(packed, 0)}, Fd{token: packed_word(packed, 1)}})
 }
 
@@ -1573,7 +1575,7 @@ open_pipe: fn() -[Env]> [Fd] IOError! {
 // what the other writes. Both block, so either can go to another process;
 // `Fd.read` and `Fd.write` wait with a timeout.
 open_socket_pair: fn() -[Env]> [Fd] IOError! {
-    packed: core.sys.__fd_socket_pair_raw()
+    packed: sys_rt.fd_socket_pair()
     Ok([Fd]{Fd{token: packed_word(packed, 0)}, Fd{token: packed_word(packed, 1)}})
 }
 
@@ -1593,15 +1595,15 @@ PseudoTerminal: struct {
 // can claim it first. Neither end becomes this process's controlling
 // terminal.
 open_pseudoterminal: fn() -[Env]> PseudoTerminal IOError! {
-    packed: core.sys.__fd_pseudoterminal_raw()
+    packed: sys_rt.fd_pseudoterminal()
     Ok(PseudoTerminal{primary: Fd{token: packed_word(packed, 0)}, secondary: Fd{token: packed_word(packed, 1)}, path: "/dev/pts/{packed_word(packed, 2)}"})
 }
 
 // The Fd owning a token the runtime just issued (net.unix_receive).
-__fd_adopt: fn(token: Int) -> Fd { Fd{token: token} }
+priv __fd_adopt: fn(token: Int) -> Fd { Fd{token: token} }
 
 // The token `fd` owns, lent to a leaf for one call.
-__fd_token: fn(fd: Fd) -> Int { fd.token }
+priv __fd_token: fn(fd: Fd) -> Int { fd.token }
 
 // Anonymous memory of a fixed size shared with other processes through its
 // descriptor (a memfd), mapped read-write into this one. The memfd is sealed
@@ -1614,18 +1616,18 @@ SharedMemory: struct {
     priv size: Int,
 
     impl Close {
-        close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
+        close: fn(^^self) { sys_rt.fd_close(self.token) }
     }
 
     len: fn(self) -> Int { self.size }
 
     // Copies `bytes` in at byte `offset`.
-    write: fn(&self, offset: Int(0..1073741824), bytes: [U8]) -[Env]> IOError! {
+    write: fn(^self, offset: Int(0..1073741824), bytes: [U8]) -[Env]> IOError! {
         count: Int(0..1073741824).from_int(bytes.len()) ?? return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         if !shared_range_valid(self, offset, count) {
             return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         }
-        core.sys.__shared_write_raw(self.token, offset, bytes)
+        sys_rt.shared_write(self.token, offset, bytes)
     }
 
     // `count` bytes from byte `offset`.
@@ -1633,7 +1635,7 @@ SharedMemory: struct {
         if !shared_range_valid(self, offset, count) {
             return Err(syscall_input(.Read, None, "shared memory read is out of bounds"))
         }
-        core.sys.__shared_read_raw(self.token, offset, count)
+        sys_rt.shared_read(self.token, offset, count)
     }
 
     // Copies the rectangle at (`x`, `y`), `width` by `height` pixels, of an
@@ -1643,7 +1645,7 @@ SharedMemory: struct {
     // the conversion happens in place, so presenting a frame allocates
     // nothing and costs only its damage. An image side is at most 16384
     // pixels, so its stride is at most 65536 bytes.
-    write_pixels: fn(&self, offset: Int(0..1073741824), rgba: [U8], stride: Int(4..65536), x: Int(0..16384), y: Int(0..16384), width: Int(0..16384), height: Int(0..16384), format: PixelFormat) -[Env]> IOError! {
+    write_pixels: fn(^self, offset: Int(0..1073741824), rgba: [U8], stride: Int(4..65536), x: Int(0..16384), y: Int(0..16384), width: Int(0..16384), height: Int(0..16384), format: PixelFormat) -[Env]> IOError! {
         row: Int{stride}
         if row %% 4 != 0 {
             return Err(syscall_input(.Write, None, "an RGBA row is a whole number of 4-byte pixels"))
@@ -1660,17 +1662,17 @@ SharedMemory: struct {
             return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         }
         order: if format == .XRGB8888 -> 0 else -> 1
-        core.sys.__shared_write_pixels_raw(self.token, offset, rgba, row, x, y, width, height, order)
+        sys_rt.shared_write_pixels(self.token, offset, rgba, row, x, y, width, height, order)
     }
 
     // Stores `count` little-endian copies of the 32-bit `value` from byte
     // `offset`: a solid run of pixels.
-    fill_u32: fn(&self, offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295)) -[Env]> IOError! {
+    fill_u32: fn(^self, offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295)) -[Env]> IOError! {
         bytes: Int(0..1073741824).from_int(wrapping(count * 4)) ?? return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
         if !shared_range_valid(self, offset, bytes) {
             return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
         }
-        core.sys.__shared_fill_raw(self.token, offset, count, value)
+        sys_rt.shared_fill(self.token, offset, count, value)
     }
 
     // The signed 64-bit word at byte `offset`, read atomically. A word
@@ -1684,36 +1686,36 @@ SharedMemory: struct {
         if !shared_word_valid(self, offset) {
             return Err(syscall_input(.Read, None, "a shared word is 8 aligned bytes inside the memory"))
         }
-        core.sys.__shared_load_raw(self.token, offset)
+        sys_rt.shared_load(self.token, offset)
     }
 
     // Stores `value` atomically into the word at byte `offset`.
-    store: fn(&self, offset: Int(0..1073741816), value: Int) -[Env]> IOError! {
+    store: fn(^self, offset: Int(0..1073741816), value: Int) -[Env]> IOError! {
         if !shared_word_valid(self, offset) {
             return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
         }
         if !shared_word_fits(value) {
             return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
         }
-        core.sys.__shared_store_raw(self.token, offset, value)
+        sys_rt.shared_store(self.token, offset, value)
     }
 
     // Atomically replaces the word at byte `offset` with `replacement` if it
     // holds `expected`; whether it did.
-    compare_exchange: fn(&self, offset: Int(0..1073741816), expected: Int, replacement: Int) -[Env]> Bool IOError! {
+    compare_exchange: fn(^self, offset: Int(0..1073741816), expected: Int, replacement: Int) -[Env]> Bool IOError! {
         if !shared_word_valid(self, offset) {
             return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
         }
         if !shared_word_fits(expected) || !shared_word_fits(replacement) {
             return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
         }
-        swapped: core.sys.__shared_compare_exchange_raw(self.token, offset, expected, replacement)
+        swapped: sys_rt.shared_compare_exchange(self.token, offset, expected, replacement)
         Ok(swapped == 1)
     }
 
     // A new descriptor for this memory, to pass to another process.
     descriptor: fn(self) -[Env]> Fd IOError! {
-        Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)})
+        Ok(Fd{token: sys_rt.fd_duplicate(self.token)})
     }
 }
 
@@ -1723,7 +1725,7 @@ SHARED_MEMORY_MAX: 1073741824
 
 // `size` zeroed bytes of shared memory, 1 B to 1 GiB.
 shared_memory: fn(size: Int(1..1073741824)) -[Env]> SharedMemory IOError! {
-    Ok(SharedMemory{token: core.sys.__shared_create_raw(size), size: size})
+    Ok(SharedMemory{token: sys_rt.shared_create(size), size: size})
 }
 
 // How SharedMemory bounds its accesses: not part of the sys surface. Offsets
@@ -2270,7 +2272,7 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
     assert(environment().get("JET_ENVIRONMENT_PROBE") == None)
 }
 
-host_env: fn(name: String) -[Env]> String? Never! { decode_host_env(core.sys.__host_env(name)) }
+host_env: fn(name: String) -[Env]> String? Never! { decode_host_env(sys_rt.host_env(name)) }
 
 decode_host_env: fn(raw: [U8]?) -> String? Never! {
     bytes: raw ?? return None
@@ -2348,7 +2350,7 @@ unsupported: fn(operation: String) -> IOError {
 }
 
 syscall_error: fn(operation: IOOperation, resource: String?, errno: Int) -> IOError {
-    syscall_input(operation, resource, core.sys.__errno_text(errno))
+    syscall_input(operation, resource, sys_rt.errno_text(errno))
 }
 
 syscall_input: fn(operation: IOOperation, resource: String?, cause: String) -> IOError {
@@ -2395,8 +2397,8 @@ decode: fn<T: Decode>(prefix: String, file: String, allow: [String]) -[FS, Env, 
     }
 }
 
-__decode_tree: fn(prefix: String, file: String, allow: [String], names: [{env_name: String, key: String}]) -[FS, Env, Exec]> {tree: Dyn, origins: [{name: String, path: String}]} [FieldError]! {
-    platform: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
+priv __decode_tree: fn(prefix: String, file: String, allow: [String], names: [{env_name: String, key: String}]) -[FS, Env, Exec]> {tree: Dyn, origins: [{name: String, path: String}]} [FieldError]! {
+    platform: if files_rt.path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
     path: host_path.from_text(file, platform)
     if host_path.is_absolute(path) {
         return Err(config_error("Jet.EnvDecodeFailed: Dotenv.file must be project-relative"))
@@ -2448,7 +2450,7 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [{env_na
 // value, else, for a value that is missing, the variable that would have
 // supplied it. The value is hidden when the field path or the variable's
 // name after the prefix contains a secret word (`db_password`, `api_key`).
-__decode_errors: fn(errors: [FieldError], origins: [{name: String, path: String}], prefix: String, names: [{env_name: String, key: String}]) -> [FieldError] Never! {
+priv __decode_errors: fn(errors: [FieldError], origins: [{name: String, path: String}], prefix: String, names: [{env_name: String, key: String}]) -> [FieldError] Never! {
     framed := [FieldError]{}
     loop error in errors {
         variable := String?{None}
@@ -2547,7 +2549,7 @@ config_allowed: fn(name: String, allow: [String]) -> Bool Never! {
     false
 }
 
-config_put: fn(values: &[ConfigValue], name: String, value: String) Never! {
+config_put: fn(values: ^[ConfigValue], name: String, value: String) Never! {
     folded: ascii_upper(name)
     loop index in 0..<values.len() {
         if values[index].folded == folded {
@@ -2650,7 +2652,7 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [{
     Ok(out)
 }
 
-config_insert: fn(tree: &&ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
+config_insert: fn(tree: ^^ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
     owned: tree.move()
     if owned.move() == {
         .Object(pairs) -> {
@@ -2678,7 +2680,7 @@ config_insert: fn(tree: &&ConfigTree, segments: [String], at: Int, value: String
     }
 }
 
-config_tree: fn(tree: &&ConfigTree) -> Dyn Never! {
+config_tree: fn(tree: ^^ConfigTree) -> Dyn Never! {
     owned: tree.move()
     if owned.move() == {
         .Text(text) -> Dyn.Text(text)

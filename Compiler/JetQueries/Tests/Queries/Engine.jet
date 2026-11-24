@@ -38,27 +38,27 @@ query_test_words: fn(text: String) -> Int Never! {
     count
 }
 
-query_test_word_count: fn(db: &QueryEngine<QueryTestValue>, path: String) -> Int Never! {
+query_test_word_count: fn(db: ^QueryEngine<QueryTestValue>, path: String) -> Int Never! {
     key: QueryKey.new("tokens", path)
     if (db.query(key, "count")) == .Val(hit) -> return query_test_count(hit)
     text: (db.input_text(InputKey.new(path))) ?? ""
     query_test_count(db.finish_query(key, "count", QueryTestValue.Count{value: query_test_words(text)}))
 }
 
-query_test_read: fn(db: &QueryEngine<QueryTestValue>, key: QueryKey, input: InputKey) -> String Never! {
+query_test_read: fn(db: ^QueryEngine<QueryTestValue>, key: QueryKey, input: InputKey) -> String Never! {
     if (db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
     text: (db.input_text(input)) ?? ""
     query_test_text(db.finish_query(key, "text", QueryTestValue.Text{value: text}))
 }
 
-query_test_graph: fn(db: &QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
+query_test_graph: fn(db: ^QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
     if (db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
     a: (db.input_text(InputKey.new("a.jet"))) ?? ""
     b: (db.input_text(InputKey.new("b.jet"))) ?? ""
     query_test_text(db.finish_query(key, "text", QueryTestValue.Text{value: "{a}+{b}"}))
 }
 
-query_test_symbols: fn(db: &QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
+query_test_symbols: fn(db: ^QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
     if (db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
     n: query_test_word_count(db, "a.jet")
     query_test_text(db.finish_query(key, "text", QueryTestValue.Text{value: "symbols:{n}"}))

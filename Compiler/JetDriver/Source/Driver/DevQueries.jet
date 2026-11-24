@@ -64,13 +64,13 @@ JetDriverDevQueryResult: struct {
     internal_problem: String?,
 }
 
-jet_driver_dev_query_failed: fn(diagnostics: &&[Diagnostic], problem: &&String?) -> JetDriverDevQueryResult Never! {
+jet_driver_dev_query_failed: fn(diagnostics: ^^[Diagnostic], problem: ^^String?) -> JetDriverDevQueryResult Never! {
     {config: jet_driver_dev_config_stock(), diagnostics: diagnostics.move(), complete: false, internal_problem: problem.move()}
 }
 
 // The dev configuration of the request's entry package: the stock loop when the
 // package has no `dev: fn(d: Dev)`, otherwise what that function configures.
-jet_driver_query_dev_config: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverDevQueryResult {
+jet_driver_query_dev_config: fn(owned_request: ^^JetDriverCompileRequest) -> JetDriverDevQueryResult {
     request := owned_request.move()
     sources: jet_driver_source_query(request)
     if !sources.complete -> return jet_driver_dev_query_failed(sources.diagnostics.move(), None)

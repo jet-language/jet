@@ -63,7 +63,7 @@ sema_units_catalog_suffixes: fn(family_name: String, uppercase_head: Bool, max_s
 
 // The names `items` declares (`occupied`) and the unit families it declares
 // itself (`local_families`); each item is read in place.
-sema_units_local_names: fn(items: [Item], occupied: &[String:Bool], local_families: &[String:Bool]) Never! {
+sema_units_local_names: fn(items: [Item], occupied: ^[String:Bool], local_families: ^[String:Bool]) Never! {
     loop item in items {
         if item == {
             .UnitFamily(family) -> {
@@ -192,7 +192,7 @@ sema_units_scanned: fn(inputs: [SemaRegistrationModuleInput], index: Int, skippe
 // shared state, up to `threads` compiler threads scan the sources in place,
 // claimed largest first, and the inputs move back in order. Each row lands
 // at its input, so the rows are the same for any thread count.
-sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: ModuleID, names: SemaUnitsCatalogNames, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
+sema_units_scan_mentions: fn(inputs: ^[SemaRegistrationModuleInput], skipped: ModuleID, names: SemaUnitsCatalogNames, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
     rows := [SemaUnitSourceMentions]{}
     jobs := [Int]{}
     weights := [Int]{}
@@ -226,7 +226,7 @@ sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: Mo
 }
 
 // The mentions an input held (`units_mentions`), taken out of it.
-sema_units_held: fn(held: &&SemaUnitSourceMentions?) -> SemaUnitSourceMentions? Never! {
+sema_units_held: fn(held: ^^SemaUnitSourceMentions?) -> SemaUnitSourceMentions? Never! {
     held.move()
 }
 
@@ -251,19 +251,19 @@ SemaUnitsScanned: struct {
     mentions: SemaUnitSourceMentions,
 }
 
-sema_units_scan_fill: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: &[SemaRegistrationModuleInput]) {
+sema_units_scan_fill: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: ^[SemaRegistrationModuleInput]) {
     permit: shared_state.guard_edit()
     compiler_transfer_rows<SemaRegistrationModuleInput>(permit.value.inputs, inputs)
 }
 
-sema_units_scan_take: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: &[SemaRegistrationModuleInput]) {
+sema_units_scan_take: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: ^[SemaRegistrationModuleInput]) {
     permit: shared_state.guard_edit()
     compiler_transfer_rows<SemaRegistrationModuleInput>(inputs, permit.value.inputs)
 }
 
 // Runs scanning threads `from..<workers`, one task each, and moves every row
 // a thread returned into its input's slot of `rows`.
-sema_units_scanners: fn(shared_state: Shared<SemaUnitsScanShared>, queue: SemaUnitsScanQueue, from: Int, workers: Int, rows: &[SemaUnitSourceMentions]) {
+sema_units_scanners: fn(shared_state: Shared<SemaUnitsScanShared>, queue: SemaUnitsScanQueue, from: Int, workers: Int, rows: ^[SemaUnitSourceMentions]) {
     if from >= workers {
         return
     }
@@ -296,7 +296,7 @@ sema_units_scan_claimed: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Se
 sema_units_scan_claim: fn(queue: SemaUnitsScanQueue) -> Int { queue.next.add(1) }
 
 // `mentions` is the input's sema_units_scan_mentions row.
-sema_units_inject: fn(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) Never! {
+sema_units_inject: fn(input: ^SemaRegistrationModuleInput, catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) Never! {
     if input.program.no_prelude {
         return
     }

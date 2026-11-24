@@ -264,8 +264,8 @@ publication_diff_test_entry: fn(version: String, yanked: Bool) -> PublicationInd
 }
 
 #Test("publication diff treats published capability effect dimension and trait signatures as opaque bytes") {
-    old: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: Account, amount: Int) -[]> Int"), publication_diff_test_function("report", "fn report() -[]> Int"), publication_diff_test_function("bench.report", "fn bench.report() -[]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Length, .Linear>>(value: &&Q) -[]> Q"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[IO]> Int }}")}
-    new: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: &Account, amount: Int) -[]> Int"), publication_diff_test_function("report", "fn report() -[IO]> Int"), publication_diff_test_function("bench.report", "fn bench.report() -[IO]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Time, .Linear>>(value: &&Q) -[]> Q"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[GPU]> Int }}")}
+    old: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: Account, amount: Int) -[]> Int"), publication_diff_test_function("report", "fn report() -[]> Int"), publication_diff_test_function("bench.report", "fn bench.report() -[]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Length, .Linear>>(value: ^^Q) -[]> Q"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[IO]> Int }}")}
+    new: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: ^Account, amount: Int) -[]> Int"), publication_diff_test_function("report", "fn report() -[IO]> Int"), publication_diff_test_function("bench.report", "fn bench.report() -[IO]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Time, .Linear>>(value: ^^Q) -[]> Q"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[GPU]> Int }}")}
     changes: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 5)
     loop index in 0..<old.len() {

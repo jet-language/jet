@@ -103,7 +103,7 @@ JET_LIVE_GAME_RECORDS: 512
 
 // A callback's function line, `name\tfile\tline\n`. Empty, or cut short by
 // the runtime's 160-scalar text bound (no closing newline), it names none.
-jet_live_game_function: fn(raw: &&[U8]) -> JetLiveGameFunction? JetLiveSnapshotError! {
+jet_live_game_function: fn(raw: ^^[U8]) -> JetLiveGameFunction? JetLiveSnapshotError! {
     if raw.len() == 0 || raw[raw.len() - 1] != (U8{10}) -> return Ok(None)
     whole: String.from_bytes(raw.move()) ?? return Err(jet_live_error("live game callback function is not valid UTF-8"))
     fields: whole.slice(0..<whole.len() - 1).split("\t").to_list()
@@ -163,7 +163,7 @@ JetLiveCursor: struct {
     at: Int,
 }
 
-jet_live_word: fn(cursor: &JetLiveCursor) -> U64 JetLiveSnapshotError! {
+jet_live_word: fn(cursor: ^JetLiveCursor) -> U64 JetLiveSnapshotError! {
     if cursor.bytes.len() - cursor.at < 8 {
         return Err(jet_live_error("live runtime snapshot is truncated"))
     }
@@ -175,19 +175,19 @@ jet_live_word: fn(cursor: &JetLiveCursor) -> U64 JetLiveSnapshotError! {
 
 // Unsigned runtime words above Int's range saturate, as the reference
 // codec's i64 cast does.
-jet_live_unsigned: fn(cursor: &JetLiveCursor) -> Int JetLiveSnapshotError! {
+jet_live_unsigned: fn(cursor: ^JetLiveCursor) -> Int JetLiveSnapshotError! {
     value: jet_live_word(cursor)
     if value > JET_LIVE_INT_MAX -> return Ok(9223372036854775807)
     Ok(Int{value})
 }
 
-jet_live_signed: fn(cursor: &JetLiveCursor) -> Int JetLiveSnapshotError! {
+jet_live_signed: fn(cursor: ^JetLiveCursor) -> Int JetLiveSnapshotError! {
     value: jet_live_word(cursor)
     if value <= JET_LIVE_INT_MAX -> return Ok(Int{value})
     Ok(Int{value - JET_LIVE_INT_MAX - U64{1}} + (-9223372036854775807 - 1))
 }
 
-jet_live_raw: fn(cursor: &JetLiveCursor) -> [U8]? JetLiveSnapshotError! {
+jet_live_raw: fn(cursor: ^JetLiveCursor) -> [U8]? JetLiveSnapshotError! {
     length: jet_live_word(cursor)
     if length == JET_LIVE_ABSENT -> return Ok(None)
     if length > (U64{cursor.bytes.len() - cursor.at}) {
@@ -220,12 +220,12 @@ jet_live_shown: fn(raw: [U8], label: String) -> String JetLiveSnapshotError! {
 }
 
 // An absent text shows as "", except where the view keeps absence.
-jet_live_read_text: fn(cursor: &JetLiveCursor, label: String) -> String JetLiveSnapshotError! {
+jet_live_read_text: fn(cursor: ^JetLiveCursor, label: String) -> String JetLiveSnapshotError! {
     raw: jet_live_raw(cursor)
     jet_live_shown(raw ?? [U8]{}, label)
 }
 
-jet_live_read_optional: fn(cursor: &JetLiveCursor, label: String) -> String? JetLiveSnapshotError! {
+jet_live_read_optional: fn(cursor: ^JetLiveCursor, label: String) -> String? JetLiveSnapshotError! {
     raw: jet_live_raw(cursor)
     if raw == .Val(present) -> return Ok(Val(jet_live_shown(present, label)))
     Ok(None)
@@ -482,7 +482,7 @@ jet_live_stat_fields: fn(text: String) -> [String] Never! {
 // process start (field 22) must not follow the writer's boot-clock start,
 // so a reused pid's stale snapshot is refused; utime and stime (fields 14
 // and 15) less the run's starting ticks are its CPU time.
-jet_live_bind: fn(snapshot: &JetLiveSnapshot, stat: String) JetLiveSnapshotError! {
+jet_live_bind: fn(snapshot: ^JetLiveSnapshot, stat: String) JetLiveSnapshotError! {
     // comm may contain spaces and ')'; the fields follow the LAST ') '.
     parts: stat.split(") ").to_list()
     if parts.len() < 2 -> return Err(jet_live_error("process identity stat is malformed"))

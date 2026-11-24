@@ -5,13 +5,13 @@ Buf: struct {
     priv data: [I64],
 
     impl Close {
-        close: fn(&&self) { print("closed {self.data[0]}") }
+        close: fn(^^self) { print("closed {self.data[0]}") }
     }
 }
 
 make: fn(tag: I64) -> Buf? { .Val(Buf{data: [I64]{tag}}) }
 
-hold: fn(buf: &&Buf) { print("kept {buf.data[0]}") }
+hold: fn(buf: ^^Buf) { print("kept {buf.data[0]}") }
 
 run: fn() {
     if make(1) == .Val(b) -> print("bound {b.data[0]}")

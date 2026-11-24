@@ -77,8 +77,8 @@ LSPChoice: struct {
 // `.jet` files below a workspace folder, in path order.
 LSPChecker: trait {
     check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never!,
-    stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never!,
-    failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never!,
+    stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never!,
+    failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never!,
     sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never!,
 }
 
@@ -94,7 +94,7 @@ LSPFix: struct {
 
 // A fix whose edits reach another file than the diagnostic's own, or that
 // sema left pending, is no code action: an action edits the one document.
-lsp_fixes_from_diagnostics: fn(diagnostics: &&[Diagnostic]) -> [LSPFix] Never! {
+lsp_fixes_from_diagnostics: fn(diagnostics: ^^[Diagnostic]) -> [LSPFix] Never! {
     fixes := [LSPFix]{}
     loop diagnostic in diagnostics.move() {
         applicability: diagnostic.applicability ?? next
@@ -135,7 +135,7 @@ lsp_fix_names_origin: fn(diagnostic: Diagnostic, edit: TextEdit) -> Bool Never! 
 }
 
 // `edit` as an edit of the document, without the path it names.
-lsp_fix_unnamed: fn(edit: &&TextEdit) -> TextEdit Never! {
+lsp_fix_unnamed: fn(edit: ^^TextEdit) -> TextEdit Never! {
     TextEdit{span: edit.span, new_text: edit.new_text.move()}
 }
 

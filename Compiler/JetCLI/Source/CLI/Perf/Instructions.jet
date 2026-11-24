@@ -185,7 +185,7 @@ jet_cli_perf_instructions_section: fn(elf: [U8], level: Int, sampled: JetCLIPerf
 // program counter `pc`: the line table's function, else the `.symtab`
 // symbol's, added with `width` counters when it has none. None outside
 // both.
-jet_cli_perf_code_entry: fn(found: &[JetCLIPerfCode], at: &[Int:Int], table: X64Jetline, functions: [X64ImageFunction], pc: Int, width: Int) -> Int? Never! {
+jet_cli_perf_code_entry: fn(found: ^[JetCLIPerfCode], at: ^[Int:Int], table: X64Jetline, functions: [X64ImageFunction], pc: Int, width: Int) -> Int? Never! {
     function: x64_jetline_find(table, pc)
     symbol: if function >= 0 -> -1 else -> x64_image_function_find(functions, pc)
     if function < 0 && symbol < 0 -> return None

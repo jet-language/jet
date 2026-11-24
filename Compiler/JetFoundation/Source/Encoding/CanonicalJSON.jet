@@ -51,12 +51,12 @@ canonical_json_sha256: fn(value: CanonicalJSON) -> String Never! {
     sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
 }
 
-canonical_json_append: fn(out: &[U8], text: String) Never! {
+canonical_json_append: fn(out: ^[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
 }
 
 // Rust `encode_json`.
-canonical_json_encode: fn(value: CanonicalJSON, out: &[U8]) Never! {
+canonical_json_encode: fn(value: CanonicalJSON, out: ^[U8]) Never! {
     if value == {
         .Null -> { canonical_json_append(out, "null") }
         .Bool(flag) -> { canonical_json_append(out, if flag -> "true" else -> "false") }
@@ -85,7 +85,7 @@ canonical_json_encode: fn(value: CanonicalJSON, out: &[U8]) Never! {
 
 // Rust `encode_string`: short escapes for `"`, `\`, BS, FF, LF, CR, TAB; other
 // C0 controls as `\u00xx`; every other scalar verbatim.
-canonical_json_encode_string: fn(value: String, out: &[U8]) Never! {
+canonical_json_encode_string: fn(value: String, out: ^[U8]) Never! {
     hex: "0123456789abcdef".bytes()
     out.push(U8{34})
     loop byte in value.bytes() {

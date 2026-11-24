@@ -65,7 +65,7 @@ paren_tuple1_source: fn(path: String, text: String) -> MigrationOutcome {
 // A Jet program quoted in a string literal without interpolation holes or
 // unread escapes, rewritten in place when the result parses cleanly and
 // declares an item, so prose that happens to hold a `(name:` stays.
-paren_tuple1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[String]) -> LambdaShapeQuoted? {
+paren_tuple1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: ^[String]) -> LambdaShapeQuoted? {
     raw: lambda_shape1_text(bytes, token.span.start, token.span.end)
     if !raw.contains("(") -> return None
     quote: paren_tuple1_quote_width(bytes, token)
@@ -110,7 +110,7 @@ paren_tuple1_quoted_text: fn(bytes: [U8], token: Token) -> String? {
 // ends at its first `}`, so a record inside one stays as written and is
 // reported: bind it to a name before the string. A `(name: Type)` before
 // `->` or `-[`, the retired arrow lambda's parameters, is reported too.
-paren_tuple1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], hole: Bool, edits: &[LambdaShapeEdit], skipped: &[String]) -> Int {
+paren_tuple1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], hole: Bool, edits: ^[LambdaShapeEdit], skipped: ^[String]) -> Int {
     tokens: lexer_without_comments(raw)
     rewritten := 0
     loop index in 0..<tokens.len() {

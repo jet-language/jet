@@ -1,0 +1,28 @@
+#Error
+Bad: struct {
+    reason: String
+}
+
+parse: fn(text: String) -> Int Bad! {
+    if text == "" -> return Err(Bad{reason: "empty"})
+    Ok(1)
+}
+
+relay: fn(text: String) -> Int {
+    parse(text) + 1
+}
+
+Meter: struct {
+    value: Int
+}
+
+impl Meter {
+    scale: fn(self, by: Int) -> Int {
+        self.value * by
+    }
+}
+
+measure: fn(meter: Meter) -> Int {
+    copied: meter.copy()
+    copied.scale(2)
+}

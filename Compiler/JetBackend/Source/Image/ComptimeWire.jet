@@ -113,7 +113,7 @@ x64_comptime_frame: fn(kind: Int, operands: [Int]) -> [U8] Never! {
     bytes
 }
 
-x64_comptime_put_word: fn(bytes: &[U8], value: Int) Never! {
+x64_comptime_put_word: fn(bytes: ^[U8], value: Int) Never! {
     bits := if value < 0 -> value + 18446744073709551616 else -> value
     loop _ in 0..<8 {
         bytes.push(U8{bits & 255})
@@ -221,7 +221,7 @@ x64_comptime_filter: fn(stdout: Bool, cookie: Int) -> [U8] Never! {
 // returns through its restorer with the reissue's cookie still in r9, and the
 // restorer's rt_sigreturn is no reissue. Classic BPF jumps only forward, so
 // the descriptor check ends in its own -4095 return.
-x64_comptime_admit_block: fn(program: &[X64ComptimeBpf], cookie: Int) Never! {
+x64_comptime_admit_block: fn(program: ^[X64ComptimeBpf], cookie: Int) Never! {
     start: program.len()
     calls: X64_COMPTIME_FILE_CALLS
     unadmitted: start + 7 + calls.len()
@@ -252,7 +252,7 @@ x64_comptime_admit_block: fn(program: &[X64ComptimeBpf], cookie: Int) Never! {
 // The refusal block: the calls a comptime run makes freely, the descriptor
 // checks of read and write (`fds`: the descriptors write admits), and a trap
 // for every other call.
-x64_comptime_refusal_block: fn(program: &[X64ComptimeBpf], fds: [Int]) Never! {
+x64_comptime_refusal_block: fn(program: ^[X64ComptimeBpf], fds: [Int]) Never! {
     // Labels are instruction indices, fixed by this layout; classic BPF
     // jumps only forward, so each check ends in its own trap.
     start: program.len()

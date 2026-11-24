@@ -102,7 +102,7 @@ ir_ssa_find: fn(s: IRSsa, value: Int) -> Int Never! {
     at
 }
 
-ir_ssa_value: fn(s: &IRSsa, slot: Int, kind: IRSsaKind, at: Int) -> Int Never! {
+ir_ssa_value: fn(s: ^IRSsa, slot: Int, kind: IRSsaKind, at: Int) -> Int Never! {
     id: s.val_slot.len()
     s.val_slot.push(slot)
     s.val_kind.push(kind.copy())
@@ -111,18 +111,18 @@ ir_ssa_value: fn(s: &IRSsa, slot: Int, kind: IRSsaKind, at: Int) -> Int Never! {
     id
 }
 
-ir_ssa_undef: fn(s: &IRSsa, slot: Int) -> Int Never! {
+ir_ssa_undef: fn(s: ^IRSsa, slot: Int) -> Int Never! {
     if s.undef[slot] < 0 -> s.undef[slot] = ir_ssa_value(s, slot, .Undef, -1)
     s.undef[slot]
 }
 
 // The value `slot` holds now (its Undef value before any write).
-ir_ssa_read: fn(s: &IRSsa, current: [Int], slot: Int) -> Int Never! {
+ir_ssa_read: fn(s: ^IRSsa, current: [Int], slot: Int) -> Int Never! {
     if current[slot] >= 0 -> return current[slot]
     ir_ssa_undef(s, slot)
 }
 
-ir_ssa_block: fn(s: &IRSsa, preds: &&[Int]) -> Int Never! {
+ir_ssa_block: fn(s: ^IRSsa, preds: ^^[Int]) -> Int Never! {
     id: s.preds.len()
     s.preds.push(preds)
     id
@@ -130,7 +130,7 @@ ir_ssa_block: fn(s: &IRSsa, preds: &&[Int]) -> Int Never! {
 
 // An edge from `from` into join `join`, carrying the current value of each
 // slot the join merges.
-ir_ssa_edge: fn(s: &IRSsa, join: Int, kind: IRSsaEdgeKind, at: Int, from: Int, current: [Int]) Never! {
+ir_ssa_edge: fn(s: ^IRSsa, join: Int, kind: IRSsaEdgeKind, at: Int, from: Int, current: [Int]) Never! {
     id: s.edge_kind.len()
     s.edge_kind.push(kind.copy())
     s.edge_at.push(at)
@@ -149,7 +149,7 @@ ir_ssa_edge: fn(s: &IRSsa, join: Int, kind: IRSsaEdgeKind, at: Int, from: Int, c
 }
 
 // The phis of join `join` at its block; each merged slot now holds its phi.
-ir_ssa_phis: fn(s: &IRSsa, join: Int, current: &[Int]) Never! {
+ir_ssa_phis: fn(s: ^IRSsa, join: Int, current: ^[Int]) Never! {
     loop k in 0..<s.join_slots[join].len() {
         slot: s.join_slots[join][k]
         phi: s.phi_join.len()
@@ -173,7 +173,7 @@ ir_ssa_phi_arg: fn(s: IRSsa, phi: Int, k: Int) -> Int Never! {
 // them (ir_ssa_exposed). `depth[slot]` is the depth of the innermost open
 // construct known to write it: a construct that writes a slot makes every
 // enclosing open one write it too.
-ir_ssa_written: fn(s: &IRSsa, f: IRFunction) Never! {
+ir_ssa_written: fn(s: ^IRSsa, f: IRFunction) Never! {
     exposed: ir_ssa_exposed(f)
     depth := [Int]{}
     loop _ in 0..<f.slot_type.len() -> depth.push(0)
@@ -286,7 +286,7 @@ ir_ssa_new: fn(f: IRFunction) -> IRSsa Never! {
 }
 
 // Records the values instruction `at`'s slot operands read.
-ir_ssa_reads: fn(s: &IRSsa, f: IRFunction, at: Int, current: [Int]) Never! {
+ir_ssa_reads: fn(s: ^IRSsa, f: IRFunction, at: Int, current: [Int]) Never! {
     op: f.op[at]
     a: f.a[at]
     if op == {
@@ -434,7 +434,7 @@ ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
 
 // Replaces each phi whose arguments are one value (or itself) by that
 // value, until none is left.
-ir_ssa_prune: fn(s: &IRSsa) Never! {
+ir_ssa_prune: fn(s: ^IRSsa) Never! {
     changed := true
     loop changed {
         changed = false
@@ -471,7 +471,7 @@ ir_ssa_prune: fn(s: &IRSsa) Never! {
 // Immediate dominators (one Cooper-Harvey-Kennedy pass: blocks are numbered
 // in a topological order of the forward edges and a back edge's source is
 // numbered after its header) and the dominator tree's pre/post numbers.
-ir_ssa_dominators: fn(s: &IRSsa) Never! {
+ir_ssa_dominators: fn(s: ^IRSsa) Never! {
     count: s.preds.len()
     loop _ in 0..<count {
         s.idom.push(-1)
@@ -574,7 +574,7 @@ ir_ssa_live: fn(s: IRSsa, f: IRFunction) -> [Bool] Never! {
     live
 }
 
-ir_ssa_mark: fn(s: IRSsa, live: &[Bool], work: &[Int], used: Int) Never! {
+ir_ssa_mark: fn(s: IRSsa, live: ^[Bool], work: ^[Int], used: Int) Never! {
     if used < 0 {
         return
     }
@@ -629,7 +629,7 @@ ir_ssa_verify: fn(f: IRFunction, s: IRSsa) -> [String] Never! {
     errors
 }
 
-ir_ssa_check: fn(f: IRFunction, s: IRSsa, errors: &[String], used: Int, slot: Int, block: Int, at: Int) Never! {
+ir_ssa_check: fn(f: IRFunction, s: IRSsa, errors: ^[String], used: Int, slot: Int, block: Int, at: Int) Never! {
     if used < 0 {
         return
     }

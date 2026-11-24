@@ -51,14 +51,14 @@ peer_write: fn(path: String, text: String) {
     files.write(path, text) ?? panic("fixture write")
 }
 
-peer_nar_token: fn(out: &[U8], token: [U8]) {
+peer_nar_token: fn(out: ^[U8], token: [U8]) {
     nix_push_le(out, token.len(), 8)
     loop byte in token -> out.push(byte)
     padding: (8 - token.len() % 8) % 8
     loop _ in 0..<padding -> out.push(U8{0})
 }
 
-peer_nar_node: fn(out: &[U8], path: String) {
+peer_nar_node: fn(out: ^[U8], path: String) {
     peer_nar_token(out, "(".bytes())
     peer_nar_token(out, "type".bytes())
     info: files.stat(path) ?? panic("fixture NAR stat")

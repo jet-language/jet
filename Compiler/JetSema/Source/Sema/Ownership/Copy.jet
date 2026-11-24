@@ -207,7 +207,7 @@ sema_copy_walk: fn() -> SemaCopyWalk Never! {
 
 // The id of walk key `key` in `walk.keys`, its `finished` and `pending` rows
 // grown to it.
-sema_copy_walk_key_id: fn(walk: &SemaCopyWalk, key: String) -> Int Never! {
+sema_copy_walk_key_id: fn(walk: ^SemaCopyWalk, key: String) -> Int Never! {
     id: name_index(name_intern(walk.keys, key))
     loop walk.finished.len() <= id {
         walk.finished.push(None)
@@ -595,7 +595,7 @@ sema_copy_type_facts: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     if sema_copy_generic_param_facts(ty, generic_params, graph) == .Val(facts) -> return facts
     if ty == {
@@ -699,7 +699,7 @@ sema_copy_named_facts: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     if graph == .Val(registered) {
         // A part typed by a trait name holds a trait value, which copies like
@@ -761,7 +761,7 @@ sema_copy_core_row_facts: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts? Never! {
     parts := [Type]{}
     if {
@@ -818,7 +818,7 @@ sema_copy_nominal_facts: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     key: nominal.identity_key
     if walk.active.contains(key) {
@@ -893,7 +893,7 @@ sema_copy_nominal_combine: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     cloneable := true
     heap := false
@@ -927,7 +927,7 @@ sema_copy_nominal_combine: fn(
 // A table walk reaching a nominal on its path: the same instantiation is a
 // cycle, which lowers `low` to that instantiation's number; another
 // instantiation of the same generic is not, and taints as in a query.
-sema_copy_walk_back_edge: fn(walk: &SemaCopyWalk, key: String, actual: Type) -> Bool Never! {
+sema_copy_walk_back_edge: fn(walk: ^SemaCopyWalk, key: String, actual: Type) -> Bool Never! {
     // An instantiation on the path has its key interned, so a key the walk
     // never reached is another instantiation.
     found: name_find(walk.keys, sema_copy_walk_key(key, actual)) ?? return false
@@ -958,8 +958,8 @@ sema_copy_facts_same: fn(left: SemaCopyTypeFacts, right: SemaCopyTypeFacts) -> B
 // fact away from it and the rounds end. A tainted component is not settled:
 // no table row keeps facts that read it.
 sema_copy_scc_finish: fn(
-    member: &&SemaCopySccMember,
-    result: &&SemaCopyTypeFacts,
+    member: ^^SemaCopySccMember,
+    result: ^^SemaCopyTypeFacts,
     self_loop: Bool,
     outer_tainted: Bool,
     outer_low: Int,
@@ -967,7 +967,7 @@ sema_copy_scc_finish: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     tainted: walk.tainted
     low: walk.low
@@ -1021,7 +1021,7 @@ sema_copy_apply_nested_facts: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     nested := sema_copy_type_facts_known(false, true, false, false, false, false, true)
     loop arg in args {
@@ -1041,7 +1041,7 @@ sema_copy_stored_nested_facts: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     if nominal.source == .SourceAST(item) {
         if (item == .Struct(_) || item == .Enum(_)) && nominal.generic_params.len() == args.len() {
@@ -1070,7 +1070,7 @@ sema_copy_apply_facts: fn(
     table: SemaCopyFactsTable,
     caller: Int,
     generic_params: [TGenericParam],
-    walk: &SemaCopyWalk,
+    walk: ^SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     dynamic_loan: sema_copy_apply_is_dynamic_loan(name)
     // A task handle is the builtin `Task<T>` even where the program declares
@@ -1244,7 +1244,7 @@ sema_copy_names_deterministic_clock: fn(ty: Type) -> Bool Never! {
     }
 }
 
-sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &NameTable) -> Bool Never! {
+sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: ^NameTable) -> Bool Never! {
     if sema_call_is_clock_type(ty) -> return true
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) -> false
@@ -1283,7 +1283,7 @@ sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: I
 
 // Each instance of a nominal is walked once: a walk that found a Clock has
 // already answered, so an instance seen before adds nothing.
-sema_copy_holds_fork_nominal: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &NameTable) -> Bool Never! {
+sema_copy_holds_fork_nominal: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: ^NameTable) -> Bool Never! {
     if graph == .Val(registered) {
         row: sema_copy_fork_row_at(ty, registered, caller) ?? return false
         instance: "{registered.modules[row.module_index].nominals[row.row].identity_key}<{type_name(ty)}>"
@@ -1362,7 +1362,7 @@ SEMA_COPY_SINGLE_USE_WALK: 256
 // `seen` holds each instance walked once; a nominal whose parts grow its own
 // arguments without end (`Node<T>` holding a `Node<[T]>`) stops at
 // SEMA_COPY_SINGLE_USE_WALK instances.
-sema_copy_holds_single_use: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int, seen: &[String]) -> Bool {
+sema_copy_holds_single_use: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int, seen: ^[String]) -> Bool {
     if ty == {
         .Named(_) | .Apply(_, _) -> {
             row: sema_copy_fork_row_at(ty, graph, caller) ?? return false

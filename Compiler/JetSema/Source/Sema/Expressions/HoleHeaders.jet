@@ -29,7 +29,7 @@ use {
 // A call `expr` checked (as `checked`) while a hole table's header is: the
 // call's facts take its fix, and a call that changes a value is refused here,
 // once for the header however many arms check it.
-sema_expr_hole_header_call: fn(expr: Expr, checked: TExpr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_expr_hole_header_call: fn(expr: Expr, checked: TExpr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     value: checked ?? return None
     span: expr_span(expr)
     if !sema_expr_in_hole_header(scopes, span) -> return Val(value)
@@ -74,7 +74,7 @@ sema_expr_hole_call_name: fn(expr: Expr) -> String Never! {
 }
 
 // What the checked call changes, as E0442 says it, or "" when it changes
-// nothing: a `&self` method writes the value it is called on, and a `&`
+// nothing: a `^self` method writes the value it is called on, and a `^`
 // parameter the value it is given.
 sema_expr_hole_call_change: fn(expr: Expr, value: TExpr, state: SemaOwnershipState) -> String Never! {
     if expr == .MethodCall(receiver, _, _, _, _, _, _) {

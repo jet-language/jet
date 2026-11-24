@@ -33,12 +33,13 @@ use {
     if marker_row.kind != JetCLISyntaxKind.Marker || jet_cli_syntax_display(marker_row) != "#Inline" {
         panic("marker identity")
     }
-    take_index: jet_cli_syntax_lookup("&&") ?? panic("take token lookup")
+    take_index: jet_cli_syntax_lookup("^^") ?? panic("take token lookup")
     essay: jet_cli_syntax_plain_text(JET_CLI_SYNTAX_ROWS[take_index])
-    if !essay.contains("Between two conditions:\n") || !essay.contains("Before a parameter's type or `self`:\n") {
+    if !essay.contains("Before a parameter's type or `self`:\n") || !essay.contains("After `task`, before a name:\n") {
         panic("one token's multiple meanings")
     }
-    if jet_cli_syntax_lookup("^") != .None -> panic("`^` is free and has no dictionary row")
+    and_index: jet_cli_syntax_lookup("&&") ?? panic("logical and lookup")
+    if JET_CLI_SYNTAX_ROWS[and_index].kind != JetCLISyntaxKind.Operator -> panic("`&&` is only the logical and")
     if !jet_cli_syntax_query("#Inlin") || !jet_cli_syntax_query(":>") || !jet_cli_syntax_query("é") {
         panic("syntax typo classification")
     }

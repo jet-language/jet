@@ -1,0 +1,110 @@
+// Every mark position in one program, layered inside each other: write and
+// take receivers on a generic type, function types that write and take as
+// fields and parameters, lambdas with marked parameters, write windows into
+// windows, matches that write into deep subjects inside loops, a task that
+// takes a name, and marks right beside the bitwise & and logical && operators.
+package: {
+    name: "layers"
+    authority: { allow: [IO, Time.Wait] }
+}
+
+Packet: struct {
+    flags: Int,
+    body: [Int],
+    retries: Int?,
+}
+
+Stage: struct {
+    name: String,
+    edit: fn(^Packet) -> Bool,
+    finish: fn(^^Packet) -> Int,
+}
+
+Outbox: struct<T> {
+    items: [T],
+    seen: Int,
+
+    push: fn(^self, item: ^^T) { self.items.push(item) }
+
+    count_where: fn(^self, keep: fn(^T) -> Bool) -> Int {
+        hits := 0
+        loop i in 0..<self.items.len() {
+            slot: ^self.items[i]
+            if keep(slot) && self.seen >= 0 -> hits += 1
+        }
+        self.seen += hits
+        hits
+    }
+
+    drain: fn(^^self) -> [T] { self.items }
+}
+
+masked: fn(packet: ^Packet, mask: Int) -> Bool {
+    packet.flags = packet.flags & mask
+    packet.flags & 1 == 1 && packet.body.len() > 0
+}
+
+seal: fn(packet: ^^Packet) -> Int { packet.body.len() + (packet.flags & 255) }
+
+retry: fn(packets: ^[Packet], extra: Int) {
+    loop i in 0..<packets.len() {
+        slot: ^packets[i]
+        if ^slot.retries == {
+            .Val(n) -> { n += extra }
+            .None -> {}
+        }
+    }
+}
+
+apply_all: fn(stages: ^^[Stage], outbox: ^Outbox<Packet>, log: ^[String]) -> Int {
+    total := 0
+    loop stage in stages {
+        hits: outbox.count_where(fn(packet: ^Packet) -> Bool { (stage.edit)(packet) && packet.flags & 2 == 2 })
+        log.push("{stage.name}: {hits}")
+        total += hits
+    }
+    total
+}
+
+checksum: fn(packets: ^^[Packet]) -> Int {
+    sum := 0
+    loop packet in packets -> sum += packet.flags & 31
+    sum
+}
+
+run: fn() {
+    outbox := Outbox<Packet>{items: [Packet]{}, seen: 0}
+    outbox.push(Packet{flags: 7, body: [1, 2, 3], retries: Val(1)})
+    outbox.push(Packet{flags: 2, body: [4], retries: None})
+    outbox.push(Packet{flags: 11, body: [5, 6], retries: Val(3)})
+
+    stages := [Stage]{}
+    stages.push(Stage{name: "mask", edit: fn(packet: ^Packet) -> Bool { masked(packet, 3) }, finish: seal})
+    grow: fn(packet: ^Packet) -> Bool {
+        packet.body.push(0)
+        packet.body.len() > 1 && packet.flags & 4 == 0
+    }
+    stages.push(Stage{name: "grow", edit: grow, finish: fn(packet: ^^Packet) -> Int { packet.flags }})
+
+    log := [String]{}
+    total: apply_all(stages, outbox, log)
+    loop line in log -> print(line)
+    print("total {total}")
+
+    retry(outbox.items, 1)
+    edit: ^outbox.items[0..<outbox.items.len()]
+    middle: ^edit[1..<3]
+    first: ^middle[0]
+    first.flags = first.flags | 16
+    second: ^middle[1]
+    if ^second.retries == {
+        .Val(n) -> { n *= 2 }
+        .None -> {}
+    }
+
+    packets := outbox.drain()
+    task.group sealing {
+        sealed: task ^^packets { checksum(packets) }
+        print(sealed.join() ?? panic("sealing failed"))
+    }
+}

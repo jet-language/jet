@@ -156,7 +156,7 @@ setup: fn(args: [String]) -> Run Failure! {
     )
 }
 
-measure: fn(r: Run, live: &Live) -> Timing Failure! {
+measure: fn(r: Run, live: ^Live) -> Timing Failure! {
     if r.metric == {
         "first_run" -> {
             started: time.instant()
@@ -186,7 +186,7 @@ measure: fn(r: Run, live: &Live) -> Timing Failure! {
     }
 }
 
-measure_error: fn(r: Run, live: &Live) -> Timing Failure! {
+measure_error: fn(r: Run, live: ^Live) -> Timing Failure! {
     start_dev(r, live)
     start_browser(r, live)
     d: live_driver(live)
@@ -205,7 +205,7 @@ measure_error: fn(r: Run, live: &Live) -> Timing Failure! {
     Ok(Timing{value_ms: diagnosis_ms + repair_ms, diagnosis_ms: Val(diagnosis_ms), repair_ms: Val(repair_ms)})
 }
 
-start_dev: fn(r: Run, live: &Live) Failure! {
+start_dev: fn(r: Run, live: ^Live) Failure! {
     argv: jet_argv(r, [String]{"dev", r.entry.copy(), "--target=web", "--canvas", "--port={r.port}"})
     child: process.cmd(argv).cwd(r.project).env("NO_COLOR", "1").env("CI", "1").stdout(.Inherit).stderr(.Inherit).spawn() ?? return Err(Failure{message: "jet dev could not start: {err}"})
     live.server = Val(child)
@@ -221,7 +221,7 @@ jet_argv: fn(r: Run, rest: [String]) -> [String] {
     argv
 }
 
-start_browser: fn(r: Run, live: &Live) Failure! {
+start_browser: fn(r: Run, live: ^Live) Failure! {
     d: open(r.engine)
     live.driver = Val(d)
     navigate(d, "http://127.0.0.1:{r.port}/")

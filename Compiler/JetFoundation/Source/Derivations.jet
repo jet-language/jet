@@ -61,7 +61,7 @@ derivation_record: fn(subject: String, claim: String, producer: String, method: 
     record
 }
 
-derivation_record_with_payload: fn(record: &&DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
+derivation_record_with_payload: fn(record: ^^DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
     updated := record
     updated.payload = Val(payload)
     updated.id = derivation_record_id(updated)
@@ -195,14 +195,14 @@ derivation_method_raw: fn(method: DerivationMethod) -> String Never! {
     }
 }
 
-derivation_hash_frame: fn(state: &DerivationHashState, value: String) Never! {
+derivation_hash_frame: fn(state: ^DerivationHashState, value: String) Never! {
     bytes := value.bytes()
     length := bytes.len()
     loop index in 0..<8 { derivation_hash_byte(state, U8{((length >> ((7 - index) * 8))) & 255}) }
     loop byte in bytes -> derivation_hash_byte(state, byte)
 }
 
-derivation_hash_byte: fn(state: &DerivationHashState, byte: U8) Never! {
+derivation_hash_byte: fn(state: ^DerivationHashState, byte: U8) Never! {
     value: U64{byte}
     state.first = wrapping(((state.first) ~ value) * U64{0x100000001b3})
     state.second = wrapping((((state.second) ~ state.first.rotate_left(17)) ~ value) * U64{0x9e3779b185ebca87})

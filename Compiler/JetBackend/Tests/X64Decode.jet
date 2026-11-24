@@ -99,7 +99,7 @@ x64_decode_test_mnemonics: fn(bytes: [U8]) -> [String] Never! {
 }
 
 // Push the form `text` with the bytes `code` holds.
-x64_decode_test_form: fn(forms: &[X64DecodeTestForm], text: String, code: X64Code) Never! {
+x64_decode_test_form: fn(forms: ^[X64DecodeTestForm], text: String, code: X64Code) Never! {
     forms.push(X64DecodeTestForm{text: text, bytes: code.bytes})
 }
 
@@ -577,7 +577,7 @@ x64_decode_test_objdump_text: fn(text: String) -> String Never! {
 }
 
 // Push each instruction of `bytes`, decoded from offset 0, as its own run.
-x64_decode_test_split: fn(runs: &[[U8]], bytes: [U8]) Never! {
+x64_decode_test_split: fn(runs: ^[[U8]], bytes: [U8]) Never! {
     loop item in x64_decode_test_linear(bytes, "objdump") {
         runs.push(bytes.slice(item.at, item.at + item.insn.length))
     }

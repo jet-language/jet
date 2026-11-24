@@ -13,7 +13,7 @@ use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandle
 // The lowering of `receiver.operation(args)` when the receiver is the
 // canonical Dyn and the operation is one of the tree methods here; None
 // leaves the operation to ir_handle_method.
-ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
+ir_dyn_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     dyn_row: ir_dyn_def(p, ir_ty(m, p, b, receiver)) ?? return None
     if operation == {
         .DynGetKey -> return Val(ir_dyn_key_lookup(m, p, b, ty, dyn_row, receiver, args, false, span))
@@ -34,7 +34,7 @@ ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
             if ir_failed(b) || tree < 0 -> return Val(-1)
             return Val(ir_dyn_text_read(m, p, b, ty, dyn_row, tree, "jet_dyn_text", span))
         }
-        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynAt | .DynInt | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynGetAt | .DynKeys | .DynLen(_, _) | .SerdeEncode(_) | .JSONAt | .JSONInt | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> {}
+        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynAt | .DynInt | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynGetAt | .DynKeys | .DynLen(_, _) | .SerdeEncode(_) | .JSONAt | .JSONInt | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> {}
     }
     // The encoding.dyn routes: the tree is borrowed, an index moves.
     route: if operation == {
@@ -44,7 +44,7 @@ ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
         .DynBool | .JSONBool -> {symbol: "jet_dyn_bool", arity: 0, mask: [Bool]{true}}
         .DynFloat | .JSONFloat -> {symbol: "jet_dyn_float", arity: 0, mask: [Bool]{true}}
         .DynKeys -> {symbol: "jet_dyn_keys", arity: 0, mask: [Bool]{true}}
-        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynText | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynHas | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONText | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> {
+        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynText | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynHas | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONText | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> {
             return None
         }
     }
@@ -65,7 +65,7 @@ ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
 
 // `tree[key]` / `tree[index]`: the jet_dyn_index_key / jet_dyn_index_at
 // route (ir_dyn_checked).
-ir_dyn_index: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, symbol: String, keyed: Bool, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
+ir_dyn_index: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, symbol: String, keyed: Bool, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn index with {args.len()} arguments")
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     tree: ir_expr(m, p, b, receiver)
@@ -79,7 +79,7 @@ ir_dyn_index: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
 // `left op right` on Dyn operands (`+ - * /` or `< <= > >=`): the
 // jet_dyn_binary / jet_dyn_compare route over the borrowed trees
 // (ir_dyn_checked).
-ir_dyn_operator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, symbol: String, op: String, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
+ir_dyn_operator: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, symbol: String, op: String, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn operator with {args.len()} arguments")
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     left: ir_expr(m, p, b, receiver)
@@ -91,7 +91,7 @@ ir_dyn_operator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     ir_dyn_checked(m, p, b, ty, row, symbol, [Int]{left, right, spelling, site}, [Bool]{true, true, true, true}, location, span)
 }
 
-ir_dyn_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
+ir_dyn_text: fn(m: ^IRModule, b: ^IRBuilder, text: String) -> Int Never! {
     string_row: ir_string_row(m)
     slot: ir_temp(m, b, string_row)
     ir_emit(b.f, IROp.ConstText, slot, ir_intern_text(m, text), -1, -1, b.line)
@@ -101,7 +101,7 @@ ir_dyn_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
 // A checked Dyn route gives Ok(its value) or Err(its stop detail), and an Err
 // stops at the expression's line, its source quoted with the caret at the line
 // start.
-ir_dyn_checked: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, symbol: String, operands: [Int], mask: [Bool], location: TPanicLoc, span: Span) -> Int Never! {
+ir_dyn_checked: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, row: Int, symbol: String, operands: [Int], mask: [Bool], location: TPanicLoc, span: Span) -> Int Never! {
     string_row: ir_string_row(m)
     result_ty: Type.Result{ok: ty, err: Type.String}
     outcome: ir_route(m, p, b, symbol, operands, mask, result_ty, span)
@@ -132,7 +132,7 @@ IRDynObject: struct {
     entry: [IRMember],
 }
 
-ir_dyn_object_layout: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, span: Span) -> IRDynObject? Never! {
+ir_dyn_object_layout: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, dyn_row: Int, span: Span) -> IRDynObject? Never! {
     object: ir_variant_index(p, dyn_row, "Object") ?? {
         _: ir_fail_slot(b, span, "canonical Dyn has no Object variant")
         return None
@@ -163,7 +163,7 @@ ir_dyn_object_layout: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int
 // equals the String `key`, read in place (JetRuntime Dyn.jet
 // dyn_object_find); 0 when `tree` holds another variant or no entry
 // has that key.
-ir_dyn_object_find: fn(m: &IRModule, b: &IRBuilder, layout: IRDynObject, tree: Int, key: Int) -> Int Never! {
+ir_dyn_object_find: fn(m: ^IRModule, b: ^IRBuilder, layout: IRDynObject, tree: Int, key: Int) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     zero: ir_word_const(m, b, 0)
     hit: ir_temp(m, b, pointer_row)
@@ -198,7 +198,7 @@ ir_dyn_object_find: fn(m: &IRModule, b: &IRBuilder, layout: IRDynObject, tree: I
 // Object whose key equals `key`, read in place. get gives Some(a new owner
 // of the entry's value), else None, as has gives whether it exists; any
 // other variant has no keys.
-ir_dyn_key_lookup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], has: Bool, span: Span) -> Int Never! {
+ir_dyn_key_lookup: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], has: Bool, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn key lookup with {args.len()} arguments")
     layout: ir_dyn_object_layout(m, p, b, dyn_row, span) ?? return -1
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -247,7 +247,7 @@ ir_dyn_key_lookup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_r
 // read in place as get does, where the route would build a runtime tree of
 // the whole Object and convert the entry's value back. A missing key or
 // another variant takes the route, whose failure names the field.
-ir_dyn_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_dyn_field: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 {
         return ir_fail_slot(b, span, "Dyn field lookup with {args.len()} arguments")
     }
@@ -285,7 +285,7 @@ ir_dyn_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
 // The borrowing route `symbol` over `operands` inside one arm of a branch:
 // the operands stay owned by the caller, which releases them once after the
 // branch joins.
-ir_dyn_route_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, operands: [Int], ty: Type, span: Span) -> Int Never! {
+ir_dyn_route_lent: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, operands: [Int], ty: Type, span: Span) -> Int Never! {
     fresh := [Bool]{}
     mask := [Bool]{}
     loop slot in operands {
@@ -302,7 +302,7 @@ ir_dyn_route_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String,
 // DynCodec.jet jet_rt_codec_decode_string, the route `symbol`): a native
 // Text gives Ok(a new owner of its String), read in place; another variant
 // takes the route, whose failure names the variant it found.
-ir_dyn_text_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, tree: Int, symbol: String, span: Span) -> Int Never! {
+ir_dyn_text_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, dyn_row: Int, tree: Int, symbol: String, span: Span) -> Int Never! {
     text: ir_variant_index(p, dyn_row, "Text") ?? return ir_fail_slot(b, span, "canonical Dyn has no Text variant")
     members: ir_variant_members(m, p, dyn_row, [Type]{}, text) ?? [IRMember]{}
     if members.len() != 1 || m.types[members[0].ty].kind != .String {
@@ -341,7 +341,7 @@ IRDynPlace: struct {
     backs: [IRWriteBack],
 }
 
-ir_dyn_place_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, span: Span) -> IRDynPlace? Never! {
+ir_dyn_place_open: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, dyn_row: Int, receiver: Int, span: Span) -> IRDynPlace? Never! {
     receiver_ty: ir_ty(m, p, b, receiver)
     value_row: ir_value_type(m, p, receiver_ty) ?? {
         _: ir_type_fail(b, span, receiver_ty)
@@ -359,7 +359,7 @@ ir_dyn_place_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, r
 
 // The mutated runtime tree becomes the place's native Dyn; the one it
 // replaced drops, and a variable's write cell is read back.
-ir_dyn_place_close: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, place: IRDynPlace, span: Span) Never! {
+ir_dyn_place_close: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, dyn_row: Int, place: IRDynPlace, span: Span) Never! {
     value_row: b.f.slot_type[place.current]
     updated: ir_dyn_from_runtime(m, p, b, dyn_row, place.tree, value_row, span)
     if updated < 0 {
@@ -375,7 +375,7 @@ ir_dyn_place_close: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, 
 // runtime Array of Text keys and Int indexes, the owned value as a runtime
 // tree the route adopts; a refused step stops with the route's "{site}: ..."
 // text at the checked location. A one-key path is ir_dyn_set_key.
-ir_dyn_set_path: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, keys: [Bool], site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
+ir_dyn_set_path: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, dyn_row: Int, receiver: Int, keys: [Bool], site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     if args.len() != keys.len() + 1 {
         return ir_fail_slot(b, span, "Dyn path write with {args.len()} operands for {keys.len()} steps")
     }
@@ -438,7 +438,7 @@ ir_dyn_set_path: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rec
 // keys, so it costs the same whatever the Object's values hold. Any other
 // variant stops with jet_dyn_set_path's "{site}: expected an object, found
 // ..." text, its kind named as the runtime's dyn_kind_name does.
-ir_dyn_set_key: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
+ir_dyn_set_key: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, dyn_row: Int, receiver: Int, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     layout: ir_dyn_object_layout(m, p, b, dyn_row, span) ?? return -1
     key: ir_expr(m, p, b, args[0])
     if ir_failed(b) || key < 0 -> return -1
@@ -516,7 +516,7 @@ ir_dyn_set_key: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rece
 
 // `tree.remove(key)` (JetRuntime jet_dyn_remove): the receiver's first
 // Object entry named `key` leaves it; Some(its value), else None.
-ir_dyn_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_dyn_remove: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn.remove with {args.len()} arguments")
     _: if ir_untag(ty) == .Option(inner) -> inner else -> {
         return ir_fail_slot(b, span, "Dyn.remove as {ir_type_name(ty)}")
@@ -535,14 +535,16 @@ ir_dyn_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: 
     removed
 }
 
-// `tree.decode<T>()`: T's own Decode implementation, called with the tree; a
-// container, F32 or Dyn target's Core/Encoding/Encoding.jet decode helper
-// (ir_codec_decode_helper, ir_dyn_fixed_decode); else the runtime's canonical
-// scalar adapter jet_rt_codec_decode_<scalar>, which borrows the tree.
+// `tree.decode<T>()`: T's own Decode implementation, called with the tree
+// (F32 and Dyn have theirs in core.encoding); a container target's Core
+// decode helper, the function that fills its jet_builtins role
+// (ir_codec_decode_helper, ir_dyn_fixed_decode); else the runtime's
+// canonical scalar adapter jet_rt_codec_decode_<scalar>, which borrows the
+// tree.
 // `tree.decode_stored<T>()` (`stored`) calls T's derived `decode_stored`
 // when T has one, a struct with a `#Secret` field; any other target decodes
 // as `decode<T>()` does.
-ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, stored: Bool, args: [Int], span: Span) -> Int Never! {
+ir_dyn_decode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, target: Type, stored: Bool, args: [Int], span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(b, span, "Dyn.decode with {args.len()} arguments")
     concrete: ir_fact(p, b, target, span)
     if ir_failed(b) -> return -1
@@ -551,8 +553,8 @@ ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     if ir_codec_impl(p, concrete, "Decode", method) == .Val(found) {
         return ir_call(m, p, b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
-    if ir_codec_decode_helper(p, concrete) == .Val(helper) {
-        helper_key: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
+    if ir_codec_decode_helper(concrete) == .Val(helper) {
+        helper_key: ir_codec_decode_key(p, helper.role) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(concrete)}: the Core decode helper of role {helper.role} is outside the checked program")
         return ir_call(m, p, b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
     if ir_untag(concrete) == .FixedList(element, measure) {
@@ -572,17 +574,17 @@ ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     ir_route(m, p, b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, ty, span)
 }
 
-// `tree.decode<[T#N]>()`: Core/Encoding/Encoding.jet __decode_fixed_list
+// `tree.decode<[T#N]>()`: the Core decode helper of role DecodeFixedList
 // decodes the List of exactly N items. A `[T#N]` carried as a List is that
 // List; an inline one takes a copy of its N elements.
-ir_dyn_fixed_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, fixed: Type, element: Type, measure: Measure, span: Span) -> Int Never! {
+ir_dyn_fixed_decode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, fixed: Type, element: Type, measure: Measure, span: Span) -> Int Never! {
     count: measure_literal_value(measure) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)} without a literal length")
     err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> {
         return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)} as {ir_type_name(ty)}")
     }
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     fixed_row: ir_value_type(m, p, fixed) ?? return ir_type_fail(b, span, fixed)
-    key: ir_codec_decode_key(p, "__decode_fixed_list") ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)}: Core/Encoding/Encoding.jet __decode_fixed_list is outside the checked program")
+    key: ir_codec_decode_key(p, "DecodeFixedList") ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)}: the Core decode helper of role DecodeFixedList is outside the checked program")
     length: ir_node(m, p, b, Type.Int, NodeKind.IntLit{value: count, width: None}, span)
     listed: ir_call(m, p, b, key, [Type]{element.copy()}, -1, [IRWriteBack]{}, [BodyCallArg]{ir_codec_arg(receiver), ir_codec_arg(length)}, span)
     if ir_failed(b) || listed < 0 -> return -1
@@ -619,7 +621,7 @@ ir_dyn_fixed_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
 // member's errors when none does. Those errors move into the union's Result
 // as they are: its Ok side never runs, and a distinct member's success row
 // (its base's) names no variant to rebox into.
-ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
+ir_dyn_union_decode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
     err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> {
         return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(union_ty)} as {ir_type_name(ty)}")
     }
@@ -681,78 +683,52 @@ ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     out
 }
 
-// `FieldError.under(segment, inner)`: Core/Encoding/Encoding.jet
-// __decode_under frames every error of the inner Result under `segment` and
+// `FieldError.under(segment, inner)`: the Core decode helper of role
+// DecodeUnder frames every error of the inner Result under `segment` and
 // passes a success through.
-ir_decode_under: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
+ir_decode_under: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
     success: if ir_untag(ty) == {
         .Result(ok, _) -> ok.copy()
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
             return ir_fail_slot(b, span, "FieldError.under as {ir_type_name(ty)}")
         }
     }
-    key: ir_codec_decode_key(p, "__decode_under") ?? return ir_fail_slot(b, span, "FieldError.under: Core/Encoding/Encoding.jet __decode_under is outside the checked program")
+    key: ir_codec_decode_key(p, "DecodeUnder") ?? return ir_fail_slot(b, span, "FieldError.under: the Core decode helper of role DecodeUnder is outside the checked program")
     args: [BodyCallArg]{ir_codec_arg(segment), ir_codec_arg(inner)}
     ir_call(m, p, b, key, [Type]{success}, -1, [IRWriteBack]{}, args, span)
 }
 
-// A plain positional call argument for a by-name Core codec helper.
+// A plain positional call argument for a Core codec helper.
 ir_codec_arg: fn(value: Int) -> BodyCallArg Never! {
     BodyCallArg{value: value, template_items: [], borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
 }
 
-// The Core decode helper for a target with no Decode implementation of its
-// own, and its type arguments: a List (a byte List also takes Bytes and
-// base64 Text), an Option, a String-keyed Map, an F32 and Dyn itself.
-ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> {name: String, type_args: [Type]}? Never! {
-    if ir_dyn_def(p, target) != None -> return Val({name: "__decode_dyn", type_args: [Type]{}})
+// The role of the Core decode helper for a target with no Decode
+// implementation of its own, and its type arguments: a List (a byte List
+// also takes Bytes and base64 Text), an Option and a String-keyed Map.
+ir_codec_decode_helper: fn(target: Type) -> {role: String, type_args: [Type]}? Never! {
     if ir_untag(target) == {
         .List(element) -> {
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
-                return Val({name: "__decode_bytes", type_args: [Type]{}})
+                return Val({role: "DecodeBytes", type_args: [Type]{}})
             }
-            Val({name: "__decode_list", type_args: [Type]{element.copy()}})
+            Val({role: "DecodeList", type_args: [Type]{element.copy()}})
         }
-        .Option(inner) -> Val({name: "__decode_option", type_args: [Type]{inner.copy()}})
+        .Option(inner) -> Val({role: "DecodeOption", type_args: [Type]{inner.copy()}})
         .Map(key, _, value) -> {
             if ir_untag(key) != Type.String -> return None
-            Val({name: "__decode_map", type_args: [Type]{value.copy()}})
+            Val({role: "DecodeMap", type_args: [Type]{value.copy()}})
         }
-        .Float32 -> Val({name: "__decode_f32", type_args: [Type]{}})
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
-// The checked key of the Core decode helper `name`, or None when the program
-// does not hold it (IRProgram.decode_helpers).
-ir_codec_decode_key: fn(p: IRProgram, name: String) -> String? Never! {
-    loop (at, helper) in ir_codec_decode_helpers() {
-        if helper != name -> next
-        row: p.decode_helpers[at]
-        if row < 0 -> return None
-        return Val(p.functions[row].key.copy())
-    }
-    None
-}
-
-// By ir_codec_decode_helpers index, the row of the first function of that
-// name the helpers' source holds (CoreReach.jet ir_codec_decode_source) that
-// is its key's first row; -1 for a helper the program lacks. Found once by
-// ir_program_bind, after it binds the functions and their rows.
-ir_codec_decode_rows: fn(p: IRProgram) -> [Int] Never! {
-    names: ir_codec_decode_helpers()
-    found := (loop _ in 0..<names.len() -> -1)
-    loop (index, function) in p.functions {
-        if !ir_codec_decode_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) {
-            next
-        }
-        loop (at, helper) in names {
-            if helper == function.name && found[at] < 0 && ir_function_row(p, function.key) == (Val(index)) {
-                found[at] = index
-            }
-        }
-    }
-    found
+// The checked key of the Core decode helper that fills jet_builtins role
+// `role` (CoreReach.jet ir_codec_decode_roles), or None when the program
+// does not hold it.
+ir_codec_decode_key: fn(p: IRProgram, role: String) -> String? Never! {
+    row: ir_core_role_row(p, role) ?? return None
+    Val(p.functions[row].key.copy())
 }
 
 // The runtime scalar Decode adapter's suffix for `target`, or None for a
@@ -780,7 +756,7 @@ ir_codec_scalar: fn(target: Type) -> String? Never! {
 // have no lowering here. `value.encode_stored()` (`stored`) calls the
 // derived `encode_stored` of a struct with a `#Secret` field; any other value
 // encodes as `value.encode()` does.
-ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, stored: Bool, span: Span) -> Int Never! {
+ir_serde_encode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, stored: Bool, span: Span) -> Int Never! {
     concrete: ir_ty(m, p, b, receiver)
     if ir_dyn_def(p, concrete) != None -> return ir_expr(m, p, b, receiver)
     method: if stored && ir_codec_impl(p, concrete, "Encode", "encode_stored") != None -> "encode_stored" else -> "encode"
@@ -798,7 +774,7 @@ ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
             }
         }
         if ir_sequence_element(concrete) == .Val(element) {
-            // A byte List encodes as Dyn.Bytes, the inverse of __decode_bytes
+            // A byte List encodes as Dyn.Bytes, the inverse of DecodeBytes
             // (encoding-decisions.md: Codable `[U8]` is never an integer array);
             // an inline `[U8#N]` crosses as a List copy of it.
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
@@ -851,7 +827,7 @@ ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
 
 // A List's `encode()`: the Array of each item's encode(), in order, built by
 // a loop over the list the way ir_dyn_object_encode builds an Object.
-ir_dyn_array_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, element: Type, span: Span) -> Int Never! {
+ir_dyn_array_encode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, element: Type, span: Span) -> Int Never! {
     output_ty: Type.List{element: ty}
     output_row: ir_value_type(m, p, output_ty) ?? return ir_type_fail(b, span, output_ty)
     ir_scope_open(b)
@@ -886,7 +862,7 @@ ir_dyn_array_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
 }
 
 // An Option's `encode()`: its value's encode() when present, Null when not.
-ir_dyn_option_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, inner: Type, span: Span) -> Int Never! {
+ir_dyn_option_encode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, inner: Type, span: Span) -> Int Never! {
     dyn_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     inner_row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
     ir_scope_open(b)
@@ -922,7 +898,7 @@ ir_dyn_option_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, va
 
 // A union's `encode()`: the encode() of the member its variant holds, the
 // variants in layout order (ir_union_layout_order).
-ir_dyn_union_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
+ir_dyn_union_encode: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
     row: ir_type_def(p, ir_union_key(ir_untag(union_ty))) ?? return ir_fail_slot(b, span, "union {ir_type_name(union_ty)} without a definition")
     dyn_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     if members.len() == 0 {
@@ -968,7 +944,7 @@ ir_dyn_union_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
 // The value `value` evaluated and bound for the current scope under a
 // generated local, which owns it when it is a fresh value with a drop; -1
 // when it fails.
-ir_dyn_encode_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, stem: String, span: Span) -> Int Never! {
+ir_dyn_encode_source: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, stem: String, span: Span) -> Int Never! {
     source: ir_expr(m, p, b, value)
     if ir_failed(b) || source < 0 -> return -1
     value_ty: ir_ty(m, p, b, value)
@@ -981,7 +957,7 @@ ir_dyn_encode_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, 
 
 // The `encode()` of the borrowed slot `slot` of type `slot_ty`, through a
 // generated local `name` bound to it.
-ir_dyn_encode_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, slot_ty: Type, name: String, span: Span) -> Int Never! {
+ir_dyn_encode_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, slot: Int, slot_ty: Type, name: String, span: Span) -> Int Never! {
     local: checked_generated_local(name, span, slot_ty)
     b.bindings.push(IRBinding{name: local.name.copy(), slot: slot})
     item: ir_node(m, p, b, slot_ty, NodeKind.Local{local: local}, span)
@@ -1054,17 +1030,17 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
     Val(args)
 }
 
-// The read a `__Decoding.read<Target, Source>` call (Core/Encoding/
-// Encoding.jet) lowers to: the target's own read (a derived streaming
-// `__read`), else the `__Decoding` read of a list (not bytes), option,
-// String-keyed map, Int, Bool, Float or String, each with its arguments and
-// then Source. None for another call, and for any other target, which takes
-// the reference body: the value's captured tree, decoded.
+// The read a `__Decoding.read<Target, Source>` call lowers to: the target's
+// own read (a derived streaming `__read`), else the `__Decoding` read of a
+// list (not bytes), option, String-keyed map, Int, Bool, Float or String,
+// each with its arguments and then Source. None for another call, and for
+// any other target, which takes the reference body: the value's captured
+// tree, decoded.
 ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> {key: String, args: [Type]}? Never! {
     if function.name != "read" || type_args.len() != 2 || !function.key.ends_with("read") {
         return None
     }
-    if !module_is_core(function.module_identity) || !ir_core_source_path(function.source_file, "Core/Encoding/Encoding.jet") {
+    if !module_is_core(function.module_identity) {
         return None
     }
     owner: if function.kind == {

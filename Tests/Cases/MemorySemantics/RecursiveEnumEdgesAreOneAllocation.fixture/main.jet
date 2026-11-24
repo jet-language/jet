@@ -97,8 +97,8 @@ eval: fn(expr: Expr) -> Int {
 }
 
 // Rewrites the left operand of an Add in place through a write window.
-rewrite_left: fn(expr: &Expr, value: Int) {
-    if &expr == .Add(left, _) -> left = Expr.Num{value: value}
+rewrite_left: fn(expr: ^Expr, value: Int) {
+    if ^expr == .Add(left, _) -> left = Expr.Num{value: value}
 }
 
 expressions: fn(from: Int, to: Int) -> Int {
@@ -127,7 +127,7 @@ scope_depth: fn(scope: Scope) -> Int {
     1 + up + down + scope.name.len()
 }
 
-detach: fn(scope: &Scope) { scope.parent = None }
+detach: fn(scope: ^Scope) { scope.parent = None }
 
 scopes: fn(from: Int, to: Int) -> Int {
     total := 0

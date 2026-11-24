@@ -59,7 +59,7 @@ renamed: fn(env: Env) -> Graph {
     updated
 }
 
-consume: fn(graph: &&Graph) -> Int { graph.names.len() }
+consume: fn(graph: ^^Graph) -> Int { graph.names.len() }
 
 consumed: fn(env: Env) -> Int {
     graph: env.graph ?? return 0
@@ -83,7 +83,7 @@ Holder: struct {
 }
 
 // An owned parameter's last use moves it into the struct; no copy is left.
-hold: fn(graph: &&Graph, note: &&String) -> Holder { Holder{graph: graph, note: note} }
+hold: fn(graph: ^^Graph, note: ^^String) -> Holder { Holder{graph: graph, note: note} }
 
 run: fn() {
     env := Env{graph: Val(Graph{names: [String]{"ab", "c", "ab"}}), plain: Graph{names: [String]{"p"}}}

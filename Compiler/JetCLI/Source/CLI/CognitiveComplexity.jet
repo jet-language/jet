@@ -16,7 +16,7 @@ jet_cli_complexity_reports: fn(program: Program) -> [JetCLIComplexityReport] Nev
     reports
 }
 
-jet_cli_complexity_items: fn(tables: ASTTables, items: [Item], reports: &[JetCLIComplexityReport]) Never! {
+jet_cli_complexity_items: fn(tables: ASTTables, items: [Item], reports: ^[JetCLIComplexityReport]) Never! {
     loop item in items {
         if item == {
             .Func(function) -> { jet_cli_complexity_function(tables, function, reports) }
@@ -66,7 +66,7 @@ JetCLIComplexityVisitor: struct {
     mixed: Int,
     recursive: Bool,
 
-    visit: fn(&self, tables: ASTTables, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
+    visit: fn(^self, tables: ASTTables, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
         if ast_expr(tables, expression) == {
             .If(_, _, _, _, _, span, _) -> {
                 self.controls.push(span.copy())
@@ -116,7 +116,7 @@ jet_cli_complexity_furthest: fn(ends: [Int]) -> Int Never! {
     furthest
 }
 
-jet_cli_complexity_function: fn(tables: ASTTables, function: Func, reports: &[JetCLIComplexityReport]) Never! {
+jet_cli_complexity_function: fn(tables: ASTTables, function: Func, reports: ^[JetCLIComplexityReport]) Never! {
     visitor := JetCLIComplexityVisitor{function_name: function.name, controls: [Span]{}, nesting: [Span]{}, mixed: 0, recursive: false}
     loop statement in function.body {
         jet_cli_complexity_statement(tables, statement, visitor.controls, visitor.nesting)
@@ -141,11 +141,11 @@ jet_cli_complexity_boolean_operators: fn(tables: ASTTables, expression: ExprNode
     }
 }
 
-jet_cli_complexity_body: fn(tables: ASTTables, body: [StmtNode], controls: &[Span], nesting: &[Span]) Never! {
+jet_cli_complexity_body: fn(tables: ASTTables, body: [StmtNode], controls: ^[Span], nesting: ^[Span]) Never! {
     loop statement in body -> jet_cli_complexity_statement(tables, statement, controls, nesting)
 }
 
-jet_cli_complexity_statement: fn(tables: ASTTables, statement: StmtNode, controls: &[Span], nesting: &[Span]) Never! {
+jet_cli_complexity_statement: fn(tables: ASTTables, statement: StmtNode, controls: ^[Span], nesting: ^[Span]) Never! {
     if ast_stmt(tables, statement) == {
         .While(_, body, span, _, _) | .For(_, _, _, _, body, span, _, _, _) | .Loop(body, span, _, _) -> {
             controls.push(span.copy())

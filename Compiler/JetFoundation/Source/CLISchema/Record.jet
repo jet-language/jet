@@ -54,7 +54,7 @@ CLIRecordCursor: struct {
     bytes: View<U8>,
     at: Int,
 
-    byte: fn(&self) -> U8 RecordDecodeError! {
+    byte: fn(^self) -> U8 RecordDecodeError! {
         if self.at >= self.bytes.len() {
             return Err(RecordDecodeError.Malformed{why: "truncated payload"})
         }
@@ -63,7 +63,7 @@ CLIRecordCursor: struct {
         Ok(value)
     }
 
-    u32: fn(&self) -> Int RecordDecodeError! {
+    u32: fn(^self) -> Int RecordDecodeError! {
         if self.at > self.bytes.len() || self.bytes.len() - self.at < 4 {
             return Err(RecordDecodeError.Malformed{why: "truncated payload"})
         }
@@ -73,7 +73,7 @@ CLIRecordCursor: struct {
         Ok(value)
     }
 
-    string: fn(&self) -> String RecordDecodeError! {
+    string: fn(^self) -> String RecordDecodeError! {
         length: self.u32()
         if length > CLI_SCHEMA_MAX_STRING_BYTES {
             return Err(RecordDecodeError.Malformed{why: "string too long"})
@@ -87,7 +87,7 @@ CLIRecordCursor: struct {
         Ok(String.from_bytes(bytes) ?? return Err(RecordDecodeError.Malformed{why: "string is not UTF-8"}))
     }
 
-    optional_string: fn(&self) -> String? RecordDecodeError! {
+    optional_string: fn(^self) -> String? RecordDecodeError! {
         if self.byte() == {
             CLI_SCHEMA_BYTE_0 -> Ok(None)
             CLI_SCHEMA_BYTE_1 -> Ok(Val(self.string()))
@@ -173,7 +173,7 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
     Ok(CLICommandSchema{entry_type: entry_type, description: description, inputs: inputs.move(), commands: commands.move(), jobs: jobs.move(), standard: standard, version: version_text})
 }
 
-cli_schema_decode_input: fn(cursor: &CLIRecordCursor) -> CLIInputSchema RecordDecodeError! {
+cli_schema_decode_input: fn(cursor: ^CLIRecordCursor) -> CLIInputSchema RecordDecodeError! {
     field: cursor.string()
     flag: cursor.string()
     short: cursor.optional_string()
@@ -230,7 +230,7 @@ cli_schema_decode_input: fn(cursor: &CLIRecordCursor) -> CLIInputSchema RecordDe
     Ok(CLIInputSchema{field: field, flag: flag, short: short, env: env, help: help, metavar: metavar, shape: shape, positional: positional})
 }
 
-cli_schema_decode_strings: fn(cursor: &CLIRecordCursor, maximum: Int, refusal: String) -> [String] RecordDecodeError! {
+cli_schema_decode_strings: fn(cursor: ^CLIRecordCursor, maximum: Int, refusal: String) -> [String] RecordDecodeError! {
     count: cursor.u32()
     if count > maximum -> return Err(RecordDecodeError.Malformed{why: refusal})
     values := [String]{}
@@ -239,7 +239,7 @@ cli_schema_decode_strings: fn(cursor: &CLIRecordCursor, maximum: Int, refusal: S
     Ok(values)
 }
 
-cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact RecordDecodeError! {
+cli_schema_decode_job: fn(cursor: ^CLIRecordCursor) -> JobFact RecordDecodeError! {
     name: cursor.string()
     scope: if cursor.byte() == {
         CLI_SCHEMA_BYTE_0 -> JobScope.Dev
@@ -326,17 +326,17 @@ cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact RecordDecodeError
     Ok(JobFact{name: name, scope: scope, doc: doc, arguments: arguments.move(), after: after, packages: packages, cwd: cwd, inputs: inputs, outputs: outputs, skip: skip, cache: cache, parallel: parallel, limits: limits, schedule: schedule})
 }
 
-cli_schema_put_u32: fn(out: &[U8], value: Int) Never! {
+cli_schema_put_u32: fn(out: ^[U8], value: Int) Never! {
     loop index in 0..<4 -> out.push(U8{(value >> (index * 8)) & 255})
 }
 
-cli_schema_put_string: fn(out: &[U8], value: String) Never! {
+cli_schema_put_string: fn(out: ^[U8], value: String) Never! {
     bytes: value.bytes()
     cli_schema_put_u32(out, bytes.len())
     out.extend(bytes)
 }
 
-cli_schema_put_optional_string: fn(out: &[U8], value: String?) Never! {
+cli_schema_put_optional_string: fn(out: ^[U8], value: String?) Never! {
     if value == {
         None -> { out.push(U8{0}) }
         .Val(text) -> {
@@ -346,7 +346,7 @@ cli_schema_put_optional_string: fn(out: &[U8], value: String?) Never! {
     }
 }
 
-cli_schema_encode_input: fn(out: &[U8], input: CLIInputSchema) Never! {
+cli_schema_encode_input: fn(out: ^[U8], input: CLIInputSchema) Never! {
     cli_schema_put_string(out, input.field)
     cli_schema_put_string(out, input.flag)
     cli_schema_put_optional_string(out, input.short)
@@ -386,12 +386,12 @@ cli_schema_encode_input: fn(out: &[U8], input: CLIInputSchema) Never! {
     }
 }
 
-cli_schema_encode_strings: fn(out: &[U8], values: [String]) Never! {
+cli_schema_encode_strings: fn(out: ^[U8], values: [String]) Never! {
     cli_schema_put_u32(out, values.len())
     loop value in values -> cli_schema_put_string(out, value)
 }
 
-cli_schema_encode_job: fn(out: &[U8], job: JobFact) Never! {
+cli_schema_encode_job: fn(out: ^[U8], job: JobFact) Never! {
     cli_schema_put_string(out, job.name)
     out.push(
         if job.scope == {

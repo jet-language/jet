@@ -145,7 +145,7 @@ ReplayCursor: struct {
     position: Int,
     sequence: Int?,
 
-    seek: fn(&self, recording: SessionRecording, sequence: Int) -> ReplayProjection RecordingError! {
+    seek: fn(^self, recording: SessionRecording, sequence: Int) -> ReplayProjection RecordingError! {
         self.check(recording)
         index := -1
         loop (position, event) in recording.events {
@@ -160,7 +160,7 @@ ReplayCursor: struct {
         recording.projection(self)
     }
 
-    seek_time: fn(&self, recording: SessionRecording, timestamp_ms: Int) -> ReplayProjection RecordingError! {
+    seek_time: fn(^self, recording: SessionRecording, timestamp_ms: Int) -> ReplayProjection RecordingError! {
         self.check(recording)
         if recording.events.len() > 0 {
             first: recording.events[0]
@@ -177,7 +177,7 @@ ReplayCursor: struct {
         recording.projection(self)
     }
 
-    step: fn(&self, recording: SessionRecording, direction: ReplayStep) -> ReplayProjection RecordingError! {
+    step: fn(^self, recording: SessionRecording, direction: ReplayStep) -> ReplayProjection RecordingError! {
         self.check(recording)
         if direction == {
             .Forward -> {
@@ -302,7 +302,7 @@ SessionRecording: struct {
         }
     }
 
-    append_event: fn(&self, event: &&SessionEvent) -> Int RecordingError! {
+    append_event: fn(^self, event: ^^SessionEvent) -> Int RecordingError! {
         sequence: event.sequence
         events := [SessionEvent]{}
         events.push(event.move())
@@ -311,7 +311,7 @@ SessionRecording: struct {
         sequence
     }
 
-    record_envelope: fn(&self, bytes: [U8]) -> Int RecordingError! {
+    record_envelope: fn(^self, bytes: [U8]) -> Int RecordingError! {
         if bytes.len() > MAX_RECORDING_BYTES {
             return Err(RecordingError.EnvelopeTooLarge{bytes: bytes.len(), limit: MAX_RECORDING_BYTES})
         }
@@ -416,7 +416,7 @@ SessionRecording: struct {
         }
     }
 
-    append_event_unchecked: fn(&self, event: &&SessionEvent) {
+    append_event_unchecked: fn(^self, event: ^^SessionEvent) {
         self.last_sequence = Val(event.sequence)
         self.last_timestamp_ms = Val(event.timestamp_ms)
         self.retained_bytes += event.wire_len()

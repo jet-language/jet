@@ -18,11 +18,11 @@ fixture_run: fn() -> ProcessReceipt {
     process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
 }
 
-fixture_copy: fn(out: &[U8], bytes: [U8], start: Int, end: Int) {
+fixture_copy: fn(out: ^[U8], bytes: [U8], start: Int, end: Int) {
     loop i in start..<end -> out.push(bytes[i])
 }
 
-fixture_u16: fn(out: &[U8], n: Int) {
+fixture_u16: fn(out: ^[U8], n: Int) {
     out.push(U8{(n /% 256) %% 256})
     out.push(U8{n %% 256})
 }

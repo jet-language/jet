@@ -18,7 +18,7 @@ store_test_ingest_request: fn(name: String, reference: String, source: String, r
     }
 }
 
-store_test_assert_nothing_published: fn(verification: &StoreVerification, roots: HangarRoots, reference: String, source: String) Never! {
+store_test_assert_nothing_published: fn(verification: ^StoreVerification, roots: HangarRoots, reference: String, source: String) Never! {
     assert_eq((store_list_checked(verification, roots) ?? panic("listing")).len(), 0)
     assert_eq((store_closure_graph(verification, roots) ?? panic("graph")).records.len(), 0)
     assert(store_find_by_reference(verification, roots, reference) == None)
@@ -341,7 +341,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
 }
 
 // Register admitted Nix entries under the Hangar lock.
-store_test_register_admitted: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
+store_test_register_admitted: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     assert(store_register_admitted_nix_entries_unlocked(verification, roots, [StoreEntry]{entry}) ?? panic("register admitted"))
 }

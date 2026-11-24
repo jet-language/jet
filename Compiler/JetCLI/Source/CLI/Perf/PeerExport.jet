@@ -16,28 +16,28 @@ use {
 }
 
 // A protobuf field's key: its number and wire type (0 varint, 2 bytes).
-jet_cli_perf_pb_key: fn(out: &[U8], field: Int, wire: Int) Never! {
+jet_cli_perf_pb_key: fn(out: ^[U8], field: Int, wire: Int) Never! {
     record_put_uvarint(out, field * 8 + wire)
 }
 
-jet_cli_perf_pb_int: fn(out: &[U8], field: Int, value: Int) Never! {
+jet_cli_perf_pb_int: fn(out: ^[U8], field: Int, value: Int) Never! {
     jet_cli_perf_pb_key(out, field, 0)
     record_put_uvarint(out, value)
 }
 
-jet_cli_perf_pb_message: fn(out: &[U8], field: Int, body: [U8]) Never! {
+jet_cli_perf_pb_message: fn(out: ^[U8], field: Int, body: [U8]) Never! {
     jet_cli_perf_pb_key(out, field, 2)
     record_put_uvarint(out, body.len())
     loop byte in body -> out.push(byte)
 }
 
-jet_cli_perf_pb_text: fn(out: &[U8], field: Int, text: String) Never! {
+jet_cli_perf_pb_text: fn(out: ^[U8], field: Int, text: String) Never! {
     jet_cli_perf_pb_key(out, field, 2)
     record_put_str(out, text)
 }
 
 // A packed repeated varint field.
-jet_cli_perf_pb_packed: fn(out: &[U8], field: Int, values: [Int]) Never! {
+jet_cli_perf_pb_packed: fn(out: ^[U8], field: Int, values: [Int]) Never! {
     body := [U8]{}
     loop value in values -> record_put_uvarint(body, value)
     jet_cli_perf_pb_message(out, field, body)
@@ -45,7 +45,7 @@ jet_cli_perf_pb_packed: fn(out: &[U8], field: Int, values: [Int]) Never! {
 
 // The index of `text` in pprof's string table `strings`, whose first entry
 // is "", adding it when it is new.
-jet_cli_perf_pprof_string: fn(strings: &[String], text: &&String) -> Int Never! {
+jet_cli_perf_pprof_string: fn(strings: ^[String], text: ^^String) -> Int Never! {
     loop (index, known) in strings {
         if known == text -> return index
     }
@@ -54,7 +54,7 @@ jet_cli_perf_pprof_string: fn(strings: &[String], text: &&String) -> Int Never! 
 }
 
 // A pprof `ValueType`: its type and unit.
-jet_cli_perf_pprof_value_type: fn(strings: &[String], kind: &&String, unit: &&String) -> [U8] Never! {
+jet_cli_perf_pprof_value_type: fn(strings: ^[String], kind: ^^String, unit: ^^String) -> [U8] Never! {
     body := [U8]{}
     jet_cli_perf_pb_int(body, 1, jet_cli_perf_pprof_string(strings, kind))
     jet_cli_perf_pb_int(body, 2, jet_cli_perf_pprof_string(strings, unit))
@@ -314,7 +314,7 @@ jet_cli_perf_pprof_read: fn(bytes: [U8]) -> JetCLIPerfImport JetCLIReadError! {
 }
 
 // A pprof `Sample`: its leaf location (its first) and its first value.
-jet_cli_perf_pprof_sample: fn(bytes: [U8], cursor: &RecordCursor) -> {location: Int, value: Int} Never! {
+jet_cli_perf_pprof_sample: fn(bytes: [U8], cursor: ^RecordCursor) -> {location: Int, value: Int} Never! {
     location := -1
     value := 0
     valued := false
@@ -337,7 +337,7 @@ jet_cli_perf_pprof_sample: fn(bytes: [U8], cursor: &RecordCursor) -> {location: 
 
 // A pprof `Location`: its id, and the function and line of its first
 // `Line`, the innermost of the functions inlined there.
-jet_cli_perf_pprof_location: fn(bytes: [U8], cursor: &RecordCursor, functions: &[Int:Int], lines: &[Int:Int]) Never! {
+jet_cli_perf_pprof_location: fn(bytes: [U8], cursor: ^RecordCursor, functions: ^[Int:Int], lines: ^[Int:Int]) Never! {
     id := 0
     function := 0
     line := 0
@@ -370,7 +370,7 @@ jet_cli_perf_pprof_location: fn(bytes: [U8], cursor: &RecordCursor, functions: &
 }
 
 // A pprof `Function`: its id, name and file, as places in the string table.
-jet_cli_perf_pprof_function: fn(bytes: [U8], cursor: &RecordCursor, names: &[Int:Int], files: &[Int:Int]) Never! {
+jet_cli_perf_pprof_function: fn(bytes: [U8], cursor: ^RecordCursor, names: ^[Int:Int], files: ^[Int:Int]) Never! {
     id := 0
     name := 0
     file := 0
@@ -389,7 +389,7 @@ jet_cli_perf_pprof_function: fn(bytes: [U8], cursor: &RecordCursor, names: &[Int
 
 // A repeated varint field's values at `cursor`: packed (wire type 2) or
 // one (wire type 0).
-jet_cli_perf_pb_ints: fn(bytes: [U8], cursor: &RecordCursor, wire: Int) -> [Int] Never! {
+jet_cli_perf_pb_ints: fn(bytes: [U8], cursor: ^RecordCursor, wire: Int) -> [Int] Never! {
     values := [Int]{}
     if wire == 0 {
         values.push(record_read_uvarint(bytes, cursor))
@@ -411,7 +411,7 @@ jet_cli_perf_pb_ints: fn(bytes: [U8], cursor: &RecordCursor, wire: Int) -> [Int]
 }
 
 // Steps `cursor` past a field's value of wire type `wire`.
-jet_cli_perf_pb_skip: fn(bytes: [U8], cursor: &RecordCursor, wire: Int) Never! {
+jet_cli_perf_pb_skip: fn(bytes: [U8], cursor: ^RecordCursor, wire: Int) Never! {
     size: if wire == {
         0 -> {
             _: record_read_uvarint(bytes, cursor)

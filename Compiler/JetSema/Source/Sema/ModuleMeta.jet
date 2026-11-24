@@ -187,7 +187,7 @@ sema_module_meta_package: fn(package: SemaModulePackage, span: Span) -> Expr Nev
 // The generated constant of a module named `name` whose body starts with
 // `items`: the record of the compiler's fields and the field lines, which
 // leave the body. Setting a compiler-filled field is E0111.
-sema_module_meta_record: fn(items: &[Item], name: String, doc: String, source: SemaModuleMetaSource, span: Span, diagnostics: &[Diagnostic]) {
+sema_module_meta_record: fn(items: ^[Item], name: String, doc: String, source: SemaModuleMetaSource, span: Span, diagnostics: ^[Diagnostic]) {
     fields := [ExprField]{
         sema_module_meta_field("name", sema_module_meta_text(name, span), span),
         sema_module_meta_field("file", sema_module_meta_text(source.file, span), span),
@@ -262,7 +262,7 @@ sema_module_meta_carries: fn(items: [Item], declared_module: String, reads: Name
 // Give each inline module body of `items` that carries a record, nested ones
 // included, its record. True when any record was added.
 // `bytes` is the module's source text, as sema_module_meta_doc_above reads it.
-sema_module_meta_inline: fn(items: &[Item], meta_source: SemaModuleMetaSource, bytes: [U8], diagnostics: &[Diagnostic]) -> Bool {
+sema_module_meta_inline: fn(items: ^[Item], meta_source: SemaModuleMetaSource, bytes: [U8], diagnostics: ^[Diagnostic]) -> Bool {
     added := false
     loop index in 0..<items.len() {
         updated := CodeModule?{None}
@@ -287,7 +287,7 @@ sema_module_meta_inline: fn(items: &[Item], meta_source: SemaModuleMetaSource, b
 // Lower the field lines of module `program` into its Module records: the
 // file's own when it is a file module, and each inline module body's.
 // `text` is the module's source text; the caller passes no Core source.
-sema_module_meta_lower: fn(program: &Program, declared_module: String, meta_source: SemaModuleMetaSource, text: String, diagnostics: &[Diagnostic]) {
+sema_module_meta_lower: fn(program: ^Program, declared_module: String, meta_source: SemaModuleMetaSource, text: String, diagnostics: ^[Diagnostic]) {
     if !sema_module_meta_wanted(program.items, declared_module) {
         return
     }
@@ -306,7 +306,7 @@ sema_module_meta_lower: fn(program: &Program, declared_module: String, meta_sour
 }
 
 // The inline module bodies of `items`, nested ones included, by name.
-sema_module_meta_names: fn(items: [Item], names: &NameTable) Never! {
+sema_module_meta_names: fn(items: [Item], names: ^NameTable) Never! {
     loop item in items {
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
@@ -319,7 +319,7 @@ sema_module_meta_names: fn(items: [Item], names: &NameTable) Never! {
 
 // The modules a source declares, by name: its file module, when
 // `declared_module` names one, and its inline module bodies.
-sema_module_meta_declared_names: fn(items: [Item], declared_module: String, names: &NameTable) Never! {
+sema_module_meta_declared_names: fn(items: [Item], declared_module: String, names: ^NameTable) Never! {
     if declared_module != "" -> _ := name_intern(names, sema_module_meta_leaf(declared_module))
     sema_module_meta_names(items, names)
 }
@@ -359,7 +359,7 @@ sema_module_meta_value_at: fn(bytes: [U8], end: Int) -> Bool Never! {
 // Each of `modules` that `text` reads as a value (sema_module_meta_value_at)
 // joins `reads`. A `//` comment reads nothing; a string may, which only
 // gives a module a record it doesn't use.
-sema_module_meta_value_reads: fn(text: String, modules: NameTable, reads: &NameTable) Never! {
+sema_module_meta_value_reads: fn(text: String, modules: NameTable, reads: ^NameTable) Never! {
     bytes: text.bytes()
     index := 0
     loop index < bytes.len() {
@@ -395,7 +395,7 @@ sema_module_meta_compiler_source: fn(input: SemaRegistrationModuleInput) -> Bool
 // field, carry a record. A record is read across files (`lib.inner` from
 // another file of the package), so every source is scanned for every
 // module.
-sema_module_meta_mark_reads: fn(inputs: &[SemaRegistrationModuleInput]) {
+sema_module_meta_mark_reads: fn(inputs: ^[SemaRegistrationModuleInput]) {
     names := name_table_sized(2)
     loop input in inputs {
         if sema_module_meta_compiler_source(input) -> next

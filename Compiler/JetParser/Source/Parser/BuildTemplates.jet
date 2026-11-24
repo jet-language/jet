@@ -5,7 +5,7 @@ use {
     jet_lexer.[TOKEN_HASH, TOKEN_IDENT, TOKEN_LBRACE]
 }
 
-parser_parse_generate_template_arg: fn(state: &JetParserState, method: String, args: &[CallArg]) -> Bool {
+parser_parse_generate_template_arg: fn(state: ^JetParserState, method: String, args: ^[CallArg]) -> Bool {
     if method != "generate" || parser_current_kind(state) != TOKEN_LBRACE -> return false
     parser_parse_template_items_arg(state, args)
     true
@@ -13,7 +13,7 @@ parser_parse_generate_template_arg: fn(state: &JetParserState, method: String, a
 
 // The `{ items }` block at the current `{`, pushed as the hidden final
 // argument that carries its items.
-parser_parse_template_items_arg: fn(state: &JetParserState, args: &[CallArg]) {
+parser_parse_template_items_arg: fn(state: ^JetParserState, args: ^[CallArg]) {
     open: parser_current(state).span
     items := parser_marker_body(state)
     span: parser_cover(open, parser_lookahead(state, -1).span)
@@ -24,7 +24,7 @@ parser_parse_template_items_arg: fn(state: &JetParserState, args: &[CallArg]) {
 
 // `#code { items }`, written with no space between `#` and `code`. Its
 // spelling is the Syntax registry's CODE_VALUE; `code` stays an identifier.
-parser_code_value_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_code_value_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_kind_at(state, 0) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT || parser_value_at(state, 1) != "code" {
         return false
     }
@@ -33,7 +33,7 @@ parser_code_value_ahead: fn(state: &JetParserState) -> Bool Never! {
 
 // A `Code` value: the call `#code` whose one argument is its item block, as
 // a `b.generate` template rides on its call (sema_build_code_value).
-parser_parse_code_value: fn(state: &JetParserState) -> ParsedExpr {
+parser_parse_code_value: fn(state: ^JetParserState) -> ParsedExpr {
     hash: parser_bump(state)
     word: parser_bump(state)
     args := [CallArg]{}

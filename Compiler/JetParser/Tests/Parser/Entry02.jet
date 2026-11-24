@@ -192,10 +192,10 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 // are one E0175 whose edit writes the states into the signatures and the
 // moves into the state list; a marker with no owner in the file has no edit.
 #Test("state_marker_is_retired_with_one_edit_per_owner") {
-    src: "Door: struct {{\n    state {{ Open, Closed }}\n    id: Int,\n\n    #State(_ -> Open) open: fn(id: Int) -> Door {{ Door{{id: id}} }}\n    #State(Open -> Closed) close: fn(&&self) -> Self {{ self }}\n    #State(Closed) id_of: fn(self) -> Int {{ self.id }}\n}}\n"
+    src: "Door: struct {{\n    state {{ Open, Closed }}\n    id: Int,\n\n    #State(_ -> Open) open: fn(id: Int) -> Door {{ Door{{id: id}} }}\n    #State(Open -> Closed) close: fn(^^self) -> Self {{ self }}\n    #State(Closed) id_of: fn(self) -> Int {{ self.id }}\n}}\n"
     retired: entry02_diag(entry02_errors(src), "E0175")
     edit: retired.edit ?? panic("state marker migration edit")
-    assert(edit.new_text == "state {{\n        Open -> Closed\n        Closed\n    }}\n    id: Int,\n\n    open: fn(id: Int) -> Door.Open {{ Door{{id: id}} }}\n    close: fn(self: &&Door.Open) -> Door.Closed {{ self }}\n    id_of: fn(self: Door.Closed")
+    assert(edit.new_text == "state {{\n        Open -> Closed\n        Closed\n    }}\n    id: Int,\n\n    open: fn(id: Int) -> Door.Open {{ Door{{id: id}} }}\n    close: fn(self: ^^Door.Open) -> Door.Closed {{ self }}\n    id_of: fn(self: Door.Closed")
     ownerless: entry02_diag(entry02_errors("#State(Open -> Closed)\nwork: fn() {{}}\n"), "E0175")
     assert(ownerless.edit == None)
     assert(entry02_errors("#State(Open -> Closed -> Gone)\nwork: fn() {{}}\n").len() > 0)

@@ -707,7 +707,7 @@ project_owns_module: fn(ctx: ProjectContext, module_path: String) -> Bool Never!
     false
 }
 
-add_project_rename_site: fn(sites: &[ProjectRenameSite], seen: &[String:Bool], source: Int, source_id: String, span: Span) Never! {
+add_project_rename_site: fn(sites: ^[ProjectRenameSite], seen: ^[String:Bool], source: Int, source_id: String, span: Span) Never! {
     key: "{source_id}\n{span.start}\n{span.end}"
     if seen.has_key(key) {
         return
@@ -1152,13 +1152,13 @@ add_env_service_to_source: fn(src: String, name: String, service: String) -> Str
 
 // ---- Checking and writing one transaction ----
 
-finish_project_changes: fn(checker: LSPChecker, ctx: ProjectContext, request: String, op: String, changes: &[ProjectChange]) -> String Err! {
+finish_project_changes: fn(checker: LSPChecker, ctx: ProjectContext, request: String, op: String, changes: ^[ProjectChange]) -> String Err! {
     finish_project_changes_with_audit(checker, ctx, request, op, changes, "")
 }
 
 // Formats and checks the changes, writes them unless the request is a
 // preview, and answers the transaction's audit record.
-finish_project_changes_with_audit: fn(checker: LSPChecker, ctx: ProjectContext, request: String, op: String, changes: &[ProjectChange], audit: String) -> String Err! {
+finish_project_changes_with_audit: fn(checker: LSPChecker, ctx: ProjectContext, request: String, op: String, changes: ^[ProjectChange], audit: String) -> String Err! {
     rename: op == "rename_binding" || op == "rename_function"
     loop change in changes { validate_project_path(ctx.project_root, change.path, change.rel) }
     if rename {
@@ -1189,7 +1189,7 @@ finish_project_changes_with_audit: fn(checker: LSPChecker, ctx: ProjectContext, 
 
 // Checks every changed Package, workspace and env file against its model,
 // and formats every changed Jet source in place.
-normalize_and_format_project_changes: fn(ctx: ProjectContext, changes: &[ProjectChange]) Err! {
+normalize_and_format_project_changes: fn(ctx: ProjectContext, changes: ^[ProjectChange]) Err! {
     loop at in 0..<changes.len() {
         if changes[at].before == changes[at].after -> next
         normalized: normalize_project_change(ctx, changes[at])
@@ -1225,7 +1225,7 @@ normalize_project_change: fn(ctx: ProjectContext, change: ProjectChange) -> Stri
 }
 
 // Formats the changes, then checks each changed Jet source as an overlay.
-normalize_and_validate_project_changes: fn(checker: LSPChecker, ctx: ProjectContext, changes: &[ProjectChange]) Err! {
+normalize_and_validate_project_changes: fn(checker: LSPChecker, ctx: ProjectContext, changes: ^[ProjectChange]) Err! {
     normalize_and_format_project_changes(ctx, changes)
     loop change in changes {
         if change.before == change.after || project_file_kind_for_rel(change.rel) != "source" {

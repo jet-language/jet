@@ -67,7 +67,7 @@ MpiError: enum {
 /// The random source of the drawing functions (mbedtls's f_rng and p_rng).
 /// `fill` writes `out.len()` random bytes and reports whether it could.
 RNG: trait {
-    fill: fn(&self, out: &[U8]) -[]> Bool Never!,
+    fill: fn(^self, out: ^[U8]) -[]> Bool Never!,
 }
 
 // ---------------------------------------------------------------------------
@@ -104,11 +104,11 @@ ct_select: fn(mask: U64, a: U64, b: U64) -> U64 Never! { b ~ mask & (a ~ b) }
     {hi: p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32), lo: (mid << 32) | p00 & m}
 }
 
-copy_limbs: fn(dst: &[U64], src: [U64], limbs: Int) Never! {
+copy_limbs: fn(dst: ^[U64], src: [U64], limbs: Int) Never! {
     loop i in 0..<limbs -> dst[i] = src[i]
 }
 
-zero_limbs: fn(x: &[U64], limbs: Int) Never! {
+zero_limbs: fn(x: ^[U64], limbs: Int) Never! {
     loop i in 0..<limbs -> x[i] = U64{0}
 }
 
@@ -165,13 +165,13 @@ core_bits_above: fn(a: [#Secret U64], pos: Int) -> U64 Never! {
 }
 
 /// x = a when `assign` is 1, in constant time.
-core_cond_assign: fn(x: &[U64], a: [U64], limbs: Int, assign: #Secret U64) Never! {
+core_cond_assign: fn(x: ^[U64], a: [U64], limbs: Int, assign: #Secret U64) Never! {
     mask: ct_mask(assign)
     loop i in 0..<limbs -> x[i] = ct_select(mask, a[i], x[i])
 }
 
 /// Swap x and y when `swap` is 1, in constant time.
-core_cond_swap: fn(x: &[U64], y: &[U64], limbs: Int, swap: #Secret U64) Never! {
+core_cond_swap: fn(x: ^[U64], y: ^[U64], limbs: Int, swap: #Secret U64) Never! {
     mask: ct_mask(swap)
     loop i in 0..<limbs {
         t: x[i]
@@ -186,7 +186,7 @@ get_byte: fn(a: [U64], i: Int) -> U8 Never! {
 }
 
 /// Little-endian `input` into the `x_limbs` limbs of x.
-core_read_le: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
+core_read_le: fn(x: ^[U64], x_limbs: Int, input: [U8]) MpiError! {
     if x_limbs < (input.len() + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BufferTooSmall)
     zero_limbs(x, x_limbs)
     loop i in 0..<input.len() {
@@ -195,7 +195,7 @@ core_read_le: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
 }
 
 /// Big-endian `input` into the `x_limbs` limbs of x.
-core_read_be: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
+core_read_be: fn(x: ^[U64], x_limbs: Int, input: [U8]) MpiError! {
     n: input.len()
     if x_limbs < (n + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BufferTooSmall)
     zero_limbs(x, x_limbs)
@@ -238,7 +238,7 @@ core_write_be: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
 }
 
 /// x >>= count over `limbs` limbs.
-core_shift_r: fn(x: &[U64], limbs: Int, count: Int) Never! {
+core_shift_r: fn(x: ^[U64], limbs: Int, count: Int) Never! {
     v0: count /% LIMB_BITS
     v1: count % LIMB_BITS
     if v0 > limbs || (v0 == limbs && v1 > 0) {
@@ -262,7 +262,7 @@ core_shift_r: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x <<= count over `limbs` limbs; bits shifted past the top are lost.
-core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
+core_shift_l: fn(x: ^[U64], limbs: Int, count: Int) Never! {
     v0: count /% LIMB_BITS
     v1: count % LIMB_BITS
     if v0 > 0 {
@@ -287,7 +287,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x = a + b over `limbs` limbs; the carry out.
-#Overflow(.Wrapping) core_add: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
+#Overflow(.Wrapping) core_add: fn(x: ^[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
         t: c + a[i]
@@ -300,7 +300,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x += a over `limbs` limbs when `cond` is 1, in constant time; the carry.
-#Overflow(.Wrapping) core_add_if: fn(x: &[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
+#Overflow(.Wrapping) core_add_if: fn(x: ^[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
     mask: ct_mask(cond)
     c := U64{0}
     loop i in 0..<limbs {
@@ -315,7 +315,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x = a - b over `limbs` limbs; the borrow out.
-#Overflow(.Wrapping) core_sub: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
+#Overflow(.Wrapping) core_sub: fn(x: ^[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
         z: ct_lt(a[i], c)
@@ -327,7 +327,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x = a - c over `limbs` limbs for one limb c; the borrow out.
-#Overflow(.Wrapping) core_sub_int: fn(x: &[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
+#Overflow(.Wrapping) core_sub_int: fn(x: ^[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
     borrow := c
     loop i in 0..<limbs {
         s: a[i]
@@ -340,7 +340,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 
 /// d[off..<off + d_len] += s[0..<s_len] * b; the carry out. d_len must be at
 /// least s_len; a shorter d gives a wrong result, never a write past it.
-#Overflow(.Wrapping) core_mla: fn(d: &[U64], off: Int, d_len: Int, s: [U64], s_len: Int, b: U64) -> U64 Never! {
+#Overflow(.Wrapping) core_mla: fn(d: ^[U64], off: Int, d_len: Int, s: [U64], s_len: Int, b: U64) -> U64 Never! {
     n: if d_len < s_len -> d_len else -> s_len
     c := U64{0}
     loop i in 0..<n {
@@ -361,7 +361,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x = a * b, x of a_limbs + b_limbs limbs.
-core_mul: fn(x: &[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
+core_mul: fn(x: ^[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
     zero_limbs(x, a_limbs + b_limbs)
     loop i in 0..<b_limbs -> _: core_mla(x, i, a_limbs + 1, a, a_limbs, b[i])
 }
@@ -378,7 +378,7 @@ core_mul: fn(x: &[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
 /// an_limbs limbs, b has b_limbs <= an_limbs, and a * b < R * n. t is
 /// scratch of at least 2 * an_limbs + 1 limbs. The final subtraction always
 /// runs and its result is chosen by mask.
-#Overflow(.Wrapping) core_montmul: fn(x: &[U64], a: [U64], b: [U64], b_limbs: Int, n: [U64], an_limbs: Int, mm: U64, t: &[U64]) Never! {
+#Overflow(.Wrapping) core_montmul: fn(x: ^[U64], a: [U64], b: [U64], b_limbs: Int, n: [U64], an_limbs: Int, mm: U64, t: ^[U64]) Never! {
     zero_limbs(t, 2 * an_limbs + 1)
     loop i in 0..<an_limbs {
         u0: a[i]
@@ -406,7 +406,7 @@ core_get_mont_r2_unsafe: fn(n: Mpi) -> Mpi MpiError! {
 
 /// dest = table[index] of `count` entries of `limbs` limbs, reading every
 /// entry so the index never shows in the access pattern.
-core_ct_uint_table_lookup: fn(dest: &[U64], table: [U64], limbs: Int, count: Int, index: #Secret U64) Never! {
+core_ct_uint_table_lookup: fn(dest: ^[U64], table: [U64], limbs: Int, count: Int, index: #Secret U64) Never! {
     loop i in 0..<count {
         mask: ct_mask(ct_bool(U64{i} ~ index) ~ U64{1})
         loop j in 0..<limbs -> dest[j] = ct_select(mask, table[i * limbs + j], dest[j])
@@ -417,7 +417,7 @@ core_ct_uint_table_lookup: fn(dest: &[U64], table: [U64], limbs: Int, count: Int
 /// limbs. The byte order is the one RFC 6979 section 3.3 expects of a
 /// deterministic ECDSA nonce. A failed draw leaves neither its bytes nor
 /// a partial x behind.
-core_fill_random: fn<R: RNG>(x: &[U64], x_limbs: Int, n_bytes: Int, rng: &R) MpiError! {
+core_fill_random: fn<R: RNG>(x: ^[U64], x_limbs: Int, n_bytes: Int, rng: ^R) MpiError! {
     if x_limbs < (n_bytes + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BadInput)
     buf := cipher.zero_bytes(n_bytes)
     if !rng.fill(buf) {
@@ -435,7 +435,7 @@ core_fill_random: fn<R: RNG>(x: &[U64], x_limbs: Int, n_bytes: Int, rng: &R) Mpi
 /// A uniform draw min <= x < n over `limbs` limbs, by rejection: the leftmost
 /// bitlen(n) bits of each fill, as RFC 6979 section 3.3 does. A failure
 /// leaves no rejected draw in x.
-core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiError! {
+core_random: fn<R: RNG>(x: ^[U64], min: U64, n: [U64], limbs: Int, rng: ^R) MpiError! {
     n_bits: core_bitlen(n, limbs)
     n_bytes: (n_bits + 7) /% 8
     // When n is crypto-sized one try almost always lands; a small n needs
@@ -475,7 +475,7 @@ exp_mod_window: fn(ebits: Int) -> Int Never! { if ebits > 79 -> WINDOW_SIZE else
 /// is processed. Each window is chosen by a full table scan, so the time
 /// and access pattern depend only on the start. Left-to-right k-ary
 /// exponentiation, one bit per step (HAC 14.82).
-core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64], start_limb: Int, start_bit: Int, rr: [U64]) Never! {
+core_exp_mod: fn(x: ^[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64], start_limb: Int, start_bit: Int, rr: [U64]) Never! {
     limb_index := start_limb
     bit_index := start_bit
     wsize: exp_mod_window(limb_index * LIMB_BITS)
@@ -535,23 +535,23 @@ core_check_zero_ct: fn(a: [#Secret U64], limbs: Int) -> U64 Never! {
 }
 
 /// x = a * R mod n, given rr = R^2 mod n.
-core_to_mont_rep: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
+core_to_mont_rep: fn(x: ^[U64], a: [U64], n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: ^[U64]) Never! {
     core_montmul(x, a, rr, an_limbs, n, an_limbs, mm, t)
 }
 
 /// x = a * R^-1 mod n.
-core_from_mont_rep: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, mm: U64, t: &[U64]) Never! {
+core_from_mont_rep: fn(x: ^[U64], a: [U64], n: [U64], an_limbs: Int, mm: U64, t: ^[U64]) Never! {
     core_montmul(x, a, [U64]{U64{1}}, 1, n, an_limbs, mm, t)
 }
 
 /// x = a - b mod n with a and b in [0, n).
-core_sub_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
+core_sub_mod: fn(x: ^[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
     c: core_sub(x, a, b, limbs)
     _: core_add_if(x, n, limbs, c)
 }
 
 /// x = a + b mod n with a and b in [0, n).
-core_add_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
+core_add_mod: fn(x: ^[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
     sum := cipher.words(limbs)
     carry: core_add(sum, a, b, limbs)
     borrow: core_sub(x, sum, n, limbs)
@@ -563,7 +563,7 @@ core_add_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
 
 /// x = a * b mod n for a < R and b < n, all of an_limbs limbs: the
 /// Montgomery product a b R^-1, then its product with rr = R^2 mod n.
-core_mul_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
+core_mul_mod: fn(x: ^[U64], a: [U64], b: [U64], n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: ^[U64]) Never! {
     ab := cipher.words(an_limbs)
     core_montmul(ab, a, b, an_limbs, n, an_limbs, mm, t)
     core_montmul(x, ab, rr, an_limbs, n, an_limbs, mm, t)
@@ -574,7 +574,7 @@ core_mul_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], an_limbs: Int, mm: U64
 /// over a's an_limbs-limb chunks from the top, x = x R + chunk R mod n by
 /// two Montgomery products and a modular sum each, so no division and no
 /// test of a's or n's limbs.
-core_to_mont_rep_wide: fn(x: &[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
+core_to_mont_rep_wide: fn(x: ^[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: ^[U64]) Never! {
     zero_limbs(x, an_limbs)
     chunk := cipher.words(an_limbs)
     high := cipher.words(an_limbs)
@@ -599,7 +599,7 @@ core_to_mont_rep_wide: fn(x: &[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs:
 /// x = a mod n for any a of a_limbs limbs, in n's an_limbs limbs, given
 /// rr = R^2 mod n: into Montgomery form by core_to_mont_rep_wide and out
 /// again, with no division.
-core_mod_wide: fn(x: &[U64], a: [#Secret U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
+core_mod_wide: fn(x: ^[U64], a: [#Secret U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: ^[U64]) Never! {
     m := cipher.words(an_limbs)
     core_to_mont_rep_wide(m, a, a_limbs, n, an_limbs, mm, rr, t)
     core_from_mont_rep(x, m, n, an_limbs, mm, t)
@@ -629,7 +629,7 @@ core_get_mont_r2_ct: fn(n: Mpi) -> Mpi MpiError! {
 }
 
 /// x = x / 2 mod n for odd n and x in [0, n): add n first when x is odd.
-core_div2_mod_odd: fn(x: &[U64], n: [U64], limbs: Int) Never! {
+core_div2_mod_odd: fn(x: ^[U64], n: [U64], limbs: Int) Never! {
     c: core_add_if(x, n, limbs, x[0] & U64{1})
     core_shift_r(x, limbs, 1)
     x[limbs - 1] = x[limbs - 1] | c << 63
@@ -641,7 +641,7 @@ core_div2_mod_odd: fn(x: &[U64], n: [U64], limbs: Int) Never! {
 /// 8 made readable): each step keeps one of u, v and v - u, halves another
 /// and drops the third, mirroring the moves on the cofactors q and r mod n;
 /// bitlen(a) + bitlen(n) steps reach the fixed point u = 0, v = gcd.
-core_gcd_modinv_odd: fn(g: &[U64], i: &[U64], inverse: Bool, a: [#Secret U64], a_limbs: Int, n: [#Secret U64], n_limbs: Int) Never! {
+core_gcd_modinv_odd: fn(g: ^[U64], i: ^[U64], inverse: Bool, a: [#Secret U64], a_limbs: Int, n: [#Secret U64], n_limbs: Int) Never! {
     an: if a_limbs > n_limbs -> n_limbs else -> a_limbs
     u := cipher.words(n_limbs)
     copy_limbs(u, a, an)
@@ -706,7 +706,7 @@ Mpi: struct {
     p: [U64],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             p := self.p.move()
             cipher.wipe_words(p)
         }
@@ -730,7 +730,7 @@ from_int: fn(z: Int) -> Mpi Never! {
 }
 
 /// Grow x to at least `limbs` limbs. The old storage is wiped.
-grow: fn(x: &Mpi, limbs: Int) MpiError! {
+grow: fn(x: ^Mpi, limbs: Int) MpiError! {
     if limbs > MAX_LIMBS -> return Err(.AllocFailed)
     if x.p.len() >= limbs {
         return
@@ -743,7 +743,7 @@ grow: fn(x: &Mpi, limbs: Int) MpiError! {
 
 /// Shrink x to its significant limbs but at least `limbs`; grow it when it
 /// has fewer.
-shrink: fn(x: &Mpi, limbs: Int) MpiError! {
+shrink: fn(x: ^Mpi, limbs: Int) MpiError! {
     if limbs > MAX_LIMBS -> return Err(.AllocFailed)
     if x.p.len() <= limbs -> return grow(x, limbs)
     i := x.p.len() - 1
@@ -787,7 +787,7 @@ copy_mpi_ct: fn(y: Mpi) -> Mpi Never! { Mpi{s: y.s, p: y.p.copy()} }
 /// significant ones (at least one) and zeroed above them; an empty y zeroes
 /// x. Results replace a number through this rather than by rebinding it
 /// (#6702: rebinding a Close local closes the old value twice).
-set_mpi: fn(x: &Mpi, y: Mpi) MpiError! {
+set_mpi: fn(x: ^Mpi, y: Mpi) MpiError! {
     if y.p.len() == 0 {
         if x.p.len() != 0 {
             x.s = 1
@@ -807,7 +807,7 @@ set_mpi: fn(x: &Mpi, y: Mpi) MpiError! {
 /// x = y in place with all of y's limbs, leading zero ones too, so no limb
 /// is tested: set_mpi for a secret, as copy_mpi_ct is copy_mpi for one.
 /// x is grown to y's length and zeroed above it.
-set_mpi_ct: fn(x: &Mpi, y: Mpi) MpiError! {
+set_mpi_ct: fn(x: ^Mpi, y: Mpi) MpiError! {
     x.s = y.s
     if x.p.len() < y.p.len() -> grow(x, y.p.len()) ?? return Err(err) else {
         loop j in y.p.len()..<x.p.len() -> x.p[j] = U64{0}
@@ -816,7 +816,7 @@ set_mpi_ct: fn(x: &Mpi, y: Mpi) MpiError! {
 }
 
 /// Exchange x and y.
-swap: fn(x: &Mpi, y: &Mpi) Never! {
+swap: fn(x: ^Mpi, y: ^Mpi) Never! {
     s: x.s
     x.s = y.s
     y.s = s
@@ -826,7 +826,7 @@ swap: fn(x: &Mpi, y: &Mpi) Never! {
 }
 
 /// x = z, keeping x's limbs.
-lset: fn(x: &Mpi, z: Int) MpiError! {
+lset: fn(x: ^Mpi, z: Int) MpiError! {
     grow(x, 1) ?? return Err(err)
     zero_limbs(x.p, x.p.len())
     x.p[0] = sint_abs(z)
@@ -845,7 +845,7 @@ limb_bit: fn(x: Mpi, pos: Int) -> U64 Never! {
 }
 
 /// Set bit `pos` of |x| to `val`, 0 or 1, growing x for a 1.
-set_bit: fn(x: &Mpi, pos: Int, val: Int) MpiError! {
+set_bit: fn(x: ^Mpi, pos: Int, val: Int) MpiError! {
     if val != 0 && val != 1 -> return Err(.BadInput)
     off: pos /% LIMB_BITS
     idx: pos % LIMB_BITS
@@ -1030,7 +1030,7 @@ write_binary_le: fn(x: Mpi, buflen: Int) -> [U8] MpiError! { core_write_le(x.p, 
 write_binary: fn(x: Mpi, buflen: Int) -> [U8] MpiError! { core_write_be(x.p, x.p.len(), buflen) }
 
 /// x <<= count, growing x as needed.
-shift_l: fn(x: &Mpi, count: Int) MpiError! {
+shift_l: fn(x: ^Mpi, count: Int) MpiError! {
     bits: bitlen(x) + count
     if x.p.len() * LIMB_BITS < bits {
         grow(x, (bits + LIMB_BITS - 1) /% LIMB_BITS) ?? return Err(err)
@@ -1039,7 +1039,7 @@ shift_l: fn(x: &Mpi, count: Int) MpiError! {
 }
 
 /// x >>= count.
-shift_r: fn(x: &Mpi, count: Int) Never! {
+shift_r: fn(x: ^Mpi, count: Int) Never! {
     if x.p.len() != 0 -> core_shift_r(x.p, x.p.len(), count)
 }
 
@@ -1098,7 +1098,7 @@ ct_sign_if: fn(cond: U64, a: Int, b: Int) -> Int Never! {
 
 /// x = y when `assign` is 1, else x unchanged, without revealing which.
 /// x grows to y's limb count; its limbs above y's are zeroed on assignment.
-safe_cond_assign: fn(x: &Mpi, y: Mpi, assign: Int) MpiError! {
+safe_cond_assign: fn(x: ^Mpi, y: Mpi, assign: Int) MpiError! {
     grow(x, y.p.len()) ?? return Err(err)
     cond: ct_bool(U64{assign & 0xff})
     x.s = ct_sign_if(cond, y.s, x.s)
@@ -1108,7 +1108,7 @@ safe_cond_assign: fn(x: &Mpi, y: Mpi, assign: Int) MpiError! {
 }
 
 /// Swap x and y when `swap` is 1, without revealing whether it happened.
-safe_cond_swap: fn(x: &Mpi, y: &Mpi, swap: Int) MpiError! {
+safe_cond_swap: fn(x: ^Mpi, y: ^Mpi, swap: Int) MpiError! {
     cond: ct_bool(U64{swap & 0xff})
     grow(x, y.p.len()) ?? return Err(err)
     grow(y, x.p.len()) ?? return Err(err)
@@ -1357,7 +1357,7 @@ mod_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 /// rr = R^2 mod n for odd n > 1, R = 2^(64 * n.p.len()), unless rr already
 /// holds it: the cache `exp_mod` and `mod_ct` keep beside a modulus. It is
 /// computed in constant time, since the modulus may be a CRT prime.
-mont_r2: fn(rr: &Mpi, n: Mpi) MpiError! {
+mont_r2: fn(rr: ^Mpi, n: Mpi) MpiError! {
     if rr.p.len() == 0 {
         computed := core_get_mont_r2_ct(n) ?? return Err(err)
         swap(rr, computed)
@@ -1367,7 +1367,7 @@ mont_r2: fn(rr: &Mpi, n: Mpi) MpiError! {
 /// a mod n for odd n > 1 and a >= 0 of any length, in n's limb count, with
 /// no division and no test of either's limbs (core_mod_wide). `rr` caches
 /// R^2 mod n as for `exp_mod`.
-mod_ct: fn(a: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+mod_ct: fn(a: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
     if a.s < 0 -> return Err(.BadInput)
     mont_r2(rr, n) ?? return Err(err)
     an: n.p.len()
@@ -1393,7 +1393,7 @@ limbs_of: fn(x: Mpi, limbs: Int) -> [U64] Never! {
 /// |a| of any length enters Montgomery form by core_to_mont_rep_wide, so an
 /// a at or above n is reduced with no division; the result has n's limb
 /// count.
-exp_mod_from: fn(a: Mpi, ep: [#Secret U64], start_limb: Int, start_bit: Int, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+exp_mod_from: fn(a: Mpi, ep: [#Secret U64], start_limb: Int, start_bit: Int, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
     an: n.p.len()
     mont_r2(rr, n) ?? return Err(err)
     x := zeros(an) ?? return Err(err)
@@ -1433,7 +1433,7 @@ exp_mod_modulus_ok: fn(n: Mpi) -> Bool Never! {
 /// (mbedtls_mpi_exp_mod). e is read over the larger of its own and n's limb
 /// count with the window that length fixes, so its bit length does not
 /// show either. A negative e is told by its sign alone.
-exp_mod: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+exp_mod: fn(a: Mpi, e: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
     if !exp_mod_modulus_ok(n) || e.s < 0 || e.p.len() > MAX_BITS /% LIMB_BITS {
         return Err(.BadInput)
     }
@@ -1451,7 +1451,7 @@ exp_mod: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
 }
 
 /// a^e mod n for a public e; the time depends on e (mbedtls_mpi_exp_mod_unsafe).
-exp_mod_unsafe: fn(a: Mpi, e: Mpi, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+exp_mod_unsafe: fn(a: Mpi, e: Mpi, n: Mpi, rr: ^Mpi) -> Mpi MpiError! {
     if !exp_mod_modulus_ok(n) || cmp_int(e, 0) < 0 || bitlen(e) > MAX_BITS -> return Err(.BadInput)
     if e.p.len() == 0 -> return Ok(from_int(1))
     e_bits := bitlen(e)
@@ -1518,7 +1518,7 @@ gcd: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 
 /// `size` random bytes as a big-endian number in exactly ceil(size / 8)
 /// limbs.
-fill_random: fn<R: RNG>(size: Int, rng: &R) -> Mpi MpiError! {
+fill_random: fn<R: RNG>(size: Int, rng: ^R) -> Mpi MpiError! {
     x := zeros((size + LIMB_BYTES - 1) /% LIMB_BYTES) ?? return Err(err)
     if size == 0 -> return Ok(x)
     core_fill_random(x.p, x.p.len(), size, rng) ?? return Err(err)
@@ -1526,7 +1526,7 @@ fill_random: fn<R: RNG>(size: Int, rng: &R) -> Mpi MpiError! {
 }
 
 /// A uniform draw min <= x < n, in n's limb count (mbedtls_mpi_random).
-random: fn<R: RNG>(min: Int, n: Mpi, rng: &R) -> Mpi MpiError! {
+random: fn<R: RNG>(min: Int, n: Mpi, rng: ^R) -> Mpi MpiError! {
     if min < 0 -> return Err(.BadInput)
     if cmp_int(n, min) <= 0 -> return Err(.BadInput)
     x := zeros(n.p.len()) ?? return Err(err)
@@ -1629,7 +1629,7 @@ check_small_factors: fn(x: Mpi) -> Bool MpiError! {
 }
 
 /// Miller-Rabin with `rounds` random bases 1 < a < x - 1 (HAC 4.24).
-miller_rabin: fn<R: RNG>(x: Mpi, rounds: Int, rng: &R) MpiError! {
+miller_rabin: fn<R: RNG>(x: Mpi, rounds: Int, rng: ^R) MpiError! {
     w: sub_int(x, 1) ?? return Err(err)
     s: lsb(w)
     r := copy_mpi(w)
@@ -1669,7 +1669,7 @@ miller_rabin: fn<R: RNG>(x: Mpi, rounds: Int, rng: &R) MpiError! {
 
 /// Probabilistic primality of |x|: trial division, then `rounds` of
 /// Miller-Rabin. NotAcceptable when composite.
-is_prime_ext: fn<R: RNG>(x: Mpi, rounds: Int, rng: &R) MpiError! {
+is_prime_ext: fn<R: RNG>(x: Mpi, rounds: Int, rng: ^R) MpiError! {
     xx: Mpi{s: 1, p: x.p.copy()}
     if cmp_int(xx, 0) == 0 || cmp_int(xx, 1) == 0 -> return Err(.NotAcceptable)
     if cmp_int(xx, 2) == 0 {
@@ -1691,7 +1691,7 @@ CEIL_MAXUINT_DIV_SQRT2: U64{0xb504f333f9de6485}
 /// asks for a safe prime: (x - 1) / 2 prime too. Miller-Rabin rounds give
 /// an error probability of 2^-80 (HAC table 4.4) or with `low_err` 2^-100
 /// (HAC fact 4.48).
-gen_prime: fn<R: RNG>(nbits: Int, rng: &R, dh: Bool{false}, low_err: Bool{false}) -> Mpi MpiError! {
+gen_prime: fn<R: RNG>(nbits: Int, rng: ^R, dh: Bool{false}, low_err: Bool{false}) -> Mpi MpiError! {
     if nbits < 3 || nbits > MAX_BITS -> return Err(.BadInput)
     n: (nbits + LIMB_BITS - 1) /% LIMB_BITS
     rounds: if {
@@ -1753,7 +1753,7 @@ gen_prime: fn<R: RNG>(nbits: Int, rng: &R, dh: Bool{false}, low_err: Bool{false}
 
 /// One safe-prime candidate: small factors of x and y before Miller-Rabin
 /// on either.
-safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: &R) MpiError! {
+safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: ^R) MpiError! {
     _: check_small_factors(x) ?? return Err(err)
     _: check_small_factors(y) ?? return Err(err)
     miller_rabin(x, rounds, rng) ?? return Err(err)
@@ -1874,7 +1874,7 @@ FailingDraws: struct {
     left: Int,
 
     impl RNG {
-        fill: fn(&self, out: &[U8]) -> Bool Never! {
+        fill: fn(^self, out: ^[U8]) -> Bool Never! {
             if self.left == 0 -> return false
             self.left -= 1
             loop i in 0..<out.len() -> out[i] = U8{0xFF}

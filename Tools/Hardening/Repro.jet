@@ -217,7 +217,7 @@ make_repro: fn(input: ReproInput) -> Dyn Err! {
 
 // Canonical base64 only: decoding and encoding again gives the same text,
 // so one byte string has exactly one recorded form.
-channel_bytes: fn(tree: Dyn, name: String, errors: &[String]) -> [U8] Never! {
+channel_bytes: fn(tree: Dyn, name: String, errors: ^[String]) -> [U8] Never! {
     encoding: field_text(tree, "{name}_encoding") ?? ""
     if encoding != "base64" -> errors.push("repro {name}_encoding must be base64")
     text: field_text(tree, "{name}_bytes") ?? {
@@ -232,7 +232,7 @@ channel_bytes: fn(tree: Dyn, name: String, errors: &[String]) -> [U8] Never! {
     bytes
 }
 
-read_commands: fn(tree: Dyn, errors: &[String]) -> [TierCommand] Never! {
+read_commands: fn(tree: Dyn, errors: ^[String]) -> [TierCommand] Never! {
     out := [TierCommand]{}
     value: field(tree, "tier_commands") ?? Dyn.Null
     if shape(value) != "array" -> errors.push("repro tier_commands must be an array")
@@ -262,7 +262,7 @@ read_commands: fn(tree: Dyn, errors: &[String]) -> [TierCommand] Never! {
     out
 }
 
-read_oracle: fn(tree: Dyn, errors: &[String]) -> Oracle Never! {
+read_oracle: fn(tree: Dyn, errors: ^[String]) -> Oracle Never! {
     value: field(tree, "oracle") ?? Dyn.Null
     oracle: Oracle{
         name: field_text(value, "name") ?? "",

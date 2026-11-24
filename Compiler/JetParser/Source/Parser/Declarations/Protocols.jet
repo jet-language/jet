@@ -21,11 +21,11 @@ use {
     ]
 }
 
-parser_protocol_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_protocol_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "protocol" && parser_kind_at(state, 1) == TOKEN_IDENT
 }
 
-parser_parse_protocol: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
+parser_parse_protocol: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -> Item {
     start: parser_bump(state)
     name: parser_expect_name(state, "for a protocol name")
     parser_expect(state, TOKEN_LBRACE, "`{{` before protocol messages")
@@ -46,7 +46,7 @@ parser_parse_protocol: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     Item.ProtocolDecl{value: ProtocolDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, messages: messages, span: parser_cover(start.span, close.span)}}
 }
 
-parser_protocol_message: fn(state: &JetParserState) -> ProtocolMessage {
+parser_protocol_message: fn(state: ^JetParserState) -> ProtocolMessage {
     start: parser_current(state)
     sender: parser_expect_name(state, "for a protocol message sender")
     endpoint: if parser_value(state, sender) == {
@@ -92,6 +92,6 @@ parser_protocol_message: fn(state: &JetParserState) -> ProtocolMessage {
     ProtocolMessage{direction: endpoint.direction, name: parser_value(state, message), name_span: message.span, fields: fields, span: parser_cover(start.span, close.span)}
 }
 
-parser_protocol_error: fn(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
+parser_protocol_error: fn(state: ^JetParserState, span: Span, what: String, why: String, fix: String) {
     parser_add_error_code(state, "E0154", span, what, why, fix)
 }

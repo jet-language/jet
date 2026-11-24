@@ -62,17 +62,17 @@ LEXICAL_LEDGER: [LexicalEntry]{
     {spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items"},
     {spelling: "compiler.query(source, kind, at:, limit:)", meaning: "the one typed fact query of `core.compiler`: the `[Fact]` rows of one `FactKind` in an explicit immutable `FactSource` (`.Schema`, `.Program` or `.Run`), or a `MetadataError`, never a partial or empty stand-in; `jet inspect facts --store=… --kind=…` renders the same rows"},
     {spelling: "fn(…) {{ … }}", meaning: "lambda: a function binding's value without its name; a passed lambda leaves out the parameter types, effect row and result its expected callable type fixes (`xs.filter(fn(n) {{ n > 2 }})`), a stored one writes them as a named function does (`square: fn(n: Int) -> Int {{ n * n }}`); the body is always braced and its last value is the result"},
-    {spelling: "value.method", meaning: "bound method value: where a function type or an optional one is expected (an argument, a struct field, a list element, a return value), a method read without parentheses is the method with its receiver bound, the lambda `fn(a) {{ value.method(a) }}` checked against that type; the receiver is evaluated once and kept as a closure keeps a capture, so a `&self` method over a copied receiver is refused; anywhere else, a union included, the read is a forgotten call, and a type with both a field and a method of the name makes it an error naming both"},
+    {spelling: "value.method", meaning: "bound method value: where a function type or an optional one is expected (an argument, a struct field, a list element, a return value), a method read without parentheses is the method with its receiver bound, the lambda `fn(a) {{ value.method(a) }}` checked against that type; the receiver is evaluated once and kept as a closure keeps a capture, so a `^self` method over a copied receiver is refused; anywhere else, a union included, the read is a forgotten call, and a type with both a field and a method of the name makes it an error naming both"},
     {spelling: "-[…]", meaning: "effect row on a callable; a signature has, after its parameters, nothing or exactly one arrow, `->` or `-[Effects]>`, then its optional result type, then its optional error contract (`load: fn(p: Path) -[FS.Read]> String IOError!`); a unit function that can fail writes the arrow and its contract alone (`save: fn(p: Path) -[FS.Write]> IOError!`), and a contract written before the arrow is not Jet syntax"},
     {spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row"},
     {spelling: "?", meaning: "optional type mark after its type (`T?`)"},
     {spelling: "??", meaning: "fallback"},
     {spelling: "|>", meaning: "pipe step: the expression after it runs on the value from the line above, which it reads as `<>`; each step is a hidden one-step binding"},
     {spelling: "<>", meaning: "the value of the nearest enclosing `|>` step, legal only inside a step, which must read it at least once; in an `if` table header, the hole each arm's candidate fills"},
-    {spelling: "x.move()", meaning: "an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self`"},
-    {spelling: "&&T / &&self", meaning: "take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked"},
-    {spelling: "fn(&T) / fn(&&T)", meaning: "a function type marks a written input `&` and a taken one `&&`, as a declaration does (`action: fn(&Mobj)`); a function or lambda fits it only when its marks match (E0227), and a stored one is called plainly (`st.action(m)`)"},
-    {spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`"},
+    {spelling: "x.move()", meaning: "an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `^^T` or `^^self`"},
+    {spelling: "^^T / ^^self", meaning: "take mark in a signature, and `task ^^name` for a task capture; `^T` / `^self` is the write mark; calls stay unmarked"},
+    {spelling: "fn(^T) / fn(^^T)", meaning: "a function type marks a written input `^` and a taken one `^^`, as a declaration does (`action: fn(^Mobj)`); a function or lambda fits it only when its marks match (E0227), and a stored one is called plainly (`st.action(m)`)"},
+    {spelling: "^self.field / ^self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`"},
     {spelling: "T{{expr}}", meaning: "field default"},
     {spelling: "Name{{\"…\"}}", meaning: "checked text head"},
     {spelling: "{{ … }}", meaning: "record, the unnamed struct: `{{x: 1, y: 2}}` as a value, `{{min: Int, max: Int}}` as a type, `{{min, max}}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{{x}}` is a block, `{{x, y}}` and `{{x: x}}` are records and `{{}}` is a block; where a struct type is expected the same braces build it; braces after a signature, a control head or a block marker hold code, and a paren tuple `(x: 1)` is not Jet syntax"},
@@ -118,6 +118,7 @@ LANGUAGE_REWRITES: [LanguageRewrite]{
     {name: "american-ident1", toolchain: "a0.0.45"},
     {name: "american-tokens1", toolchain: "a0.0.45"},
     {name: "diagnostic-names1", toolchain: "a0.0.46"},
+    {name: "mark-caret1", toolchain: "a0.0.47"},
 }
 
 /// Checked compiler metadata queries that has not yet given a `$` root.
@@ -156,8 +157,8 @@ KW_CONC_TASK: "task"
 /// creates a deeply immutable owned snapshot for a task crossing.
 KW_FREEZE: "freeze"
 
-// This rule adds no second token for consuming captures: `task &&name`
-// reuses SIGIL_MOVE (`&&`) as task-capture syntax on a group child.
+// This rule adds no second token for consuming captures: `task ^^name`
+// reuses SIGIL_MOVE (`^^`) as task-capture syntax on a group child.
 // The child owns the value; later use of the name is ordinary E0121.
 /// `task.all` is the one fan-out
 /// selector that accepts either positional branches or uniformly named

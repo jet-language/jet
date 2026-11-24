@@ -20,7 +20,7 @@ env_shell_clean_path: fn() -[Env]> String Never! {
 env_shell_path_separator: fn() -[Env]> String Never! { pkg_path_separator_for_os(sys.name()) }
 
 // Append `dir` once, preserving first-seen order.
-env_shell_push_unique: fn(seen: &[String:Bool], parts: &[String], dir: String) Never! {
+env_shell_push_unique: fn(seen: ^[String:Bool], parts: ^[String], dir: String) Never! {
     if seen.has_key(dir) {
         return
     }
@@ -141,20 +141,20 @@ ShellEnv: struct {
     }
 
     // The composed environment over the caller's inherited PATH.
-    apply_to: fn(&self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
+    apply_to: fn(^self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
         base: sys.get("PATH") ?? ""
         self.apply_to_base(spec, base)
     }
 
     // Only the declared environment and realized PATH. Callers clear the
     // child environment first for clean-shell checks and task probes.
-    apply_clean_to: fn(&self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
+    apply_clean_to: fn(^self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
         self.apply_to_base(spec, env_shell_clean_path())
     }
 
     // `apply_clean_to` over a cleared child environment when `clean`, else
     // `apply_to`.
-    apply_in_mode: fn(&self, spec: ProcessSpec, clean: Bool) -[FS, Exec, Env]> ProcessSpec StoreError! {
+    apply_in_mode: fn(^self, spec: ProcessSpec, clean: Bool) -[FS, Exec, Env]> ProcessSpec StoreError! {
         if clean -> return self.apply_clean_to(spec.env_clear())
         self.apply_to(spec)
     }
@@ -172,7 +172,7 @@ ShellEnv: struct {
     // descriptors (recording the process handoff), then render PATH and the
     // leased variables for exactly the descriptors this spec carries. The
     // only place leased text becomes a child's environment.
-    apply_to_base: fn(&self, spec: ProcessSpec, base_path: String) -[FS, Exec, Env]> ProcessSpec StoreError! {
+    apply_to_base: fn(^self, spec: ProcessSpec, base_path: String) -[FS, Exec, Env]> ProcessSpec StoreError! {
         out := spec
         binding := LeaseBinding.empty()
         loop index in 0..<self.cache_leases.len() {
@@ -203,7 +203,7 @@ ShellEnv: struct {
 
     // Run `cmd_args` inside the composed env and return its exit code. The
     // Jetpack process stays the parent so callers can do post-command work.
-    run_command: fn(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    run_command: fn(^self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: false})
     }
 
@@ -211,36 +211,36 @@ ShellEnv: struct {
     // (Rust replaced the process for a lease-resolved executable). Core has
     // no process replacement, so the command is a waited child whose status,
     // a signal death as 128+n, becomes this process's exit code.
-    exec_command: fn(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    exec_command: fn(^self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: true})
     }
 
     // Run with an explicit working directory; it belongs to the child only.
-    run_command_in: fn(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    run_command_in: fn(^self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: false, silent: false, replace_process: false})
     }
 
     // Run while keeping stdout out of a generated shell script; stderr stays
     // visible so a failed task still explains itself.
-    run_command_in_silent: fn(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    run_command_in_silent: fn(^self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: false, silent: true, replace_process: false})
     }
 
     // Run with no inherited host variables: only the composed PATH, declared
     // variables, Jet markers, and declared unsets enter the child.
-    run_clean_command: fn(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    run_clean_command: fn(^self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: true, silent: false, replace_process: false})
     }
 
-    run_clean_command_in: fn(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    run_clean_command_in: fn(^self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: true, silent: false, replace_process: false})
     }
 
-    run_clean_command_in_silent: fn(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    run_clean_command_in_silent: fn(^self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: true, silent: true, replace_process: false})
     }
 
-    run_command_in_mode: fn(&self, cmd_args: [String], cwd: String?, options: ShellRunOptions) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    run_command_in_mode: fn(^self, cmd_args: [String], cwd: String?, options: ShellRunOptions) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         if !self.validate_cache(Theme.resolve_choice(ColorChoice.Never)) -> return 126
         if cmd_args.len() == 0 -> return 0
         program: cmd_args[0]
@@ -306,18 +306,18 @@ ShellEnv: struct {
     }
 
     // Enter an interactive temporary shell. Returns the child's exit code.
-    enter: fn(&self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    enter: fn(^self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.enter_with_mode(theme, kind, false)
     }
 
     // Enter an interactive temporary shell with only the composed
     // environment: the explicit `--pure` foreign-environment path. Ordinary
     // Jetpack shells keep the host variables users expect.
-    enter_clean: fn(&self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    enter_clean: fn(^self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.enter_with_mode(theme, kind, true)
     }
 
-    enter_with_mode: fn(&self, theme: Theme, kind: ShellKind, clean: Bool) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
+    enter_with_mode: fn(^self, theme: Theme, kind: ShellKind, clean: Bool) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         if !self.validate_cache(theme) -> return 126
         // The threshold rule, the signature moment of `jet env`: one quiet
         // line in and one mirrored line out, so the temporary shell reads as

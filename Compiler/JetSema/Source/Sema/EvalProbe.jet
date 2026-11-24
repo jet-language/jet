@@ -136,7 +136,7 @@ sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: St
     params := [String]{}
     loop capture in answer.captures {
         shown: if capture.source == "self" -> SEMA_EVAL_PROBE_SELF else -> capture.source
-        taken: if answer.lent -> "&&" else -> ""
+        taken: if answer.lent -> "^^" else -> ""
         params.push("{shown}: {taken}{type_name(type_unqualified_nominals(capture.ty))}")
     }
     success: if value == .Result(ok, _) -> ok else -> value
@@ -182,7 +182,7 @@ sema_eval_probes: fn(probes: [SemaEvalProbe]) -> SemaEvalProbes { SemaEvalProbes
 // Takes the answers out of each module of `modules`, ordered by probe,
 // expression and function. A function checked both ahead for compile time
 // and in its module answers once (sema_eval_answer_put).
-sema_eval_probe_answers: fn(modules: &[SemaGraphModuleResult]) -> [SemaEvalProbeAnswer] {
+sema_eval_probe_answers: fn(modules: ^[SemaGraphModuleResult]) -> [SemaEvalProbeAnswer] {
     rows := [SemaEvalProbeAnswer]{}
     loop index in 0..<modules.len() {
         taken: compiler_take_rows<SemaEvalProbeAnswer>(modules[index].eval_answers)
@@ -262,7 +262,7 @@ sema_eval_walk_for: fn(probes: SemaEvalProbes, module_identity: ModuleID, span: 
 
 // The node at `span` is about to be checked: a statement when `statement`,
 // otherwise an expression. Each probe it answers checks its expressions here.
-sema_eval_probe_visit: fn(span: Span, statement: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
+sema_eval_probe_visit: fn(span: Span, statement: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) {
     loop asked in sema_eval_walk_matches(context.eval_walk, program, span, statement) {
         answers := [SemaEvalProbeAnswer]{}
         loop (expression, value) in asked.expressions {
@@ -306,7 +306,7 @@ sema_eval_walk_matches: fn(walk: SemaEvalWalk, program: SemaProgramTables, span:
     asked
 }
 
-sema_eval_walk_store: fn(walk: &SemaEvalWalk, local: Int, exact: Bool, answers: &&[SemaEvalProbeAnswer]) {
+sema_eval_walk_store: fn(walk: ^SemaEvalWalk, local: Int, exact: Bool, answers: ^^[SemaEvalProbeAnswer]) {
     loop answer in answers.move() -> sema_eval_answer_put(walk.answers, answer)
     if exact -> walk.exact[local] = true
 }
@@ -325,7 +325,7 @@ sema_eval_walk_fork: fn(walk: SemaEvalWalk) -> SemaEvalWalk {
 // Hands the answers the walk of `child`, a context copied from `context`,
 // gave back to `context`'s walk, as a visit of its own gives them, with the
 // probes a node of `child` answered exactly.
-sema_eval_walk_take_back: fn(context: &SemaCheckContext, child: &SemaCheckContext) {
+sema_eval_walk_take_back: fn(context: ^SemaCheckContext, child: ^SemaCheckContext) {
     if child.eval_walk.rows.len() == 0 {
         return
     }
@@ -338,7 +338,7 @@ sema_eval_walk_take_back: fn(context: &SemaCheckContext, child: &SemaCheckContex
 
 // Puts `answer` in `answers` over the answer it gives again, the one of the
 // same probe, expression and function.
-sema_eval_answer_put: fn(answers: &[SemaEvalProbeAnswer], answer: &&SemaEvalProbeAnswer) {
+sema_eval_answer_put: fn(answers: ^[SemaEvalProbeAnswer], answer: ^^SemaEvalProbeAnswer) {
     loop index in 0..<answers.len() {
         if answers[index].probe == answer.probe && answers[index].expression == answer.expression && answers[index].function == answer.function {
             answers[index] = answer.move()
@@ -357,7 +357,7 @@ sema_eval_answer_put: fn(answers: &[SemaEvalProbeAnswer], answer: &&SemaEvalProb
 // solve settles the compiled function's failure (sema_eval_probe_function).
 // A bare name of a non-scalar local is lent (sema_eval_probe_lends): the
 // compiled function takes it, so returning it as-is is no refusal (E0120).
-sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, function: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: SemaCheckContext) -> SemaEvalProbeAnswer {
+sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, function: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: SemaCheckContext) -> SemaEvalProbeAnswer {
     probe_state := sema_ownership_state_snapshot(state)
     probe_context := sema_check_context_snapshot(context)
     // The probe's own check answers no probe.
@@ -390,7 +390,7 @@ sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool,
 // Whether `value` is a bare name of a local, parameter or loop element of a
 // non-scalar type. The compiled function would take each capture as a read
 // parameter, which it can't return as-is (E0120), so it takes this one
-// (`&&`) and returns it. A debugger passes the stopped frame's value and
+// (`^^`) and returns it. A debugger passes the stopped frame's value and
 // drops nothing of the result, so the frame keeps its value and nothing is
 // copied. A value of a generic parameter's type is returned as-is.
 sema_eval_probe_lends: fn(value: Expr, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool {
@@ -409,7 +409,7 @@ sema_eval_probe_lends: fn(value: Expr, scopes: SemaScopeTable, context: SemaChec
 // `Time.Wait`, so a wait is refused where the debugger links the expression
 // instead. A call the solved graph holds no node for is left out, as for a
 // callback's bound (sema_effect_check_callback_bounds).
-sema_eval_probe_judge_effects: fn(modules: &[SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]]) {
+sema_eval_probe_judge_effects: fn(modules: ^[SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]]) {
     loop module_index in 0..<modules.len() {
         loop index in 0..<modules[module_index].eval_answers.len() {
             refusals: sema_eval_probe_effect_refusals(modules[module_index].eval_answers[index], nodes, calls, solved)
@@ -465,7 +465,7 @@ sema_eval_held_rows: fn(functions: [FnBody]) -> SemaEvalHeldRows Never! {
 }
 
 // Puts the function keyed `key` at row `row`, in place of any other.
-sema_eval_held_set: fn(by_key: &SemaEvalHeldRows, key: String, row: Int) Never! {
+sema_eval_held_set: fn(by_key: ^SemaEvalHeldRows, key: String, row: Int) Never! {
     id: name_index(name_intern(by_key.keys, key))
     loop by_key.rows.len() <= id -> by_key.rows.push(-1)
     by_key.rows[id] = row
@@ -486,7 +486,7 @@ sema_eval_held_row: fn(by_key: SemaEvalHeldRows, key: String) -> Int? Never! {
 // infallible takes the `T Never!` carrier, as the solve projects one
 // (sema_failure_reconcile_function). Otherwise, or with no facts, it keeps
 // its declared carrier.
-sema_eval_held_failure_settle: fn(function: &FnBody, candidate: Bool, failure: SemaFunctionFailureFacts?, functions: [FnBody], by_key: SemaEvalHeldRows) Never! {
+sema_eval_held_failure_settle: fn(function: ^FnBody, candidate: Bool, failure: SemaFunctionFailureFacts?, functions: [FnBody], by_key: SemaEvalHeldRows) Never! {
     facts: failure ?? return
     if !candidate || facts.direct {
         return
@@ -532,7 +532,7 @@ sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], by_key
 // The first function of `functions` that writes module state, reached
 // depth-first from `index` through calls and function values
 // (sema_effect_state_writer_path over the solved graph's nodes).
-sema_eval_held_state_writer: fn(functions: [FnBody], by_key: SemaEvalHeldRows, index: Int, seen: &[Bool]) -> Int? Never! {
+sema_eval_held_state_writer: fn(functions: [FnBody], by_key: SemaEvalHeldRows, index: Int, seen: ^[Bool]) -> Int? Never! {
     if seen[index] -> return None
     seen[index] = true
     if functions[index].effects.module_writes.len() > 0 -> return Val(index)
@@ -551,7 +551,7 @@ sema_eval_held_state_writer: fn(functions: [FnBody], by_key: SemaEvalHeldRows, i
     None
 }
 
-sema_eval_probe_row_refusals: fn(row: [String], subject: String, span: Span, refusals: &[Diagnostic]) {
+sema_eval_probe_row_refusals: fn(row: [String], subject: String, span: Span, refusals: ^[Diagnostic]) {
     over: sema_effect_uncovered(row, [String]{})
     if over.len() > 0 {
         shown: sema_effect_show(over)

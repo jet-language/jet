@@ -10,7 +10,7 @@ PackageProfileLoad: struct {
     plan: PackageProfilePlan,
 }
 
-cli_cmd_profile: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_profile: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     if (parsed.positional.get(1) ?? "") == TOOL_PROFILE_NAME && parsed.positional.len() > 1 {
         return cli_cmd_tool_profile(verification, theme, parsed)
@@ -32,7 +32,7 @@ cli_cmd_profile: fn(verification: &StoreVerification, theme: Theme, parsed: CLIP
     }
 }
 
-cli_package_profile_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
+cli_package_profile_plan: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
     name: parsed.positional.get(1) ?? {
         theme.error("`jet profile plan` needs a generation name", "planning resolves one source-backed `profile.<name>` declaration and its parents", "try `jet profile plan dev`.")
         return EXIT_USAGE
@@ -112,7 +112,7 @@ cli_sorted_provider_fact_keys: fn(values: [String:ProviderFacts]) -> [String] Ne
     keys
 }
 
-cli_package_profile_build: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_package_profile_build: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     name: cli_one_profile_name(theme, parsed, PROFILE_VERB_BUILD) ?? return EXIT_USAGE
     loaded: cli_load_package_profile_plan(cache, theme, name) ?? return EXIT_USAGE
     plan: loaded.plan
@@ -123,12 +123,12 @@ cli_package_profile_build: fn(verification: &StoreVerification, cache: &Workspac
     EXIT_OK
 }
 
-cli_build_package_generation_locked: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
+cli_build_package_generation_locked: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
     _lock: cli_package_profile_lock(project_dir, plan.name)
     cli_build_package_generation(verification, cache, theme, parsed, project_dir, plan)
 }
 
-cli_package_profile_switch: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_package_profile_switch: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     name: cli_one_profile_name(theme, parsed, PROFILE_VERB_SWITCH) ?? return EXIT_USAGE
     loaded: cli_load_package_profile_plan(cache, theme, name) ?? return EXIT_USAGE
     plan: loaded.plan
@@ -143,7 +143,7 @@ cli_package_profile_switch: fn(verification: &StoreVerification, cache: &Workspa
 
 // Reuse the newest generation built from this exact plan, else build one,
 // then activate it.
-cli_switch_package_generation_locked: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageGenerationRecord CLIError! {
+cli_switch_package_generation_locked: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageGenerationRecord CLIError! {
     _lock: cli_package_profile_lock(project_dir, plan.name)
     state: cli_package_profile_state_dir(project_dir, plan.name)
     records: cli_read_package_generations(verification, state)
@@ -157,7 +157,7 @@ cli_switch_package_generation_locked: fn(verification: &StoreVerification, cache
     cli_activate_package_generation(verification, project_dir, plan.name, generation, Val(plan.fingerprint))
 }
 
-cli_package_profile_rollback: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+cli_package_profile_rollback: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     name: parsed.positional.get(1) ?? {
         theme.error("`jet profile rollback` needs a generation name", "rollback activates an older immutable generation from the same profile history", "try `jet profile rollback dev` or `jet profile rollback dev 3`")
         return EXIT_USAGE
@@ -189,7 +189,7 @@ cli_package_profile_rollback: fn(verification: &StoreVerification, cache: &Works
 }
 
 // The explicit target, or the newest generation older than the current one.
-cli_rollback_package_generation_locked: fn(verification: &StoreVerification, project_dir: String, name: String, target: Int?) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
+cli_rollback_package_generation_locked: fn(verification: ^StoreVerification, project_dir: String, name: String, target: Int?) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
     _lock: cli_package_profile_lock(project_dir, name)
     state: cli_package_profile_state_dir(project_dir, name)
     records: cli_read_package_generations(verification, state)
@@ -215,7 +215,7 @@ PackageGenerationHistory: struct {
     current: Int?,
 }
 
-cli_package_generation_history_locked: fn(verification: &StoreVerification, project_dir: String, name: String) -[FS, Env, Time]> PackageGenerationHistory CLIError! {
+cli_package_generation_history_locked: fn(verification: ^StoreVerification, project_dir: String, name: String) -[FS, Env, Time]> PackageGenerationHistory CLIError! {
     _lock: cli_package_profile_lock(project_dir, name)
     state: cli_package_profile_state_dir(project_dir, name)
     records: cli_read_package_generations(verification, state)
@@ -227,7 +227,7 @@ cli_package_generation_history_locked: fn(verification: &StoreVerification, proj
     Ok(PackageGenerationHistory{records: records, current: current})
 }
 
-cli_package_profile_generations: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+cli_package_profile_generations: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     name: cli_one_profile_name(theme, parsed, PROFILE_VERB_GENERATIONS) ?? return EXIT_USAGE
     project_dir: cli_project_env_root(cache, cli_current_dir())
     history: cli_package_generation_history_locked(verification, project_dir, name) ?? return cli_report_package_generation_error(theme, err)
@@ -280,7 +280,7 @@ cli_valid_profile_name: fn(name: String) -> Bool Never! {
 
 // Evaluate `profile.<name>` from the project's env.jet; a read failure or a
 // diagnostic is rendered here.
-cli_load_package_profile_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme, name: String) -[IO, FS, Env, Exec, Time.Wait]> PackageProfileLoad? Never! {
+cli_load_package_profile_plan: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, name: String) -[IO, FS, Env, Exec, Time.Wait]> PackageProfileLoad? Never! {
     project_dir: cli_project_env_root(cache, cli_current_dir())
     path: EnvFile.path_in(project_dir)
     source: files.read(path) ?? {

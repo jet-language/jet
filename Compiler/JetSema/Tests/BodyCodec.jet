@@ -172,7 +172,7 @@ body_codec_source: fn() -> String {
 // so the compiler-owned nominals registration puts in the entry live there.
 // The result keeps its registration graph, whose interner names the types
 // of its function checks.
-body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool{false}, extra: String{""}, own_entry: Bool{false}) -> SemaGraphResult? Err! {
+body_codec_check: fn(failures: ^[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool{false}, extra: String{""}, own_entry: Bool{false}) -> SemaGraphResult? Err! {
     threads: compiler_threads_single()
     loading: hooks.guard_read().value.core_bodies != None
     stage := body_codec_declared(failures, package, core, loading, extra, own_entry) ?? return None
@@ -193,7 +193,7 @@ body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaReg
 
 // The declaration stage of body_codec_check, its graph in it: `loading` as
 // when the host hooks hold a bodies file.
-body_codec_declared: fn(failures: &[String], package: String, core: Bool, loading: Bool, extra: String, own_entry: Bool{false}) -> SemaComptimeDeclarationStage? Err! {
+body_codec_declared: fn(failures: ^[String], package: String, core: Bool, loading: Bool, extra: String, own_entry: Bool{false}) -> SemaComptimeDeclarationStage? Err! {
     source: "{body_codec_source()}{extra}"
     threads: compiler_threads_single()
     parsed := parse_source(source.bytes())
@@ -231,7 +231,7 @@ body_codec_declared: fn(failures: &[String], package: String, core: Bool, loadin
 
 // The checked modules of body_codec_source(), with the canonical effect
 // module's.
-body_codec_modules: fn(failures: &[String]) -> [SemaGraphModuleResult] {
+body_codec_modules: fn(failures: ^[String]) -> [SemaGraphModuleResult] {
     checked := body_codec_check(failures, "body-codec", body_codec_hooks()) ?? return [SemaGraphModuleResult]{}
     checked.modules.move()
 }
@@ -242,7 +242,7 @@ body_codec_hooks: fn() -> Shared<SemaRegistrationHostHooks> {
 }
 
 // The checked functions of body_codec_source(), every module's.
-body_codec_functions: fn(failures: &[String]) -> [FnBody] {
+body_codec_functions: fn(failures: ^[String]) -> [FnBody] {
     functions := [FnBody]{}
     loop module_row in body_codec_modules(failures) {
         loop function in module_row.functions.move() -> functions.push(function.move())
@@ -257,7 +257,7 @@ body_codec_method_input: fn() -> SemaMethodInput {
 
 // One packet per checked function of body_codec_source(), with its compute
 // and failure facts; the first also carries a method input.
-body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
+body_codec_packets: fn(failures: ^[String]) -> [SemaParallelBody] {
     packets := [SemaParallelBody]{}
     loop module_row in body_codec_modules(failures) {
         row := module_row.move()
@@ -634,7 +634,7 @@ BodyCodecRecords: struct {
 
 // The bodies file of a check's captures, as the Core library writes it
 // (JetCLI CoreLibrary.jet jet_cli_core_bodies_file).
-body_codec_file: fn(captures: &&SemaCoreCaptures) -> [U8] {
+body_codec_file: fn(captures: ^^SemaCoreCaptures) -> [U8] {
     held := captures.move()
     sema_core_bodies_bytes(held.bodies.move(), held.context)
 }
@@ -858,7 +858,7 @@ body_codec_records: fn(hooks: SemaRegistrationHostHooks) -> [SemaCoreBodyRecord]
 // (BodyCodecRecords) when `hooks` has one. Then takes each as a module
 // pass's load would: each packet is `loads[position]`, the one a load reads
 // ("" where none loads), and the takes count `total` bytes read.
-body_codec_ahead: fn(failures: &[String], graph: SemaRegistrationGraph, hooks: &SemaRegistrationHostHooks, loads: [String], total: Int, mode: String) {
+body_codec_ahead: fn(failures: ^[String], graph: SemaRegistrationGraph, hooks: ^SemaRegistrationHostHooks, loads: [String], total: Int, mode: String) {
     found := body_codec_records(hooks)
     count: found.len()
     sema_core_bodies_ahead_load(graph, hooks, found.move(), CompilerThreads{cap: None, cores: 4, memory_available: None})

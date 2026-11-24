@@ -1,0 +1,30 @@
+// `Decode` is core.encoding's declaration: a derived struct, F32 and Dyn each
+// decode through an impl of it, directly and under a generic bound.
+#Codable
+Reading: struct {
+    label: String,
+    scale: F32,
+    extra: Dyn,
+}
+
+read_back: fn<T: Decode>(tree: Dyn) -> T [FieldError]! { Ok(tree.decode<T>() ?? return Err(err)) }
+
+run: fn() {
+    tree: Dyn.Object(["label": Dyn.Text("probe"), "scale": Dyn.Float(1.5), "extra": Dyn.Array([Dyn.Int(1), Dyn.Bool(true)])])
+    reading: tree.decode<Reading>() ?? panic("reading: {err[0].reason}")
+    print("{reading.label} {reading.scale} {reading.extra.len()}")
+    generic: read_back<Reading>(tree) ?? panic("generic reading")
+    print("{generic.label} {generic.scale}")
+    single: Dyn.Float(2.25).decode<F32>() ?? panic("f32")
+    print(single)
+    print(read_back<F32>(Dyn.Int(3)) ?? panic("generic f32"))
+    same: Dyn.Int(9).decode<Dyn>() ?? panic("dyn")
+    print(same.to_text())
+    kept: read_back<Dyn>(Dyn.Text("as is")) ?? panic("generic dyn")
+    print(kept.to_text())
+    if Dyn.Float(1.0e300).decode<F32>() == .Err(errors) -> print("range: {errors[0].reason}")
+    if Dyn.Text("x").decode<F32>() == .Err(errors) -> print("text: {errors[0].reason}")
+    if read_back<F32>(Dyn.Float(1.0e300)) == .Err(errors) {
+        print("generic range: {errors[0].reason}")
+    }
+}

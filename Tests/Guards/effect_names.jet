@@ -30,7 +30,7 @@ EffectNameList: struct {
 // The roots and leaves (`Root.Case`) the effect source `text` declares: each
 // top-level `Name: struct {` or `Name: enum {`, and each case line of an enum
 // before its first blank line or `impl`.
-effect_name_declared: fn(text: String, out: &[String]) {
+effect_name_declared: fn(text: String, out: ^[String]) {
     family := ""
     loop line in text.lines() {
         if family != "" {
@@ -112,7 +112,7 @@ effect_name_list_at: fn(text: String, start: Int) -> [String]? {
 // The effect lists in `text`: each literal list opened by `[` or `{` whose
 // members are all name-shaped, more than half of them and at least two
 // declared effects.
-effect_name_lists_in: fn(path: String, text: String, vocabulary: [String], out: &[EffectNameList]) {
+effect_name_lists_in: fn(path: String, text: String, vocabulary: [String], out: ^[EffectNameList]) {
     bytes: text.bytes()
     line := 1
     loop index in 0..<bytes.len() {
@@ -136,7 +136,7 @@ effect_name_lists_in: fn(path: String, text: String, vocabulary: [String], out: 
     }
 }
 
-effect_name_scan: fn(path: String, vocabulary: [String], out: &[EffectNameList]) {
+effect_name_scan: fn(path: String, vocabulary: [String], out: ^[EffectNameList]) {
     kind: effect_name_files.stat(path) ?? return
     if kind.is_symlink {
         return
@@ -224,7 +224,7 @@ EffectListRow: struct {
 // The roots the effect source `text` declares, in order: each top-level
 // `Name: struct {` or `Name: enum {` whose body names no `parent:` (a kind of
 // another effect is no root).
-effect_name_roots: fn(text: String, out: &[String]) -[]> {
+effect_name_roots: fn(text: String, out: ^[String]) -[]> {
     name := ""
     kind := false
     loop line in text.lines() {
@@ -293,7 +293,7 @@ effect_list_problems: fn(roots: [String], rows: [EffectListRow]) -[]> [String] {
 }
 
 // The spec pages under `path` that hold a table headed EFFECT_LIST_HEADER.
-effect_list_homes: fn(path: String, out: &[String]) -[FS.Read]> {
+effect_list_homes: fn(path: String, out: ^[String]) -[FS.Read]> {
     kind: effect_name_files.stat(path) ?? return
     if kind.is_dir {
         loop child in (effect_name_files.list_dir(path) ?? panic("list {path}: {err}")) {

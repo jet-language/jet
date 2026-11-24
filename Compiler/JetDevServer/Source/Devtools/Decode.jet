@@ -45,7 +45,7 @@ decode_devtools_envelope: fn(payload: String) -> JetDevtoolsDecodedEnvelope Err!
     Ok(JetDevtoolsDecodedEnvelope.Events{envelope: events})
 }
 
-devtools_decode_events: fn(object: [{key: String, value: Dyn}], session_id: &&String, started_at_ms: Int) -> JetDevtoolsEnvelope Err! {
+devtools_decode_events: fn(object: [{key: String, value: Dyn}], session_id: ^^String, started_at_ms: Int) -> JetDevtoolsEnvelope Err! {
     items: devtools_decode_array(object, "events")
     if items.len() > JET_DEVTOOLS_MAX_EVENTS {
         return Err("devtools envelope exceeds the retained event limit")
@@ -289,7 +289,7 @@ devtools_decode_expected_fields: fn(kind: String) -> [String]? Never! {
     }
 }
 
-devtools_decode_commands: fn(object: [{key: String, value: Dyn}], session_id: &&String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Err! {
+devtools_decode_commands: fn(object: [{key: String, value: Dyn}], session_id: ^^String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Err! {
     if !devtools_decode_exact(object, [String]{"protocol", "session_id", "started_at_ms", "direction", "commands"}) {
         return Err("devtools command envelope has unexpected top-level fields")
     }

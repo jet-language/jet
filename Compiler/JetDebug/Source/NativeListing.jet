@@ -34,7 +34,7 @@ NativeListingAsk: struct {
 // of the line table a `.symtab` symbol of that name starts. A line: the rows
 // of each function of the file that hold it, the pieces the optimizer moved
 // away included. `file` is the console's source, read as `lines`.
-native_disassemble: fn(session: &NativeSession, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
+native_disassemble: fn(session: ^NativeSession, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
     spec := ""
     specs := 0
     bytes := false
@@ -131,7 +131,7 @@ native_disassemble: fn(session: &NativeSession, operand: String, file: String, l
 }
 
 // Whether a fix made the code at `low` jump to its edit's.
-native_listing_replaced: fn(session: &NativeSession, low: Int) -> Bool Never! {
+native_listing_replaced: fn(session: ^NativeSession, low: Int) -> Bool Never! {
     loop fixed in session.fixed {
         if fixed.was == low -> return true
     }
@@ -144,7 +144,7 @@ native_listing_replaced: fn(session: &NativeSession, low: Int) -> Bool Never! {
 // image's level, where it is and how big; a row starting a new line is
 // headed by the line and its source text; a run of inlined code is headed
 // by the function inlined and the line of its call (native_listing_call_line).
-native_listing_block: fn(session: &NativeSession, symbols: [X64ListingSymbol], function: Int, low: Int, high: Int, name: String, ask: NativeListingAsk, file: String, lines: [String]) -> String Never! {
+native_listing_block: fn(session: ^NativeSession, symbols: [X64ListingSymbol], function: Int, low: Int, high: Int, name: String, ask: NativeListingAsk, file: String, lines: [String]) -> String Never! {
     marks := [Int:String]{}
     loop breakpoint in session.breakpoints {
         loop at in breakpoint.addresses {
@@ -258,7 +258,7 @@ native_listing_call_line: fn(function: NativeFunction, run: Int) -> String Never
 // of the line table, then each sized `.symtab` symbol that starts no such
 // function. Without the image's symbols (NativeSession.eval_facts) only the
 // functions.
-native_listing_symbols: fn(session: &NativeSession) -> [X64ListingSymbol] Never! {
+native_listing_symbols: fn(session: ^NativeSession) -> [X64ListingSymbol] Never! {
     symbols := [X64ListingSymbol]{}
     starts := [Int:Bool]{}
     loop function in session.image.lines.functions {
@@ -272,7 +272,7 @@ native_listing_symbols: fn(session: &NativeSession) -> [X64ListingSymbol] Never!
 
 // The `.symtab` symbols named `name`; none without the image's symbols
 // (NativeSession.eval_facts).
-native_listing_named: fn(session: &NativeSession, name: String) -> [X64ListingSymbol] Never! {
+native_listing_named: fn(session: ^NativeSession, name: String) -> [X64ListingSymbol] Never! {
     found := [X64ListingSymbol]{}
     facts_cell: session.eval_facts() ?? return found
     facts: facts_cell.guard_read()
@@ -284,7 +284,7 @@ native_listing_named: fn(session: &NativeSession, name: String) -> [X64ListingSy
 }
 
 // Adds each sized `.symtab` symbol to `symbols` but those at `starts`.
-native_listing_table: fn(session: &NativeSession, symbols: &[X64ListingSymbol], starts: [Int:Bool]) Never! {
+native_listing_table: fn(session: ^NativeSession, symbols: ^[X64ListingSymbol], starts: [Int:Bool]) Never! {
     facts_cell: session.eval_facts() ?? return
     facts: facts_cell.guard_read()
     loop (name, slot) in facts.value.symbols.slots {
@@ -334,7 +334,7 @@ NATIVE_LISTING_DEBUGGER: "[debugger]"
 // across functions where one ends at the next one's start or a gap of
 // padding apart; an address past the code is listed as invalid, a byte a
 // row. Bytes are read as NativeSession.code reads them.
-native_listing_window: fn(session: &NativeSession, address: Int, skip: Int, count: Int) -> [NativeListedRow] Never! {
+native_listing_window: fn(session: ^NativeSession, address: Int, skip: Int, count: Int) -> [NativeListedRow] Never! {
     symbols: native_listing_symbols(session)
     spans: native_listing_spans(session, symbols)
     at := -1
@@ -391,7 +391,7 @@ native_listing_invalid: fn(address: Int) -> NativeListedRow Never! {
 // next free byte. Then, between two of them at most NATIVE_LISTING_GAP
 // bytes apart, the padding. A stretch overlapping an earlier one is left
 // out.
-native_listing_spans: fn(session: &NativeSession, symbols: [X64ListingSymbol]) -> [NativeListingSpan] Never! {
+native_listing_spans: fn(session: ^NativeSession, symbols: [X64ListingSymbol]) -> [NativeListingSpan] Never! {
     found := [NativeListingSpan]{}
     loop symbol in symbols {
         if symbol.size <= 0 -> next
@@ -428,7 +428,7 @@ native_listing_spans: fn(session: &NativeSession, symbols: [X64ListingSymbol]) -
 }
 
 // The rows of the stretch `span`, through the one listing builder.
-native_listing_span_rows: fn(session: &NativeSession, symbols: [X64ListingSymbol], span: NativeListingSpan) -> [NativeListedRow] Never! {
+native_listing_span_rows: fn(session: ^NativeSession, symbols: [X64ListingSymbol], span: NativeListingSpan) -> [NativeListedRow] Never! {
     file := ""
     path := ""
     if span.function >= 0 {

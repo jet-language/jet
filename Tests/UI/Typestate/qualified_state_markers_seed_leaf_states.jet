@@ -3,10 +3,10 @@ Door: struct {
     state { Closed, Open }
 
     #State(_ -> Door.State.Closed) new: fn() -[]> Door { return Door{} }
-    #State(Door.State.Closed -> Door.State.Open) open: fn(self: &&Door) -[]> Door {
+    #State(Door.State.Closed -> Door.State.Open) open: fn(self: ^^Door) -[]> Door {
         return self
     }
-    #State(Door.State.Closed) inspect: fn(self: &&Door) -[]> String {
+    #State(Door.State.Closed) inspect: fn(self: ^^Door) -[]> String {
         next := self.open()
         return "closed"
     }

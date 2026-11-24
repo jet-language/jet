@@ -117,7 +117,7 @@ pattern_binding_names: fn(pattern: Pattern) -> [BindName] Never! {
     names
 }
 
-pattern_collect_binding_names: fn(pattern: Pattern, names: &[BindName]) Never! {
+pattern_collect_binding_names: fn(pattern: Pattern, names: ^[BindName]) Never! {
     if pattern == {
         .Variant(_, bindings, _, _) -> {
             loop slot in bindings -> pattern_collect_slot_names(slot, names)
@@ -171,7 +171,7 @@ pattern_collect_binding_names: fn(pattern: Pattern, names: &[BindName]) Never! {
 }
 
 // A payload pattern binds its nested pattern's names, else its own name.
-pattern_collect_payload_names: fn(binding: String, binding_span: Span, inner: Pattern?, names: &[BindName]) Never! {
+pattern_collect_payload_names: fn(binding: String, binding_span: Span, inner: Pattern?, names: ^[BindName]) Never! {
     if inner == .Val(nested) {
         pattern_collect_binding_names(nested, names)
         return
@@ -179,7 +179,7 @@ pattern_collect_payload_names: fn(binding: String, binding_span: Span, inner: Pa
     names.push(BindName{name: binding, span: binding_span, rename: None})
 }
 
-pattern_collect_slot_names: fn(slot: PatSlot, names: &[BindName]) Never! {
+pattern_collect_slot_names: fn(slot: PatSlot, names: ^[BindName]) Never! {
     if slot == {
         .Bind(name, span) -> { names.push(BindName{name: name, span: span, rename: None}) }
         .Nested(pattern) -> { pattern_collect_binding_names(pattern, names) }

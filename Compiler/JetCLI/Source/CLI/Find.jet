@@ -137,7 +137,7 @@ jet_cli_find_parse_shape: fn(query: String) -> JetCLIFindShape? Never! {
 jet_cli_find_parameter_type: fn(part: String) -> String? Never! {
     text := part.trim()
     if text.starts_with("...") -> text = jet_cli_find_text(text, 3, text.bytes().len())
-    loop text.starts_with("~") || text.starts_with("&") {
+    loop text.starts_with("~") || text.starts_with("^") {
         text = jet_cli_find_text(text, 1, text.bytes().len())
     }
     halves: jet_cli_find_split_once(text, ":") ?? return None
@@ -149,9 +149,9 @@ jet_cli_find_parameter_type: fn(part: String) -> String? Never! {
 }
 
 // `signature_shape`: the call shape of a rendered symbol signature, read
-// between the first `(` and the last `)` of its declaration line. Source
-// signatures carry a `failure:` line after it, whose own parentheses are not
-// part of the call shape.
+// between the first `(` and the last `)` of its declaration line. A type's
+// signature carries its trait contracts' method lines after it, whose own
+// parentheses are not part of the call shape.
 jet_cli_find_signature_shape: fn(rendered: String) -> JetCLIFindShape? Never! {
     signature := rendered
     if jet_cli_find_split_once(rendered, "\n") == .Val(lines) -> signature = lines[0]
@@ -272,7 +272,7 @@ jet_cli_find_inner: fn(ty: String) -> String Never! {
 }
 
 // `type_matches`: single capital letters bind consistently.
-jet_cli_find_type_matches: fn(wanted_raw: String, candidate_raw: String, bindings: &[String:String]) -> Bool Never! {
+jet_cli_find_type_matches: fn(wanted_raw: String, candidate_raw: String, bindings: ^[String:String]) -> Bool Never! {
     wanted: jet_cli_find_compact(wanted_raw)
     candidate: jet_cli_find_compact(candidate_raw)
     if jet_cli_find_is_type_variable(wanted) {

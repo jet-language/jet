@@ -1,4 +1,4 @@
-// Moves out of fields, `&&` parameters and returned variables take the value:
+// Moves out of fields, `^^` parameters and returned variables take the value:
 // none of them clones it, and a field emptied after its move refills.
 Holder: struct {
     items: [Int],
@@ -21,14 +21,14 @@ take_items: fn(n: Int) -> Int {
     got.len() + h.items.len()
 }
 
-take_param: fn(h: &&Holder) -> String { h.name.move() }
+take_param: fn(h: ^^Holder) -> String { h.name.move() }
 
-param_items: fn(h: &&Holder) -> [Int] {
+param_items: fn(h: ^^Holder) -> [Int] {
     items := h.items.move()
     items
 }
 
-moved_param: fn(items: &&[Int]) -> [Int] {
+moved_param: fn(items: ^^[Int]) -> [Int] {
     kept := items.move()
     kept
 }

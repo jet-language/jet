@@ -99,7 +99,7 @@ envmodel_evaluate_system: fn(path: String, lit: SystemLit, src: String, scope: M
 // Plan the values written in a system record's services and options.
 // `names` are the module values; an `options:` value reading none of them
 // keeps its spelling (envmodel_evaluate_option_value) and is not computed.
-envmodel_plan_system: fn(plan: &EnvValueProgram, lit: SystemLit, globals: [String:CtValue], names: [String]) EnvModelEvalError! {
+envmodel_plan_system: fn(plan: ^EnvValueProgram, lit: SystemLit, globals: [String:CtValue], names: [String]) EnvModelEvalError! {
     readable: envmodel_value_readable(plan, names)
     envmodel_plan_system_fields(plan, lit.fields, [String:String]{}, readable, globals)
 }
@@ -116,7 +116,7 @@ envmodel_value_readable: fn(plan: EnvValueProgram, names: [String]) -> [String] 
 
 // Plan each service field's value whole, and each `options:` value that
 // reads one of `readable`. `siblings` are a host override's own fields.
-envmodel_plan_system_fields: fn(plan: &EnvValueProgram, fields: [SystemField], siblings: [String:String], readable: [String], globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_system_fields: fn(plan: ^EnvValueProgram, fields: [SystemField], siblings: [String:String], readable: [String], globals: [String:CtValue]) EnvModelEvalError! {
     loop field in fields {
         if field.value == {
             .Services(entries) -> {
@@ -182,7 +182,7 @@ envmodel_check_platform: fn(os: String, arch: String, span: Span) -> String EnvM
 // computed; every other known field's value is computed whole. `from:`,
 // `format:` and `target:` are names, and an unknown field is refused when the
 // image is read.
-envmodel_plan_image: fn(plan: &EnvValueProgram, lit: ImageLit, globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_image: fn(plan: ^EnvValueProgram, lit: ImageLit, globals: [String:CtValue]) EnvModelEvalError! {
     siblings: [String:String]{}
     loop field in lit.fields {
         if field.value == .Other(expr) {

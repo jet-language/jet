@@ -44,7 +44,7 @@ Seeded: struct {
     state: U32,
     draw: Draw,
 
-    next: fn(&self) -> Int {
+    next: fn(^self) -> Int {
         self.state = wrapping(self.state + U32{1831565813})
         t := self.state
         t = wrapping((t ~ t >> 15) * (t | U32{1}))
@@ -52,7 +52,7 @@ Seeded: struct {
         Int{t ~ t >> 14}
     }
 
-    int: fn(&self, lo: Int, hi: Int) -> Int {
+    int: fn(^self, lo: Int, hi: Int) -> Int {
         span: hi - lo + 1
         if self.draw == {
             .Scaled -> lo + ((self.next() * span) >> 32)
@@ -61,7 +61,7 @@ Seeded: struct {
     }
 
     // copy: the picked word is the caller's own
-    pick: fn(&self, list: [String]) -> String { list[self.int(0, list.len() - 1)].copy() }
+    pick: fn(^self, list: [String]) -> String { list[self.int(0, list.len() - 1)].copy() }
 }
 
 seeded: fn(seed: Int, draw: Draw) -> Seeded { Seeded{state: wrapping(U32{seed}), draw: draw} }
@@ -105,7 +105,7 @@ GROUP: 32
 
 FILE_GROUPS: 24
 
-consumer_tree: fn(files: &[String:String], entries: [String], prefix: String) -> [String] {
+consumer_tree: fn(files: ^[String:String], entries: [String], prefix: String) -> [String] {
     // copy: the level is rebuilt each round
     level := entries.copy()
     depth := 0
@@ -137,7 +137,7 @@ consumer_tree: fn(files: &[String:String], entries: [String], prefix: String) ->
 
 // The entry file: `run` folds every root into one checksum line, after any
 // declarations the shape already placed in main.jet.
-finish: fn(name: String, files: &[String:String], roots: [String]) {
+finish: fn(name: String, files: ^[String:String], roots: [String]) {
     body := [String]{"run: fn() {{", "    checksum := 0"}
     loop (index, root) in roots {
         body.push("    checksum = (checksum * 31 + {root}({index + 1})) % {M}")
@@ -149,7 +149,7 @@ finish: fn(name: String, files: &[String:String], roots: [String]) {
 }
 
 // Split `items` (lists of lines) into files of about `per_file` code lines.
-pack: fn(files: &[String:String], prefix: String, items: [[String]], per_file: Int{600}) {
+pack: fn(files: ^[String:String], prefix: String, items: [[String]], per_file: Int{600}) {
     current := [String]{}
     size := 0
     index := 0

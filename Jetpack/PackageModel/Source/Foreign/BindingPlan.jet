@@ -412,8 +412,8 @@ BindingPlan: struct {
                 if self.operation.pointer_count == {
                     .Val(pointer_count) -> {
                         pointer: pointer_count.pointer_parameter
-                        lines.push("#Import c.{self.library}: module {{\n    __jet_ffi_native_{name}: fn({pointer}: &[U8], {pointer_count.count_parameter}: U64) {self.operation.result_type} = \"{name}\"\n}}\n\n")
-                        lines.push("{name}: fn({pointer}: &[U8]) -> {self.operation.result_type} {{\n    return __jet_ffi_native_{name}({pointer}, {pointer}.len())\n}}\n")
+                        lines.push("#Import c.{self.library}: module {{\n    __jet_ffi_native_{name}: fn({pointer}: ^[U8], {pointer_count.count_parameter}: U64) {self.operation.result_type} = \"{name}\"\n}}\n\n")
+                        lines.push("{name}: fn({pointer}: ^[U8]) -> {self.operation.result_type} {{\n    return __jet_ffi_native_{name}({pointer}, {pointer}.len())\n}}\n")
                     }
                     .None -> {
                         lines.push("// automatic facade preserves native signature: {self.operation.native_signature}\n")

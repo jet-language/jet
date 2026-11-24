@@ -69,7 +69,7 @@ jet_cli_emit_ast_program: fn(program: Program, function: String?) -> [JetCLIEmit
     nodes
 }
 
-jet_cli_emit_ast_find_functions: fn(tables: ASTTables, item: Item, name: String, found: &[JetCLIEmitNode]) Never! {
+jet_cli_emit_ast_find_functions: fn(tables: ASTTables, item: Item, name: String, found: ^[JetCLIEmitNode]) Never! {
     if item == {
         .Func(value) -> {
             if value.name == name -> found.push(jet_cli_emit_ast_func(tables, value))
@@ -88,7 +88,7 @@ jet_cli_emit_ast_find_functions: fn(tables: ASTTables, item: Item, name: String,
     }
 }
 
-jet_cli_emit_ast_find_methods: fn(tables: ASTTables, methods: [Func], name: String, found: &[JetCLIEmitNode]) Never! {
+jet_cli_emit_ast_find_methods: fn(tables: ASTTables, methods: [Func], name: String, found: ^[JetCLIEmitNode]) Never! {
     loop method in methods {
         if method.name == name -> found.push(jet_cli_emit_ast_func(tables, method))
     }
@@ -158,7 +158,7 @@ jet_cli_emit_ast_func: fn(tables: ASTTables, value: Func) -> JetCLIEmitNode Neve
     jet_cli_emit_node("function", "{value.name}{jet_cli_emit_ast_type_params(value.type_params)}: fn({jet_cli_emit_ast_params(value.params)}){jet_cli_emit_ast_return(value.return_type)}", children)
 }
 
-jet_cli_emit_ast_methods: fn(tables: ASTTables, methods: [Func], children: &[JetCLIEmitNode]) Never! {
+jet_cli_emit_ast_methods: fn(tables: ASTTables, methods: [Func], children: ^[JetCLIEmitNode]) Never! {
     loop method in methods -> children.push(jet_cli_emit_ast_func(tables, method))
 }
 
@@ -319,7 +319,7 @@ jet_cli_emit_ast_lvalue: fn(tables: ASTTables, target: LValue) -> JetCLIEmitNode
     }
 }
 
-jet_cli_emit_ast_arms: fn(tables: ASTTables, arms: [SwitchArm], else_body: [StmtNode]?, children: &[JetCLIEmitNode]) Never! {
+jet_cli_emit_ast_arms: fn(tables: ASTTables, arms: [SwitchArm], else_body: [StmtNode]?, children: ^[JetCLIEmitNode]) Never! {
     loop arm in arms {
         arm_children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, arm.cond)}
         arm_children.push(jet_cli_emit_ast_body(tables, "body", "then", arm.body))
@@ -461,7 +461,7 @@ jet_cli_emit_ast_format: fn(format: StrSelector?) -> String Never! {
     ":{selector.name}({args.join(", ")})"
 }
 
-jet_cli_emit_ast_args: fn(tables: ASTTables, args: [CallArg], children: &[JetCLIEmitNode]) Never! {
+jet_cli_emit_ast_args: fn(tables: ASTTables, args: [CallArg], children: ^[JetCLIEmitNode]) Never! {
     loop arg in args {
         value: jet_cli_emit_ast_expr(tables, arg.expr)
         label: if arg.label == .Val(written) -> "{written.name}: " else -> ""
@@ -473,13 +473,13 @@ jet_cli_emit_ast_args: fn(tables: ASTTables, args: [CallArg], children: &[JetCLI
     }
 }
 
-jet_cli_emit_ast_fields: fn(tables: ASTTables, fields: [ExprField], children: &[JetCLIEmitNode]) Never! {
+jet_cli_emit_ast_fields: fn(tables: ASTTables, fields: [ExprField], children: ^[JetCLIEmitNode]) Never! {
     loop field in fields {
         children.push(jet_cli_emit_node("field", "{field.name}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, field.value)}))
     }
 }
 
-jet_cli_emit_ast_pairs: fn(tables: ASTTables, entries: [ExprPair], children: &[JetCLIEmitNode]) Never! {
+jet_cli_emit_ast_pairs: fn(tables: ASTTables, entries: [ExprPair], children: ^[JetCLIEmitNode]) Never! {
     loop entry in entries {
         children.push(jet_cli_emit_node("entry", "entry", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, entry.key), jet_cli_emit_ast_expr(tables, entry.value)}))
     }

@@ -32,7 +32,7 @@ UNICODE_STRING_VERSION: "17.0.0"
 utf8_bytes: fn(text: String) -> [U8] Never! { text.bytes() }
 
 // Rust jet_unicode_append_mapping:42-53. One caller-owned UTF-8 output buffer.
-append_mapping: fn(out: &[U8], cp: Int, index: View<U8>, pool: View<U8>) Never! {
+append_mapping: fn(out: ^[U8], cp: Int, index: View<U8>, pool: View<U8>) Never! {
     if text_asset.mapping(index, pool, cp) == .Val(span) {
         loop i in span.start..<(span.start + span.length) {
             append_cp(out, text_asset.scalar(pool, i))
@@ -635,7 +635,7 @@ utf8_width_at: fn(raw: [U8], at: Int) -> Int Never! {
 }
 
 // Write into the caller's UTF-8 buffer: normalization allocates no per-scalar strings.
-append_cp: fn(out: &[U8], cp: Int) Never! {
+append_cp: fn(out: ^[U8], cp: Int) Never! {
     n := cp
     if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
     if n < 128 -> out.push(U8{n}) else if n < 2048 {

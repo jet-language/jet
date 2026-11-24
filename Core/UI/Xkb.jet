@@ -247,7 +247,7 @@ Keymap: struct {
     /// Sets the state from the compositor's wl_keyboard.modifiers event.
     /// From then on the compositor owns the state and `press` stops
     /// applying key actions, as libxkbcommon requires.
-    modifiers: fn(&self, depressed: Int, latched: Int, locked: Int, group: Int) {
+    modifiers: fn(^self, depressed: Int, latched: Int, locked: Int, group: Int) {
         // The event's fields are uint32; the group is read as libxkbcommon
         // reads it, as an int32 that wraps into the key's groups.
         layout: group & 4294967295
@@ -264,7 +264,7 @@ Keymap: struct {
     /// A key press (`down`) or release of evdev key `code`: the key's
     /// level-1 symbol in the active group, and on a press the text it types
     /// ("" for none, for control characters and inside a Compose sequence).
-    press: fn(&self, code: Int, down: Bool) -> {key: Key, text: String} {
+    press: fn(^self, code: Int, down: Bool) -> {key: Key, text: String} {
         index: key_at(self, code + 8)
         if index < 0 -> return {key: Key.Unknown, text: ""}
         key: ui_key(self, index)
@@ -480,11 +480,11 @@ priv internal: module {
         p.toks[p.at].text.lower()
     }
 
-    advance: fn(p: &Parser) {
+    advance: fn(p: ^Parser) {
         if p.toks[p.at].kind != T_END -> p.at += 1
     }
 
-    accept: fn(p: &Parser, ch: String) -> Bool {
+    accept: fn(p: ^Parser, ch: String) -> Bool {
         if !is_punct(p, ch) -> return false
         p.at += 1
         true
@@ -498,19 +498,19 @@ priv internal: module {
         "'{t.text}'"
     }
 
-    expect: fn(p: &Parser, ch: String) UIError! {
+    expect: fn(p: ^Parser, ch: String) UIError! {
         if !accept(p, ch) -> return Err(syntax(line_at(p), "expected '{ch}', found {describe(p)}"))
         Ok()
     }
 
-    expect_word: fn(p: &Parser) -> String UIError! {
+    expect_word: fn(p: ^Parser) -> String UIError! {
         if !is_word(p) -> return Err(syntax(line_at(p), "expected a name, found {describe(p)}"))
         text: p.toks[p.at].text.copy()
         p.at += 1
         Ok(text)
     }
 
-    expect_string: fn(p: &Parser) -> String UIError! {
+    expect_string: fn(p: ^Parser) -> String UIError! {
         if kind_at(p) != T_STRING {
             return Err(syntax(line_at(p), "expected a string, found {describe(p)}"))
         }
@@ -519,7 +519,7 @@ priv internal: module {
         Ok(text)
     }
 
-    expect_key: fn(p: &Parser) -> String UIError! {
+    expect_key: fn(p: ^Parser) -> String UIError! {
         if kind_at(p) != T_KEY {
             return Err(syntax(line_at(p), "expected a key name, found {describe(p)}"))
         }
@@ -528,7 +528,7 @@ priv internal: module {
         Ok(text)
     }
 
-    expect_number: fn(p: &Parser) -> Int UIError! {
+    expect_number: fn(p: ^Parser) -> Int UIError! {
         if kind_at(p) != T_NUMBER {
             return Err(syntax(line_at(p), "expected a number, found {describe(p)}"))
         }
@@ -539,7 +539,7 @@ priv internal: module {
 
     // Skips tokens up to the end of the current statement: past its `;`, or up
     // to a closing `}` (or `,` when `items`) at nesting depth 0.
-    skip_statement: fn(p: &Parser, items: Bool) UIError! {
+    skip_statement: fn(p: ^Parser, items: Bool) UIError! {
         depth := 0
         loop {
             k: kind_at(p)
@@ -560,7 +560,7 @@ priv internal: module {
 
     // The 1-based index after `name` in a level or group name (`Level2`,
     // `Group1`), or a plain number.
-    indexed: fn(p: &Parser, prefix: String) -> Int UIError! {
+    indexed: fn(p: ^Parser, prefix: String) -> Int UIError! {
         if kind_at(p) == T_NUMBER -> return Ok(expect_number(p))
         word: word_lower(p)
         if word.starts_with(prefix) {
@@ -574,7 +574,7 @@ priv internal: module {
     }
 
     // A 0-based group index from `[N]` / `[GroupN]`.
-    group_index: fn(p: &Parser) -> Int UIError! {
+    group_index: fn(p: ^Parser) -> Int UIError! {
         expect(p, "[")
         group: indexed(p, "group")
         expect(p, "]")
@@ -584,7 +584,7 @@ priv internal: module {
         Ok(group - 1)
     }
 
-    parse_bool: fn(p: &Parser) -> Bool UIError! {
+    parse_bool: fn(p: ^Parser) -> Bool UIError! {
         word: expect_word(p).lower()
         if word == "true" || word == "yes" || word == "on" -> return Ok(true)
         if word == "false" || word == "no" || word == "off" -> return Ok(false)
@@ -614,7 +614,7 @@ priv internal: module {
 
     // A modifier mask: real and virtual modifier names, `none`, `all` or a
     // number, joined by `+`. Virtual modifier i is bit 8 + i.
-    mod_expr: fn(p: &Parser) -> Int UIError! {
+    mod_expr: fn(p: ^Parser) -> Int UIError! {
         mask := 0
         loop {
             if kind_at(p) == T_NUMBER -> mask = mask | expect_number(p) else {
@@ -635,7 +635,7 @@ priv internal: module {
 
     // `virtual_modifiers A, B = 0x4000;`: declares virtual modifiers, with an
     // optional fixed mapping.
-    virtual_modifiers: fn(p: &Parser) UIError! {
+    virtual_modifiers: fn(p: ^Parser) UIError! {
         loop {
             name: expect_word(p)
             fixed := Int{-1}
@@ -673,7 +673,7 @@ priv internal: module {
 
     // The keysym a name spells: a known name, `U<hex>` (the Latin-1 keysym for
     // a Latin-1 scalar), or a synthetic id for a name the table does not know.
-    keysym_named: fn(p: &Parser, name: String) -> Int {
+    keysym_named: fn(p: ^Parser, name: String) -> Int {
         if p.names.get(name) == .Val(value) -> return value
         if name.len() >= 5 && name.starts_with("U") {
             digits: name.remove_prefix("U")
@@ -853,7 +853,7 @@ priv internal: module {
         out
     }
 
-    parse_keymap: fn(p: &Parser) UIError! {
+    parse_keymap: fn(p: ^Parser) UIError! {
         loop is_word(p) && word_lower(p) != "xkb_keymap" -> advance(p)
         if word_lower(p) != "xkb_keymap" {
             return Err(syntax(line_at(p), "expected xkb_keymap, found {describe(p)}"))
@@ -892,7 +892,7 @@ priv internal: module {
         Ok()
     }
 
-    keycodes: fn(p: &Parser) UIError! {
+    keycodes: fn(p: ^Parser) UIError! {
         loop !is_punct(p, "}}") {
             if kind_at(p) == T_KEY {
                 name: expect_key(p)
@@ -915,7 +915,7 @@ priv internal: module {
         Ok()
     }
 
-    types: fn(p: &Parser) UIError! {
+    types: fn(p: ^Parser) UIError! {
         loop !is_punct(p, "}}") {
             word: word_lower(p)
             if word == "virtual_modifiers" {
@@ -936,7 +936,7 @@ priv internal: module {
         Int{-1}
     }
 
-    key_type: fn(p: &Parser) UIError! {
+    key_type: fn(p: ^Parser) UIError! {
         name: expect_string(p)
         expect(p, "{{")
         mods := 0
@@ -1016,7 +1016,7 @@ priv internal: module {
     }
 
     // `Name(arg, arg=value, !flag)`.
-    action: fn(p: &Parser) -> Action UIError! {
+    action: fn(p: ^Parser) -> Action UIError! {
         name: expect_word(p)
         out := no_action()
         out.kind = action_kind(name)
@@ -1060,7 +1060,7 @@ priv internal: module {
         Ok(out)
     }
 
-    compat: fn(p: &Parser) UIError! {
+    compat: fn(p: ^Parser) UIError! {
         loop !is_punct(p, "}}") {
             word: word_lower(p)
             if word == "virtual_modifiers" {
@@ -1085,7 +1085,7 @@ priv internal: module {
         }
     }
 
-    interpret: fn(p: &Parser) UIError! {
+    interpret: fn(p: ^Parser) UIError! {
         if accept(p, ".") {
             field: expect_word(p).lower()
             expect(p, "=")
@@ -1159,14 +1159,14 @@ priv internal: module {
         Ok()
     }
 
-    level_one: fn(p: &Parser) -> Bool UIError! {
+    level_one: fn(p: ^Parser) -> Bool UIError! {
         word: expect_word(p).lower()
         if word == "level1" || word == "levelone" -> return Ok(true)
         if word == "anylevel" || word == "any" -> return Ok(false)
         Err(syntax(line_at(p), "expected level1 or AnyLevel, found '{word}'"))
     }
 
-    symbols: fn(p: &Parser) UIError! {
+    symbols: fn(p: ^Parser) UIError! {
         loop !is_punct(p, "}}") {
             word: word_lower(p)
             if word == "virtual_modifiers" {
@@ -1193,7 +1193,7 @@ priv internal: module {
     }
 
     // The key a symbols name refers to, through an alias; -1 if no keycode.
-    key_slot: fn(p: &Parser, name: String) -> Int {
+    key_slot: fn(p: ^Parser, name: String) -> Int {
         if p.key_index.get(name) == .Val(index) -> return index
         real := name.copy()
         if p.aliases.get(name) == .Val(target) -> real = target.copy()
@@ -1224,11 +1224,11 @@ priv internal: module {
         Group{type_name: "", explicit_type: false, type: 0, levels: [[Int]]{}, actions: [Action]{}}
     }
 
-    ensure_group: fn(groups: &[Group], group: Int) {
+    ensure_group: fn(groups: ^[Group], group: Int) {
         loop groups.len() <= group -> groups.push(empty_group())
     }
 
-    keysym_token: fn(p: &Parser) -> Int UIError! {
+    keysym_token: fn(p: ^Parser) -> Int UIError! {
         if kind_at(p) == T_NUMBER {
             value: expect_number(p)
             return Ok(if value <= 9 -> 48 + value else -> value)
@@ -1238,7 +1238,7 @@ priv internal: module {
     }
 
     // `[ a, A, {b, c}, NoSymbol ]`: each level's keysyms.
-    symbol_list: fn(p: &Parser) -> [[Int]] UIError! {
+    symbol_list: fn(p: ^Parser) -> [[Int]] UIError! {
         expect(p, "[")
         levels := [[Int]]{}
         loop !is_punct(p, "]") {
@@ -1261,7 +1261,7 @@ priv internal: module {
         Ok(levels)
     }
 
-    action_list: fn(p: &Parser) -> [Action] UIError! {
+    action_list: fn(p: ^Parser) -> [Action] UIError! {
         expect(p, "[")
         out := [Action]{}
         loop !is_punct(p, "]") {
@@ -1285,7 +1285,7 @@ priv internal: module {
         Ok(out)
     }
 
-    key_def: fn(p: &Parser) UIError! {
+    key_def: fn(p: ^Parser) UIError! {
         name: expect_key(p)
         index: key_slot(p, name)
         expect(p, "{{")
@@ -1380,7 +1380,7 @@ priv internal: module {
         Ok()
     }
 
-    modifier_map: fn(p: &Parser) UIError! {
+    modifier_map: fn(p: ^Parser) UIError! {
         name: expect_word(p)
         mod: real_mod_index(name)
         if mod < 0 && name.lower() != "none" {
@@ -1469,7 +1469,7 @@ priv internal: module {
         mask
     }
 
-    compile: fn(p: &Parser) -> Keymap UIError! {
+    compile: fn(p: ^Parser) -> Keymap UIError! {
         // Key modifier maps: a key name, or the first key typing the keysym.
         loop m in 0..<p.modmap.len() {
             entry: p.modmap[m].copy()
@@ -1598,7 +1598,7 @@ priv internal: module {
     }
 
     // The ONE_LEVEL type, standing in for a type the keymap does not define.
-    fallback_type: fn(p: &Parser) -> Int {
+    fallback_type: fn(p: ^Parser) -> Int {
         found: type_named(p, "ONE_LEVEL")
         if found >= 0 -> return found
         p.types.push(KeyType{name: "ONE_LEVEL", mods: 0, mask: 0, levels: 1, entries: [TypeEntry]{}})
@@ -1753,7 +1753,7 @@ priv internal: module {
     // xkb_compose_state_feed: a modifier keysym passes; a keysym continuing the
     // pending sequence composes ("" until it reaches a result); any other
     // keysym cancels a pending sequence ("") or types its own text.
-    press_text: fn(km: &Keymap, index: Int) -> String {
+    press_text: fn(km: ^Keymap, index: Int) -> String {
         one: one_sym(km, index)
         if keysym_is_modifier(one) -> return key_text(km, index, one)
         pending: km.compose
@@ -1813,7 +1813,7 @@ priv internal: module {
         }
     }
 
-    refresh: fn(km: &Keymap) {
+    refresh: fn(km: ^Keymap) {
         km.locked_group = wrap(km.locked_group, km.group_count)
         km.group = wrap(km.base_group + km.latched_group + km.locked_group, km.group_count)
         km.mods = km.base_mods | km.latched_mods | km.locked_mods
@@ -1823,7 +1823,7 @@ priv internal: module {
 
     // xkb_state_update_key: run the held keys' filters, start the pressed key's
     // action, then recount the base modifiers.
-    update_key: fn(km: &Keymap, index: Int, down: Bool) {
+    update_key: fn(km: ^Keymap, index: Int, down: Bool) {
         code: km.keys[index].code
         km.set_mods = 0
         km.clear_mods = 0
@@ -1861,7 +1861,7 @@ priv internal: module {
         refresh(km)
     }
 
-    start_filter: fn(km: &Keymap, f: Int) {
+    start_filter: fn(km: ^Keymap, f: Int) {
         act: km.filters[f].action.copy()
         if act.kind == ACT_SET_MODS -> km.set_mods = act.mask else if act.kind == ACT_LATCH_MODS {
             km.filters[f].latch = LATCH_KEY_DOWN
@@ -1886,7 +1886,7 @@ priv internal: module {
 
     // One held key's filter seeing key `index` go down or up; true swallows the
     // event (no new action starts).
-    filter_key: fn(km: &Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
+    filter_key: fn(km: ^Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
         act: km.filters[f].action.copy()
         mine: km.filters[f].code == code
         if act.kind == ACT_LATCH_MODS || act.kind == ACT_LATCH_GROUP {
@@ -1918,7 +1918,7 @@ priv internal: module {
         true
     }
 
-    latch_filter: fn(km: &Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
+    latch_filter: fn(km: ^Keymap, f: Int, code: Int, index: Int, down: Bool) -> Bool {
         act: km.filters[f].action.copy()
         group_latch: act.kind == ACT_LATCH_GROUP
         latch := km.filters[f].latch
@@ -2080,7 +2080,7 @@ priv internal: module {
 
     // Drives every key of `km` through presses, releases and hostile compositor
     // modifiers; none of it may stop the program.
-    exercise: fn(km: &Keymap) {
+    exercise: fn(km: ^Keymap) {
         loop code in 0..<300 {
             _: km.press(code, true)
             _: km.repeats(code)

@@ -4,7 +4,7 @@ Error: Jet.MissingMoveMarker: `item` cannot be moved from borrowed storage
  10 |     rows.push(item)
     |               ^^^^
  Why: `item` is a read or write parameter, so its caller keeps the value; moving it here would copy it
- Fix: Write `item.copy()` when `.push()` should receive a copy, or declare the parameter `item: &&[Int]` so the caller hands the value over
+ Fix: Write `item.copy()` when `.push()` should receive a copy, or declare the parameter `item: ^^[Int]` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker
 
 Error: Jet.MissingMoveMarker: `item` cannot be moved from borrowed storage
@@ -13,7 +13,7 @@ Error: Jet.MissingMoveMarker: `item` cannot be moved from borrowed storage
  14 | by_call: fn(item: [Int]) -> Int { hold(item) }
     |                                        ^^^^
  Why: `item` is a read or write parameter, so its caller keeps the value; moving it here would copy it
- Fix: Write `item.copy()` when `hold` should receive a copy, or declare the parameter `item: &&[Int]` so the caller hands the value over
+ Fix: Write `item.copy()` when `hold` should receive a copy, or declare the parameter `item: ^^[Int]` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker
 
 Error: Jet.MoveWithoutMarker: `.push()` takes `item`, but `item` is used again later

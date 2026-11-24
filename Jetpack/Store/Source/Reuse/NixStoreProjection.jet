@@ -108,7 +108,7 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
 
 // Rust `nix_store_projection_for_entry`: the closure record in the Hangar
 // graph names every transitive runtime object.
-store_nix_store_projection_for_entry: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
+store_nix_store_projection_for_entry: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
     if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) {
@@ -143,7 +143,7 @@ store_nix_store_projection_for_entry: fn(verification: &StoreVerification, roots
 
 // Every object in the closure of every named root, each with exactly one
 // canonical store path among its owning Nix records.
-store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, record: ClosureRecord, entry: StoreEntry, logical_digests: &[String:String]) StoreError! {
+store_reuse_add_closure_objects: fn(roots: HangarRoots, graph: ClosureGraph, record: ClosureRecord, entry: StoreEntry, logical_digests: ^[String:String]) StoreError! {
     expected_outputs := entry.named_outputs
     expected_outputs["out"] = entry.envelope.output_hash
     if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs || record.references != store_sorted_unique(entry.references) {
@@ -252,7 +252,7 @@ store_reuse_store_fact: fn(value: String?) -> String? Never! {
 
 // Rust `add_nix_projection_path`: one plain `/nix/store/<name>` per digest;
 // a logical path may not map to two digests.
-store_reuse_add_nix_projection_path: fn(logical_digests: &[String:String], logical: String, digest: String) StoreError! {
+store_reuse_add_nix_projection_path: fn(logical_digests: ^[String:String], logical: String, digest: String) StoreError! {
     name: files.basename(logical)
     if logical != "/nix/store/{name}" || name == "" || name == "." || name == ".." {
         return Err(StoreError.Other("invalid canonical Nix output path `{logical}`"))
@@ -282,7 +282,7 @@ store_reuse_hangar_projection_object: fn(roots: HangarRoots, digest: String, log
     Ok(object)
 }
 
-store_reuse_sealed_hangar_projection_object: fn(verification: &StoreVerification, roots: HangarRoots, digest: String, logical: String) -> String StoreError! {
+store_reuse_sealed_hangar_projection_object: fn(verification: ^StoreVerification, roots: HangarRoots, digest: String, logical: String) -> String StoreError! {
     object: store_reuse_hangar_projection_object(roots, digest, logical)
     if sys.name() == "linux" {
         sealed: store_check_seal(verification, object, roots.hangar_dir())
@@ -293,7 +293,7 @@ store_reuse_sealed_hangar_projection_object: fn(verification: &StoreVerification
     Ok(object)
 }
 
-store_reuse_validate_direct_projection_seals: fn(verification: &StoreVerification, roots: HangarRoots, projections: [NixStoreProjection]) StoreError! {
+store_reuse_validate_direct_projection_seals: fn(verification: ^StoreVerification, roots: HangarRoots, projections: [NixStoreProjection]) StoreError! {
     if sys.name() != "linux" {
         return
     }

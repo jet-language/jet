@@ -41,7 +41,7 @@
 use jet_foundation.[Type, compiler_threads_single]
 
 // Turns each local box of `f` into frame storage; returns how many.
-ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+ir_opt_local_boxes: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     if f.asm != None || f.op.len() == 0 -> return 0
     alloc: ir_interned_name(m, "jet_rt_alloc") ?? -2
     value: ir_interned_name(m, "jet_rt_alloc_value") ?? -2
@@ -393,7 +393,7 @@ ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
 // One arm of run(left) below: boxes `tag` twice (jet_rt_alloc(16, 8), two
 // Stores) and moves the box into `joined`, as an inlined call's return
 // moves its Result box into the call's result.
-ir_opt_local_box_join_arm: fn(m: &IRModule, run: &IRFunction, joined: Int, tag: Int, line: Int) Never! {
+ir_opt_local_box_join_arm: fn(m: ^IRModule, run: ^IRFunction, joined: Int, tag: Int, line: Int) Never! {
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     alloc: ir_intern_name(m, "jet_rt_alloc")
     size: ir_slot(run, word, IRSlotKind.Temp, -1, 0)

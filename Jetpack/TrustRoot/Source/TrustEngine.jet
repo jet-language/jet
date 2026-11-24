@@ -88,7 +88,7 @@ TrustEngine: struct {
     }
 
     // Distinct domains: one binding per kind; the same name may refresh.
-    bind_identity: fn(&self, identity: BoundIdentity) TrustRootError! {
+    bind_identity: fn(^self, identity: BoundIdentity) TrustRootError! {
         identity.validate()
         kind: identity.kind.label()
         if self.identities.get(kind) == {
@@ -105,7 +105,7 @@ TrustEngine: struct {
     // A new root must satisfy both the current and its own root threshold,
     // expire later than now, and strictly advance the version. A pinned
     // engine moves its on-disk pin in the same step.
-    update_root: fn(&self, signed_root: SignedMetadata<TUFRootMetadata>, clock: TrustedClock) -[FS, Time]> TrustRootError! {
+    update_root: fn(^self, signed_root: SignedMetadata<TUFRootMetadata>, clock: TrustedClock) -[FS, Time]> TrustRootError! {
         canonical: trust_canonical_root(signed_root.signed)
         trust_enforce_size(MetadataRole.Root, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
@@ -162,7 +162,7 @@ TrustEngine: struct {
 
     clone_for_drill: fn(self) -> TrustEngine Never! { self.copy() }
 
-    verify_targets: fn(&self, signed: SignedMetadata<TargetsMetadata>, delegated_path: String?, clock: TrustedClock) -[Time]> TrustRootError! {
+    verify_targets: fn(^self, signed: SignedMetadata<TargetsMetadata>, delegated_path: String?, clock: TrustedClock) -[Time]> TrustRootError! {
         canonical: trust_canonical_targets(signed.signed)
         trust_enforce_size(MetadataRole.Targets, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
@@ -178,7 +178,7 @@ TrustEngine: struct {
         self.versions[(MetadataRole.Targets).label()] = signed.signed.version
     }
 
-    verify_snapshot: fn(&self, signed: SignedMetadata<SnapshotMetadata>, targets_canonical: String, targets_version: Int, clock: TrustedClock) -[Time]> TrustRootError! {
+    verify_snapshot: fn(^self, signed: SignedMetadata<SnapshotMetadata>, targets_canonical: String, targets_version: Int, clock: TrustedClock) -[Time]> TrustRootError! {
         canonical: trust_canonical_snapshot(signed.signed)
         trust_enforce_size(MetadataRole.Snapshot, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
@@ -206,7 +206,7 @@ TrustEngine: struct {
         self.versions[(MetadataRole.Snapshot).label()] = signed.signed.version
     }
 
-    verify_timestamp: fn(&self, signed: SignedMetadata<TimestampMetadata>, snapshot_canonical: String, snapshot_version: Int, clock: TrustedClock) -[Time]> TrustRootError! {
+    verify_timestamp: fn(^self, signed: SignedMetadata<TimestampMetadata>, snapshot_canonical: String, snapshot_version: Int, clock: TrustedClock) -[Time]> TrustRootError! {
         canonical: trust_canonical_timestamp(signed.signed)
         trust_enforce_size(MetadataRole.Timestamp, canonical.bytes().len(), self.policy)
         trust_check_clock(self.policy, clock)
@@ -294,7 +294,7 @@ trust_enforce_monotonic: fn(engine: TrustEngine, role: MetadataRole, incoming: I
     }
 }
 
-trust_enforce_metadata_digest: fn(engine: &TrustEngine, role: MetadataRole, version: Int, canonical: String) TrustRootError! {
+trust_enforce_metadata_digest: fn(engine: ^TrustEngine, role: MetadataRole, version: Int, canonical: String) TrustRootError! {
     digest: crypto.sha256(canonical.bytes()).hex()
     current_version: engine.versions.get(role.label()) ?? 0
     if current_version == version {

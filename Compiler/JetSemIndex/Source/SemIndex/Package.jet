@@ -24,7 +24,7 @@ use {
 // The overlay policy of the nearest workspace around `entry`. The walk stops
 // at the first workspace source, even when its lock is missing, is not a
 // workspace lock or holds an empty policy; None when no workspace is found.
-semindex_workspace_overlay_policy_for_entry: fn(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> OverlayPolicy? ManifestError! {
+semindex_workspace_overlay_policy_for_entry: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[FS, Env]> OverlayPolicy? ManifestError! {
     if entry == "" || entry == "/" -> return Ok(None)
     first: AuthorityResolver.open(pkg_path_parent(entry)) ?? return Err(ManifestError{diagnostic: err.diagnostic()})
     dir := first.root
@@ -55,7 +55,7 @@ semindex_workspace_overlay_policy_for_entry: fn(cache: &WorkspaceDeclarationCach
 // lock, or the lock is a package lock; a workspace lock that is malformed or
 // no longer matches its sources is Jet.StaleLockFile, and never sends the
 // walk outward.
-semindex_workspace_lock_at: fn(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan? ManifestError! {
+semindex_workspace_lock_at: fn(cache: ^WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan? ManifestError! {
     lock_file: if resolver.checked_file(UNIFIED_LOCK_FILE) == {
         .Ok(file) -> file
         .Err(error) -> {
@@ -78,7 +78,7 @@ semindex_workspace_lock_at: fn(cache: &WorkspaceDeclarationCache, resolver: Auth
 // The package comes first, and a package the model cannot compose is the
 // model's own diagnostic; a workspace failure is reported rather than
 // leaving the index half attached.
-semindex_attach_package_facts: fn(index: &SemIndex, entry: String) -[FS, Env]> Diagnostic? {
+semindex_attach_package_facts: fn(index: ^SemIndex, entry: String) -[FS, Env]> Diagnostic? {
     cache := WorkspaceDeclarationCache.new()
     facts: if pkg_package_facts_for_entry(cache, entry) == {
         .Ok(found) -> found

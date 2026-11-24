@@ -197,12 +197,12 @@ jet_driver_run_receipt_normalized_links: fn(links: [JetDriverRecordLink], label:
     Ok(normalized)
 }
 
-jet_driver_run_receipt_frame: fn(out: &[U8], bytes: [U8]) Never! {
+jet_driver_run_receipt_frame: fn(out: ^[U8], bytes: [U8]) Never! {
     jet_driver_run_receipt_uint(out, bytes.len(), 8)
     loop byte in bytes -> out.push(byte)
 }
 
-jet_driver_run_receipt_uint: fn(out: &[U8], number: Int, width: Int) Never! {
+jet_driver_run_receipt_uint: fn(out: ^[U8], number: Int, width: Int) Never! {
     value := number
     digits := [U8]{}
     loop _ in 0..<width {
@@ -219,7 +219,7 @@ JetDriverRunReceiptCursor: struct {
     maximum: Int,
 }
 
-jet_driver_run_receipt_take: fn(cursor: &JetDriverRunReceiptCursor) -> [U8] JetDriverRunReceiptError! {
+jet_driver_run_receipt_take: fn(cursor: ^JetDriverRunReceiptCursor) -> [U8] JetDriverRunReceiptError! {
     if cursor.at > cursor.bytes.len() - 8 {
         return Err(jet_driver_run_receipt_error("{cursor.prefix} frame length is truncated"))
     }
@@ -240,7 +240,7 @@ jet_driver_run_receipt_take: fn(cursor: &JetDriverRunReceiptCursor) -> [U8] JetD
     Ok(bytes)
 }
 
-jet_driver_run_receipt_take_text: fn(cursor: &JetDriverRunReceiptCursor, label: String) -> String JetDriverRunReceiptError! {
+jet_driver_run_receipt_take_text: fn(cursor: ^JetDriverRunReceiptCursor, label: String) -> String JetDriverRunReceiptError! {
     bytes: jet_driver_run_receipt_take(cursor)
     Ok(String.from_bytes(bytes) ?? return Err(jet_driver_run_receipt_error("{cursor.prefix} {label} is not UTF-8")))
 }
@@ -260,7 +260,7 @@ jet_driver_run_receipt_number: fn(bytes: [U8], width: Int, label: String, maximu
     Ok(value)
 }
 
-jet_driver_run_receipt_decode_links: fn(cursor: &JetDriverRunReceiptCursor, label: String) -> [JetDriverRecordLink] JetDriverRunReceiptError! {
+jet_driver_run_receipt_decode_links: fn(cursor: ^JetDriverRunReceiptCursor, label: String) -> [JetDriverRecordLink] JetDriverRunReceiptError! {
     count: jet_driver_run_receipt_number(jet_driver_run_receipt_take(cursor), 8, "{label} link count", 100000, "receipt has too many {label} links (maximum 100000)")
     links := [JetDriverRecordLink]{}
     loop _ in 0..<count {
@@ -341,7 +341,7 @@ jet_driver_run_receipt_decode: fn(bytes: [U8]) -> JetDriverRunReceipt JetDriverR
     Ok(receipt)
 }
 
-jet_driver_run_receipt_encode_links: fn(out: &[U8], links: [JetDriverRecordLink]) Never! {
+jet_driver_run_receipt_encode_links: fn(out: ^[U8], links: [JetDriverRecordLink]) Never! {
     count := [U8]{}
     jet_driver_run_receipt_uint(count, links.len(), 8)
     jet_driver_run_receipt_frame(out, count)

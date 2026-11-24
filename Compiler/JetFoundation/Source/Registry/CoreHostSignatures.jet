@@ -28,9 +28,9 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins jetc_write Int,[u8],Int,Int JetcRaw
     jet_builtins jetc_stat Int JetcStat
     jet_builtins jetc_link Int,Int,String JetcRaw
-    core.crypto __sha256_blocks &[U32],[u8],Int,Int Bool
-    core.crypto __aes_blocks [u8],Int,Int,&[u8],[u8],Int,Int,&[u8] Bool
-    core.crypto __ghash_blocks [u8],&[u8],[u8],Int,Int Bool
+    core.crypto __sha256_blocks ^[U32],[u8],Int,Int Bool
+    core.crypto __aes_blocks [u8],Int,Int,^[u8],[u8],Int,Int,^[u8] Bool
+    core.crypto __ghash_blocks [u8],^[u8],[u8],Int,Int Bool
     core.files scope Authority FileScope
     core.files read Union<String,Path> Result<String,IOError>
     core.files read_bytes Union<String,Path> Result<[u8],IOError>
@@ -58,33 +58,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.files temp_file String Result<TempFile,IOError>
     core.files lock Union<String,Path>,Duration? Result<FileLock,IOError>
     core.files try_lock Union<String,Path> Result<FileLock?,IOError>
-    core.files __open_reader Int,String,Int Result<FileReader,IOError>
     core.files jet_std_files_open_reader_nonblocking String Result<FileReader,IOError>
-    core.files __open_writer Int,String,Bool,Int,Int,Int Result<FileWriter,IOError>
-    core.files __open_directory Int,String Result<Int,IOError>
-    core.files __close_directory Int -
-    core.files __fsync_directory Int Result<Unit,IOError>
-    core.files __flock Int,Int Result<Unit,IOError>
-    core.files __create_directory Int,String,Int Result<Unit,IOError>
     core.files __list_directory Int Result<[[u8]],IOError>
-    core.files __stat_at Int,String,Bool Result<[Int],IOError>
-    core.files __path_kind String Result<Int,IOError>
-    core.files __rename_at Int,String,Int,String,Int Result<Unit,IOError>
-    core.files __remove_at Int,String,Bool Result<Unit,IOError>
-    core.files __read_link_at Int,String Result<String,IOError>
-    core.files __xattr_names String Result<[String],IOError>
-    core.files __xattr_get String,String Result<[u8]?,IOError>
-    core.files __xattr_set String,String,[u8] Result<Unit,IOError>
-    core.files __reader_stat FileReader Result<[Int],IOError>
-    core.files __writer_stat FileWriter Result<[Int],IOError>
-    core.files __reader_fd FileReader Result<Int,IOError>
-    core.files __writer_fd FileWriter Result<Int,IOError>
-    core.files __writer_set_mode|__writer_allocate FileWriter,Int Result<Unit,IOError>
-    core.files __reader_advise FileReader,Int Result<Unit,IOError>
-    core.files __map_advise MappedFile,Int Result<Unit,IOError>
-    core.files __map_kind MappedFile Int
-    core.files __access_raw String,Int Result<Unit,IOError>
-    core.files __space String Result<[Int],IOError>
     core.files __open_reader_raw Int,[u8] Result<FileReader,IOError>
     core.files __open_writer_raw Int,[u8],Int,Int Result<FileWriter,IOError>
     core.files __remove_at_raw Int,[u8] Result<Unit,IOError>
@@ -125,6 +100,7 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.term read_all_input|readline - Result<String,IOError>
     core.term read_until String Result<String,IOError>
     core.term take Int Result<[u8],IOError>
+    core.term take_within Int,Duration Result<[u8]?,IOError>
     core.term buffered - StdinHandle
     core.term binread Union<String,Path> Result<[u8],IOError>
     core.term binwrite Union<String,Path>,[u8] Result<Unit,IOError>
@@ -138,7 +114,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.sys temp_dir - String
     core.sys set String,String -
     core.sys get String String?
-    core.sys __host_env String [U8]?
     core.sys unset String Result<Bool,EnvError>
     core.sys vars - Result<[String],EnvError>
     core.sys current_dir - Result<String,IOError>
@@ -146,13 +121,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.sys name|family|arch|executable|hostname|username|release|version - String
     core.sys expand String String
     core.sys pid|getpid|cpu_count|getppid|getuid|geteuid|getgid|getegid|getpgrp - Int
-    core.sys __getppid|__getuid|__geteuid|__getgid|__getegid|__getpgrp - Int?
-    core.sys __cpu_count|__groups_count - Int?
-    core.sys __timing_host - Int
-    core.sys __executable - String?
-    core.sys __umask Int Int?
-    core.sys __groups_fill Int [Int]
-    core.sys __loadavg - (available:Bool,count:Int,first:Float,second:Float,third:Float)
     core.sys __times - (available:Bool,user:Int,system:Int,child_user:Int,child_system:Int,elapsed:Int,ticks:Int)
     core.sys __rlimit Int (available:Bool,soft:Int,hard:Int,errno:Int)
     core.sys __set_rlimit|__sched_set Int,Int,Int (available:Bool,value:Int,errno:Int)
@@ -168,20 +136,12 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.sys __wait - (available:Bool,value:Int,errno:Int,status:Int)
     core.sys __waitpid Int,Int (available:Bool,value:Int,errno:Int,status:Int)
     core.sys __pipe - (available:Bool,value:Int,errno:Int,read_fd:Int,write_fd:Int)
-    core.sys __errno_text Int String
     core.process __spec_fields [String],Bool,String,Bool,[String],[String],[String],Bool,ProcessStreamMode,ProcessStreamMode,ProcessStreamMode,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Bool,TerminalPolicy,Bool,String ProcessSpec
     core.process __spec_parent_death ProcessSpec ProcessSpec
-    core.files __metadata_directory String Result<Bool,String>
-    core.files __host_path_is_absolute String Bool
-    core.files __host_path_join String,String String
-    core.files __temp_path_sample - (clock_available:Bool,nanos:String)
-    core.files __temp_directory - String
     core.files __directory_fd Int (available:Bool,held:Bool,fd:Int)
     core.process __keep_open_raw ProcessSpec,Int,Int,Bool (spec:ProcessSpec,available:Bool,assigned_fd:Int,errno:Int)
     core.process __signal_add Int,Int,ProcessSignal (available:Bool,value:Int,errno:Int)
     core.process __signal_receiver Int Receiver<ProcessSignal>
-    core.sys __current_dir - Result<String,String>
-    core.sys __set_current_dir String Result<Unit,String>
     core.sys umask|exitcode Int Int
     core.sys success Int Bool
     core.sys uptime - Float
@@ -342,8 +302,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.math.random gammavariate|betavariate|lognormvariate|weibullvariate|vonmisesvariate Float,Float Float
     core.math.random paretovariate Float Float
     core.math.random rng|split Int RNG
-    core.crypto __wipe &[u8] -
-    core.crypto __secret_keep &[u8] -
+    core.crypto __wipe ^[u8] -
+    core.crypto __secret_keep ^[u8] -
     core.time sleep Duration -
     core.time sleep_until Instant -
     core.time start - Stopwatch
@@ -370,11 +330,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.tasks timeout Duration Unit
     core.tasks interval Duration Receiver<Int>
     core.tasks after Duration,T Receiver<T> T
-    core.tasks yield_now|__yield_now - Unit
-    core.tasks __task_canceled - Bool?
-    core.tasks __quiesce - Bool
-    core.tasks __task_cpu_ns|__task_identity - Int
-    core.game run &GameScene,GameReplay?,GameBackend?,Int? String
+    core.tasks yield_now - Unit
+    core.game run ^GameScene,GameReplay?,GameBackend?,Int? String
     core.event __scope_new - EventScope
     core.event __policy_sync - EventPolicy
     core.event __event_with_policy EventPolicy Event<T> T
@@ -382,14 +339,10 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.event __decision_hook_new HookPolicy DecisionHook<T,E> T|E
     core.event __async_new AsyncPolicy,FailurePolicy Result<AsyncEvent<T,E>,EventConfigError> T|E
     core.rt __next_deadline RealtimeStream Instant
-    core.rt __receipt RealtimeStream RealtimeReceipt
-    core.rt __cancel &RealtimeStream Unit
-    core.rt __is_canceled RealtimeStream Bool
     core.rt __coded_stop String,String Never
     core.tasks __interval_ms Int Receiver<Int>
     core.tasks __channel_new - (sender:Sender<T>,receiver:Receiver<T>) T
     core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
-    core.tasks __condition_notify_one|__condition_notify_all Condition Unit
     core.prelude __receipt_attach T,String,String,String Unit T
     core.encoding.json parse|loads|decode String Result<Dyn,EncodingError>
     core.encoding.json to_string|to_string_pretty|dumps|dump Dyn Result<String,EncodingError>
@@ -404,14 +357,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.encoding.csv to_string [[String]] String
     core.encoding.csv rows String,String,Bool,Bool Result<[CSVRow],String>
     jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
-    core.net __ip_from_bytes &&[u8] IPAddr
-    core.net __ip_bytes IPAddr [u8]
-    core.net __ip_is_v4 IPAddr Bool
-    core.net __socket_from_parts &&IPAddr,U16,U32,U32 SocketAddr
-    core.net __socket_ip SocketAddr IPAddr
-    core.net __socket_port SocketAddr Int
-    core.net __socket_scope SocketAddr Int?
-    core.net __udp_packet_addr UDPPacket SocketAddr
+    core.net __ip_from_bytes ^^[u8] IPAddr
+    core.net __socket_from_parts ^^IPAddr,U16,U32,U32 SocketAddr
     core.service __active_endpoint String Result<ServiceEndpoint,ServiceError>
     core.service __endpoint_authority ServiceEndpoint String
     core.service __authority_signing_key String Result<[u8],ServiceError>

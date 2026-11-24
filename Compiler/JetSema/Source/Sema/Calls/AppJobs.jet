@@ -49,7 +49,7 @@ SemaAppJob: struct {
 // function keeps a copy of the service and, as a mounted job's does
 // (`sema_app_mount_callback`), is checked on its own against `__enqueue`'s
 // parameter, with whatever effects its package's authority allows.
-sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_enqueue: fn(alias: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() == 0 -> return sema_app_job_refused("it is given no closure", span, diagnostics)
     if args.len() > 1 {
         return sema_app_job_refused("arguments follow its closure, but its one call gives them", args[1].span, diagnostics)
@@ -98,7 +98,7 @@ sema_app_enqueue_param: fn(params: [SemaCallParam], index: Int, environment: Sem
 
 // `value`, written at `span`, checked and passed as `__enqueue`'s parameter
 // `index`.
-sema_app_enqueue_arg: fn(value: &&Expr, params: [SemaCallParam], index: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+sema_app_enqueue_arg: fn(value: ^^Expr, params: [SemaCallParam], index: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TCallArg? {
     checked: sema_check_expression(value, Val(sema_app_enqueue_param(params, index, environment, program)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     Val(sema_call_http_static_tree_arg(checked, sema_http_mount_arg(value, span)))
 }
@@ -142,12 +142,12 @@ sema_app_job_statements: fn(args_name: String, service_name: String, method: Fun
 
 // An `enqueue` that is not one call of an `#App.Job` method of its service:
 // E2817, naming what it is instead.
-sema_app_job_refused: fn(found: String, at: Span, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_app_job_refused: fn(found: String, at: Span, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     _: sema_app_job_not_one(found, at, diagnostics)
     sema_live_rejected()
 }
 
-sema_app_job_not_one: fn(found: String, at: Span, diagnostics: &[Diagnostic]) -> SemaAppJob? {
+sema_app_job_not_one: fn(found: String, at: Span, diagnostics: ^[Diagnostic]) -> SemaAppJob? {
     entry: diagnostic_registry_row("E2817") ?? panic("E2817 must have a registry row")
     diagnostics.push(sema_error("E2817", at, entry.what.replace("{{found}}", found), entry.why, entry.fix))
     None
@@ -155,7 +155,7 @@ sema_app_job_not_one: fn(found: String, at: Span, diagnostics: &[Diagnostic]) ->
 
 // The closure `expression` given to `enqueue`, which must take no
 // parameters and be one call, `self.method(args)` (sema_app_job_method).
-sema_app_job_call: fn(alias: String, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaAppJob? {
+sema_app_job_call: fn(alias: String, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaAppJob? {
     span: expr_span(expression)
     if expression == .Lambda(lambda, _) {
         if lambda.params.len() != 0 {
@@ -178,7 +178,7 @@ sema_app_job_call: fn(alias: String, expression: Expr, environment: SemaScopeEnv
 
 // The closure's one call, which must be a method call without type
 // arguments on `self`, in a method of a service.
-sema_app_job_method: fn(alias: String, call: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaAppJob? {
+sema_app_job_method: fn(alias: String, call: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaAppJob? {
     if call == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
         if owner_type_args.len() != 0 || type_args.len() != 0 {
             return sema_app_job_not_one("its call has type arguments", method_span, diagnostics)
@@ -206,7 +206,7 @@ sema_app_job_method: fn(alias: String, call: Expr, span: Span, environment: Sema
 // `#App.Job` method of the service, passed each argument in its place, and
 // each parameter type must be Encode and Decode. Each argument is encoded
 // with `alias.__live_arg`.
-sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_span: Span, args: [CallArg], receiver_span: Span, receiver_id: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaAppJob? {
+sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_span: Span, args: [CallArg], receiver_span: Span, receiver_id: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaAppJob? {
     graph: program.registration_graph ?? return None
     row: sema_type_resolve_nominal_row(graph, service, environment.module_identity) ?? return sema_app_job_not_one("`self` is a {sema_type_show_quoted(service)}, not a service", receiver_span, diagnostics)
     service_module: graph.modules[row.module_index].module_identity

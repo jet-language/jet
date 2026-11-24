@@ -117,7 +117,7 @@ SEMA_APP_SERVER_ONLY_MARKERS: [String]{SEMA_APP_JOB_MARKER, SEMA_APP_EVERY_MARKE
 
 // E2819 when an endpoint marker marks `func`, a method a server-only app
 // marker also marks, both written in module `module_identity`.
-sema_app_server_only_endpoint_check: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostics: &[Diagnostic]) {
+sema_app_server_only_endpoint_check: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostics: ^[Diagnostic]) {
     loop marker in func.markers {
         if !sema_app_endpoint_marker(marker, graph, module_identity) -> next
         loop other in func.markers {
@@ -162,7 +162,7 @@ sema_app_marker_span: fn(marker: Marker, at: Int) -> Span {
 
 // Argument `at` of `marker`, checked as `expected`, as an argument of an App
 // registration.
-sema_app_marker_checked: fn(marker: Marker, at: Int, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+sema_app_marker_checked: fn(marker: Marker, at: Int, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TCallArg? {
     if marker.args[at] == .Expr(value) {
         checked: sema_check_expression(value, Val(expected), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
         return Val(sema_call_http_static_tree_arg(checked, sema_http_mount_arg(value, expr_span(value))))
@@ -264,7 +264,7 @@ sema_app_upload_params: fn(method: Func, graph: SemaRegistrationGraph, module_id
 // `#App.SignedIn` or `#App.Public` marks is a remote call
 // (`sema_app_remote_call`). Any other method of `S` is server-only (E2812),
 // and a name `S` does not declare is no method of the Remote (E0102).
-sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     shown := "app.Remote<{type_name(service)}>"
     declared := false
@@ -307,7 +307,7 @@ sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, m
 // an endpoint marker (`#App.SignedIn`, `#App.Public`) marks, in the order
 // `S` declares them, as a `[String]`. A job, a webhook, a signing key and an
 // unmarked method are server-only, so the list never names one.
-sema_call_app_endpoints: fn(alias: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_app_endpoints: fn(alias: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     callee: "{alias}.endpoints"
     if args.len() != 0 {
         sema_data_arity_diagnostic(callee, 0, args.len(), span, diagnostics)
@@ -336,7 +336,7 @@ sema_call_app_endpoints: fn(alias: String, type_args: [Type], args: [CallArg], s
     SemaDirectSpecialCheck{handled: true, value: sema_check_expression(listed, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
 }
 
-sema_app_endpoints_no_service: fn(callee: String, service: Type, span: Span, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_app_endpoints_no_service: fn(callee: String, service: Type, span: Span, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     diagnostics.push(sema_error("E0119", span, "{sema_type_show_quoted(service)} names no service struct, so `{callee}` has no endpoints to list", "`{callee}<S>()` lists the marked methods of the struct `S`", "name the service struct as the type argument"))
     sema_live_rejected()
 }
@@ -360,7 +360,7 @@ sema_app_remote_method_call: fn(remote: String, method: String, type_args: [Type
 // A method that answers nothing is a write, which a device that queues may
 // queue, so it lowers to `__write` or `__write_value`. The call's type is
 // `R E!`, or `R app.CallError!` for a method that can't fail.
-sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declaration: Func, service_module: ModuleID, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declaration: Func, service_module: ModuleID, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     method: declaration.name
     concrete: declaration.params.len() > 0 && declaration.params[0].name == "self" && declaration.params[0].convention == AccessConvention.Read && declaration.type_params.len() == 0
@@ -467,7 +467,7 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
 // after the call), and the error converts to `E` as any propagated error
 // does. `raised_return` is the method's `R E!` once more, for `__raise<R>`;
 // `hidden` prefixes the closure's names.
-sema_app_remote_fallible: fn(remote: String, hidden: String, wire: &&[CallArg], ok: Type, failure: Type, raised_return: Type, span: Span) -> Expr Never! {
+sema_app_remote_fallible: fn(remote: String, hidden: String, wire: ^^[CallArg], ok: Type, failure: Type, raised_return: Type, span: Span) -> Expr Never! {
     failure_name: "{hidden}_failure"
     raised_name: "{hidden}_raised"
     raised_ok: if {
@@ -560,7 +560,7 @@ sema_http_mount_arg: fn(expression: Expr, span: Span) -> CallArg Never! {
 // each endpoint-marked one as POST `{prefix}/{name}`
 // (`sema_app_mount_endpoint`), under the static `prefix` when there is one;
 // the call is the App, so it chains.
-sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     // The app graph mounts a service at its key: `.api<S>` names where its
     // clients reach it, so its `.mount` takes the service alone.
     on_graph: sema_app_is_graph(receiver_value.ty, environment, program)
@@ -782,7 +782,7 @@ sema_app_graph_mount_refused: fn(method: String, what: String, span: Span) -> Di
 // The generated code is the mount call's, at `span`: the marker may sit in
 // another file, or outside the function that mounts, and a generated
 // handler is a lambda of that function.
-sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "endpoint method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
@@ -820,7 +820,7 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
 // check (E2805 otherwise). The answer, limit and window are an endpoint's
 // (`sema_app_mount_endpoint`). The generated code is the mount call's, at
 // `span`.
-sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, methods: [Func], method: Func, method_module: ModuleID, uploads: [Int], access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, methods: [Func], method: Func, method_module: ModuleID, uploads: [Int], access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "upload endpoint `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
@@ -914,7 +914,7 @@ sema_app_signing_key_at: fn(methods: [Func], name: String, graph: SemaRegistrati
 // marks (E2814 otherwise), whose key each delivery is checked under
 // (`sema_app_webhook_key`). The generated code is the mount call's, at
 // `span`.
-sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, methods: [Func], method: Func, method_module: ModuleID, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, methods: [Func], method: Func, method_module: ModuleID, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "webhook method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted webhook decodes its arguments from the delivery and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
@@ -978,7 +978,7 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
 // read-only `self`, and the line is a static String in the grammar the app
 // module's scheduler reads (E2805 otherwise). The generated code is the
 // mount call's, at `span`.
-sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, method: Func, method_module: ModuleID, marker: Marker, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, method: Func, method_module: ModuleID, marker: Marker, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     if !sema_app_mount_concrete(method) || method.params.len() != 1 {
         diagnostics.push(sema_error("E2805", marker.span, "schedule method `{method.name}` needs read-only self, no other parameters and a concrete signature", "the scheduler calls a schedule's method at each due minute, with nothing to pass it", "write `{method.name}: fn(self)` without method type parameters"))
@@ -1012,7 +1012,7 @@ sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, met
 // (`sema_app_job_statements`). The method takes read-only `self` and
 // parameters that are Encode and Decode, and has a concrete signature
 // (E2805 otherwise). The generated code is the mount call's, at `span`.
-sema_app_mount_job: fn(mux: TExpr, value_name: String, service: String, method: Func, method_module: ModuleID, marker: Marker, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_app_mount_job: fn(mux: TExpr, value_name: String, service: String, method: Func, method_module: ModuleID, marker: Marker, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "job method `{method.name}` needs read-only self and a concrete signature", "a serving server runs a job's kept rows on a copy of the mounted service", "write `{method.name}: fn(self, ...)` without method type parameters"))
@@ -1100,7 +1100,7 @@ sema_app_cron_number: fn(text: String) -> Int? {
 // are `method`'s parameters at `path_params`: it decodes each parameter of
 // the signing-key method `key_method` from those, by name, and gives
 // `Ok(value.key_method(...))`.
-sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, method: Func, method_module: ModuleID, path_params: [Int], address: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, method: Func, method_module: ModuleID, path_params: [Int], address: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TCallArg? {
     graph: program.registration_graph ?? return None
     if !sema_app_mount_concrete(key_method) {
         diagnostics.push(sema_error("E2805", key_method.name_span, "signing-key method `{key_method.name}` needs read-only self, read parameters and a concrete signature", "a webhook runs its signing-key method on each delivery's path parameters, on request workers", "write `{key_method.name}: fn(self, ...)` with read parameters and without method type parameters"))
@@ -1130,7 +1130,7 @@ sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, metho
 }
 
 // The type of parameter `index` of the App's registration method `name`.
-sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Type {
+sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Type {
     graph: program.registration_graph ?? panic("an App registration has no registration graph")
     candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, mux.ty, name, [Type]{}, [Type]{}, span, environment, program, diagnostics)
     candidate: candidates.pop() ?? panic("App.{name} is not registered")
@@ -1143,7 +1143,7 @@ sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, en
 // `value_name`'s method `method` on a call's arguments: it decodes each
 // argument from the call's JSON array in turn, runs the method, and gives its
 // encoded reply.
-sema_app_mount_answer: fn(value_name: String, method: Func, method_module: ModuleID, answer_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+sema_app_mount_answer: fn(value_name: String, method: Func, method_module: ModuleID, answer_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TCallArg? {
     graph: program.registration_graph ?? return None
     args_name: "__jet_http_mount_args_{span.start}"
     statements := [Stmt]{}
@@ -1167,7 +1167,7 @@ sema_app_mount_answer: fn(value_name: String, method: Func, method_module: Modul
 // when it answers nothing, since `Unit` has no codec to meet
 // `__reply_value`'s `Encode` bound. A method that can't fail (`T Never!`)
 // has no error to encode, so its fallback, which never runs, is `__failed`.
-sema_app_mount_reply: fn(args_name: String, statements: &[Stmt], invocation: &&Expr, declared_return: &&Type, span: Span) {
+sema_app_mount_reply: fn(args_name: String, statements: ^[Stmt], invocation: ^^Expr, declared_return: ^^Type, span: Span) {
     replied: "{args_name}_value"
     reply_type: if {
         declared_return == .Result(ok, err) -> {
@@ -1192,7 +1192,7 @@ sema_app_mount_reply: fn(args_name: String, statements: &[Stmt], invocation: &&E
 // `method`'s but the `Upload`, by name, runs the check and replies as a
 // mounted call does (`sema_app_mount_reply`), so a check that fails refuses
 // the upload.
-sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, method: Func, method_module: ModuleID, upload_at: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, method: Func, method_module: ModuleID, upload_at: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TCallArg? {
     graph: program.registration_graph ?? return None
     if !sema_app_mount_concrete(check_method) {
         diagnostics.push(sema_error("E2805", check_method.name_span, "upload check `{check_method.name}` needs read-only self, read parameters and a concrete signature", "the server runs an upload endpoint's check on the call's other arguments, on request workers, before it reads the file", "write `{check_method.name}: fn(self, ...)` with read parameters and without method type parameters"))
@@ -1229,7 +1229,7 @@ sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, me
 // a route handler is, it is checked with no effect bound: a mounted method
 // may use whatever its package's authority allows, a store above all, and
 // the framework runs it on a request worker as one transaction.
-sema_app_mount_callback: fn(args_name: String, statements: [Stmt], callback_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+sema_app_mount_callback: fn(args_name: String, statements: [Stmt], callback_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TCallArg? {
     handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
     callback_arg := sema_http_mount_arg(handler, span)
     unbounded: if {
@@ -1250,7 +1250,7 @@ SEMA_APP_LIMIT_WINDOW_NS: 60000000000
 // An endpoint marker's rate limit as the two arguments `__remote_public`
 // and `__remote_signed_in` take: its `limit:` (0, no limit, when unwritten)
 // and its `per:` window in nanoseconds (`per.ns`), each checked as an Int.
-sema_app_endpoint_limit: fn(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TCallArg]? {
+sema_app_endpoint_limit: fn(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> [TCallArg]? {
     span: marker.span
     calls := Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
     window := Expr.Int{value: SEMA_APP_LIMIT_WINDOW_NS, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
@@ -1285,7 +1285,7 @@ sema_http_mount_prefix: fn(text: String) -> String Never! {
     text.slice(0, end)
 }
 
-sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: ModuleID, mounted: &[SymbolID]) Never! {
+sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: ModuleID, mounted: ^[SymbolID]) Never! {
     node: body_node(tree, expression)
     if node.kind == .InlineBlock(body) {
         loop statement in body {
@@ -1303,7 +1303,7 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
 // One function body's mounts. Its own function so the visitor closure lends
 // the `mounted` write parameter: the stage-0 Rust tier then lends `graph` to the
 // closure instead of copying the whole registration graph per function.
-sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: ModuleID, mounted: &[SymbolID]) Never! {
+sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: ModuleID, mounted: ^[SymbolID]) Never! {
     loop statement in function.body {
         body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_http_collect_mounted(function.tree, expression, graph, identity, mounted) })
     }

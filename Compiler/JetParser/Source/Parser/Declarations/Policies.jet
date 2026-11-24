@@ -31,7 +31,7 @@ use {
     ]
 }
 
-parser_policy_file_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_policy_file_decl_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_current_kind(state) != TOKEN_HASH -> return false
     name: parser_lookahead(state, 1)
     if name.kind != TOKEN_IDENT || parser_value(state, name) != "Policy" -> return false
@@ -57,7 +57,7 @@ parser_policy_file_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
     true
 }
 
-parser_parse_policy_file_decl: fn(state: &JetParserState, program: &Program) {
+parser_parse_policy_file_decl: fn(state: ^JetParserState, program: ^Program) {
     marker: parser_parse_marker(state)
     declarations: parser_policy_declarations_from_marker(state, marker, PolicyScope.Module) ?? {
         parser_sync_top(state)
@@ -68,7 +68,7 @@ parser_parse_policy_file_decl: fn(state: &JetParserState, program: &Program) {
 
 // `#Policy(...) { … }` scopes its declarations to the block
 // (Rust `at_policy_stmt`). Each declaration targets the whole statement.
-parser_policy_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt? {
+parser_policy_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt? {
     declarations := parser_policy_declarations_from_marker(state, marker, PolicyScope.Block) ?? return None
     loop index in 0..<declarations.len() -> declarations[index].target = Val(span)
     loop declaration in declarations -> state.block_policy_declarations.push(declaration)
@@ -87,7 +87,7 @@ parser_overflow_declaration: fn(marker: Marker, scope: PolicyScope, target: Span
 
 // `#Overflow(.Wrapping) { … }` scopes its mode to the block. A malformed
 // argument still keeps the body, with no mode open.
-parser_overflow_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
+parser_overflow_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
     declarations := [PolicyDeclaration]{}
     if parser_overflow_declaration(marker, PolicyScope.Block, Val(span)) == .Val(declaration) {
         state.block_policy_declarations.push(declaration.copy())
@@ -100,7 +100,7 @@ parser_overflow_block_stmt: fn(state: &JetParserState, marker: Marker, body: [St
 // policy to the block, sourced to the marker so the formatter writes it back
 // as `#Runtime`. A malformed argument still keeps the body, with no policy
 // open.
-parser_runtime_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
+parser_runtime_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
     declarations := [PolicyDeclaration]{}
     if runtime_marker_mode(marker) == .Val(value) {
         declaration: PolicyDeclaration{key: PolicyKey.Runtime, value: value, scope: PolicyScope.Block, span: marker.span, target: Val(span), source: MARKER_RUNTIME}
@@ -115,7 +115,7 @@ parser_runtime_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stm
 // Returns the declaration targeting `target`, or None when the mode is
 // absent or `.None`. A package-level mode written at a gate is E3108;
 // other argument shapes are left to sema's typed marker-argument check.
-parser_unsafe_obligation_policy: fn(state: &JetParserState, marker: Marker, scope: PolicyScope, target: Span) -> PolicyDeclaration? {
+parser_unsafe_obligation_policy: fn(state: ^JetParserState, marker: Marker, scope: PolicyScope, target: Span) -> PolicyDeclaration? {
     values: parser_marker_bindings(marker, [String]{"reason", "obligations"}) ?? return None
     written: values[1] ?? return None
     if written == .EnumLit(type_name, variant, _, args, _, span, _) {
@@ -151,7 +151,7 @@ parser_callable_policy_marker: fn(marker: Marker) -> Bool Never! {
 }
 
 // One declaration per argument, or None after reporting the first refusal.
-parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marker, scope: PolicyScope) -> [PolicyDeclaration]? {
+parser_policy_declarations_from_marker: fn(state: ^JetParserState, marker: Marker, scope: PolicyScope) -> [PolicyDeclaration]? {
     out := [PolicyDeclaration]{}
     loop index in 0..<marker.args.len() {
         expr: parser_marker_expression(marker, index) ?? {
@@ -203,7 +203,7 @@ parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marke
                 return None
             }
             .Writes -> mode ?? {
-                parser_add_error_code(state, "E0355", name_span, "`writes` needs an explicit mode", "calls are written plain by default; the policy requires the `&` and `&&` marks a call's signature implies", "write `writes: .Explicit`")
+                parser_add_error_code(state, "E0355", name_span, "`writes` needs an explicit mode", "calls are written plain by default; the policy requires the `^` and `^^` marks a call's signature implies", "write `writes: .Explicit`")
                 return None
             }
             .Failures -> mode ?? {

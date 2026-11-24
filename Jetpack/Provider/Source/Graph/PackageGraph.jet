@@ -85,11 +85,11 @@ PackageGraph: struct {
     }
 
     // Add or replace the package with this name.
-    add_package: fn(&self, node: PackageNode) Never! { self.packages[node.name] = node }
+    add_package: fn(^self, node: PackageNode) Never! { self.packages[node.name] = node }
 
-    add_catalog: fn(&self, entry: CatalogEntry) Never! { self.catalogs.push(entry.copy()) }
+    add_catalog: fn(^self, entry: CatalogEntry) Never! { self.catalogs.push(entry.copy()) }
 
-    add_workspace_member: fn(&self, name: String, path: String) Never! {
+    add_workspace_member: fn(^self, name: String, path: String) Never! {
         paths := self.workspace_members.get(name) ?? [String]{}
         paths.push(path.copy())
         self.workspace_members[name] = paths

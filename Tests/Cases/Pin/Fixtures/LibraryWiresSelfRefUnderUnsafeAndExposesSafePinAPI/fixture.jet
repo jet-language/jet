@@ -5,7 +5,7 @@ SelfNode: struct {
     self_addr: Int,
 }
 
-wire_self: fn(node: &SelfNode) -> Pin<SelfNode> {
+wire_self: fn(node: ^SelfNode) -> Pin<SelfNode> {
     #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
         node.self_addr = mem.address_of(node.payload)
     }

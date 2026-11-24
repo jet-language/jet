@@ -34,7 +34,7 @@ canonical_json_peek: fn(parser: CanonicalJSONParser) -> Int Never! {
     Int{parser.bytes[parser.at]}
 }
 
-canonical_json_take: fn(parser: &CanonicalJSONParser) -> Int Never! {
+canonical_json_take: fn(parser: ^CanonicalJSONParser) -> Int Never! {
     byte: canonical_json_peek(parser)
     if byte >= 0 -> parser.at += 1
     byte
@@ -62,7 +62,7 @@ canonical_json_parse: fn(bytes: [U8]) -> CanonicalJSON CanonicalJSONError! {
     Ok(value)
 }
 
-canonical_json_value: fn(parser: &CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
+canonical_json_value: fn(parser: ^CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
     byte: canonical_json_peek(parser)
     if byte == -1 -> return Err(canonical_json_error("unexpected end of JSON"))
     if byte == 34 -> return Ok(CanonicalJSON.String(canonical_json_string(parser)))
@@ -106,7 +106,7 @@ canonical_json_value: fn(parser: &CanonicalJSONParser) -> CanonicalJSON Canonica
     Err(canonical_json_error("invalid canonical JSON token"))
 }
 
-canonical_json_string: fn(parser: &CanonicalJSONParser) -> String CanonicalJSONError! {
+canonical_json_string: fn(parser: ^CanonicalJSONParser) -> String CanonicalJSONError! {
     if canonical_json_take(parser) != 34 -> return Err(canonical_json_error("expected JSON string"))
     out := [U8]{}
     loop {
@@ -173,7 +173,7 @@ canonical_json_string: fn(parser: &CanonicalJSONParser) -> String CanonicalJSONE
     }
 }
 
-canonical_json_array: fn(parser: &CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
+canonical_json_array: fn(parser: ^CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
     parser.at += 1
     values := [CanonicalJSON]{}
     if canonical_json_peek(parser) == 93 {
@@ -188,7 +188,7 @@ canonical_json_array: fn(parser: &CanonicalJSONParser) -> CanonicalJSON Canonica
     }
 }
 
-canonical_json_parse_object: fn(parser: &CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
+canonical_json_parse_object: fn(parser: ^CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
     parser.at += 1
     values := [CanonicalJSONField]{}
     seen := [String:Bool]{}

@@ -32,7 +32,7 @@ ir_ordered_header: fn(m: IRModule, p: IRProgram, row: Int) -> Bool Never! {
 }
 
 // The element row of the PriorityQueue type row `heap_row`.
-ir_priority_queue_row: fn(m: &IRModule, p: IRProgram, heap_row: Int) -> Int? Never! {
+ir_priority_queue_row: fn(m: ^IRModule, p: IRProgram, heap_row: Int) -> Int? Never! {
     elem: ir_priority_queue_element(ir_row_ty(m, p, heap_row)) ?? return None
     ir_value_type(m, p, elem)
 }
@@ -47,7 +47,7 @@ ir_heap_kind: fn(m: IRModule, p: IRProgram, elem_row: Int) -> String Never! {
 // The id of PriorityQueue or List sort helper `name` over the header type
 // row `row` with element row `elem_row`, built on first use. Its deferred
 // calls (a user Comparable implementation) resolve before it is stored.
-ir_heap_helper: fn(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: String) -> Int Never! {
+ir_heap_helper: fn(m: ^IRModule, p: IRProgram, row: Int, elem_row: Int, name: String) -> Int Never! {
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, row))}>"
     if ir_keyed_function(m, key) == .Val(known) -> return known
     kind: ir_heap_kind(m, p, elem_row)
@@ -75,7 +75,7 @@ ir_heap_helper: fn(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: St
 }
 
 // A call of helper `name` with result row `result` (-1: none).
-ir_heap_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, elem_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
+ir_heap_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, elem_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
     callee: ir_heap_helper(m, p, row, elem_row, name)
     dst: if result >= 0 -> ir_fresh_temp(m, b, result) else -> -1
     operands: ir_args(b.f, args)
@@ -85,7 +85,7 @@ ir_heap_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, elem_row: 
 }
 
 // Swaps the elements at `left` and `right` through the frame slot `scratch`.
-ir_heap_swap: fn(m: &IRModule, a: &IRBuilder, left: Int, right: Int, width: Int, scratch: Int) Never! {
+ir_heap_swap: fn(m: ^IRModule, a: ^IRBuilder, left: Int, right: Int, width: Int, scratch: Int) Never! {
     _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{scratch, left, width}, -1)
     _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{left, right, width}, -1)
     _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{right, scratch, width}, -1)
@@ -93,7 +93,7 @@ ir_heap_swap: fn(m: &IRModule, a: &IRBuilder, left: Int, right: Int, width: Int,
 
 // Sifts the element at `start` up while it orders below its parent; every
 // comparison reads live element storage.
-ir_heap_sift_up: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, data: Int, start: Int, elem_row: Int) Never! {
+ir_heap_sift_up: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, data: Int, start: Int, elem_row: Int) Never! {
     stride: ir_list_stride(m, elem_row)
     width: ir_word_const(m, a, stride)
     scratch: ir_out_slot(m, a, (stride + 7) /% 8)
@@ -124,7 +124,7 @@ ir_heap_sift_up: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, dat
 // Sifts the element at `start` down within the first `length` elements while
 // a child orders below it, swapping with the lesser child (the left one on a
 // tie).
-ir_heap_sift_down: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, data: Int, start: Int, length: Int, elem_row: Int) Never! {
+ir_heap_sift_down: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, data: Int, start: Int, length: Int, elem_row: Int) Never! {
     stride: ir_list_stride(m, elem_row)
     width: ir_word_const(m, a, stride)
     scratch: ir_out_slot(m, a, (stride + 7) /% 8)
@@ -168,7 +168,7 @@ ir_heap_sift_down: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, d
 
 // The order word of the queue header `heap` and whether it is a key order;
 // an element without a native order has only key orders.
-ir_heap_order: fn(m: &IRModule, a: &IRBuilder, heap: Int) -> {order: Int, keyed: Int} Never! {
+ir_heap_order: fn(m: ^IRModule, a: ^IRBuilder, heap: Int) -> {order: Int, keyed: Int} Never! {
     pointer_row: ir_pointer_row(m)
     order: ir_load_at(m, a, heap, 24, pointer_row)
     none: ir_word_const(m, a, 0)
@@ -179,7 +179,7 @@ ir_heap_order: fn(m: &IRModule, a: &IRBuilder, heap: Int) -> {order: Int, keyed:
 // after every element its key does not order before (equal keys keep
 // insertion order); under the native order it is taken over at the end and
 // sifts up.
-ir_priority_queue_push_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, heap: Int, elem_row: Int, value: Int) Never! {
+ir_priority_queue_push_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, heap: Int, elem_row: Int, value: Int) Never! {
     length: ir_list_reserve(m, p, a, heap, elem_row)
     data: ir_load_word(m, a, heap, 16)
     stride: ir_list_stride(m, elem_row)
@@ -229,7 +229,7 @@ ir_priority_queue_push_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind:
 }
 
 // priority_queue.heapify(heap): sifts every parent down, the last first.
-ir_priority_queue_heapify_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, heap: Int, elem_row: Int) Never! {
+ir_priority_queue_heapify_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, heap: Int, elem_row: Int) Never! {
     length: ir_load_word(m, a, heap, 0)
     data: ir_load_word(m, a, heap, 16)
     one: ir_word_const(m, a, 1)
@@ -252,7 +252,7 @@ ir_priority_queue_heapify_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ki
 // priority_queue.pop(heap): the first element moves into an Option box (null
 // when empty). Under a key order the rest move down one place; under the
 // native order the last element moves to the root and sifts down.
-ir_priority_queue_pop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, heap: Int, elem_row: Int, option_row: Int) Never! {
+ir_priority_queue_pop_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, heap: Int, elem_row: Int, option_row: Int) Never! {
     a.f.result = option_row
     length: ir_load_word(m, a, heap, 0)
     zero: ir_word_const(m, a, 0)
@@ -297,7 +297,7 @@ ir_priority_queue_pop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: 
 // priority_queue.key_sort (`keyed`) sorts a queue header into pop order: the
 // right run's element goes first only when its `before` (the order word)
 // says so.
-ir_list_sort_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, list: Int, elem_row: Int, descending: Bool, keyed: Bool) Never! {
+ir_list_sort_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, kind: String, list: Int, elem_row: Int, descending: Bool, keyed: Bool) Never! {
     order_box: if keyed -> ir_heap_order(m, a, list).order else -> -1
     stride: ir_list_stride(m, elem_row)
     stride_word: ir_word_const(m, a, stride)
@@ -409,7 +409,7 @@ ir_list_sort_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, kind: String, l
 
 // The signed word whose order is f64::total_cmp's for the Float at
 // `address` (ir_float_total_bits).
-ir_float_total_key: fn(m: &IRModule, a: &IRBuilder, address: Int) -> Int Never! {
+ir_float_total_key: fn(m: ^IRModule, a: ^IRBuilder, address: Int) -> Int Never! {
     word_row: ir_word_row(m)
     bits: ir_load_at(m, a, address, 0, word_row)
     ir_float_total_bits(m, a, bits)
@@ -418,7 +418,7 @@ ir_float_total_key: fn(m: &IRModule, a: &IRBuilder, address: Int) -> Int Never! 
 // The Float or Float32 in slot `value` as its total-order word: IEEE 754
 // totalOrder, -NaN < -inf < ... < -0.0 < +0.0 < ... < +inf < NaN. A Float32
 // widens to Float first, which keeps its order.
-ir_float_total_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+ir_float_total_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, span: Span) -> Int Never! {
     floating := value
     if m.types[b.f.slot_type[value]].kind == .Float32 {
         float_row: ir_value_type(m, p, Type.Float) ?? return ir_type_fail(b, span, Type.Float)
@@ -433,7 +433,7 @@ ir_float_total_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, 
 // The Float bits `bits` (a signed word) as the word whose order is
 // f64::total_cmp's: every bit but the sign flips when the sign is set
 // (negative values and -NaN reverse their magnitude order).
-ir_float_total_bits: fn(m: &IRModule, a: &IRBuilder, bits: Int) -> Int Never! {
+ir_float_total_bits: fn(m: ^IRModule, a: ^IRBuilder, bits: Int) -> Int Never! {
     word_row: ir_word_row(m)
     key: ir_temp(m, a, word_row)
     ir_emit(a.f, IROp.Copy, key, bits, -1, -1, a.line)
@@ -449,7 +449,7 @@ ir_float_total_bits: fn(m: &IRModule, a: &IRBuilder, bits: Int) -> Int Never! {
 // `xs.sort()` / `xs.sort_desc()` on the List at `list` in place, or on a
 // write window over a list's range (a View header over the owner's storage):
 // the element needs a native order.
-ir_list_sort: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row: Int, descending: Bool, span: Span) -> Int Never! {
+ir_list_sort: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, list: Int, elem_row: Int, descending: Bool, span: Span) -> Int Never! {
     list_row: b.f.slot_type[list]
     list_ty: ir_row_ty(m, p, list_row)
     is_list: if ir_untag(list_ty) == {
@@ -469,7 +469,7 @@ ir_list_sort: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row:
 
 // The copy of the queue in canonical order (to_sorted_list, rendering):
 // lowest-first under the native order, storage order under a key order.
-ir_priority_queue_sorted: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, heap: Int, elem_row: Int, span: Span) -> Int Never! {
+ir_priority_queue_sorted: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, heap: Int, elem_row: Int, span: Span) -> Int Never! {
     elem_ty: ir_row_ty(m, p, elem_row)
     list_row: ir_value_type(m, p, Type.List{element: elem_ty}) ?? return ir_fail_slot(b, span, "type [{ir_type_name(elem_ty)}]")
     sorted: ir_list_clone(m, p, b, heap, elem_row, list_row)
@@ -482,7 +482,7 @@ ir_priority_queue_sorted: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, heap: In
 
 // Opens an If over the native order of the queue header `heap`; false (and
 // nothing opened) when its element has no native order.
-ir_heap_native_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, heap: Int, elem_row: Int) -> Bool Never! {
+ir_heap_native_open: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, heap: Int, elem_row: Int) -> Bool Never! {
     if ir_heap_kind(m, p, elem_row) == "" -> return false
     heap_order: ir_heap_order(m, b, heap)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -498,7 +498,7 @@ ir_heap_native_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, heap: Int, el
 // `key` (ir_key_order). A queue's source sorts into pop order stably, so
 // equal keys keep their input order; a Rank's source elements are inserted
 // in order, later duplicates dropped.
-ir_key_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, descending: Bool, from: Bool, subject: Int, operands: [Int], span: Span) -> Int Never! {
+ir_key_ordered: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, descending: Bool, from: Bool, subject: Int, operands: [Int], span: Span) -> Int Never! {
     header_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     if from && (operands.len() != 2 || operands[1] < 0) {
         return ir_fail_slot(b, span, "from_by without a key")
@@ -535,7 +535,7 @@ ir_key_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, descendi
 // a box owning the key at 24 whose code (key_order.before) calls it on both
 // elements and compares the keys natively, reversed for `descending`. The
 // box is fresh; the header that stores it owns it.
-ir_key_order: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: Int, elem_row: Int, descending: Bool, span: Span) -> Int Never! {
+ir_key_order: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: Int, elem_row: Int, descending: Bool, span: Span) -> Int Never! {
     closure_ty: ir_row_ty(m, p, b.f.slot_type[key])
     ret: ir_closure_result(closure_ty) ?? return ir_fail_slot(b, span, "key function {ir_type_name(closure_ty)} without a result")
     key_ty: ir_never_carrier_success(ret) ?? ret
@@ -563,7 +563,7 @@ ir_key_order: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: Int, elem_row: 
 // key_order.before(boxed, left, right): whether `left`'s key orders before
 // `right`'s (after it when `descending`), the key function at 24 of the box.
 // One per key function type and direction.
-ir_key_order_helper: fn(m: &IRModule, p: IRProgram, closure_ty: Type, elem_row: Int, key_row: Int, descending: Bool) -> Int Never! {
+ir_key_order_helper: fn(m: ^IRModule, p: IRProgram, closure_ty: Type, elem_row: Int, key_row: Int, descending: Bool) -> Int Never! {
     key: "key_order.before<{type_carrier_identity(closure_ty)}|{if descending -> "desc" else -> "asc"}>"
     if ir_keyed_function(m, key) == .Val(known) -> return known
     id: m.functions.len()
@@ -601,7 +601,7 @@ ir_key_order_helper: fn(m: &IRModule, p: IRProgram, closure_ty: Type, elem_row: 
 }
 
 // The total-order word of the Float key in `value` (ir_float_total_key).
-ir_key_order_float: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, value: Int) -> Int Never! {
+ir_key_order_float: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, value: Int) -> Int Never! {
     spill: ir_out_slot(m, a, 1)
     ir_store_at(m, p, a, spill, 0, value)
     ir_float_total_key(m, a, spill)
@@ -610,7 +610,7 @@ ir_key_order_float: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, value: Int) ->
 // `PriorityQueue.from(source)` / `source.to_priority_queue()`: a fresh List
 // gives its buffer up, any other's elements are copied; then the heap is
 // built in place.
-ir_priority_queue_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, span: Span) -> Int Never! {
+ir_priority_queue_from: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, source: Int, span: Span) -> Int Never! {
     heap_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     elem_row: ir_priority_queue_row(m, p, heap_row) ?? return ir_fail_slot(b, span, "PriorityQueue construction of {ir_type_name(ty)}")
     if ir_map_key_kind(m, p, elem_row) == "" {
@@ -631,7 +631,7 @@ ir_priority_queue_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
 
 // `PriorityQueue.new()` (the Prelude std::collections::BinaryHeap::new
 // route): an empty header.
-ir_priority_queue_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+ir_priority_queue_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != 0 {
         return ir_fail_slot(b, span, "PriorityQueue.new with {inputs.len()} arguments")
     }
@@ -645,7 +645,7 @@ ir_priority_queue_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [In
 
 // A PriorityQueue builtin: from, len, is_empty, push, clear, remove,
 // to_sorted_list, peek and pop.
-ir_priority_queue_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, operation: TBuiltinOp, subject: Int, operands: [Int], span: Span) -> Int Never! {
+ir_priority_queue_builtin: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, operation: TBuiltinOp, subject: Int, operands: [Int], span: Span) -> Int Never! {
     if operation == .PriorityQueueFrom {
         if operands.len() != 1 {
             return ir_fail_slot(b, span, "PriorityQueue.from with {operands.len() - 1} arguments")

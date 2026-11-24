@@ -17,7 +17,7 @@ use {
     jet_wasm.[WasmError, WasmFuncType, WASM_EXTERN_FUNC, WASM_FUNCREF, WASM_OP_REF_FUNC, wasm_load_component]
 }
 
-jet_plugin_link: fn(m: &IRModule, root: String, needs: [String]) -[FS]> Never! {
+jet_plugin_link: fn(m: ^IRModule, root: String, needs: [String]) -[FS]> Never! {
     count: m.functions.len()
     loop id in 0..<count {
         key: m.functions[id].key
@@ -60,7 +60,7 @@ plug_stem: fn(path: String) -> String Never! {
 }
 
 // The signature class of `ty`, made on first sight.
-plug_sig: fn(keys: &[String:Int], types: &[WasmFuncType], ty: WasmFuncType) -> Int Never! {
+plug_sig: fn(keys: ^[String:Int], types: ^[WasmFuncType], ty: WasmFuncType) -> Int Never! {
     key: ty.render()
     if keys.get(key) == .Val(known) -> return known
     class: types.len()
@@ -69,7 +69,7 @@ plug_sig: fn(keys: &[String:Int], types: &[WasmFuncType], ty: WasmFuncType) -> I
     class
 }
 
-plug_thunk_add: fn(thunks: &[Int:Int], fids: &[Int], fid: Int) Never! {
+plug_thunk_add: fn(thunks: ^[Int:Int], fids: ^[Int], fid: Int) Never! {
     if fid < 0 || thunks.get(fid) != None {
         return
     }
@@ -77,7 +77,7 @@ plug_thunk_add: fn(thunks: &[Int:Int], fids: &[Int], fid: Int) Never! {
     fids.push(fid)
 }
 
-plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, bytes: [U8], needs: [String]) WasmError! {
+plug_link_component: fn(m: ^IRModule, id: Int, artifact: String, name: String, bytes: [U8], needs: [String]) WasmError! {
     flat: plug_flatten(wasm_load_component(bytes.copy()))
     sig_keys := [String:Int]{}
     sig_types := [WasmFuncType]{}
@@ -190,7 +190,7 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
 // Gives guest entry `id` its body: op -1 answers descriptor data row `desc`,
 // op -2 runs the start functions (`base` + each of `starts`), op k calls
 // entry thunk `thunk_base` + k (one per function of `thunk_fids`).
-plug_guest_entry: fn(m: &IRModule, id: Int, desc: Int, thunk_base: Int, thunk_fids: [Int], base: Int, starts: [Int]) Never! {
+plug_guest_entry: fn(m: ^IRModule, id: Int, desc: Int, thunk_base: Int, thunk_fids: [Int], base: Int, starts: [Int]) Never! {
     word: ir_word_row(m)
     f := ir_function_new(m.functions[id].name, m.functions[id].key, m.functions[id].symbol, "", 0)
     f.symbol_hash = m.functions[id].symbol_hash

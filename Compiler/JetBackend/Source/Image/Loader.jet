@@ -395,7 +395,7 @@ loader_segments: fn(header: [U8], table: [U8], table_at: Int, size: Int) -> X64S
 }
 
 // Append `value` in hex (no prefix) to `out`.
-loader_hex_push: fn(out: &[U8], value: Int) Never! {
+loader_hex_push: fn(out: ^[U8], value: Int) Never! {
     digits: "0123456789abcdef".bytes()
     shift := 60
     loop shift > 0 && (value >> shift) & 15 == 0 -> shift -= 4
@@ -704,7 +704,7 @@ loader_patch: fn(exe: X64Executable, delta: Int, from: Int, to: Int) {
 // whoever reads the view's symbols (the fault report, report.S `symbol`;
 // Alloc.jet alloc_check_symbol) reads both tables, and nothing is copied
 // but the headers.
-loader_view: fn(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: Int) -> String {
+loader_view: fn(image: ^X64LoadedImage, exe: X64Executable, file: Int, memfd: Int) -> String {
     header := x64_executable_header(exe)
     count: loader_u16(header, 60)
     sections: loader_u64(header, 40) - exe.tail_at
@@ -996,7 +996,7 @@ loader_self_part_lookup: fn(label: [U8], stamp: [Int]) -> LoaderPartLookup {
     LoaderPartLookup{checked: true, found: None}
 }
 
-loader_self_parts_store: fn(stamp: [Int], labels: &&[[U8]], ats: &&[Int], sizes: &&[Int]) {
+loader_self_parts_store: fn(stamp: [Int], labels: ^^[[U8]], ats: ^^[Int], sizes: ^^[Int]) {
     guard := LOADER_SELF.guard_edit()
     guard.value.part_stamp = stamp
     guard.value.part_labels = labels.move()
@@ -1036,7 +1036,7 @@ x64_self_read: fn(at: Int, size: Int) -> [U8]? {
 // x64_self_read into the first `size` bytes of `into`, a List of the
 // caller's that a run of reads reuses, grown to `size` when it is shorter;
 // false when the file can't be opened or read, or ends first.
-x64_self_read_into: fn(at: Int, into: &[U8], size: Int) -> Bool {
+x64_self_read_into: fn(at: Int, into: ^[U8], size: Int) -> Bool {
     if at < 0 || size < 0 -> return false
     if size == 0 -> return true
     if into.len() < size -> link_pad_to(into, size, 0)
@@ -1087,14 +1087,14 @@ x64_executable_keep: fn(exe: X64Executable, path: String) -> String {
     ""
 }
 
-loader_kept_word: fn(out: &[U8], value: Int) Never! {
+loader_kept_word: fn(out: ^[U8], value: Int) Never! {
     at: out.len()
     link_pad_to(out, at + 8, 0)
     link_put64(out, at, value)
 }
 
 // `bytes`, then zeros up to the next word.
-loader_kept_run: fn(out: &[U8], bytes: [U8]) Never! {
+loader_kept_run: fn(out: ^[U8], bytes: [U8]) Never! {
     out.extend(bytes.copy())
     end: out.len() + (8 - out.len() % 8) % 8
     link_pad_to(out, end, 0)
@@ -1148,7 +1148,7 @@ x64_executable_kept: fn(path: String) -> X64Executable? {
 // `image_path` (x64_executable_load). `exe` was bound with that file's
 // identity (`image_stamp`): with none, its image part can't be mapped or
 // read again.
-x64_executable_image_head: fn(exe: &X64Executable, image: [U8]) Never! {
+x64_executable_image_head: fn(exe: ^X64Executable, image: [U8]) Never! {
     head: if exe.image_gap > 0 -> exe.image_gap_at else -> image.len()
     first: if head < OS_PAGE_SIZE -> head else -> OS_PAGE_SIZE
     exe.image_gap = image.len() + exe.image_gap - first
@@ -1163,7 +1163,7 @@ LoaderKeptReader: struct {
     failed: Bool,
 }
 
-loader_kept_next: fn(reader: &LoaderKeptReader) -> Int Never! {
+loader_kept_next: fn(reader: ^LoaderKeptReader) -> Int Never! {
     if reader.failed || reader.at + 8 > reader.bytes.len() {
         reader.failed = true
         return -1
@@ -1175,7 +1175,7 @@ loader_kept_next: fn(reader: &LoaderKeptReader) -> Int Never! {
 }
 
 // The next `size` bytes, then the cursor at the next word.
-loader_kept_take: fn(reader: &LoaderKeptReader, size: Int) -> [U8] Never! {
+loader_kept_take: fn(reader: ^LoaderKeptReader, size: Int) -> [U8] Never! {
     if reader.failed || size < 0 || size > reader.bytes.len() - reader.at {
         reader.failed = true
         return [U8]{}
@@ -1207,7 +1207,7 @@ loader_image_file_failed: fn(failure: String) -> X64ImageFile Never! {
 
 // Give `exe` its whole image part when x64_image_file_read left out the
 // loaded segments (loader_image_part_whole); "" or why not.
-x64_executable_complete: fn(exe: &X64Executable) -> String {
+x64_executable_complete: fn(exe: ^X64Executable) -> String {
     if exe.image_gap == 0 -> return ""
     whole := loader_image_part_whole(exe)
     if whole.failure != "" -> return whole.failure
@@ -1447,7 +1447,7 @@ loader_plan_failed: fn(plan: LoaderPlan, failure: String) -> LoaderPlan {
     LoaderPlan{plan: 0, plan_size: 0, executor: 0, data: 0, stack_low: 0, stack_size: 0, failure: failure}
 }
 
-loader_record: fn(rows: &[Int], number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, kind: Int) Never! {
+loader_record: fn(rows: ^[Int], number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, kind: Int) Never! {
     rows.push(number)
     rows.push(a1)
     rows.push(a2)
@@ -1482,7 +1482,7 @@ LOADER_DATA_MM: 256
 // brk(0). Unprivileged needs only CONFIG_CHECKPOINT_RESTORE; where the call
 // is refused it changes nothing, and the executor goes on past it.
 #Unsafe("the map's 104 bytes lie in the caller's data page, in its mm-map room; brk(0) only reports the current break")
-loader_mm_record: fn(rows: &[Int], map: Int, stack: Int, arg_start: Int, arg_end: Int, env_start: Int, env_end: Int) {
+loader_mm_record: fn(rows: ^[Int], map: Int, stack: Int, arg_start: Int, arg_end: Int, env_start: Int, env_end: Int) {
     stat: loader_files.read("/proc/self/stat") ?? return
     // The fields after the command name, which may hold spaces or ")".
     parts: stat.split(") ").to_list()
@@ -1547,7 +1547,7 @@ loader_kernel_ranges: fn() -> [Int] {
 // munmap records for every gap between the disjoint [start, end) pairs of
 // `kept`, from 0 to LOADER_TASK_END.
 // Raw munmap rows: the executor runs them before the runtime and its sentry exist.
-loader_unmap_records: fn(rows: &[Int], kept: [Int]) Never! {
+loader_unmap_records: fn(rows: ^[Int], kept: [Int]) Never! {
     at := 0
     last := -1
     loop {
@@ -1585,7 +1585,7 @@ loader_executor_fill: fn(executor: Int) -> Int {
 // leaves no orphan. Their spawn runs on jet's main thread, whose end is
 // jet's end. A jet that ends between the fork and this record still
 // orphans the child.
-loader_fork_records: fn(rows: &[Int], launch: X64Launch) Never! {
+loader_fork_records: fn(rows: ^[Int], launch: X64Launch) Never! {
     loader_record(rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 1)
     if launch.parent_death -> loader_record(rows, OS_SYS_PRCTL, 1, 15, 0, 0, 0, 0, 0)
 }
@@ -1594,7 +1594,7 @@ loader_fork_records: fn(rows: &[Int], launch: X64Launch) Never! {
 // i) and close every descriptor from fds.len() up: two rounds through
 // descriptors above every source, so no move overwrites a source a later
 // move reads.
-loader_fd_records: fn(rows: &[Int], fds: [Int]) Never! {
+loader_fd_records: fn(rows: ^[Int], fds: [Int]) Never! {
     spare := fds.len()
     loop fd in fds {
         if fd >= spare -> spare = fd + 1
@@ -2733,7 +2733,7 @@ LoaderTraceEnds: struct {
 // pipe whose read end the helper takes (loader_trace_hold). This process
 // keeps one end of each (X64Trace.channel, and the lifeline's write end as
 // X64Trace.lifeline).
-loader_trace_ends: fn(trace: &X64Trace) -> LoaderTraceEnds {
+loader_trace_ends: fn(trace: ^X64Trace) -> LoaderTraceEnds {
     ends := LoaderTraceEnds{channel: 0, lifeline: 0}
     #Unsafe("socketpair and pipe2 each write their two int descriptors to the trace's scratch word, which is read before the next call") {
         pair: os_syscall(OS_SYS_SOCKETPAIR, LOADER_SOCKET_UNIX, LOADER_SOCKET_STREAM_CLOEXEC, 0, trace.scratch + LOADER_TRACE_WORD, 0, 0)
@@ -3294,7 +3294,7 @@ x64_trace_signal: fn(trace: X64Trace, signal: Int) -> Bool {
 
 // End the program, if it still runs, its helper and the trace's scratch
 // page.
-x64_trace_close: fn(trace: &X64Trace) {
+x64_trace_close: fn(trace: ^X64Trace) {
     if trace.pid > 0 {
         _ := os_kill_i64(I64{trace.pid}, I64{9})
         // The kill ends a stopped tracee too; the helper reaps each thread,
@@ -3491,7 +3491,7 @@ loader_sampler_attr: fn(attr: Int, period_ns: Int, flags: Int) {
 // (`cpu` -1, any CPU) or with `inherit` a process (on CPU `cpu`), and add
 // it and its ring to `sampler`. A thread that ended or a CPU that isn't
 // online is left out; a refusal names the sampler's failure.
-loader_sampler_add: fn(sampler: &X64Sampler, attr: Int, pid: Int, cpu: Int) {
+loader_sampler_add: fn(sampler: ^X64Sampler, attr: Int, pid: Int, cpu: Int) {
     what: if cpu < 0 -> "thread {pid}" else -> "CPU {cpu}"
     fd: Int{os_perf_event_open_i64(I64{attr}, I64{pid}, I64{cpu}, I64{-1}, I64{LOADER_PERF_FLAG_FD_CLOEXEC})}
     if (cpu < 0 && fd == -LOADER_ESRCH) || (cpu >= 0 && fd == -LOADER_ENODEV) {
@@ -3517,7 +3517,7 @@ loader_sampler_add: fn(sampler: &X64Sampler, attr: Int, pid: Int, cpu: Int) {
 // The sampler's origin: now on the monotonic clock (CLOCK_MONOTONIC, the
 // samples' clock) and on the wall clock (CLOCK_REALTIME), in nanoseconds.
 #Unsafe("clock_gettime writes two words at the caller's `scratch`, read before the next")
-loader_sampler_origin: fn(sampler: &X64Sampler, scratch: Int) {
+loader_sampler_origin: fn(sampler: ^X64Sampler, scratch: Int) {
     _ := os_clock_gettime_i64(I64{LOADER_CLOCK_MONOTONIC}, I64{scratch})
     sampler.origin_ns = os_load_word(scratch) * 1000000000 + os_load_word(scratch + 8)
     _ := os_clock_gettime_i64(I64{LOADER_CLOCK_REALTIME}, I64{scratch})
@@ -3526,7 +3526,7 @@ loader_sampler_origin: fn(sampler: &X64Sampler, scratch: Int) {
 
 // Move the samples, execs, mappings and forks each ring holds into `into`,
 // freeing the rings for more.
-x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
+x64_sampler_drain: fn(sampler: X64Sampler, into: ^X64Samples) {
     size: LOADER_PERF_RING_PAGES * OS_PAGE_SIZE
     loop sampled in sampler.rings {
         data: sampled.ring + OS_PAGE_SIZE
@@ -3611,7 +3611,7 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
 }
 
 // Stop sampling: each ring and event go.
-x64_sampler_close: fn(sampler: &X64Sampler) {
+x64_sampler_close: fn(sampler: ^X64Sampler) {
     ring_size: (1 + LOADER_PERF_RING_PAGES) * OS_PAGE_SIZE
     loop sampled in sampler.rings {
         _ := os_unmap(sampled.ring, ring_size)
@@ -3673,7 +3673,7 @@ x64_sampled_start: fn(path: String, argv: [String], env: [String]?, cpus: [Int],
 // Whether the sampled command has ended and been reaped, not waiting for
 // it: once reaped, its wait status, CPU and peak memory are the run's. A
 // wait that fails names the run's failure, and counts as reaped.
-x64_sampled_reaped: fn(run: &X64SampledRun) -> Bool {
+x64_sampled_reaped: fn(run: ^X64SampledRun) -> Bool {
     if run.command.child < 0 -> return true
     reaped: loader_command_reap(run.command, LOADER_WNOHANG)
     if reaped == 0 -> return false
@@ -3689,7 +3689,7 @@ x64_sampled_reaped: fn(run: &X64SampledRun) -> Bool {
 }
 
 // Stop sampling the reaped command: its rings, events and page go.
-x64_sampled_close: fn(run: &X64SampledRun) {
+x64_sampled_close: fn(run: ^X64SampledRun) {
     x64_sampler_close(run.sampler)
     if run.command.page != 0 {
         _ := os_unmap(run.command.page, OS_PAGE_SIZE)
@@ -4028,7 +4028,7 @@ x64_counters_open: fn(pid: Int) -> X64Counters {
 
 // Read the traced command's counters (x64_counters_open) into `counted`:
 // its instructions, cycles, `scaled` and `errno`. They close.
-x64_counters_close: fn(counters: X64Counters, counted: &X64Counted) {
+x64_counters_close: fn(counters: X64Counters, counted: ^X64Counted) {
     counted.errno = counters.errno
     if os_failed(counters.page) {
         return

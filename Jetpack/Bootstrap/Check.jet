@@ -240,12 +240,12 @@ prove: fn(repo: String, state: String, jet: String, options: Options) -> Int {
     prove_check(proof, state)
 }
 
-set: fn(child: &Child, name: String, value: String) {
+set: fn(child: ^Child, name: String, value: String) {
     child.names.push(name.copy())  // copy: the names are literals
     child.values.push(value.copy())  // copy: the proof keeps the value
 }
 
-set_or_unset: fn(child: &Child, name: String, value: String) {
+set_or_unset: fn(child: ^Child, name: String, value: String) {
     if value == "" -> child.unset.push(name.copy()) else -> set(child, name, value)  // copy: the names are literals
 }
 

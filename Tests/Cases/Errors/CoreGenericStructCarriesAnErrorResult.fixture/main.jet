@@ -6,11 +6,11 @@ Held: struct<Q> {
 // core.prelude's generic SendError<T> carried in an error result: at a
 // concrete argument, at a generic function's parameter, and around a
 // generic struct of the program's own.
-refuse: fn(x: &&[String]) -> Int SendError<[String]>! { Err(SendError<[String]>{value: x}) }
+refuse: fn(x: ^^[String]) -> Int SendError<[String]>! { Err(SendError<[String]>{value: x}) }
 
-refuse_any: fn<Q>(x: &&Q) -> Int SendError<Q>! { Err(SendError<Q>{value: x}) }
+refuse_any: fn<Q>(x: ^^Q) -> Int SendError<Q>! { Err(SendError<Q>{value: x}) }
 
-refuse_held: fn<Q>(x: &&Q) -> Int SendError<Held<Q>>! {
+refuse_held: fn<Q>(x: ^^Q) -> Int SendError<Held<Q>>! {
     Err(SendError<Held<Q>>{value: Held<Q>{reason: "full", value: Val(x)}})
 }
 

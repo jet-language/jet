@@ -80,9 +80,9 @@ WebTable: struct<T> {
     // Zero or one typed server loader; `with_server_page` replaces it.
     server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!],
 
-    with_column: fn(&self, col: &&WebTableColumn<T>) Never! { with_column<T>(self, col) }
+    with_column: fn(^self, col: ^^WebTableColumn<T>) Never! { with_column<T>(self, col) }
 
-    paginate: fn(&self, index: Int, size: Int) Never! { paginate<T>(self, index, size) }
+    paginate: fn(^self, index: Int, size: Int) Never! { paginate<T>(self, index, size) }
 
     page: fn(self) -> WebTablePage<T> WebTableError! { page_state<T>(self) }
 }
@@ -101,16 +101,16 @@ new_keyed: fn<T, E>(name: String, rows: [T], key_fn: fn(T) -> String E!) -> WebT
     WebTable<T>{name: name, columns: [WebTableColumn<T>]{}, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{}}
 }
 
-column: fn<T>(#ColumnOf name: String, label: String, project: &&fn(T) -> String Never!) -> WebTableColumn<T> Never! {
+column: fn<T>(#ColumnOf name: String, label: String, project: ^^fn(T) -> String Never!) -> WebTableColumn<T> Never! {
     WebTableColumn<T>{name: name, label: label, project: project.move()}
 }
 
 // A table holds its columns' projection functions, which Jet cannot
 // duplicate, so configuring and mutating calls edit the table in place
 // through write access instead of returning a second table.
-with_column: fn<T>(table: &WebTable<T>, col: &&WebTableColumn<T>) Never! { table.columns.push(col) }
+with_column: fn<T>(table: ^WebTable<T>, col: ^^WebTableColumn<T>) Never! { table.columns.push(col) }
 
-with_server_page: fn<T>(table: &WebTable<T>, fetch: &&fn(WebTableState) -> WebTablePage<T> WebTableError!) Never! {
+with_server_page: fn<T>(table: ^WebTable<T>, fetch: ^^fn(WebTableState) -> WebTablePage<T> WebTableError!) Never! {
     table.server_page = [fn(WebTableState) -> WebTablePage<T> WebTableError!]{fetch.move()}
     table.state.page_mode = WebTablePageMode.Server
 }
@@ -206,23 +206,23 @@ page: fn<T>(rows: [T], index: Int, size: Int) -> WebTablePage<T> WebTableError! 
     Ok(WebTablePage<T>{rows: out, row_keys: keys, page_index: index, page_size: size, total_rows: rows.len(), page_count: (rows.len() + size - 1) /% size})
 }
 
-sort_by: fn<T>(table: &WebTable<T>, name: String, direction: WebTableSortDirection) Never! {
+sort_by: fn<T>(table: ^WebTable<T>, name: String, direction: WebTableSortDirection) Never! {
     table.state.sort = WebTableSort{column: name, descending: direction == WebTableSortDirection.Descending}
     table.state.page_index = 0
 }
 
-filter_by: fn<T>(table: &WebTable<T>, name: String, value: String) Never! {
+filter_by: fn<T>(table: ^WebTable<T>, name: String, value: String) Never! {
     table.state.filter = WebTableFilter{column: name, value: value}
     table.state.page_index = 0
 }
 
 // Keep every other state field and clamp the boundary.
-paginate: fn<T>(table: &WebTable<T>, index: Int, size: Int) Never! {
+paginate: fn<T>(table: ^WebTable<T>, index: Int, size: Int) Never! {
     table.state.page_index = page_index(index)
     table.state.page_size = page_size(size)
 }
 
-set_rows: fn<T>(table: &WebTable<T>, rows: [T]) WebTableError! {
+set_rows: fn<T>(table: ^WebTable<T>, rows: [T]) WebTableError! {
     if rows.len() > C_MAX_TABLE_ROWS -> return Err(WebTableError.Invalid)
     keyed := [WebTableRow<T>]{}
     loop i in 0..<rows.len() -> keyed.push(WebTableRow<T>{key: "{i}", value: rows[i]})
@@ -233,7 +233,7 @@ set_rows: fn<T>(table: &WebTable<T>, rows: [T]) WebTableError! {
     return Ok()
 }
 
-set_selected: fn<T>(table: &WebTable<T>, key: String, on: Bool) WebTableError! {
+set_selected: fn<T>(table: ^WebTable<T>, key: String, on: Bool) WebTableError! {
     if !has_key<T>(table.rows, key) -> return Err(WebTableError.NotFound)
     selected := [String]{}
     loop item in table.state.selected {
@@ -243,7 +243,7 @@ set_selected: fn<T>(table: &WebTable<T>, key: String, on: Bool) WebTableError! {
     table.state.selected = selected
 }
 
-toggle_selection: fn<T>(table: &WebTable<T>, key: String) WebTableError! {
+toggle_selection: fn<T>(table: ^WebTable<T>, key: String) WebTableError! {
     enabled := true
     loop item in table.state.selected {
         if item == key -> enabled = false
@@ -251,19 +251,19 @@ toggle_selection: fn<T>(table: &WebTable<T>, key: String) WebTableError! {
     set_selected<T>(table, key, enabled)
 }
 
-focus: fn<T>(table: &WebTable<T>, key: String) WebTableError! {
+focus: fn<T>(table: ^WebTable<T>, key: String) WebTableError! {
     if !has_key<T>(table.rows, key) -> return Err(WebTableError.NotFound)
     table.state.focus = key
 }
 
-clear_focus: fn<T>(table: &WebTable<T>) Never! { table.state.focus = "" }
+clear_focus: fn<T>(table: ^WebTable<T>) Never! { table.state.focus = "" }
 
 focused_key: fn<T>(table: WebTable<T>) -> String? Never! {
     if table.state.focus.len() == 0 -> return None
     Val(table.state.focus)
 }
 
-clear_selection: fn<T>(table: &WebTable<T>) Never! { table.state.selected = [String]{} }
+clear_selection: fn<T>(table: ^WebTable<T>) Never! { table.state.selected = [String]{} }
 
 selected_keys: fn<T>(table: WebTable<T>) -> [String] Never! { table.state.selected }
 
@@ -283,7 +283,7 @@ selected_rows: fn<T>(table: WebTable<T>) -> [WebTableRow<T>] WebTableError! {
     Ok(out)
 }
 
-insert_row: fn<T>(table: &WebTable<T>, row: T) -> String WebTableError! {
+insert_row: fn<T>(table: ^WebTable<T>, row: T) -> String WebTableError! {
     if table.rows.len() >= C_MAX_TABLE_ROWS -> return Err(WebTableError.Invalid)
     key := "{table.rows.len()}"
     loop {
@@ -294,7 +294,7 @@ insert_row: fn<T>(table: &WebTable<T>, row: T) -> String WebTableError! {
     Ok(key)
 }
 
-replace_row: fn<T>(table: &WebTable<T>, key: String, row: T) WebTableError! {
+replace_row: fn<T>(table: ^WebTable<T>, key: String, row: T) WebTableError! {
     loop i in 0..<table.rows.len() {
         if table.rows[i].key == key {
             table.rows[i] = WebTableRow<T>{key: key, value: row}
@@ -304,7 +304,7 @@ replace_row: fn<T>(table: &WebTable<T>, key: String, row: T) WebTableError! {
     return Err(WebTableError.NotFound)
 }
 
-update_row: fn<T, E>(table: &WebTable<T>, key: String, transform: fn(T) -> T E!) (E | WebTableError)! {
+update_row: fn<T, E>(table: ^WebTable<T>, key: String, transform: fn(T) -> T E!) (E | WebTableError)! {
     loop i in 0..<table.rows.len() {
         if table.rows[i].key == key {
             updated: transform(table.rows[i].value.copy())
@@ -315,7 +315,7 @@ update_row: fn<T, E>(table: &WebTable<T>, key: String, transform: fn(T) -> T E!)
     return Err(WebTableError.NotFound)
 }
 
-remove_row: fn<T>(table: &WebTable<T>, key: String) -> T WebTableError! {
+remove_row: fn<T>(table: ^WebTable<T>, key: String) -> T WebTableError! {
     if table.rows.len() == 0 -> return Err(WebTableError.NotFound)
     remaining := [WebTableRow<T>]{}
     found := false
@@ -347,9 +347,9 @@ remove_row: fn<T>(table: &WebTable<T>, key: String) -> T WebTableError! {
     Ok(removed)
 }
 
-first_page: fn<T>(table: &WebTable<T>) Never! { table.state.page_index = 0 }
+first_page: fn<T>(table: ^WebTable<T>) Never! { table.state.page_index = 0 }
 
-next_page: fn<T>(table: &WebTable<T>) Never! {
+next_page: fn<T>(table: ^WebTable<T>) Never! {
     if table.state.page_size < 1 -> table.state.page_size = 25
     if table.state.page_size > C_MAX_TABLE_PAGE_SIZE {
         table.state.page_size = C_MAX_TABLE_PAGE_SIZE
@@ -360,7 +360,7 @@ next_page: fn<T>(table: &WebTable<T>) Never! {
     if table.state.page_index + 1 < pages -> table.state.page_index += 1
 }
 
-last_page: fn<T>(table: &WebTable<T>) WebTableError! {
+last_page: fn<T>(table: ^WebTable<T>) WebTableError! {
     if table.state.page_size < 1 || table.state.page_size > C_MAX_TABLE_PAGE_SIZE {
         return Err(WebTableError.Invalid)
     }

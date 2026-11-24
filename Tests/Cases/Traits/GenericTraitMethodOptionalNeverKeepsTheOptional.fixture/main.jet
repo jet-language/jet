@@ -2,34 +2,34 @@
 // through a bounded type parameter keeps it, so its None reaches `??` and a
 // `.Val` pattern instead of being unwrapped as a failure carrier.
 Src: trait {
-    grab: fn(&self) -[]> [U8]? Never!,
-    grab2: fn(&self) -> Int? Never!,
+    grab: fn(^self) -[]> [U8]? Never!,
+    grab2: fn(^self) -> Int? Never!,
 }
 
 Holder: struct {
     data: [U8],
 
     impl Src {
-        grab: fn(&self) -[]> [U8]? Never! {
+        grab: fn(^self) -[]> [U8]? Never! {
             if self.data.len() == 0 -> return None
             Val(self.data.copy())
         }
 
-        grab2: fn(&self) -> Int? Never! {
+        grab2: fn(^self) -> Int? Never! {
             if self.data.len() == 0 -> return None
             Val(self.data.len())
         }
     }
 }
 
-total: fn<H: Src>(h: &H) -[]> Int {
+total: fn<H: Src>(h: ^H) -[]> Int {
     bytes: h.grab() ?? return -1
     bytes.len() + (h.grab2() ?? 0)
 }
 
-size: fn<H: Src>(h: &H) -[]> Int { h.grab2() ?? -2 }
+size: fn<H: Src>(h: ^H) -[]> Int { h.grab2() ?? -2 }
 
-first: fn<H: Src>(h: &H) -[]> Int {
+first: fn<H: Src>(h: ^H) -[]> Int {
     if h.grab() == .Val(bytes) -> return Int{bytes[0]}
     0
 }

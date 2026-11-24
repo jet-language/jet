@@ -390,7 +390,7 @@ BuildExecutionReport: struct {
     metrics: BuildExecutionMetrics,
 }
 
-build_insert_sorted_int: fn(values: &[Int], value: Int) Never! {
+build_insert_sorted_int: fn(values: ^[Int], value: Int) Never! {
     if values.contains(value) {
         return
     }
@@ -417,7 +417,7 @@ build_action_pools: fn(action: HermeticBuildAction) -> [BuildResourcePool] Never
 
 // Rust `collect_target_actions`: the actions of `target` and its dependency
 // closure; revisiting a target on the walk is a target cycle.
-build_collect_target_actions: fn(plan: HermeticBuildPlan, target: Int, visiting: [Int], out: &[Int]) HermeticBuildError! {
+build_collect_target_actions: fn(plan: HermeticBuildPlan, target: Int, visiting: [Int], out: ^[Int]) HermeticBuildError! {
     if visiting.contains(target) -> return Err(build_target_cycle_error(plan, visiting, target))
     node: plan.targets.get(target) ?? return Err(HermeticBuildError.UnknownTarget(target))
     walk := visiting
@@ -426,7 +426,7 @@ build_collect_target_actions: fn(plan: HermeticBuildPlan, target: Int, visiting:
     loop action in node.actions -> build_insert_sorted_int(out, action.id)
 }
 
-build_visit_target_closure: fn(plan: HermeticBuildPlan, target: Int, out: &[Int]) Never! {
+build_visit_target_closure: fn(plan: HermeticBuildPlan, target: Int, out: ^[Int]) Never! {
     if out.contains(target) {
         return
     }
@@ -522,7 +522,7 @@ build_action_cycle_error: fn(plan: HermeticBuildPlan, remaining: [Int], prereqs:
     HermeticBuildError.ActionDependencyCycle(DependencyCycle{nodes: names})
 }
 
-build_walk_stalled: fn(node: Int, remaining: [Int], prereqs: [Int:[Int]], stack: &[Int], settled: &[Int]) -> [Int]? Never! {
+build_walk_stalled: fn(node: Int, remaining: [Int], prereqs: [Int:[Int]], stack: ^[Int], settled: ^[Int]) -> [Int]? Never! {
     if settled.contains(node) -> return None
     loop index in 0..<stack.len() {
         if stack[index] == node {

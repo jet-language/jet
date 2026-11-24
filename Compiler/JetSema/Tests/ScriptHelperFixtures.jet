@@ -2,7 +2,7 @@
 // check of the generated `run: fn` (sema_script_entry_local_types), and a
 // `:=` binding is marked as one a function may change. Functions that name
 // the variables don't stop the probe: their reports are dropped. A second
-// probe finds which `&` script parameters a function's body writes
+// probe finds which `^` script parameters a function's body writes
 // (sema_script_helper_writes).
 use {
     jet_foundation.[Span, Type, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table, type_name, type_unqualified_nominals]
@@ -97,21 +97,21 @@ show()
     assert_eq(type_name(script_helper_variable(shaped, "ratio").ty), "Decimal")
 }
 
-#Test("a function's `&` script parameters stay `&` only where its body writes them") {
+#Test("a function's `^` script parameters stay `^` only where its body writes them") {
     probe := script_helper_probe(
         `count := 0
 words := [String]{}
 limit: 3
 print(count)
-note: fn(word: String, *, count: &Int, words: &[String], limit: Int) {
+note: fn(word: String, *, count: ^Int, words: ^[String], limit: Int) {
     count += 1
     words.push("{word}")
     print("{count}/{limit}")
 }
-show: fn(*, count: &Int, words: &[String]) {
+show: fn(*, count: ^Int, words: ^[String]) {
     print("{count} {words.len()}")
 }
-own: fn(*, count: &Int) {
+own: fn(*, count: ^Int) {
     total := count
     total += 1
     print(total)

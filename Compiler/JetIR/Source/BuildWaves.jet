@@ -110,7 +110,7 @@ IRBuildClaim: struct {
 // Builds the jobs `roots` (checked functions, in order) and every function
 // they reach on up to `threads` threads; with `entry`, roots[0] is the
 // program entry (ir_entry_function), built after the first drain.
-ir_build_waves: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, threads: CompilerThreads) -> IRBuildResult Never! {
+ir_build_waves: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Bool, threads: CompilerThreads) -> IRBuildResult Never! {
     kept := ir_build_waves_kept(program, roots, entry, threads, None)
     kept.result.move()
 }
@@ -127,7 +127,7 @@ IR_BUILD_MAX_PARTS: 12
 // (ir_x64_admit), at most IR_BUILD_MAX_PARTS. The merge takes the jobs in
 // rank order, whichever part built each (ir_build_waves_finish), so the build
 // is the same for any part count.
-ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?, release_program: Bool{false}) -> IRBuildKept Never! {
+ir_build_waves_kept: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?, release_program: Bool{false}) -> IRBuildKept Never! {
     admitted: ir_x64_admit(threads, program.functions.len(), program.functions.len(), IR_BUILD_NS_PER_FUNCTION)
     count: if admitted > IR_BUILD_MAX_PARTS -> IR_BUILD_MAX_PARTS else -> admitted
     ir_build_waves_parted(program, roots, entry, count, trace_sink, release_program: release_program)
@@ -140,7 +140,7 @@ ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool,
 // part), `ir.build.entry` (the entry and what it reaches), `ir.build.glues`,
 // `ir.build.order` (the jobs ranked and the parts gathered), ir_merge's
 // steps and `ir.build.recursion`.
-ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, count: Int, trace_sink: CompilerTraceSink?, release_program: Bool{false}) -> IRBuildKept Never! {
+ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Bool, count: Int, trace_sink: CompilerTraceSink?, release_program: Bool{false}) -> IRBuildKept Never! {
     p := program.move()
     slots := [Shared<IRWaveWorker>]{}
     own := [[Int]]{}
@@ -221,11 +221,11 @@ ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Boo
         }
         result_box := [IRBuildResult]{}
         task.group ir_build_drop_program {
-            d0: task &&old_program { old_program.types.len() }
-            d1: task &&fns { fns.len() }
-            d2: task &&q1 { q1.len() }
-            d3: task &&q2 { q2.len() }
-            d4: task &&q3 { q3.len() }
+            d0: task ^^old_program { old_program.types.len() }
+            d1: task ^^fns { fns.len() }
+            d2: task ^^q1 { q1.len() }
+            d3: task ^^q2 { q2.len() }
+            d4: task ^^q3 { q3.len() }
             result_box.push(ir_build_waves_finish(jobs.move(), built_parts.move(), parts.move(), preps.move(), base_interner.move(), rooted, entry, entry_root.move(), entry_failures.move(), trace_sink))
             _: d0.join() ?? panic(compiler_threads_failure_text(err))
             _: d1.join() ?? panic(compiler_threads_failure_text(err))
@@ -243,7 +243,7 @@ ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Boo
     IRBuildKept{result: finished.move(), program: program_out.move()}
 }
 
-ir_build_waves_finish: fn(owned_jobs: &&[IRWaveJob], owned_built: &&[[IRWaveBuilt]], owned_parts: &&[IRModule], owned_preps: &&[IRMergePrep], base_interner: &&Interner, rooted: Int, entry: Bool, entry_root: &&IRMergeRoot, entry_failures: &&[IRBuildFailure], trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
+ir_build_waves_finish: fn(owned_jobs: ^^[IRWaveJob], owned_built: ^^[[IRWaveBuilt]], owned_parts: ^^[IRModule], owned_preps: ^^[IRMergePrep], base_interner: ^^Interner, rooted: Int, entry: Bool, entry_root: ^^IRMergeRoot, entry_failures: ^^[IRBuildFailure], trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
     if trace_sink == .Val(sink) -> sink.begin("ir.build.order", "", -1, -1)
     jobs := owned_jobs.move()
     built_parts := owned_built.move()
@@ -329,7 +329,7 @@ ir_build_queue_count: fn(queue: Shared<IRBuildQueue>) -> Int {
 
 // Queues the jobs `found` (in order) not queued yet: a lambda job for the
 // part that queued it, any other for any part.
-ir_build_queue_add: fn(queue: Shared<IRBuildQueue>, found: &&[IRWaveJob]) {
+ir_build_queue_add: fn(queue: Shared<IRBuildQueue>, found: ^^[IRWaveJob]) {
     rows := found.move()
     held := queue.guard_edit()
     loop job in compiler_take_rows<IRWaveJob>(rows) {
@@ -354,7 +354,7 @@ ir_build_known: fn(q: IRBuildQueue, job: IRWaveJob) -> Bool Never! {
 }
 
 // Records job `index` as its function's job.
-ir_build_note: fn(q: &IRBuildQueue, index: Int) Never! {
+ir_build_note: fn(q: ^IRBuildQueue, index: Int) Never! {
     if ir_waves_plain(q.jobs[index]) {
         row: q.jobs[index].row
         q.row_jobs[row] = index
@@ -364,7 +364,7 @@ ir_build_note: fn(q: &IRBuildQueue, index: Int) Never! {
 // Part `part`'s fused queue step: queues `found` (discovered by its previous
 // batch), then claims up to 8 jobs (own lambda jobs first) under a single lock
 // acquisition so workers avoid lock contention on every function.
-ir_build_step: fn(queue: Shared<IRBuildQueue>, part: Int, busy: Bool, found: &&[IRWaveJob]) -> IRBuildClaim {
+ir_build_step: fn(queue: Shared<IRBuildQueue>, part: Int, busy: Bool, found: ^^[IRWaveJob]) -> IRBuildClaim {
     rows := found.move()
     held := queue.guard_edit()
     added := false
@@ -505,7 +505,7 @@ ir_waves_entry_in: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>, 
     ir_wave_entry(held.value.modules[0], reads.value.programs[0], part, entry)
 }
 
-ir_wave_entry: fn(m: &IRModule, p: IRProgram, part: Int, entry: Int) -> IRWaveBuilt Never! {
+ir_wave_entry: fn(m: ^IRModule, p: IRProgram, part: Int, entry: Int) -> IRWaveBuilt Never! {
     before: m.queue.len()
     failures := [IRBuildFailure]{}
     local: ir_entry_function(m, p, entry, failures)
@@ -514,7 +514,7 @@ ir_wave_entry: fn(m: &IRModule, p: IRProgram, part: Int, entry: Int) -> IRWaveBu
 
 // Builds `job` in part `part`'s module: a checked function's id there first
 // (its stub, when an earlier job only referenced it), then its body.
-ir_wave_job: fn(m: &IRModule, p: IRProgram, job: IRWaveJob, part: Int) -> IRWaveBuilt Never! {
+ir_wave_job: fn(m: ^IRModule, p: IRProgram, job: IRWaveJob, part: Int) -> IRWaveBuilt Never! {
     local := job.local
     if job.lambda < 0 {
         local = ir_function_id(m, p, p.functions[job.row].key, job.args) ?? panic("an IR build job names no checked function")

@@ -18,9 +18,9 @@ Host: struct {
     parent: Int,
 }
 
-admit: fn(parent: &Int, producer: Producer) -> Int Never! { parent + producer.produce() }
+admit: fn(parent: ^Int, producer: Producer) -> Int Never! { parent + producer.produce() }
 
-attach: fn(host: &Host, prepared: Preparation) -> Int Never! {
+attach: fn(host: ^Host, prepared: Preparation) -> Int Never! {
     if prepared == .Prepared(producer) -> return admit(host.parent, producer)
     0
 }

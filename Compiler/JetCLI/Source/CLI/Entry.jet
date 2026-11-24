@@ -651,7 +651,7 @@ jet_cli_function_count: fn(program: Program, wanted: String) -> Int Never! {
 }
 
 // `discover_source_files` under `root`, or the problem that stopped the walk.
-jet_cli_discover_sources: fn(root: String, files: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
+jet_cli_discover_sources: fn(root: String, files: ^[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
     unretained := [AppAuthorizedDirectory]{}
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
     jet_cli_walk_sources(root, "", 0, files, unretained, false, budget)
@@ -660,7 +660,7 @@ jet_cli_discover_sources: fn(root: String, files: &[JetDriverAuthorizedSourceFil
 // `source_files_checked`: the package's discovered sources without the reserved
 // manifest, environment, config, and workspace files and without a root or
 // `src/` retired `main.jet`.
-jet_cli_package_sources: fn(root: String, files: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
+jet_cli_package_sources: fn(root: String, files: ^[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
     discovered := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_discover_sources(root, discovered) == .Val(problem) -> return Val(problem)
     loop file in discovered {
@@ -750,7 +750,7 @@ jet_cli_output_entry_file: fn(root: String, output: JetCLIOutputFact) -[FS]> Jet
 // `PackageFacts.default()`, whose origin is empty): the canonical `run.jet`
 // (root, then `src/`) after the retired-entry migration, the refusal of a
 // leftover `main.jet`, else the selected runnable output.
-jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, notices: &[String]) -[FS]> JetCLIStockEntry Never! {
+jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, notices: ^[String]) -[FS]> JetCLIStockEntry Never! {
     origin: if manifest == .Val(facts) -> facts.origin else -> ""
     loop relative in JET_CLI_STOCK_ENTRIES {
         path: jet_cli_checked_file(root, relative) ?? next
@@ -828,7 +828,7 @@ jet_cli_package_run_member: fn(root: String) -[FS]> String? Never! {
 
 // `find_project_entry_with_callable`: the stock entry of the project rooted at
 // `root`.
-jet_cli_find_project_entry: fn(root_path: String, command: String, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
+jet_cli_find_project_entry: fn(root_path: String, command: String, color: Bool, notices: ^[String]) -[FS, Env]> JetCLIEntryFound Never! {
     jet_cli_find_project_entry_at(root_path, command, color, notices, true)
 }
 
@@ -837,7 +837,7 @@ jet_cli_find_project_entry: fn(root_path: String, command: String, color: Bool, 
 // member for `run: fn`. Without `first_source` it skips reading every source
 // file of a library package whose entry won't be used (e.g. a depended
 // workspace member checked through its dependents).
-jet_cli_find_project_entry_at: fn(root_path: String, command: String, color: Bool, notices: &[String], run_member: Bool, first_source: Bool{true}) -[FS, Env]> JetCLIEntryFound Never! {
+jet_cli_find_project_entry_at: fn(root_path: String, command: String, color: Bool, notices: ^[String], run_member: Bool, first_source: Bool{true}) -[FS, Env]> JetCLIEntryFound Never! {
     root: cli_files.realpath(root_path) ?? root_path
     package := JetCLIManifest?{None}
     if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) != None {
@@ -947,7 +947,7 @@ jet_cli_command_override: fn(root_path: String, command: String, color: Bool) -[
 // Each top-level `fn <command>` of `file`: its path, and its location as the
 // package-relative `file:line`. For `build` that is the build entry
 // `build: fn(b: Build)`: the build query runs no other `build: fn`.
-jet_cli_command_override_lines: fn(file: JetDriverAuthorizedSourceFile, command: String, paths: &[String], locations: &[String]) Never! {
+jet_cli_command_override_lines: fn(file: JetDriverAuthorizedSourceFile, command: String, paths: ^[String], locations: ^[String]) Never! {
     lines: if command == "build" -> jet_cli_build_entry_lines(file.source) else -> jet_cli_top_level_function_lines(file.source, command)
     loop line in lines {
         paths.push(file.path.copy())
@@ -955,7 +955,7 @@ jet_cli_command_override_lines: fn(file: JetDriverAuthorizedSourceFile, command:
     }
 }
 
-jet_cli_find_command_entry: fn(root: String, command: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
+jet_cli_find_command_entry: fn(root: String, command: String, use_override: Bool, color: Bool, notices: ^[String]) -[FS, Env]> JetCLIEntryFound Never! {
     stock: jet_cli_find_project_entry(root, command, color, notices)
     if stock == {
         .Refused(_) -> return stock
@@ -1268,7 +1268,7 @@ JetCLIWorkspaceRunnableFound: enum {
 // stock entry of a member is resolved without the `run: fn` member parse:
 // whether it can run needs only that it has an entry file; a selected
 // member's entry is resolved in full (jet_cli_workspace_member_entry).
-jet_cli_workspace_runnable: fn(root: String, members: [JetCLIWorkspaceMember], command: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceRunnableFound Never! {
+jet_cli_workspace_runnable: fn(root: String, members: [JetCLIWorkspaceMember], command: String, use_override: Bool, color: Bool, notices: ^[String]) -[FS, Env]> JetCLIWorkspaceRunnableFound Never! {
     runnable := [JetCLIWorkspaceMember]{}
     entries := [JetCLIEntry]{}
     stocks := [Bool]{}
@@ -1307,7 +1307,7 @@ jet_cli_workspace_runnable: fn(root: String, members: [JetCLIWorkspaceMember], c
 // `cwd`, compiles. A workspace with more than one runnable member is ambiguous
 // unless `-p <member>` picks one; otherwise the nearest package's stock entry
 // (or its command override).
-jet_cli_resolve_bare_entry: fn(command: String, cwd: String, member_flag: String?, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
+jet_cli_resolve_bare_entry: fn(command: String, cwd: String, member_flag: String?, use_override: Bool, color: Bool, notices: ^[String]) -[FS, Env]> JetCLIEntryFound Never! {
     root: cli_files.realpath(cwd) ?? return JetCLIEntryFound.Absent
     source: jet_cli_workspace_source(root, color)
     if source == .Failed(plan) -> return JetCLIEntryFound.Refused{plan: plan}
@@ -1367,7 +1367,7 @@ jet_cli_resolve_bare_entry: fn(command: String, cwd: String, member_flag: String
 // the entries, in index order, of the members no other member depends on.
 // Their compiles load every other member through their dependency closures,
 // and a failing member's errors are reported inline before its E0626.
-jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceCheck Never! {
+jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: ^[String]) -[FS, Env]> JetCLIWorkspaceCheck Never! {
     root: cli_files.realpath(dir) ?? return JetCLIWorkspaceCheck.Absent
     source: jet_cli_workspace_source(root, color)
     if source == .Failed(plan) -> return JetCLIWorkspaceCheck.Refused{plan: plan}
@@ -1438,7 +1438,7 @@ JetCLIWorkspaceTest: enum {
     Refused(plan: JetCLIPlan),
 }
 
-jet_cli_workspace_fan_out_members: fn(dir: String, command: String, argv: [String], use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceTest Never! {
+jet_cli_workspace_fan_out_members: fn(dir: String, command: String, argv: [String], use_override: Bool, color: Bool, notices: ^[String]) -[FS, Env]> JetCLIWorkspaceTest Never! {
     root: cli_files.realpath(dir) ?? return JetCLIWorkspaceTest.Absent
     index_path := ""
     if jet_cli_workspace_source(root, color) == {
@@ -1488,7 +1488,7 @@ jet_cli_workspace_fan_out_members: fn(dir: String, command: String, argv: [Strin
 
 // Adds the index of the member of `runnable` named `want` to `picks`, once;
 // the refusal, naming the members that can run `jet <command>`, when none is.
-jet_cli_workspace_pick: fn(runnable: [JetCLIWorkspaceMember], want: String, command: String, color: Bool, picks: &[Int]) -> JetCLIPlan? Never! {
+jet_cli_workspace_pick: fn(runnable: [JetCLIWorkspaceMember], want: String, command: String, color: Bool, picks: ^[Int]) -> JetCLIPlan? Never! {
     loop (at, candidate) in runnable {
         if candidate.name == want {
             if !picks.contains(at) -> picks.push(at)
@@ -1550,7 +1550,7 @@ jet_cli_resolve_source_path: fn(command: String, raw: String, color: Bool, notic
 }
 
 // The notices resolution wrote, ahead of the report that stopped it.
-jet_cli_with_notices: fn(notices: [String], plan: &&JetCLIPlan) -> JetCLIPlan Never! {
+jet_cli_with_notices: fn(notices: [String], plan: ^^JetCLIPlan) -> JetCLIPlan Never! {
     if notices.len() == 0 -> return plan
     if plan == {
         .Done(output) -> return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)

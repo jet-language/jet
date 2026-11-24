@@ -121,7 +121,7 @@ pkg_binder_descriptor_for: fn(root: String, label: String) -> BinderDescriptor F
 }
 
 // Append the standard boundary record for one built archive.
-pkg_binder_append_artifact_boundary: fn(provenance: &String, root: String, label: String, lib: String, source: String, archive: String, toolchain: String) -[FS, Env, Exec, Time.Wait]> ForeignBindError! {
+pkg_binder_append_artifact_boundary: fn(provenance: ^String, root: String, label: String, lib: String, source: String, archive: String, toolchain: String) -[FS, Env, Exec, Time.Wait]> ForeignBindError! {
     descriptor: pkg_binder_descriptor_for(root, label)
     if pkg_bridge_append_boundary_for_artifact(provenance, descriptor, lib, source, archive, toolchain) == {
         .Ok(_) -> {}

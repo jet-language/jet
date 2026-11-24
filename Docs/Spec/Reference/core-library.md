@@ -52,7 +52,7 @@ consumption remain identical to the native SplitMix64 seed.
 the public `numerator()` and `denominator()` accessors; the storage names are
 not a construction API.
 
-Manual Core `Debug` implementations use the Prelude's consuming `debug(&&self)`
+Manual Core `Debug` implementations use the Prelude's consuming `debug(^^self)`
 contract; `Display` reads `self`. Neither formatting projection changes its text.
 Data errors provide their explicit `Display` and `Debug` implementations beside
 the error declaration; the `#Error` rule does not need a second formatting
@@ -136,13 +136,17 @@ never escapes a raw operation. Ordinary Close first unloads any opened native
 library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
-The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
+The `jet.runtime.files.create_dir_all_raw` leaf calls the shared recursive
 directory-creation host operation without a second fault probe; source callers
 retain their own FS.Write preflight and the host's Write/path error context.
-Filesystem internal host calls use their canonical `core.files.__*` names
-directly. There is no second `__files7_*` alias layer: the Prelude's existing
-registry entries provide the raw host boundary until Jet runtime L7 replaces
-them at Rust cutover.
+Whole-file and positioned reads and writes, link reads, removal, copy, links,
+mode and owner changes, canonicalization, access checks, the reader, writer,
+map and held-directory handle operations, extended attributes, atomic writes,
+temporary paths and host path facts call their `jet.runtime.files` leaves
+directly. The remaining filesystem host calls use their canonical
+`core.files.__*` names. There is no second `__files7_*` alias layer: the
+Prelude's existing registry entries provide that raw host boundary until Jet
+runtime L7 replaces them at Rust cutover.
 The Rust verification tier single-homes filesystem syscall tails in
 `jet_std_fs_*_raw` functions. Native seed entry points retain their original
 fault probes and call those tails; Jet entry points can perform the same
@@ -356,6 +360,12 @@ an unexported function through an alias is E1004, so safe code can't build a
 handle from a made-up word. A helper Core declares `priv` is refused as any
 package's `priv` item is, with the same diagnostic: `csv.csv_row(…)` outside
 Core is **E0605**, like `dep.pad(…)` for a `priv pad` of a dependency.
+
+A Core item whose name starts with `__` is Core's machine space, and Core
+declares every one `priv`: a public one fails the build with **E0645**. User
+source can't spell a `__` name (E0067), so only Core and the code the compiler
+generates into a module (derived codecs, a command's argument reads, an app's
+routes) name one, and that generated code reaches it from any module.
 
 `jet_builtins` (`Core/Builtins/Builtins.jet`) is Core's one door to the
 compiler: the module that declares the operations, storage types and markers
@@ -870,9 +880,9 @@ the stored value, or `start` when `k` is missing, and adds no entry, so it
 reads an immutable map too. As a place it first adds `start` under a missing
 `k`, then updates the stored value. The counter idiom is
 `counts[w, or: 0] += 1`, and `groups[w, or: [String]{}].push(w)` groups
-values under their key (written `&groups[…].push(w)` under
+values under their key (written `^groups[…].push(w)` under
 `#Policy(writes: .Explicit)`, which marks every call that changes a value).
-`slot: &m[k, or: start]` binds the entry the same way.
+`slot: ^m[k, or: start]` binds the entry the same way.
 `start` has the map's value type and runs only when `k` is missing, at most
 once per slot use. A plain `m[k, or: start] = v` sets `k` as `m[k] = v` does,
 and `start` does not run. A starting value on anything but a map is E0505, and
@@ -964,7 +974,7 @@ remainder in the same source: after two pulls from `[1, 2, 3].lazy()`,
 `to_list()` returns `[3]`. The end is `None`. A moved source cannot be pulled,
 and a loop that drives a source holds it for its whole body, so pulling from
 the same source inside that body is rejected (E0507). A helper that pulls from
-a caller's source names it as `&Iter<T>`.
+a caller's source names it as `^Iter<T>`.
 `first()` is different: it consumes the whole iterator and returns only its
 first item. Adapter callbacks run only when an item is pulled through them, and
 the item that ends a `take_while` is consumed and not yielded. User types that
@@ -1308,17 +1318,17 @@ They are bare bounds, so `fn<R: Reader>` needs no import:
 
 ```jet
 Reader: trait {
-    read_bytes: fn(&self, limit: Int) -> [U8] IOError!,
-    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,
+    read_bytes: fn(^self, limit: Int) -> [U8] IOError!,
+    read_into: fn(^self, buffer: ^[U8], limit: Int) -> Int IOError!,
 }
 
 Writer: trait {
-    write_bytes: fn(&self, bytes: [U8]) IOError!,
-    flush: fn(&self) IOError!,
-    write: fn(&self, text: String) IOError! {
+    write_bytes: fn(^self, bytes: [U8]) IOError!,
+    flush: fn(^self) IOError!,
+    write: fn(^self, text: String) IOError! {
         self.write_bytes(text.bytes())
     }
-    write_line: fn(&self, text: String) IOError! {
+    write_line: fn(^self, text: String) IOError! {
         self.write_bytes("{text}\n".bytes())
     }
 }
@@ -1330,7 +1340,7 @@ of the input. `read_into` appends at most `limit` bytes to the caller's
 bound passes each argument with the access the trait declares, so
 `source.read_into(out, n)` grows the caller's `out` in place. An
 implementation must declare the same access for each parameter that the
-trait writes (`&`) or moves (`&&`); `read_into: fn(&self, buffer: [U8],
+trait writes (`^`) or moves (`^^`); `read_into: fn(&self, buffer: [U8],
 limit: Int)` is E0907.
 
 `write_bytes` writes all of `bytes` or fails; `flush` pushes what the sink
@@ -1349,9 +1359,9 @@ until `flush`, `fsync` or close. core.term's binary cursor
 `IOError.InvalidInput`. The cursor hands out the bytes it has not yet read.
 core.term's `Stdout` and `Stderr` implement `Writer` with their own `write`
 and `write_line`.
-Because these methods write the handle (`&self`), a handle that is read or
+Because these methods write the handle (`^self`), a handle that is read or
 written lives in a mutable binding (`reader := files.open(path)`) and a helper
-that reads one takes it as `&FileReader` (E0111 and E0205 otherwise).
+that reads one takes it as `^FileReader` (E0111 and E0205 otherwise).
 
 ## Pay for what you call
 
@@ -1618,7 +1628,7 @@ count_lines: fn(path: String) -> Int IOError! {
 | `append(path)` | `FileWriter IOError!` | Open a buffered appending writer. |
 | `reader.read_line()` | `String? IOError!` | Read from the shared buffered position, remove all trailing CR/LF bytes, and return `None` only at EOF. A final unterminated line is returned; invalid UTF-8 is `IOError.InvalidInput`. |
 | `reader.read_bytes(max)` | `[U8] IOError!` | Read up to `max` bytes from the shared position; an empty list is EOF. |
-| `reader.read_into(buffer: &[U8], limit)` | `Int IOError!` | Append up to `limit` bytes from the shared position to the caller's `buffer` and return the count; 0 is EOF, and a limit below one is `IOError.InvalidInput` before any read. A cleared, reused buffer reads without allocating. |
+| `reader.read_into(buffer: ^[U8], limit)` | `Int IOError!` | Append up to `limit` bytes from the shared position to the caller's `buffer` and return the count; 0 is EOF, and a limit below one is `IOError.InvalidInput` before any read. A cleared, reused buffer reads without allocating. |
 | `reader.stat()` / `writer.stat()` | `Stat IOError!` | Describe the open file itself (fstat); a writer's buffered bytes count only after a flush. |
 | `reader.lines()` in a loop source | stream of `String` | Pull lines without loading the complete file. |
 | `writer.write(text)` / `writer.write_line(text)` / `writer.write_bytes(bytes)` | `IOError!` | Write text, text and a newline, or every byte of `bytes` (buffered). |
@@ -2175,7 +2185,7 @@ nothing and `value` reads `""`.
 
 | Signature | Result | Description |
 |---|---|---|
-| `on(target: String, event: String, handler: &&fn(WebEvent)) -[Browser]>` | — | Run `handler` for each `event` (a DOM event type) of the element the CSS selector `target` selects, once the program's `run` returned, as a click on a scene element runs its handler. The `WebEvent` carries `target` as `path`, `event` as `title`, and the value the element holds then as `payload`. |
+| `on(target: String, event: String, handler: ^^fn(WebEvent)) -[Browser]>` | — | Run `handler` for each `event` (a DOM event type) of the element the CSS selector `target` selects, once the program's `run` returned, as a click on a scene element runs its handler. The `WebEvent` carries `target` as `path`, `event` as `title`, and the value the element holds then as `payload`. |
 | `value(target: String) -[Browser]> String` | text | Read the selected input's value, else the element's text; `""` when nothing matches. |
 
 ### `core.browser.storage` — browser storage adapters
@@ -2645,6 +2655,7 @@ run: fn() {
 | `read_all_input()` | `String IOError!` | Read stdin to EOF. |
 | `input_secret(prompt)` | `String IOError!` | Read without echo; redirected/non-terminal input is an error rather than an echoed fallback. |
 | `take(n)` | `[U8] IOError!` | Read up to `n` raw bytes from stdin. |
+| `take_within(n, wait)` | `[U8]? IOError!` | Read up to `n` raw bytes once stdin has one, waiting at most `wait` (a `Duration`; zero looks without waiting): `None` when none came in time, `[]` at end of input. Prove capture and replay record each answer, `None` included. |
 | `confirm(prompt)` / `choose(prompt, options)` | `Bool` / `String IOError!` | Ask a bounded yes/no or choice question. |
 | `stdin()` / `buffered()` | `StdinHandle` | Return the buffered stdin handle; `buffered` is its alias. |
 | `stdout()` / `stderr()` | `Stdout` / `Stderr` | Return output stream handles. |
@@ -3822,7 +3833,7 @@ it retains its 64-bit floating-point projection, while
 ```jet
 use random: core.math.random
 
-roll_at: fn(rng: &RNG) -> String {
+roll_at: fn(rng: ^RNG) -> String {
     value: rng.int(1, 6)
     "roll={value}"
 }
@@ -4080,7 +4091,7 @@ compile time), so the value can key a hash table. It is not cryptographic, and
 the value may differ between runs and compiler versions: never persist it or
 compare it across processes.
 
-A `:=` String, a String field reached through one, or a `&String` parameter
+A `:=` String, a String field reached through one, or a `^String` parameter
 is edited in place with plain calls. Each call writes its receiver, so a `:`
 binding rejects it with E0111 and an unmarked parameter with E0205.
 Positions count characters, as `slice` does, and a position outside the text
@@ -4558,7 +4569,7 @@ is minimal rather than comment-preserving.
 `core.encoding.yaml` accepts JSON-compatible YAML 1.2 plus simple block maps,
 lists, comments, `|` or `>` block scalars, a leading `---` document marker,
 and JSON flow collections (`[1, 2]`, `{"a": 1}`) as values. Unknown or
-unsupported syntax fails closed: anchors and aliases (`&name`, `*name`) and a
+unsupported syntax fails closed: anchors and aliases (`^name`, `*name`) and a
 flow collection that is not JSON are `Unsupported` errors that name them. A
 key repeated in one map is a `Syntax` error at the repeat whose reason names
 where the key first appears; `parse_allow_duplicates` keeps the later value
@@ -5040,7 +5051,7 @@ package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 | `bool(key: String, value: Bool) -> LogField` | field | Create a Boolean field. |
 | `redact(key: String) -> LogField` | field | Mark a key as redacted. |
 | `span(name: String) -[Log]> LogSpan` | span | Open a named span and enter it; the calling thread's records carry it until it closes. |
-| `close(span: &&LogSpan) -[Log]>` | — | Close a span before its block ends; it takes the span. |
+| `close(span: ^^LogSpan) -[Log]>` | — | Close a span before its block ends; it takes the span. |
 | `set_sink(kind: String, path: String) -[Log]>` | — | Select the output. |
 | `set_level(level: LogLevel, path: String{""}) -[Log]>` | — | Set the code's level for the module at `path` and every module under it; `""` is every module. |
 | `sample_every(n: Int) -[Log]>` | — | Sample every positive number of records. |
@@ -5130,7 +5141,7 @@ sendability rules. The implementation is in
 | `semaphore.acquire_within(limit: Duration) -[Time.Wait]> Bool` | taken | Take a unit, waiting at most `limit` on the monotonic clock (`sem_timedwait`); `false` when none came in time or the task is canceled. |
 | `semaphore.release()` | — | Return a unit and wake one waiting `acquire`. |
 | `semaphore.value() -> Int` | units | The free units at the moment of the read. |
-| `Scheduler: trait { push, pop }`, `QueuedTask` | trait | A scheduler provider: the run queue the runtime's carriers take submitted tasks from. `push(&self, task: QueuedTask)` queues a task; `pop(&self) -> QueuedTask?` answers the next to run, None when nothing waits. |
+| `Scheduler: trait { push, pop }`, `QueuedTask` | trait | A scheduler provider: the run queue the runtime's carriers take submitted tasks from. `push(^self, task: QueuedTask)` queues a task; `pop(^self) -> QueuedTask?` answers the next to run, None when nothing waits. |
 | `#Unsafe queued_task(handle: Int) -> QueuedTask` | task | The task the runtime handed its scheduler hook as `handle`; the caller vouches it is a submitted task that goes back to the runtime once. |
 | `queued_handle(task: QueuedTask) -> Int` | handle | The runtime's handle of `task`, which the hook hands back. |
 
@@ -5260,7 +5271,7 @@ constant evaluation; they are not alternate syntax for bindings. See
 | Signature | Result | Description |
 |---|---|---|
 | `keep<T>(value: T) -> T` | `T` | Preserve a value at an explicit use site. |
-| `identity(value: &&String) -> String` | text | Return a borrowed string unchanged. |
+| `identity(value: ^^String) -> String` | text | Return a borrowed string unchanged. |
 | `always(value: Bool) -> Bool` | Boolean | Return a Boolean unchanged. |
 | `identity_int(value: Int) -> Int`, `identity_float(value: Float) -> Float`, `identity_bool(value: Bool) -> Bool` | same type | Typed identity helpers for primitive values. |
 | `const_int(value: Int, ignored: Int) -> Int` | integer | Select the first integer in a constant-evaluation expression. |
@@ -5336,6 +5347,17 @@ or golden file. The public source is
 | `world(body: fn(DeterministicWorld))` | — | Run `body` in a deterministic world. Inside it, the clock is the world's (`world.now()`). Tasks spawned there belong to the world, and their sleeps wait for `world.advance(d)`, which releases due timers in deadline order and moves the clock by exactly `d`. Seeded `core.math.random` draws come from the world's own stream and are journaled in `world.history()`. An effect with no controlled provider (network, foreign calls, OS entropy) stops the program. A world cannot end while one of its tasks is live, and worlds do not nest. |
 | `histories<Command>(seed: Int, cases: Int, strategy: HistoryStrategy<Command>?, model: fn([Command]) -> Dyn, actual: fn([Command]) -> Dyn, observe: fn(Dyn) -> Dyn) -> TestComparison Err!` | comparison | Run a typed history campaign (`D-TEST-HISTORY1`, `D-TEST-STRATEGY1`): one `HistoryRNG` seeded by `seed` feeds every `generate`; invalid or out-of-bounds cases are discarded, a mismatch shrinks to a valid reduced case and fails with `history mismatch in case `<id>`: <op> -> <op> …`, whose cause carries the replayable `history-artifact {…}` JSON. Without `strategy`, the compiler derives one from an enum whose payloads are `Int`, `Bool` or `String`; any other command type is `unsupported`. The artifact's source, tool and target identities come from the compiler. `HistoryRNG` is a Core SplitMix64 generator whose copies share one stream; `next_u64()` and `below(bound)` return `Int` (`D-TEST-COUNT1`). A strategy's `generate`, `rebuild` and `valid` slots are pure (`-[]>`): a case draws only from the `HistoryRNG`, so the campaign's effects are those of `model`, `actual` and `observe`, and a target that denies an effect they do not use still runs it. |
 | `status(comparison: TestComparison) -> String` | text | Read the comparison status. |
+
+`DeterministicWorld` is a Core struct over the runtime's world handle. Its
+methods call `jet.runtime.testing`, as `core.net`'s handles call
+`jet.runtime.net`:
+
+| Method | Result | Description |
+|---|---|---|
+| `world.now() -> Int` | milliseconds | The world's wall clock, in milliseconds since the Unix epoch. |
+| `world.advance(by: Duration) -> Int` | milliseconds | Move the clock forward by exactly `by`, releasing the timers due on the way in deadline order; the wall clock after the move. |
+| `world.wait_idle()` | — | Wait until every task of the world is blocked or done. |
+| `world.history() -> String` | text | The world's journal: its clock moves, timers and seeded random draws. |
 
 `#Test` is the only test declaration syntax (`D-TESTKIT1`).
 Use `#Test` for test declarations and keep assertions about behavior rather
@@ -5708,7 +5730,7 @@ a `Point` or `Rect` fill the pixels whose centers lie inside, with coordinates
 snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is
 inside, one on a right or bottom edge is not. The collision checks and the
 `Image` functions are pure and need no effect; `image_*` functions change an
-`Image` in place through `&`.
+`Image` in place through `^`.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -5800,8 +5822,8 @@ Every fault in a font file is a typed `FontError{reason}`.
 | `Face.layout(text: String, size_px: Float) -> TextRun` / `.wrap(text, size_px, max_width) -> [TextLine]` | layout | Place a line of glyphs with kerning, and break text into lines after spaces and hyphens. |
 | `Face.raster(id: Int, size_px: Float, x_frac: Float) -> GlyphMask` | mask | A glyph's anti-aliased coverage, unhinted, at a sub-pixel position. |
 | `cache() -> GlyphCache` / `cache_within(budget: Int)` / `GlyphCache.glyph(face, id, size_px, x_frac)` | cache | Masks kept per face, glyph, size and quarter pixel, within about `budget` bytes (CACHE_BYTES_MAX, 4 MiB, by default). |
-| `blend(&pixels, width, height, stride_bytes, mask, x, y, argb, clip: UIRect)` | — | Paint a mask onto premultiplied ARGB8888 pixels (bytes B, G, R, A, `stride_bytes` per row) by core.ui's one blend rule, source-over on the sRGB bytes: the source covers `sa = (A * coverage + 127) / 255` of a pixel, and each byte `d` becomes `s + (d * (255 - sa) + 127) / 255`, with `s = (C * sa + 127) / 255` for a color byte and `sa` for alpha. Only pixels inside `clip` and the canvas change. |
-| `draw_text(&pixels, width, height, stride_bytes, &cache, face, text, size_px, x, baseline_y, argb, clip) -> Int` | advance | Lay out and paint a line of text at quarter-pixel positions, and return its advance in whole pixels. |
+| `blend(^pixels, width, height, stride_bytes, mask, x, y, argb, clip: UIRect)` | — | Paint a mask onto premultiplied ARGB8888 pixels (bytes B, G, R, A, `stride_bytes` per row) by core.ui's one blend rule, source-over on the sRGB bytes: the source covers `sa = (A * coverage + 127) / 255` of a pixel, and each byte `d` becomes `s + (d * (255 - sa) + 127) / 255`, with `s = (C * sa + 127) / 255` for a color byte and `sa` for alpha. Only pixels inside `clip` and the canvas change. |
+| `draw_text(^pixels, width, height, stride_bytes, ^cache, face, text, size_px, x, baseline_y, argb, clip) -> Int` | advance | Lay out and paint a line of text at quarter-pixel positions, and return its advance in whole pixels. |
 
 ### `core.reactive` — explicit signals and dependency tracking
 
@@ -5836,7 +5858,7 @@ release effects with `unsubscribe`. A derived computation does not become a
 hidden global dataflow graph.
 Reactivity is an opt-in library rather than ambient language semantics (`D-REACT1`); `computed` is the canonical alias for the derived-value constructor (`D-SIGNAL1`).
 Setting a synchronized signal updates the provider state, not the Jet carrier
-binding, so its receiver call uses `count.set(value)` without an `&` mark. UI
+binding, so its receiver call uses `count.set(value)` without an `^` mark. UI
 button handlers are ordinary code arguments, `ui.button("Click", fn() { … })`
 (D-TRAILBLOCK2); a bare `{ }` after the call is E0335.
 
@@ -7233,7 +7255,7 @@ Storage adapters are named below because they are separate built modules.
 `web.form(Model, action: handler)` derives the model's typed inputs at compile
 time and returns a `WebFormTyped`, whose methods core.web.forms declares. The
 ones that change the form (`set`, `set_async_validator`, `blur`, `focus`,
-`cancel`, `submit` and `no_script`) take `&self`, so a form that is filled in
+`cancel`, `submit` and `no_script`) take `^self`, so a form that is filled in
 is bound with `:=`. `form.validate(.field, on:, with:)` names a model field
 with a leading-dot selector and returns a `WebFormValidationChain`, whose
 `render()` reports that field's result. Its model is a struct marked with the web
@@ -7268,9 +7290,9 @@ transaction/event lengths, history limit, cursor, generation, and capture state;
 the generic state payload.
 
 `transaction`, `update`, `batch`, `optimistic` and `patch` (and the `transact`
-receiver) take `apply: fn(&T) E!`: the callback receives the current value as a
+receiver) take `apply: fn(^T) E!`: the callback receives the current value as a
 written parameter and changes it in place, as in
-`store.transact("add item", fn(cart: &Cart) { cart.items.push(item) })`. The
+`store.transact("add item", fn(cart: ^Cart) { cart.items.push(item) })`. The
 store then holds the changed value and records one transaction from the value
 before it; a failure of `apply` is the call's, unchanged, and leaves the store
 as it was.
@@ -7364,7 +7386,7 @@ run: fn() {
 | `from_addr<T>(address: Int) -> *T` | pointer | `#Unsafe` function: reconstitute a pointer; every call sits in an audited `#Unsafe` region. |
 | `volatile_read<T>(pointer: *T) -> T` | value | `#Unsafe` function: perform a volatile read; every call sits in an audited `#Unsafe` region. |
 | `volatile_write<T>(pointer: *T, value: T)` | — | `#Unsafe` function: perform a volatile write; every call sits in an audited `#Unsafe` region. |
-| `stream_store<T>(dst: &T, value: T)` | — | `dst = value`, written without filling the cache (a non-temporal store) where the target has one for the value's width, else an ordinary store. Safe. |
+| `stream_store<T>(dst: ^T, value: T)` | — | `dst = value`, written without filling the cache (a non-temporal store) where the target has one for the value's width, else an ordinary store. Safe. |
 
 `Fixed` never grows or falls back to the heap. It reserves allocation and
 reverse-drop space from opposite ends of its buffer and fails before moving a
@@ -7403,8 +7425,8 @@ the neighbor that starts where the block ends.
 | `close(region)` | — | Unmap a reserved region. |
 | `block.address()`, `block.size()` | integer | The first address and the size in bytes. |
 | `block.split(at: Int) -> Block` | block | Keep the first `at` bytes and return the rest. `at` outside the block panics. |
-| `block.join(next: &&Block)` | — | Grow over `next`, which must start where the block ends, else it panics. |
-| `Allocator: trait { allocate: fn(&self, size: Int, align: Int) -> Block AllocError!; release: fn(&self, block: &&Block) Never!; resize: fn(&self, block: &Block, new_size: Int) -> Bool Never! }` | trait | The allocator trait. `resize` changes a block in place and answers whether it could; on `false` the block is unchanged. `release` and `resize` cannot fail. |
+| `block.join(next: ^^Block)` | — | Grow over `next`, which must start where the block ends, else it panics. |
+| `Allocator: trait { allocate: fn(^self, size: Int, align: Int) -> Block AllocError!; release: fn(^self, block: ^^Block) Never!; resize: fn(^self, block: ^Block, new_size: Int) -> Bool Never! }` | trait | The allocator trait. `resize` changes a block in place and answers whether it could; on `false` the block is unchanged. `release` and `resize` cannot fail. |
 
 Inside a `#Context(allocator: a)` block over an `Arena`, `context.scratch`
 (the task's scratch arena) or a `mem.Allocator` value, the list buffers,
@@ -7676,10 +7698,10 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `tcp_connect(addr: String) -[Net, Time.Wait]> TCPStream NetError!` / `tcp_connect_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPStream NetError!` | stream | Connect to a TCP endpoint. |
 | `tcp_connect_happy(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetError!` | stream | Connect through the address-family race. |
 | `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetError!` / `create_server(host, port) -[Net]> TCPListener NetError!` | endpoint | Build host/port TCP endpoints. |
-| `send(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int NetError!` | count | Write text through the caller's exclusive stream window. |
-| `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String NetError!` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] NetError!` | text/bytes | Read from a TCP stream. |
+| `send(stream: ^TCPStream, text: String) -[Net, Time.Wait]> Int NetError!` | count | Write text through the caller's exclusive stream window. |
+| `tcp_read(stream: ^TCPStream) -[Net, Time.Wait]> String NetError!` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] NetError!` | text/bytes | Read from a TCP stream. |
 | `tcp_read_text(stream, n) -[Net, Time.Wait]> String NetError!` | text | Read and decode up to `n` bytes. No byte is lost: a character the read cuts stays for the next read, and one that starts the read is read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a character the end of the stream cuts, fail each text read and stay for `tcp_read_bytes`. |
-| `stream.read_into(buffer: &[U8], limit)` / `stream.read_into(buffer, limit, deadline:)` on `TCPStream` | `Int NetError!` | Append one read of up to `limit` bytes (at most 16 MiB) to the caller's `buffer` and return the count; 0 is the end of the stream, and a limit below one is `.InvalidInput`. The bytes go straight into the buffer, so a loop that clears and reuses one buffer allocates nothing per read. A carry an earlier text read left is appended first. |
+| `stream.read_into(buffer: ^[U8], limit)` / `stream.read_into(buffer, limit, deadline:)` on `TCPStream` | `Int NetError!` | Append one read of up to `limit` bytes (at most 16 MiB) to the caller's `buffer` and return the count; 0 is the end of the stream, and a limit below one is `.InvalidInput`. The bytes go straight into the buffer, so a loop that clears and reuses one buffer allocates nothing per read. A carry an earlier text read left is appended first. |
 | `stream.read(limit)` / `stream.write(text)` on `TCPStream`, each also with `deadline:` | `String NetError!` / `NetError!` | Read and decode up to `limit` bytes as `tcp_read_text` does, or write every UTF-8 byte of the text. |
 | `stream.read_bytes(limit)` / `stream.write_some(bytes)` / `stream.write_bytes(bytes)` on `TCPStream`, each also with `deadline:` | `[U8] NetError!` / `Int NetError!` / `NetError!` | One bounded byte read, one partial write that returns the count taken, and a write of every byte. |
 | `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit NetError!` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Unit NetError!` | unit | Write every byte of the text or the bytes. |
@@ -7702,13 +7724,13 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `unix_listen(path: String) -[Net]> UnixListener NetError!` / `unix_connect(path) -[Net, Time.Wait]> UnixStream NetError!` | endpoint | Use Unix-domain sockets. |
 | `unix_accept(listener) -[Net, Time.Wait]> UnixStream NetError!` / `unix_read(stream) -[Net, Time.Wait]> String NetError!` | stream/text | Accept or read a Unix stream. |
 | `unix_write(stream, text) -[Net, Time.Wait]> Unit NetError!` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] NetError!` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
-| `stream.read_into(buffer: &[U8], limit, deadline:)` on `UnixStream` | `Int NetError!` | The TCP `read_into` with an explicit deadline, retrying an interrupted read. |
+| `stream.read_into(buffer: ^[U8], limit, deadline:)` on `UnixStream` | `Int NetError!` | The TCP `read_into` with an explicit deadline, retrying an interrupted read. |
 | `stream.read_bytes(limit, deadline:)` / `stream.write_bytes(bytes, deadline:)` on `UnixStream` | `[U8] NetError!` / `NetError!` | One bounded byte read, or a write of every byte. |
 | `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit NetError!` / `unix_shutdown(stream, how) -[Net]> Unit NetError!` / `unix_close(stream) -[Net]> Unit NetError!` | — | Write all bytes or close the same Unix stream. |
-| `unix_send(&stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit NetError!` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
-| `unix_receive(&stream, max: Int) -[Net, Time.Wait]> UnixMessage NetError!` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |
-| `unix_wait(&stream, timeout_ns: Int) -[Net, Time.Wait]> Bool NetError!` | ready | Wait on the calling thread until the stream has something to read (true) or `timeout_ns` passes (false); a negative timeout waits without limit. Interrupted waits resume with the time left. |
-| `unix_wait_wake(&stream, wake: core.sys.Fd, timeout_ns: Int) -[Net, Time.Wait]> Int NetError!` | ready bits | Wait like `unix_wait`, and also end once `wake` (a pipe another task writes to) has something to read: bit 1 of the result says the stream is readable, bit 2 says `wake` is, and 0 says `timeout_ns` passed. |
+| `unix_send(^stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit NetError!` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
+| `unix_receive(^stream, max: Int) -[Net, Time.Wait]> UnixMessage NetError!` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |
+| `unix_wait(^stream, timeout_ns: Int) -[Net, Time.Wait]> Bool NetError!` | ready | Wait on the calling thread until the stream has something to read (true) or `timeout_ns` passes (false); a negative timeout waits without limit. Interrupted waits resume with the time left. |
+| `unix_wait_wake(^stream, wake: core.sys.Fd, timeout_ns: Int) -[Net, Time.Wait]> Int NetError!` | ready bits | Wait like `unix_wait`, and also end once `wake` (a pipe another task writes to) has something to read: bit 1 of the result says the stream is readable, bit 2 says `wake` is, and 0 says `timeout_ns` passed. |
 | `dns_a(name: String) -[Net, Time.Wait]> [IPAddr] NetError!` / `dns_aaaa(name) -[Net, Time.Wait]> [IPAddr] NetError!` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String) -[Net, Time.Wait]> [IPAddr] NetError!` / `dns_aaaa_at(server, name) -[Net, Time.Wait]> [IPAddr] NetError!` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String) -[Net, Time.Wait]> [String] NetError!` / `dns_ptr(addr) -[Net, Time.Wait]> [String] NetError!` | records | Resolve TXT or PTR records. |
@@ -7732,18 +7754,20 @@ Effects follow the existing per-function Core rows, not a module-wide waiting
 annotation. TCP listen and address getters, socket options, UDP bind/options,
 and Unix listen/shutdown/close require `Net` without `Time.Wait`. Accept,
 connect, byte transfer, DNS, and the other listed waiting operations retain
-their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
-moving public validation into Jet does not widen the authority contract.
+their existing `Time.Wait` leaf, and moving public validation into Jet does
+not widen the authority contract.
 TCP reply is Jet end to end: it frames the plain-text HTTP/1.1 reply and
 writes it with the stream's own `write_bytes`, then shuts down the write half.
-TCP listen, accept, connect, address and option access, and UDP bind,
-address, send, and receive enter their Jet public functions, which call the
-matching `jet.runtime.net` leaves (`tcp_listen`, `set_nodelay`, `udp_bind`,
-and so on). Each leaf declares the public operation's effect row and keeps the
-existing native error mapping and borrow/move conventions.
-Unix listen, accept, read, byte-write, shutdown, and close also enter Jet
-source first. Their reserved raw leaves preserve exactly the public
-operation's existing effect row and supported interpreter/native tiers.
+TCP listen, accept, connect, address and option access; UDP bind, address,
+send, and receive; Unix listen, accept, connect, read, byte-write, descriptor
+passing, wait, shutdown, and close; DNS A, AAAA, and SRV lookups; and the
+IP, socket-address, and UDP-packet getters all enter their Jet public
+functions, which call the matching `jet.runtime.net` leaves (`tcp_listen`,
+`unix_send_fds_raw`, `dns_a_lookup`, `socket_port`, and so on). Each leaf
+declares the public operation's effect row and keeps the existing native
+error mapping and borrow/move conventions. Building an IP or socket address
+from parsed parts, connecting a Unix stream by a deadline, and waiting on a
+Unix stream together with a wake descriptor still use reserved raw leaves.
 The HTTP client is Jet end to end: `get`, `post`, `request`, and `send` build
 an `HTTPRequest` record, frame HTTP/1.1 over `core.net` TCP or `core.net.tls`,
 and decode the status line, headers, chunked/length framing, and gzip into an
@@ -7774,7 +7798,7 @@ requirements as their public operations.
 
 `unix_connect` retains the native entry so its ratified `deadline:` overload is
 not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
-the native access contract: reads and writes borrow the named stream with `&`,
+the native access contract: reads and writes borrow the named stream with `^`,
 not a copied local handle.
 
 ### `core.net.ip` — IPv4/IPv6 values and address classes
@@ -7823,12 +7847,12 @@ Mbed TLS 3.6.7); configuration carriers are validated before network use. See
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig IOError!` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
 | `tls.client(tcp, server_name:, config:, deadline:)` | `TLSStream NetError!` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream IOError!` | Convenience form that connects and verifies a host and port. |
-| `read(stream: &TLSStream, n: Int)` / `read_bytes(stream, n)` | `String IOError!` / `[U8] IOError!` | Read checked UTF-8 text or bounded TLS bytes. Like `tcp_read_text`, `read` loses no byte: a cut character stays for the next read, and bytes that are not UTF-8 fail the read and stay for `read_bytes`. |
-| `write(stream: &TLSStream, text: String)` / `write_bytes(stream, bytes)` / `write_some(stream, bytes)` | `IOError!` / `IOError!` / `Int IOError!` | Write every UTF-8 byte of the text, or every byte; `write_some` writes every byte too and returns the count. |
+| `read(stream: ^TLSStream, n: Int)` / `read_bytes(stream, n)` | `String IOError!` / `[U8] IOError!` | Read checked UTF-8 text or bounded TLS bytes. Like `tcp_read_text`, `read` loses no byte: a cut character stays for the next read, and bytes that are not UTF-8 fail the read and stay for `read_bytes`. |
+| `write(stream: ^TLSStream, text: String)` / `write_bytes(stream, bytes)` / `write_some(stream, bytes)` | `IOError!` / `IOError!` / `Int IOError!` | Write every UTF-8 byte of the text, or every byte; `write_some` writes every byte too and returns the count. |
 | `close(stream)` | `IOError!` | Send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
 | `stream.read_bytes(limit, deadline:)` / `stream.write_bytes(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
-| `stream.read_into(buffer: &[U8], limit, deadline:)` | `Int IOError!` | Append up to `limit` decrypted bytes to the caller's `buffer` and return the count; 0 is close-notify, and a limit below one is `IOError.InvalidInput`. |
+| `stream.read_into(buffer: ^[U8], limit, deadline:)` | `Int IOError!` | Append up to `limit` decrypted bytes to the caller's `buffer` and return the count; 0 is close-notify, and a limit below one is `IOError.InvalidInput`. |
 | `stream.close_write(deadline:)` | `IOError!` | Flush close-notify and close only writes while reads continue. |
 
 TLS handshake, read, write, and close-notify drive the engine over the consumed
@@ -8204,7 +8228,7 @@ Example: [`Examples/Modules/Packages/NpuDevice`](../../../Examples/Modules/Packa
 | `profile_f32_strict() -> String` / `profile_show() -> String` | text | Show the F32 strict profile receipt. |
 | `kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool ComputeError!` | Boolean | Check rank and bounds. |
 | `get(tensor: Tensor, index: [Int]) -> Float ComputeError!` | scalar | Read a checked element. |
-| `set(tensor: &Tensor, index: [Int], value: Float) ComputeError!` | — | Mutate a checked element in place. |
+| `set(tensor: ^Tensor, index: [Int], value: Float) ComputeError!` | — | Mutate a checked element in place. |
 | `reshape(tensor, new_shape: [Int]) -> Tensor ComputeError!` | tensor | Change shape without changing element count. |
 | `broadcast_to(tensor, new_shape: [Int]) -> Tensor ComputeError!` | tensor | Materialize checked broadcasting. |
 | `transpose(tensor: Tensor) -> Tensor ComputeError!` | tensor | Transpose a rank-two tensor. |
@@ -8375,7 +8399,7 @@ total: tree.call(pricing, Quote{items: 3}) ?? 0
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
 | `tree.worker(name: String, handler, capacity: Int) -> ServiceEndpoint ServiceError!` | endpoint | Register a checked top-level handler that takes no message, with a bounded mailbox. |
 | `tree.worker(name: String, handler: fn(Q) -> R, capacity: Int) -> Endpoint<Q, R> ServiceError!` | endpoint | Register a typed worker that runs its top-level handler once per message. |
-| `tree.worker(name: String, handler: fn(&S, Q) -> R, state: S, capacity: Int) -> Endpoint<Q, R> ServiceError!` | endpoint | Register a typed worker that lends its handler the state it keeps, starting from `state`. |
+| `tree.worker(name: String, handler: fn(^S, Q) -> R, state: S, capacity: Int) -> Endpoint<Q, R> ServiceError!` | endpoint | Register a typed worker that lends its handler the state it keeps, starting from `state`. |
 | `tree.worker(name: String, handler: fn([Q]), batch: Int, wait: Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError!` | endpoint | Register a typed worker that hands its handler up to `batch` waiting messages. |
 | `tree.send(endpoint: Endpoint<Q, ()>, message: Q) ServiceError!` | — | Queue a message for a typed worker that answers nothing. |
 | `tree.call(endpoint: Endpoint<Q, R>, message: Q) -> R ServiceError!` | answer | Send a message and wait for the handler's answer. |
@@ -8708,7 +8732,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.web.virtual`
 
 The sketch types are source-owned plain values: cloning one produces independent
-storage, and mutating a sketch uses its `&self` receiver with an explicit `&` call.
+storage, and mutating a sketch uses its `^self` receiver with an explicit `^` call.
 
 ### Writing Core in Jet
 

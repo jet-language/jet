@@ -270,7 +270,7 @@ pool_fixture: fn(path: String) -> PoolReceipt {
     }
 }
 
-queue_state: fn(delivery: &&Delivery) -[Env, FS.Read, FS.Write, Time]> String {
+queue_state: fn(delivery: ^^Delivery) -[Env, FS.Read, FS.Write, Time]> String {
     state: delivery.status() ?? return "unknown"
     if state == {
         .Pending -> return "pending"

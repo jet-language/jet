@@ -56,7 +56,7 @@ table_affinity_str: fn(db: conn.Conn, t: Int) -> [U8] Never! {
 // registers from i_reg, or with i_reg 0 make them the P4 of the
 // OP_MakeRecord just coded. A STRICT table gets an OP_TypeCheck instead,
 // ahead of that OP_MakeRecord when i_reg is 0.
-table_affinity: fn(p: &cg.Parse, t: Int, i_reg: Int) Never! {
+table_affinity: fn(p: ^cg.Parse, t: Int, i_reg: Int) Never! {
     if p.db.tables[t].tab_flags & ast.TF_STRICT != 0 {
         if i_reg == 0 {
             cg.v_append_p4(p, conn.P4.Table(t))
@@ -89,7 +89,7 @@ table_affinity: fn(p: &cg.Parse, t: Int, i_reg: Int) Never! {
 
 // readsTable: whether the program so far opens table t of database i_db,
 // or one of its indices, for reading.
-reads_table: fn(p: &cg.Parse, i_db: Int, t: Int) -> Bool Never! {
+reads_table: fn(p: ^cg.Parse, i_db: Int, t: Int) -> Bool Never! {
     i_end: cg.v_current_addr(p)
     loop i in 1..<i_end {
         if p.f.v.ops[i].opcode == opc.OP_OPEN_READ && p.f.v.ops[i].p3 == i_db {
@@ -113,29 +113,29 @@ ColumnFlagWalker: struct {
     e_code: Int,
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].icolumn >= 0 {
                 self.e_code |= self.col_flags[a.exprs[e].icolumn]
             }
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
 // sqlite3ComputeGeneratedColumns: with the ordinary columns of table t in
 // the registers from i_reg_store, compute its STORED and VIRTUAL columns,
 // each after the generated columns it uses.
-compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: Int) -[DB]> Never! {
+compute_generated_columns: fn(p: ^cg.Parse, a: ^ast.AST, i_reg_store: Int, t: Int) -[DB]> Never! {
     table_affinity(p, t, i_reg_store)
     if p.db.tables[t].tab_flags & ast.TF_HAS_STORED != 0 {
         last: cg.v_last_addr(p)
@@ -209,7 +209,7 @@ compute_generated_columns: fn(p: &cg.Parse, a: &ast.AST, i_reg_store: Int, t: In
 // VACUUM), with the AutoincInfo of the top-level Parse that tracks it.
 // Four registers: the table name, the largest rowid (the one returned),
 // its sqlite_sequence rowid and its value there.
-autoinc_begin: fn(p: &cg.Parse, a: &ast.AST, i_db: Int, t: Int) -> Int Never! {
+autoinc_begin: fn(p: ^cg.Parse, a: ^ast.AST, i_db: Int, t: Int) -> Int Never! {
     if p.db.tables[t].tab_flags & ast.TF_AUTOINCREMENT == 0 || p.db.m_db_flags & conn.DBFLAG_VACUUM != 0 {
         return 0
     }
@@ -239,7 +239,7 @@ autoinc_begin: fn(p: &cg.Parse, a: &ast.AST, i_db: Int, t: Int) -> Int Never! {
 // sqlite3AutoincrementBegin: load each AUTOINCREMENT table's sqlite_sequence
 // entry into its registers. The top-level Parse's finish codes it, ahead
 // of the statement.
-autoincrement_begin: fn(p: &cg.Parse, a: &ast.AST) Never! {
+autoincrement_begin: fn(p: ^cg.Parse, a: ^ast.AST) Never! {
     x := p.f.ainc
     loop x >= 0 {
         info: p.aincs[x]
@@ -279,7 +279,7 @@ CheckConstraintWalker: struct {
     e_code: Int,
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             if a.exprs[e].op == tk.TK_COLUMN {
                 c: a.exprs[e].icolumn
                 if c >= 0 {
@@ -289,22 +289,22 @@ CheckConstraintWalker: struct {
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
 // sqlite3ExprReferencesUpdatedColumn: whether expression e (a CHECK
 // constraint or an indexed expression) uses a column an UPDATE changes
 // (ai_chng[i] >= 0), or the rowid when chng_rowid.
-expr_references_updated_column: fn(a: &ast.AST, e: Int, ai_chng: [Int], chng_rowid: Bool) -> Bool Never! {
+expr_references_updated_column: fn(a: ^ast.AST, e: Int, ai_chng: [Int], chng_rowid: Bool) -> Bool Never! {
     w := CheckConstraintWalker{ai_col: ai_chng.copy(), e_code: 0}
     _: ast.walk_expr<CheckConstraintWalker>(w, a, e)
     if !chng_rowid -> w.e_code = util.clear_bits(w.e_code, 2)
@@ -320,7 +320,7 @@ expr_references_updated_column: fn(a: &ast.AST, e: Int, ai_chng: [Int], chng_row
 // may change, override_error the statement's ON CONFLICT (OE_DEFAULT for
 // none), ignore_dest where OE_IGNORE jumps, and ai_chng (UPDATE only) the
 // changed columns. True when a REPLACE may delete rows.
-generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [Int], i_data_cur: Int, i_idx_cur: Int, reg_new_data: Int, reg_old_data: Int, pk_chng: Bool, override_error: Int, ignore_dest: Int, ai_chng: [Int]?) -[DB]> Bool Never! {
+generate_constraint_checks: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, a_reg_idx: [Int], i_data_cur: Int, i_idx_cur: Int, reg_new_data: Int, reg_old_data: Int, pk_chng: Bool, override_error: Int, ignore_dest: Int, ai_chng: [Int]?) -[DB]> Bool Never! {
     is_update: reg_old_data != 0
     n_col: p.db.tables[t].cols.len()
     has_rowid: ex.has_rowid(p.db, t)
@@ -593,7 +593,7 @@ generate_constraint_checks: fn(p: &cg.Parse, a: &ast.AST, t: Int, a_reg_idx: [In
 // else OPFLAG_ISUPDATE with perhaps OPFLAG_SAVEPOSITION; append_bias
 // says the rowid is likely the largest; use_seek that the OP_NoConflict
 // seeks may be reused (OPFLAG_USESEEKRESULT).
-complete_insertion: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, reg_new_data: Int, a_reg_idx: [Int], update_flags: Int, append_bias: Bool, use_seek: Bool) Never! {
+complete_insertion: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, reg_new_data: Int, a_reg_idx: [Int], update_flags: Int, append_bias: Bool, use_seek: Bool) Never! {
     has_rowid: ex.has_rowid(p.db, t)
     i := 0
     ix := p.db.tables[t].index
@@ -636,7 +636,7 @@ complete_insertion: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx
 // on_error the OR clause (OE_DEFAULT for none); upsert the ON CONFLICT
 // clauses (-1 for none), which this build rejects. The statement owns and
 // deletes its arguments.
-insert: fn(p: &cg.Parse, a: &ast.AST, src: Int, select0: Int, column: Int, on_error: Int, upsert: Int) -[DB]> Never! {
+insert: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, select0: Int, column: Int, on_error: Int, upsert: Int) -[DB]> Never! {
     select := select0
     list := -1
     if cg.n_err(a) == 0 {
@@ -656,7 +656,7 @@ insert: fn(p: &cg.Parse, a: &ast.AST, src: Int, select0: Int, column: Int, on_er
 }
 
 // The body of sqlite3Insert up to its insert_cleanup label.
-insert_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, select: Int, list: Int, column: Int, on_error: Int, upsert: Int) -[DB]> Never! {
+insert_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, select: Int, list: Int, column: Int, on_error: Int, upsert: Int) -[DB]> Never! {
     t: dl.src_list_lookup(p, a, src)
     if t < 0 {
         return

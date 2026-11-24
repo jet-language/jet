@@ -8,7 +8,7 @@ Res: struct {
     name: String,
 
     impl Close {
-        close: fn(&&self) { print("close {self.name}") }
+        close: fn(^^self) { print("close {self.name}") }
     }
 }
 
@@ -33,7 +33,7 @@ closed_first: fn(n: Int, acc: Int) -> Int {
     closed_first(n - 1, acc + size)
 }
 
-handed: fn(n: Int, r: &&Res) -> Int {
+handed: fn(n: Int, r: ^^Res) -> Int {
     if n == 0 {
         close(r)
         return 0
@@ -41,7 +41,7 @@ handed: fn(n: Int, r: &&Res) -> Int {
     handed(n - 1, r)
 }
 
-kept: fn(n: Int, r: &&Res) -> Int {
+kept: fn(n: Int, r: ^^Res) -> Int {
     if n == 0 {
         close(r)
         return 0

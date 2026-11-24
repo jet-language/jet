@@ -79,6 +79,15 @@ term: module {
     // One stdin read of up to `n` bytes, and the read's failure, if any.
     #Import(c) terminal8_take: fn(n: Int) -[IO]> {bytes: [U8], read_error: String?} = "jet_terminal8_take"
 
+    // One stdin read of up to `n` bytes once stdin has one within `wait`
+    // nanoseconds, the read's failure, if any, and whether the wait ran out
+    // first.
+    #Import(c) terminal8_take_within: fn(n: Int, wait: Int) -[IO, Time.Wait]> {bytes: [U8], read_error: String?, waited_out: Bool} = "jet_terminal8_take_within"
+
     // One stdin read of up to six key bytes, and the key decoder's platform.
     #Import(c) terminal8_key_bytes: fn() -[Time.Wait]> {bytes: [U8], platform: Int} = "jet_terminal8_key_bytes"
+
+    // Whether the standard stream `fd` (0, 1 or 2) is a terminal; any other
+    // `fd` is false.
+    #Import(c) is_terminal: fn(fd: Int) -[IO]> Bool = "jet_term_is_terminal_raw"
 }

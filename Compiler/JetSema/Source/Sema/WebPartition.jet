@@ -46,7 +46,7 @@ SemaWebTypes: struct {
 }
 
 // The id of `name` in `types`, with its columns grown to cover it.
-sema_web_type_id: fn(types: &SemaWebTypes, name: String) -> Int Never! {
+sema_web_type_id: fn(types: ^SemaWebTypes, name: String) -> Int Never! {
     id: name_index(name_intern(types.names, name))
     loop types.struct_at.len() <= id {
         types.struct_at.push(-1)
@@ -55,7 +55,7 @@ sema_web_type_id: fn(types: &SemaWebTypes, name: String) -> Int Never! {
     id
 }
 
-sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic], threads: CompilerThreads) {
+sema_web_partition_check: fn(modules: ^[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic], threads: CompilerThreads) {
     // Only the checks of a program that opts in read the declarations for the
     // ABI rule, the `#Export(wasm)` signatures, the bucket reasons and the
     // functions without a checked body, so a program that doesn't collects
@@ -210,7 +210,7 @@ sema_web_placed_root_count: fn() -> Int Never! { SEMA_WEB_SERVER_RESOURCES.len()
 // which only the page has: E2824, in any program. Both read what a body
 // uses (sema_web_reach), not its solved row, which also holds every root
 // for an open-world call such as a closure parameter's.
-sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, metas: [SemaWebMeta], buckets: [WebBucket], callee_first: [Int], callees: [Int], active: Bool, diagnostics: &[Diagnostic]) Never! {
+sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, metas: [SemaWebMeta], buckets: [WebBucket], callee_first: [Int], callees: [Int], active: Bool, diagnostics: ^[Diagnostic]) Never! {
     callers: sema_web_callers(metas.len(), callee_first, callees)
     // What each meta's function reaches, by root: always the page's, and the
     // server's in a program that opts in.
@@ -442,7 +442,7 @@ sema_web_methods_marked: fn(methods: [Func]) -> Bool Never! {
 // gets every function's, and the first declaration of each struct and enum
 // name for the `#Codable` ABI rule; one that doesn't only its checked
 // functions', which are all the partition stamps.
-sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], types: &SemaWebTypes, active: Bool{false}) Never! {
+sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: ^[SemaWebMeta], types: ^SemaWebTypes, active: Bool{false}) Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
@@ -509,7 +509,7 @@ sema_web_rows: fn(functions: [FnBody]) -> SemaWebRows Never! {
     sema_web_rows_of(loop function in functions -> function.source_span)
 }
 
-sema_web_rows_of: fn(spans: &&[Span]) -> SemaWebRows Never! {
+sema_web_rows_of: fn(spans: ^^[Span]) -> SemaWebRows Never! {
     starts := [Int:Int]{}
     loop (at, span) in spans {
         if starts.get(span.start) == None -> starts[span.start] = at
@@ -539,7 +539,7 @@ sema_web_row: fn(rows: SemaWebRows, span: Span) -> Int Never! {
 // `function`'s meta. Before a program opts in (`active`), the partition
 // only stamps checked bodies and reads no name, so a function without one
 // has none, and a meta has no key or name.
-sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], active: Bool{false}) Never! {
+sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: ^[SemaWebMeta], active: Bool{false}) Never! {
     row: sema_web_row(spans, function.span)
     if !active && row < 0 {
         return

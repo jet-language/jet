@@ -46,7 +46,7 @@ parser_type_companions: fn(marker: MarkerDecl?, effect_impl: EffectImpl?) -> [It
 // effect names are built when the type closes (parser_finish_effect_type),
 // once an enum's cases are known. A `repeated` block is reported and parsed
 // for recovery; it yields None so the type keeps its first block.
-parser_parse_effect_impl: fn(state: &JetParserState, type_name: String, repeated: Bool) -> EffectImpl? {
+parser_parse_effect_impl: fn(state: ^JetParserState, type_name: String, repeated: Bool) -> EffectImpl? {
     start: parser_bump(state)
     if repeated -> parser_add_report(state, parser_effect_repeated_report(start.span, type_name))
     parser_bump(state)
@@ -82,7 +82,7 @@ parser_parse_effect_impl: fn(state: &JetParserState, type_name: String, repeated
 
 // One method of `impl Effect` joins `declared`: the `irreversible` or
 // `expert` fact, each once, or a report.
-parser_effect_method_take: fn(declared: &EffectImpl, method: Func, type_name: String, reports: &[Diagnostic]) Never! {
+parser_effect_method_take: fn(declared: ^EffectImpl, method: Func, type_name: String, reports: ^[Diagnostic]) Never! {
     if parser_effect_method_problem(method) == .Val(problem) {
         reports.push(problem)
         return
@@ -104,7 +104,7 @@ parser_effect_method_take: fn(declared: &EffectImpl, method: Func, type_name: St
 
 // `name: value` in `impl Effect`: the one setting `parent: Name`, a dotted
 // name as a row writes it. None, reported, for any other setting.
-parser_parse_effect_setting: fn(state: &JetParserState) -> NamedSpan? {
+parser_parse_effect_setting: fn(state: ^JetParserState) -> NamedSpan? {
     key_token: parser_bump(state)
     parser_bump(state)
     key: parser_value(state, key_token)
@@ -132,7 +132,7 @@ parser_effect_body_report: fn(span: Span, type_name: String, method: String) -> 
 }
 
 // `report`, unless the parser is abandoning the item it is in.
-parser_add_report: fn(state: &JetParserState, report: &&Diagnostic) {
+parser_add_report: fn(state: ^JetParserState, report: ^^Diagnostic) {
     if !parser_aborting(state) -> state.diagnostics.push(report.move())
 }
 
@@ -175,7 +175,7 @@ parser_effect_method_body: fn(method: Func) -> Expr? Never! {
 }
 
 // At the type's close the effect names are built (parser_effect_type_decls).
-parser_finish_effect_type: fn(state: &JetParserState, type_name: String, name_span: Span, effect_impl: EffectImpl?, cases: [Variant]) -> EffectImpl? {
+parser_finish_effect_type: fn(state: ^JetParserState, type_name: String, name_span: Span, effect_impl: EffectImpl?, cases: [Variant]) -> EffectImpl? {
     declared: effect_impl ?? return None
     reports := [Diagnostic]{}
     finished: parser_effect_type_decls(type_name, name_span, declared, cases, reports)
@@ -187,7 +187,7 @@ parser_finish_effect_type: fn(state: &JetParserState, type_name: String, name_sp
 // declares each case `T.Case` and its root `T`, which is irreversible when
 // any case is. A package effect with a Prelude parent and no `irreversible`
 // body is irreversible when its parent is.
-parser_effect_type_decls: fn(type_name: String, name_span: Span, effect_impl: EffectImpl, cases: [Variant], reports: &[Diagnostic]) -> EffectImpl Never! {
+parser_effect_type_decls: fn(type_name: String, name_span: Span, effect_impl: EffectImpl, cases: [Variant], reports: ^[Diagnostic]) -> EffectImpl Never! {
     declared := effect_impl
     // A toolchain family under a declared case: its cases are that case's
     // children (EffectVocabulary.jet), and it declares no name of its own.
@@ -281,7 +281,7 @@ parser_effect_vocabulary_has: fn(name: String) -> Bool Never! {
 // block, and a second block is E0908. A block whose type is declared
 // elsewhere stays an ordinary impl. The items change in place: each joined
 // type gains its effect, its effect names follow it, and its blocks leave.
-parser_attach_effect_impls: fn(items: &[Item], reports: &[Diagnostic]) Never! {
+parser_attach_effect_impls: fn(items: ^[Item], reports: ^[Diagnostic]) Never! {
     pending := [Int]{}
     loop (index, item) in items {
         if item == .Impl(definition) && parser_effect_impl_joins(items, definition) {
@@ -367,7 +367,7 @@ parser_effect_impls_outside: fn(items: [Item]) -> Bool Never! {
 // type `type_name`, with its effect names; None when no block names the type.
 // A block beside one the body wrote (`own`), or beside an earlier outside
 // block, is E0908.
-parser_joined_effect_impl: fn(type_name: String, name_span: Span, own: EffectImpl?, cases: [Variant], items: [Item], pending: [Int], reports: &[Diagnostic]) -> EffectImpl? Never! {
+parser_joined_effect_impl: fn(type_name: String, name_span: Span, own: EffectImpl?, cases: [Variant], items: [Item], pending: [Int], reports: ^[Diagnostic]) -> EffectImpl? Never! {
     found := EffectImpl?{None}
     loop index in pending {
         if items[index] == .Impl(definition) && definition.type_name == type_name {
@@ -385,7 +385,7 @@ parser_joined_effect_impl: fn(type_name: String, name_span: Span, own: EffectImp
 // An outside `impl Name.Effect` block read as the block a type body holds:
 // the methods `irreversible: fn(self) -> Bool` and `expert`, and the setting
 // `parent`.
-parser_effect_impl_from: fn(definition: ImplDef, type_name: String, reports: &[Diagnostic]) -> EffectImpl Never! {
+parser_effect_impl_from: fn(definition: ImplDef, type_name: String, reports: ^[Diagnostic]) -> EffectImpl Never! {
     declared := EffectImpl{span: definition.span, irreversible: None, method_span: None, decls: [EffectDecl]{}}
     parent := NamedSpan?{None}
     loop assoc in definition.assoc_type_impls {

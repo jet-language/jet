@@ -483,7 +483,7 @@ publication_set_satisfiable: fn(first: [PublicationComparator], second: [Publica
     publication_precedence(bounds.lower, bounds.upper) != Ordering.Greater
 }
 
-publication_constrain_release_bounds: fn(set: [PublicationComparator], bounds: &PublicationReleaseBounds) -> Bool Never! {
+publication_constrain_release_bounds: fn(set: [PublicationComparator], bounds: ^PublicationReleaseBounds) -> Bool Never! {
     loop comparator in set {
         v: publication_ver(comparator.version.major, comparator.version.minor, comparator.version.patch)
         pre: comparator.version.pre != None
@@ -510,11 +510,11 @@ publication_constrain_release_bounds: fn(set: [PublicationComparator], bounds: &
     true
 }
 
-publication_tighten_lower: fn(bounds: &PublicationReleaseBounds, version: PublicationSemVer) Never! {
+publication_tighten_lower: fn(bounds: ^PublicationReleaseBounds, version: PublicationSemVer) Never! {
     if publication_precedence(version, bounds.lower) == Ordering.Greater -> bounds.lower = version
 }
 
-publication_tighten_upper: fn(bounds: &PublicationReleaseBounds, version: PublicationSemVer) Never! {
+publication_tighten_upper: fn(bounds: ^PublicationReleaseBounds, version: PublicationSemVer) Never! {
     if publication_precedence(version, bounds.upper) == Ordering.Less -> bounds.upper = version
 }
 

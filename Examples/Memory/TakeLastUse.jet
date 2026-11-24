@@ -1,23 +1,23 @@
 // Call-site moves: an
-// unmarked argument to a take (`&&T`) parameter moves when the call is the
+// unmarked argument to a take (`^^T`) parameter moves when the call is the
 // name's last use, exactly as `name.move()` would. A use that is not the last needs
-// the explicit copy `name.copy()` (E0209 teaches it). An edit keeps its `&`.
+// the explicit copy `name.copy()` (E0209 teaches it). An edit keeps its `^`.
 Order: struct {
     id: Int,
     items: [String],
 }
 
-archive: fn(order: &&Order) -> String { "order {order.id} with {order.items.len()} items" }
+archive: fn(order: ^^Order) -> String { "order {order.id} with {order.items.len()} items" }
 
-total: fn(values: &&[Int]) -> Int {
+total: fn(values: ^^[Int]) -> Int {
     sum := 0
     loop value in values -> sum += value
     sum
 }
 
-label: fn(name: &&String, suffix: &&String) -> String { "{name}-{suffix}" }
+label: fn(name: ^^String, suffix: ^^String) -> String { "{name}-{suffix}" }
 
-bump: fn(n: &Int) { n += 1 }
+bump: fn(n: ^Int) { n += 1 }
 
 run: fn() {
     order: Order{id: 7, items: ["book", "pen"]}

@@ -370,7 +370,7 @@ immutable: fn(file: String, bytes: [U8]) -[Env, FS]> StageError! {
     Ok()
 }
 
-publish: fn(writer: &files.FileWriter, partial: String, file: String, parent: String, bytes: [U8]) -[FS]> IOError! {
+publish: fn(writer: ^files.FileWriter, partial: String, file: String, parent: String, bytes: [U8]) -[FS]> IOError! {
     writer.write_bytes(bytes) ?? return Err(err)
     writer.fsync() ?? return Err(err)
     files.rename(partial, file) ?? return Err(err)

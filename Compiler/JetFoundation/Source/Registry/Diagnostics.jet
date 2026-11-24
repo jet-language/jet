@@ -278,7 +278,7 @@ diagnostic_identities_in: fn(bytes: [U8]) -> [DiagnosticIdentity] Never! {
 // file, so the name starts after the first `.jet.` in the path's last
 // segment. A Core identity's module is its longest Core-module prefix
 // (core_path_module), or all before its last `.` when Core has none.
-diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentity]) -> Int Never! {
+diagnostic_identity_push: fn(bytes: [U8], index: Int, found: ^[DiagnosticIdentity]) -> Int Never! {
     // Both forms start with `m` or `<`; every other byte position returns
     // before any prefix bytes are built.
     first: diagnostic_byte_at(bytes, index)
@@ -487,7 +487,7 @@ diagnostic_registry_applicability: fn(row: DiagnosticRegistryRow, has_edit: Bool
     }
 }
 
-diagnostic_registry_project_row: fn(diagnostic: &&Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
+diagnostic_registry_project_row: fn(diagnostic: ^^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
     updated := diagnostic
     if updated.span != None {
         span: updated.span ?? return updated
@@ -527,7 +527,7 @@ diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: Strin
 // Dynamic Source edits are authorized and graded by the generated row. This
 // preserves the exact replacement/span authored by the producer without
 // deriving safety from human Fix prose.
-diagnostic_registry_with_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None {
@@ -564,7 +564,7 @@ diagnostic_registry_safety_auto_apply: fn(safety: DiagnosticFixSafety) -> Bool N
     }
 }
 
-diagnostic_registry_with_edit_grade: fn(diagnostic: &&Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+diagnostic_registry_with_edit_grade: fn(diagnostic: ^^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None {
@@ -583,7 +583,7 @@ diagnostic_registry_with_edit_grade: fn(diagnostic: &&Diagnostic, edit: TextEdit
     updated
 }
 
-diagnostic_registry_with_structured_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_structured_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None {
@@ -599,7 +599,7 @@ diagnostic_registry_with_structured_edit: fn(diagnostic: &&Diagnostic, edit: Tex
     updated
 }
 
-diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: &&Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
+diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
@@ -617,7 +617,7 @@ diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: &&Diagnostic,
 // accepted. The change defines the new text, so `jet fix` applies it as a
 // behavior-preserving edit, whatever the row grades the diagnostic's own
 // fixes; the row's no-fix reason covers only the other sources of the error.
-diagnostic_registry_with_migration_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_migration_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
     if diagnostic_registry_row(updated.code) == None {
@@ -630,7 +630,7 @@ diagnostic_registry_with_migration_edit: fn(diagnostic: &&Diagnostic, edit: Text
     updated
 }
 
-diagnostic_registry_with_alternative_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_alternative_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.no_fix_reason != None {
         panic("updated `{updated.code}` cannot carry an edit and no-fix reason")

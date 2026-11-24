@@ -32,21 +32,21 @@ use {
 JSONLWriter: struct<W: Writer> {
     output: stream.JSONLinesPush<W>,
 
-    write: fn(&self, value: &&Dyn) -[IO]> EncodingError! { self.output.write(value) }
+    write: fn(^self, value: ^^Dyn) -[IO]> EncodingError! { self.output.write(value) }
 
-    flush: fn(&self) -[IO]> EncodingError! { self.output.flush() }
+    flush: fn(^self) -[IO]> EncodingError! { self.output.flush() }
 
-    finish: fn(&self) -[IO]> EncodingError! { self.output.finish() }
+    finish: fn(^self) -[IO]> EncodingError! { self.output.finish() }
 }
 
-writer: fn<W: Writer>(target: &&W, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONLWriter<W> EncodingError! {
+writer: fn<W: Writer>(target: ^^W, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONLWriter<W> EncodingError! {
     output: stream.jsonl_writer<W>(target, limits) ?? return Err(err)
     Ok(JSONLWriter<W>{output: output.move()})
 }
 
 /// A bounded pull reader over a consumed byte source: one nonblank record per
 /// `next()`. The source pull engine owns framing, limits and sticky errors.
-reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONLReader<R> EncodingError! {
+reader: fn<R: Reader>(input: ^^R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONLReader<R> EncodingError! {
     source: stream.jsonl_reader<R>(input, limits, false) ?? {
         error := err
         error.format = .JSONL
@@ -58,7 +58,7 @@ reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()})
 JSONLReader: struct<R: Reader> {
     input: stream.JSONLinesPull<R>,
 
-    next: fn(&self) -[IO, Time.Wait]> Dyn? EncodingError! { self.input.next() }
+    next: fn(^self) -[IO, Time.Wait]> Dyn? EncodingError! { self.input.next() }
 }
 
 /// Parse every non-empty record as JSON. Allocates one `Dyn` per record.
@@ -95,7 +95,7 @@ JSONLRecords: struct {
     line: Int,
     records_read: Int,
 
-    next: fn(&self) -> Dyn? EncodingError! {
+    next: fn(^self) -> Dyn? EncodingError! {
         loop {
             record: self.next_record() ?? return Ok(None)
             if is_blank(record.text) -> next
@@ -105,7 +105,7 @@ JSONLRecords: struct {
         }
     }
 
-    next_record: fn(&self) -> JSONLRecord? Never! {
+    next_record: fn(^self) -> JSONLRecord? Never! {
         if self.offset >= self.text.count_bytes() -> return None
         start: self.offset
         line: self.line

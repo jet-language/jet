@@ -58,7 +58,7 @@ JetCLIDebugBuildConsole: struct {
 
     // The next command as it was given, untrimmed; None at the end of the
     // commands or of stdin.
-    next: fn(&self) -[IO, Time.Wait]> String? Never! {
+    next: fn(^self) -[IO, Time.Wait]> String? Never! {
         if self.scripted {
             if self.done >= self.script.len() -> return None
             command: "{self.script[self.done]}"
@@ -83,7 +83,7 @@ JetCLIDebugBuildConsole: struct {
     // The answer to the command `given`, trimmed, which is not `run`,
     // `continue` or `quit`: a breakpoint set or taken out, or, at a stop,
     // what `stop` holds.
-    answer: fn(&self, session: &NativeBuild, given: String, stop: NativeBuildStop, stopped: Bool) -> String Never! {
+    answer: fn(^self, session: ^NativeBuild, given: String, stop: NativeBuildStop, stopped: Bool) -> String Never! {
         command: given.trim()
         if command == "" -> return ""
         spaced: command.contains(" ")
@@ -190,7 +190,7 @@ jet_cli_debug_build_run: fn(argv: [String], going: Receiver<Bool>, finished: Sen
 }
 
 // The breakpoint `wanted`, set, as the console says it.
-jet_cli_debug_build_added: fn(session: &NativeBuild, wanted: NativeBreak) -> String Never! {
+jet_cli_debug_build_added: fn(session: ^NativeBuild, wanted: NativeBreak) -> String Never! {
     placed: session.add(wanted.file, wanted.line)
     build_debug_set_lines(session.lines())
     number: session.numbered
@@ -202,7 +202,7 @@ jet_cli_debug_build_added: fn(session: &NativeBuild, wanted: NativeBreak) -> Str
 // body's) or its traced threads (a trap's) give now; None when there is
 // none yet. A trap's stop is measured once the events the build sent
 // before it are taken, so its call's limit is the one it runs under.
-jet_cli_debug_build_stop: fn(session: &NativeBuild, told: Receiver<BuildDebugEvent>, waiting: &[NativeBuildStop]) -> NativeBuildStop? Never! {
+jet_cli_debug_build_stop: fn(session: ^NativeBuild, told: Receiver<BuildDebugEvent>, waiting: ^[NativeBuildStop]) -> NativeBuildStop? Never! {
     if waiting.len() > 0 -> return waiting.remove(0, .Slot)
     loop {
         event: told.try_receive() ?? break
@@ -228,7 +228,7 @@ jet_cli_debug_build_release: fn(told: Receiver<BuildDebugEvent>) Never! {
 }
 
 // The session's end: no event waits on it, no trap is left in a child.
-jet_cli_debug_build_end: fn(session: &NativeBuild, told: Receiver<BuildDebugEvent>, waiting: &[NativeBuildStop]) Never! {
+jet_cli_debug_build_end: fn(session: ^NativeBuild, told: Receiver<BuildDebugEvent>, waiting: ^[NativeBuildStop]) Never! {
     build_debug_close()
     loop waiting.len() > 0 {
         left := waiting.pop() ?? break
@@ -239,7 +239,7 @@ jet_cli_debug_build_end: fn(session: &NativeBuild, told: Receiver<BuildDebugEven
 }
 
 // The console: breakpoints until `run`, then each stop until the build ends.
-jet_cli_debug_build_console: fn(session: &NativeBuild, console: &JetCLIDebugBuildConsole, told: Receiver<BuildDebugEvent>, go: Sender<Bool>, ended: Receiver<JetDriverVerbOutput>) -[FS, IO, Time, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_build_console: fn(session: ^NativeBuild, console: ^JetCLIDebugBuildConsole, told: Receiver<BuildDebugEvent>, go: Sender<Bool>, ended: Receiver<JetDriverVerbOutput>) -[FS, IO, Time, FFI.Asm]> JetCLIPlan Never! {
     nothing: NativeBuildStop{number: 0, frames: [NativeBuildFrame]{}, what: ""}
     loop {
         given: console.next() ?? "run"
@@ -315,7 +315,7 @@ jet_cli_debug_build_dap_read: fn(posted: Sender<JetCLIDebugBuildPost>) -[IO, Tim
 
 // The adapter: requests until `configurationDone` starts the build, then
 // its stops and its end as events, until the editor disconnects.
-jet_cli_debug_build_dap: fn(session: &NativeBuild, told: Receiver<BuildDebugEvent>, go: Sender<Bool>, ended: Receiver<JetDriverVerbOutput>, requests: Receiver<JetCLIDebugBuildPost>) -[FS, IO, Time, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_build_dap: fn(session: ^NativeBuild, told: Receiver<BuildDebugEvent>, go: Sender<Bool>, ended: Receiver<JetDriverVerbOutput>, requests: Receiver<JetCLIDebugBuildPost>) -[FS, IO, Time, FFI.Asm]> JetCLIPlan Never! {
     dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false}
     started := false
     gone := false
@@ -423,7 +423,7 @@ jet_cli_debug_build_dap: fn(session: &NativeBuild, told: Receiver<BuildDebugEven
 
 // `setBreakpoints`: the source's breakpoints become the request's lines,
 // each placed now or when its code loads.
-jet_cli_debug_build_dap_breakpoints: fn(session: &NativeBuild, dap: &JetCLIDap, request: JetCLIDapRequest) -> String Never! {
+jet_cli_debug_build_dap_breakpoints: fn(session: ^NativeBuild, dap: ^JetCLIDap, request: JetCLIDapRequest) -> String Never! {
     path := ""
     lines := [Int]{}
     loop member in request.arguments {

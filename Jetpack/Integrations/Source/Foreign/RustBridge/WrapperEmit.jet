@@ -517,7 +517,7 @@ pkg_ffi_emit_wrapper_fn: fn(entry: ExternEntry, user_types: [String]) -> String 
 }
 
 // The Rust bridge preserves the declaration's ownership at its
-// safe wrapper edge. Read and move stay ordinary Rust values; `&` is the one
+// safe wrapper edge. Read and move stay ordinary Rust values; `^` is the one
 // exclusive borrow lasting for this call only.
 pkg_ffi_foreign_rust_param_type: fn(convention: AccessConvention, ty: Type, user_types: [String]) -> String Never! {
     base: pkg_ffi_rust_type(ty, user_types)
@@ -720,7 +720,7 @@ pkg_ffi_cabi_non_null_pointer: fn(index: Int) -> String Never! {
 
 // One argument of a direct native call (C lists, and C or inline rows with
 // a written parameter): pointers go to the live slot.
-pkg_ffi_cabi_direct_arg: fn(index: Int, convention: AccessConvention, ty: Type, native_ty: String, handle_names: [String], record_defs: CRecordDefinitions, setup: &[String]) -> String? Never! {
+pkg_ffi_cabi_direct_arg: fn(index: Int, convention: AccessConvention, ty: Type, native_ty: String, handle_names: [String], record_defs: CRecordDefinitions, setup: ^[String]) -> String? Never! {
     written: convention == AccessConvention.Write
     if ty == {
         .String -> {
@@ -766,7 +766,7 @@ pkg_ffi_cabi_scalar_arg: fn(index: Int, ty: Type, native_ty: String) -> String N
 }
 
 // One argument of a call through the safe wrapper.
-pkg_ffi_cabi_wrapper_arg: fn(index: Int, convention: AccessConvention, ty: Type, c_abi: Bool, handle_names: [String], record_defs: CRecordDefinitions, setup: &[String]) -> String? Never! {
+pkg_ffi_cabi_wrapper_arg: fn(index: Int, convention: AccessConvention, ty: Type, c_abi: Bool, handle_names: [String], record_defs: CRecordDefinitions, setup: ^[String]) -> String? Never! {
     expected: pkg_ffi_foreign_rust_param_type(convention, ty, handle_names)
     if ty == {
         .String -> {

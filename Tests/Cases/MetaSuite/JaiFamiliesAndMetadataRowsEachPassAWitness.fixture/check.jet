@@ -57,7 +57,7 @@ column_words: fn(column: String) -> [String] {
 }
 
 // The manifest's sources by kind and its family rows, with every problem.
-read_manifest: fn(root: String, text: String, coverage: &Coverage) {
+read_manifest: fn(root: String, text: String, coverage: ^Coverage) {
     kinds := [String:String]{}
     seen := [String]{}
     loop raw in text.split("\n") {
@@ -122,7 +122,7 @@ between: fn(line: String, start: String, end: String) -> String? {
 }
 
 // Every row of the metadata contract registry, Owed ones as problems.
-read_registry: fn(root: String, text: String, coverage: &Coverage) {
+read_registry: fn(root: String, text: String, coverage: ^Coverage) {
     loop line in text.split("\n") {
         if !line.trim_start().starts_with("{{spelling: \"") -> next
         spelling: (between(line, "{{spelling: \"", "\", kind:") ?? "").replace("{{{{", "{{").replace("}}}}", "}}")
@@ -143,7 +143,7 @@ read_registry: fn(root: String, text: String, coverage: &Coverage) {
     }
 }
 
-add_row: fn(root: String, name: String, witnesses: [String], coverage: &Coverage) {
+add_row: fn(root: String, name: String, witnesses: [String], coverage: ^Coverage) {
     if witnesses.len() == 0 -> coverage.problems.push("{name} names no witness")
     loop witness in witnesses {
         if !files.exists(files.join(root, witness)) {
@@ -237,7 +237,7 @@ witness_report: fn(id: String, verdicts: [String:[Verdict]]) -> WitnessReport {
     report
 }
 
-verify: fn(coverage: &Coverage, results: String) {
+verify: fn(coverage: ^Coverage, results: String) {
     verdicts: read_results(results)
     loop row in coverage.rows {
         owed := false

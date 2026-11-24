@@ -386,7 +386,7 @@ compare_sql_cell: fn(left: String, operator: String, right: String) -> Bool Neve
 
 // The analytics row queries of `core.data` and CSV check every field a query
 // reads against their row schema's field names.
-__validate_query_fields: fn(query: JetSQLQuery, fields: [String], label: String) Err! {
+priv __validate_query_fields: fn(query: JetSQLQuery, fields: [String], label: String) Err! {
     names: Set.from(fields)
     validate_sql_query_schema(query, fn(field: String) { names.has(field) }, label)
 }
@@ -675,10 +675,10 @@ priv internal: module {
     }
 
     // Rust sql_error:176–178 is identity; each caller uses the canonical Err rail.
-    sql_error: fn(message: &&String) -> String Never! { message }
+    sql_error: fn(message: ^^String) -> String Never! { message }
 
     // Rust push_token:180–184. One scalar-builder buffer; no scalar list/parser.
-    push_token: fn(tokens: &[String], token: [U8]) -> [U8] Never! {
+    push_token: fn(tokens: ^[String], token: [U8]) -> [U8] Never! {
         if token.len() > 0 {
             tokens.push(String.from_bytes(token) ?? panic("SQL token builder produced invalid UTF-8"))
         }
@@ -985,7 +985,7 @@ priv internal: module {
 
     // Rust sql_project_group:891–941. Transfer the consumed grouping positions
     // into the result rather than cloning the otherwise dead Rust group Vec.
-    sql_project_group: fn<E>(fields: [String], query: JetSQLQuery, group: &&[U64], cell: fn(U64, String) -> JetSQLValue? E!) -> JetSQLResultRow E! {
+    sql_project_group: fn<E>(fields: [String], query: JetSQLQuery, group: ^^[U64], cell: fn(U64, String) -> JetSQLValue? E!) -> JetSQLResultRow E! {
         projected := [{field: String, value: JetSQLValue}]{}
         loop item in query.projection {
             if item == {

@@ -319,7 +319,7 @@ jet_cli_prove_reject_symlink_ancestors: fn(raw: String, cwd: String) -[FS]> JetC
 // `jet_cli_walk_held_sources`): a directory link is skipped, any other link
 // refused; dot names and build output stay out; nested packages stay in, so
 // a workspace reaches its members.
-jet_cli_prove_collect: fn(directory: String, found: &[String]) -[FS]> JetCLIReadError! {
+jet_cli_prove_collect: fn(directory: String, found: ^[String]) -[FS]> JetCLIReadError! {
     listed: cli_files.list_dir(directory) ?? return Err(jet_cli_read_error("couldn't read `{directory}`: {jet_cli_io_error_text(err)}"))
     loop entry in listed {
         path: jet_cli_rooted_join(directory, entry.name)

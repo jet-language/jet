@@ -294,7 +294,7 @@ jet_cli_debug_launch: fn(entry: String, scratch: String, deep_checks: DeepChecks
 // recording was made from: a recording binds its source's digest
 // (jet_cli_replay_source_identity), and one of other source is E3621. An
 // image binds no source, so it is replayed unchecked.
-jet_cli_debug_replay_env: fn(name: String, entry: String, scratch: String, args: &[String]) -[FS, Env, Time.Wait]> [String] JetCLIProveRefusal! {
+jet_cli_debug_replay_env: fn(name: String, entry: String, scratch: String, args: ^[String]) -[FS, Env, Time.Wait]> [String] JetCLIProveRefusal! {
     path_given: name.ends_with(".jetproof-replay")
     problem: if path_given -> jet_cli_replay_input_problem(name) else -> jet_cli_replay_name_problem(name)
     if problem == .Val(why) {
@@ -435,7 +435,7 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
 // publishes its own (jet_cli_replay_record_run), and jet names it on stderr.
 // A session that ended the program first (an editor's disconnect; the
 // console's `quit` refuses on its own) leaves no log, which is refused.
-jet_cli_debug_recorded: fn(status: Int, argv: &&[String], record: JetCLIDebugRecord?) -> JetCLIProveRefusal? {
+jet_cli_debug_recorded: fn(status: Int, argv: ^^[String], record: JetCLIDebugRecord?) -> JetCLIProveRefusal? {
     made: record ?? return None
     if status < 0 {
         return Val(jet_cli_replay_unfinalized("the session ended the program before it did, so its runtime wrote no sync-order log"))
@@ -499,7 +499,7 @@ jet_cli_debug_unavailable: fn(error: NativeDebugError, color: Bool) -> JetCLIPla
 // program launched and ran to that stop, and the stop's first `print` is
 // then checked against it rather than waiting for it or compiling the
 // package's cut alone.
-jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], program_args: [String], entry: String, scratch: String, deep_checks: DeepChecks, script: [String], color: Bool, held: JetCLIDebugEvalHeldShared, refused: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_console: fn(session: ^NativeSession, file: String, lines: [String], breaks: [NativeBreak], program_args: [String], entry: String, scratch: String, deep_checks: DeepChecks, script: [String], color: Bool, held: JetCLIDebugEvalHeldShared, refused: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     opened := NativeDebugStep?{None}
     if breaks.len() > 0 {
         opened = Val(session.run_to(breaks, file, lines, program_args) ?? return jet_cli_debug_unavailable(err, color))
@@ -571,7 +571,7 @@ jet_cli_debug_file_answers: fn(image: String, entry: String, lines: [String], do
 // is refused with a line of its own. It exits 1 when the console refused a
 // command (NativeDebugStep.refused) or the program ended with a failing
 // status or a signal, else 0.
-jet_cli_debug_commands: fn(session: &NativeSession, first: NativeDebugStep, file: String, lines: [String], attached: Int, entry: String, scratch: String, deep_checks: DeepChecks, script: [String], color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_commands: fn(session: ^NativeSession, first: NativeDebugStep, file: String, lines: [String], attached: Int, entry: String, scratch: String, deep_checks: DeepChecks, script: [String], color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     scripted: script.len() > 0
     session.scripted = scripted
     echo: !scripted && !cli_term.stdin().is_tty()
@@ -652,7 +652,7 @@ jet_cli_debug_commands: fn(session: &NativeSession, first: NativeDebugStep, file
 // answered from the -O0 build of the image's source under the same
 // recording (NativeSession.recovered): built into `scratch` with
 // `deep_checks` the first time, its image then in `recovery`.
-jet_cli_debug_why: fn(session: &NativeSession, operand: String, entry: String, scratch: String, deep_checks: DeepChecks, recovery: &String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
+jet_cli_debug_why: fn(session: ^NativeSession, operand: String, entry: String, scratch: String, deep_checks: DeepChecks, recovery: ^String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
     asked: session.why(operand) ?? return Err(err)
     if !asked.recover || entry != "" -> return Ok(asked.text)
     source: session.entry_source()

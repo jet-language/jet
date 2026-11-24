@@ -83,7 +83,7 @@ HangarArchiveNode: struct {
 
     // The node's wire bytes, shared by the archive body and the canonical
     // Nix object bytes.
-    encode_into: fn(self, out: &[U8]) StoreError! {
+    encode_into: fn(self, out: ^[U8]) StoreError! {
         out.push(U8{self.kind.to_int()})
         store_archive_put_string(out, self.path)
         store_archive_put_raw_u32(out, self.mode)
@@ -110,7 +110,7 @@ NixClosureManifest: struct {
     cache_key: String,
     members: [NixClosureMember],
 
-    encode_into: fn(self, out: &[U8]) StoreError! {
+    encode_into: fn(self, out: ^[U8]) StoreError! {
         store_archive_put_string(out, self.output)
         store_archive_put_string(out, self.platform)
         store_archive_put_string(out, self.revision)
@@ -125,7 +125,7 @@ NixClosureManifest: struct {
         }
     }
 
-    decode_from: fn(reader: &HangarArchiveReader) -> NixClosureManifest StoreError! {
+    decode_from: fn(reader: ^HangarArchiveReader) -> NixClosureManifest StoreError! {
         output: reader.string()
         platform: reader.string()
         revision: reader.string()
@@ -361,7 +361,7 @@ HangarArchiveReader: struct {
     bytes: [U8],
     at: Int,
 
-    take_bytes: fn(&self, len: Int) -> [U8] StoreError! {
+    take_bytes: fn(^self, len: Int) -> [U8] StoreError! {
         if len < 0 -> return Err(StoreError.InvalidData("archive length overflows"))
         end: self.at + len
         if end > self.bytes.len() -> return Err(StoreError.InvalidData("archive is truncated"))
@@ -370,12 +370,12 @@ HangarArchiveReader: struct {
         Ok(taken)
     }
 
-    byte: fn(&self) -> U8 StoreError! {
+    byte: fn(^self) -> U8 StoreError! {
         taken: self.take_bytes(1)
         Ok(taken[0])
     }
 
-    u32: fn(&self) -> Int StoreError! {
+    u32: fn(^self) -> Int StoreError! {
         taken: self.take_bytes(4)
         value := 0
         loop index in 0..<4 -> value = (value) | (Int{taken[index]} << (8 * index))
@@ -384,14 +384,14 @@ HangarArchiveReader: struct {
 
     // A u64 field; values past Int's range come back negative, which every
     // caller rejects as over its bound.
-    u64: fn(&self) -> Int StoreError! {
+    u64: fn(^self) -> Int StoreError! {
         taken: self.take_bytes(8)
         value := 0
         loop index in 0..<8 -> value = (value) | (Int{taken[index]} << (8 * index))
         Ok(value)
     }
 
-    string: fn(&self) -> String StoreError! {
+    string: fn(^self) -> String StoreError! {
         len: self.u32()
         if len > STORE_ARCHIVE_MAX_FIELD_BYTES {
             return Err(StoreError.InvalidData("archive field is too large"))
@@ -407,22 +407,22 @@ HangarArchiveReader: struct {
     }
 }
 
-store_archive_put_u32: fn(out: &[U8], value: Int) StoreError! {
+store_archive_put_u32: fn(out: ^[U8], value: Int) StoreError! {
     if value < 0 || value > 0xFFFFFFFF {
         return Err(StoreError.InvalidData("archive field is too large"))
     }
     store_archive_put_raw_u32(out, value)
 }
 
-store_archive_put_raw_u32: fn(out: &[U8], value: Int) Never! {
+store_archive_put_raw_u32: fn(out: ^[U8], value: Int) Never! {
     loop index in 0..<4 -> out.push(U8{((value >> (8 * index))) & 255})
 }
 
-store_archive_put_u64: fn(out: &[U8], value: Int) Never! {
+store_archive_put_u64: fn(out: ^[U8], value: Int) Never! {
     loop index in 0..<8 -> out.push(U8{((value >> (8 * index))) & 255})
 }
 
-store_archive_put_string: fn(out: &[U8], value: String) StoreError! {
+store_archive_put_string: fn(out: ^[U8], value: String) StoreError! {
     raw: value.bytes()
     if raw.len() > STORE_ARCHIVE_MAX_FIELD_BYTES {
         return Err(StoreError.InvalidData("archive field is too large"))

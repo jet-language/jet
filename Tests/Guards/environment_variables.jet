@@ -70,7 +70,7 @@ environment_name_byte: fn(code: Int) -> Bool {
 }
 
 // Each whole `"JET_…"` or `"JETPACK_…"` string literal of `text`, as `path name`.
-environment_literals: fn(path: String, text: String, out: &[String]) {
+environment_literals: fn(path: String, text: String, out: ^[String]) {
     bytes: text.bytes()
     at := 0
     loop {
@@ -100,7 +100,7 @@ environment_literals: fn(path: String, text: String, out: &[String]) {
 
 // The literals of every source file under `path`. Hidden entries and Tests
 // directories are not scanned.
-environment_scan: fn(path: String, out: &[String]) {
+environment_scan: fn(path: String, out: ^[String]) {
     if environment_files.is_dir(path) {
         loop child in (environment_files.list_dir(path) ?? panic("list {path}: {err}")) {
             if child.name.starts_with(".") || child.name == "Tests" -> next

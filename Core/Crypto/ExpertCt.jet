@@ -17,25 +17,25 @@ arena: fn(words: Int) -> [I64] Never! {
 
 word: fn(w: [I64], at: Int) -> I64 Never! { w[at /% 8] }
 
-store: fn(w: &[I64], at: Int, value: I64) Never! { w[at /% 8] = value }
+store: fn(w: ^[I64], at: Int, value: I64) Never! { w[at /% 8] = value }
 
 byte: fn(w: [I64], at: Int) -> I64 Never! { (w[at /% 8] >> ((at %% 8) * 8)) & I64{255} }
 
-#Overflow(.Wrapping) put: fn(w: &[I64], at: Int, value: I64) Never! {
+#Overflow(.Wrapping) put: fn(w: ^[I64], at: Int, value: I64) Never! {
     shift: (at %% 8) * 8
     mask: I64{255} << shift
     w[at /% 8] = (w[at /% 8] & (mask ~ I64{-1})) | ((value & I64{255}) << shift)
 }
 
-wipe: fn(w: &[I64]) Never! {
+wipe: fn(w: ^[I64]) Never! {
     loop i in 0..<w.len() -> w[i] = I64{0}
 }
 
-clear: fn(w: &[I64], at: Int, count: Int) Never! {
+clear: fn(w: ^[I64], at: Int, count: Int) Never! {
     loop i in 0..<count -> put(w, at + i, I64{0})
 }
 
-load: fn(w: &[I64], at: Int, data: [U8]) Never! {
+load: fn(w: ^[I64], at: Int, data: [U8]) Never! {
     loop i in 0..<data.len() -> put(w, at + i, I64{data[i]})
 }
 
@@ -52,14 +52,14 @@ equal: fn(w: [I64], a: Int, b: Int, count: Int) -> Bool Never! {
     diff == I64{0}
 }
 
-copy_field: fn(w: &[I64], out: Int, input: Int) Never! {
+copy_field: fn(w: ^[I64], out: Int, input: Int) Never! {
     loop i in 0..<16 {
         value: word(w, input + i * 8)
         store(w, out + i * 8, value)
     }
 }
 
-#Overflow(.Wrapping) carry: fn(w: &[I64], a: Int) Never! {
+#Overflow(.Wrapping) carry: fn(w: ^[I64], a: Int) Never! {
     loop i in 0..<16 {
         v: word(w, a + i * 8) + I64{65536}
         c: v >> 16
@@ -74,7 +74,7 @@ copy_field: fn(w: &[I64], out: Int, input: Int) Never! {
     }
 }
 
-#Overflow(.Wrapping) swap: fn(w: &[I64], a: Int, b: Int, bit: I64) Never! {
+#Overflow(.Wrapping) swap: fn(w: ^[I64], a: Int, b: Int, bit: I64) Never! {
     mask: I64{0} - bit
     loop i in 0..<16 {
         x: word(w, a + i * 8)
@@ -85,21 +85,21 @@ copy_field: fn(w: &[I64], out: Int, input: Int) Never! {
     }
 }
 
-#Overflow(.Wrapping) add: fn(w: &[I64], out: Int, a: Int, b: Int) Never! {
+#Overflow(.Wrapping) add: fn(w: ^[I64], out: Int, a: Int, b: Int) Never! {
     loop i in 0..<16 {
         value: word(w, a + i * 8) + word(w, b + i * 8)
         store(w, out + i * 8, value)
     }
 }
 
-#Overflow(.Wrapping) sub: fn(w: &[I64], out: Int, a: Int, b: Int) Never! {
+#Overflow(.Wrapping) sub: fn(w: ^[I64], out: Int, a: Int, b: Int) Never! {
     loop i in 0..<16 {
         value: word(w, a + i * 8) - word(w, b + i * 8)
         store(w, out + i * 8, value)
     }
 }
 
-#Overflow(.Wrapping) mul: fn(w: &[I64], out: Int, a: Int, b: Int, work: Int) Never! {
+#Overflow(.Wrapping) mul: fn(w: ^[I64], out: Int, a: Int, b: Int, work: Int) Never! {
     loop i in 0..<31 -> store(w, work + i * 8, I64{0})
     loop i in 0..<16 {
         loop j in 0..<16 {
@@ -117,7 +117,7 @@ copy_field: fn(w: &[I64], out: Int, input: Int) Never! {
     carry(w, out)
 }
 
-#Overflow(.Wrapping) pack: fn(w: &[I64], out: Int, value: Int, reduced: Int) Never! {
+#Overflow(.Wrapping) pack: fn(w: ^[I64], out: Int, value: Int, reduced: Int) Never! {
     carry(w, value)
     carry(w, value)
     carry(w, value)
@@ -143,7 +143,7 @@ copy_field: fn(w: &[I64], out: Int, input: Int) Never! {
     }
 }
 
-inverse: fn(w: &[I64], out: Int, input: Int, work: Int) Never! {
+inverse: fn(w: ^[I64], out: Int, input: Int, work: Int) Never! {
     copy_field(w, out, input)
     i := 253
     loop {
@@ -221,7 +221,7 @@ C_I: [I64]{0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x2f43, 0xd7a
 
 C_L: [I64]{0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10}
 
-constants: fn(w: &[I64]) Never! {
+constants: fn(w: ^[I64]) Never! {
     loop i in 0..<16 {
         store(w, 3072 + i * 8, C_D2[i])
         store(w, 4608 + i * 8, C_D[i])
@@ -229,7 +229,7 @@ constants: fn(w: &[I64]) Never! {
     }
 }
 
-base: fn(w: &[I64], q: Int) Never! {
+base: fn(w: ^[I64], q: Int) Never! {
     clear(w, q, 512)
     loop i in 0..<16 {
         store(w, q + i * 8, C_X[i])
@@ -240,7 +240,7 @@ base: fn(w: &[I64], q: Int) Never! {
     mul(w, q + 384, q, q + 128, 2816)
 }
 
-point_add: fn(w: &[I64], p: Int, q: Int) Never! {
+point_add: fn(w: ^[I64], p: Int, q: Int) Never! {
     sub(w, 1792, p + 128, p)
     sub(w, 1920, q + 128, q)
     mul(w, 1792, 1792, 1920, 2816)
@@ -261,11 +261,11 @@ point_add: fn(w: &[I64], p: Int, q: Int) Never! {
     mul(w, p + 384, 2304, 2688, 2816)
 }
 
-point_swap: fn(w: &[I64], p: Int, q: Int, bit: I64) Never! {
+point_swap: fn(w: ^[I64], p: Int, q: Int, bit: I64) Never! {
     loop i in 0..<4 -> swap(w, p + i * 128, q + i * 128, bit)
 }
 
-point_mul: fn(w: &[I64], p: Int, q: Int, scalar: Int) Never! {
+point_mul: fn(w: ^[I64], p: Int, q: Int, scalar: Int) Never! {
     clear(w, p, 512)
     store(w, p + 128, I64{1})
     store(w, p + 256, I64{1})
@@ -281,7 +281,7 @@ point_mul: fn(w: &[I64], p: Int, q: Int, scalar: Int) Never! {
     }
 }
 
-point_pack: fn(w: &[I64], out: Int, p: Int) Never! {
+point_pack: fn(w: ^[I64], out: Int, p: Int) Never! {
     inverse(w, 1792, p + 256, 2816)
     mul(w, p, p, 1792, 2816)
     mul(w, p + 128, p + 128, 1792, 2816)
@@ -291,7 +291,7 @@ point_pack: fn(w: &[I64], out: Int, p: Int) Never! {
     put(w, out + 31, value)
 }
 
-#Overflow(.Wrapping) mod_l: fn(w: &[I64], out: Int, x: Int) Never! {
+#Overflow(.Wrapping) mod_l: fn(w: ^[I64], out: Int, x: Int) Never! {
     i := 63
     loop {
         if i < 32 -> break
@@ -330,7 +330,7 @@ point_pack: fn(w: &[I64], out: Int, p: Int) Never! {
     }
 }
 
-reduce: fn(w: &[I64], hash: Int) Never! {
+reduce: fn(w: ^[I64], hash: Int) Never! {
     loop i in 0..<64 {
         value: byte(w, hash + i)
         store(w, 4960 + i * 8, value)
@@ -339,7 +339,7 @@ reduce: fn(w: &[I64], hash: Int) Never! {
     mod_l(w, hash, 4960)
 }
 
-hash_parts: fn(w: &[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8]) Never! {
+hash_parts: fn(w: ^[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8]) Never! {
     data := [U8]{}
     if !mem.__list_reserve_exact<U8>(data, an + bn + msg.len()) {
         panic("crypto hash input allocation failed")
@@ -353,7 +353,7 @@ hash_parts: fn(w: &[I64], out: Int, a: Int, an: Int, b: Int, bn: Int, msg: [U8])
     crypto.wipe(digest)
 }
 
-expand: fn(w: &[I64], seed: [U8]) Never! {
+expand: fn(w: ^[I64], seed: [U8]) Never! {
     digest := crypto.sha512(seed).bytes
     load(w, 4096, digest)
     crypto.wipe(digest)
@@ -432,13 +432,13 @@ scalar_canonical: fn(w: [I64], scalar: Int) -> Bool Never! {
     }
 }
 
-field_equal: fn(w: &[I64], a: Int, b: Int) -> Bool Never! {
+field_equal: fn(w: ^[I64], a: Int, b: Int) -> Bool Never! {
     pack(w, 4960, a, 3200)
     pack(w, 4992, b, 3200)
     equal(w, 4960, 4992, 32)
 }
 
-#Overflow(.Wrapping) decode: fn(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
+#Overflow(.Wrapping) decode: fn(w: ^[I64], p: Int, bytes: Int) -> Bool Never! {
     if !canonical_y(w, bytes) -> return false
     clear(w, p, 512)
     store(w, p + 256, I64{1})
@@ -488,7 +488,7 @@ field_equal: fn(w: &[I64], a: Int, b: Int) -> Bool Never! {
     true
 }
 
-small_order: fn(w: &[I64], p: Int) -> Bool Never! {
+small_order: fn(w: ^[I64], p: Int) -> Bool Never! {
     loop i in 0..<64 {
         value: word(w, p + i * 8)
         store(w, 4096 + i * 8, value)
@@ -500,7 +500,7 @@ small_order: fn(w: &[I64], p: Int) -> Bool Never! {
     diff == I64{0}
 }
 
-canonical_point: fn(w: &[I64], p: Int, encoded: Int) -> Bool Never! {
+canonical_point: fn(w: ^[I64], p: Int, encoded: Int) -> Bool Never! {
     // decode returns -P; invert the sign bit of its encoding unless x=0.
     point_pack(w, 4928, p)
     diff := I64{0}
@@ -511,7 +511,7 @@ canonical_point: fn(w: &[I64], p: Int, encoded: Int) -> Bool Never! {
     equal(w, 4928, encoded, 32)
 }
 
-verify_equation: fn(w: &[I64], msg: [U8]) -> Bool Never! {
+verify_equation: fn(w: ^[I64], msg: [U8]) -> Bool Never! {
     hash_parts(w, 4864, 5472, 32, 5536, 32, msg)
     reduce(w, 4864)
     point_mul(w, 768, 1280, 4864)
@@ -575,7 +575,7 @@ le32: fn(w: [I64], at: Int) -> I64 Never! {
     byte(w, at) | (byte(w, at + 1) << 8) | (byte(w, at + 2) << 16) | (byte(w, at + 3) << 24)
 }
 
-#Overflow(.Wrapping) poly_block: fn(w: &[I64], length: Int) Never! {
+#Overflow(.Wrapping) poly_block: fn(w: ^[I64], length: Int) Never! {
     put(w, 96 + length, I64{1})
     t0: le32(w, 96)
     t1: le32(w, 100)
@@ -613,7 +613,7 @@ le32: fn(w: [I64], at: Int) -> I64 Never! {
     store(w, 48, next)
 }
 
-#Overflow(.Wrapping) poly_finish: fn(w: &[I64]) Never! {
+#Overflow(.Wrapping) poly_finish: fn(w: ^[I64]) Never! {
     c := I64{0}
     loop i in 1..<5 {
         v: word(w, 40 + i * 8) + c

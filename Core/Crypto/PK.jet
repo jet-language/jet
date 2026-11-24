@@ -162,7 +162,7 @@ pk_info_from_type: fn(kind: oids.PKType) -> oids.PKType? Never! {
 /// Give a context with no key the empty key of type `info`
 /// (mbedtls_pk_setup). BadInput for no type, a type pk_info_from_type does
 /// not give, or a context already set up.
-pk_setup: fn(ctx: &PKContext, info: oids.PKType?) PKError! {
+pk_setup: fn(ctx: ^PKContext, info: oids.PKType?) PKError! {
     given: info ?? return Err(.BadInput)
     kind: pk_info_from_type(given) ?? return Err(.BadInput)
     if ctx.kind != None -> return Err(.BadInput)
@@ -172,7 +172,7 @@ pk_setup: fn(ctx: &PKContext, info: oids.PKType?) PKError! {
 }
 
 /// Make a context with no key an RSA-alt key (mbedtls_pk_setup_rsa_alt).
-pk_setup_rsa_alt: fn(ctx: &PKContext, key: RSAAltKey) PKError! {
+pk_setup_rsa_alt: fn(ctx: ^PKContext, key: RSAAltKey) PKError! {
     if ctx.kind != None -> return Err(.BadInput)
     ctx.kind = Val(.RSAAlt)
     ctx.alt = Val(key)
@@ -252,7 +252,7 @@ alt_key_len: fn(ctx: PKContext) -> Int Never! {
 /// Verify `sig` over `hash` (mbedtls_pk_verify). An RSA signature longer
 /// than the modulus that verifies is SigLenMismatch, as is an ECDSA one
 /// followed by more bytes.
-pk_verify: fn(ctx: &PKContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
+pk_verify: fn(ctx: ^PKContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
     own: ctx.kind ?? return Err(.BadInput)
     if hash.len() == 0 -> return Err(.BadInput)
     if own == {
@@ -263,7 +263,7 @@ pk_verify: fn(ctx: &PKContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
 }
 
 // rsa_verify_wrap: the signature is the modulus's length of bytes.
-rsa_verify_wrap: fn(key: &rsa.RSAContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
+rsa_verify_wrap: fn(key: ^rsa.RSAContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
     if md == None && hash.len() > 0xFFFFFFFF -> return Err(.BadInput)
     rsa_len: key.len
     if sig.len() < rsa_len -> return Err(.RSA(.VerifyFailed))
@@ -284,7 +284,7 @@ ecdsa_verify_wrap: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) PKError! {
 
 /// Verify `sig` as a signature of type `kind`; RSASSA-PSS takes options,
 /// any other type none (mbedtls_pk_verify_ext).
-pk_verify_ext: fn(kind: oids.PKType, options: PSSOptions?, ctx: &PKContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
+pk_verify_ext: fn(kind: oids.PKType, options: PSSOptions?, ctx: ^PKContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
     own: ctx.kind ?? return Err(.BadInput)
     if !pk_can_do(ctx, kind) -> return Err(.TypeMismatch)
     if kind == {
@@ -310,7 +310,7 @@ pk_verify_ext: fn(kind: oids.PKType, options: PSSOptions?, ctx: &PKContext, md: 
 
 /// Sign `hash`, the signature at most sig_size bytes: RSA with the key's
 /// padding, ECDSA deterministically (RFC 6979) (mbedtls_pk_sign).
-pk_sign: fn<R: RNG>(ctx: &PKContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: &R) -> [U8] PKError! {
+pk_sign: fn<R: RNG>(ctx: ^PKContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: ^R) -> [U8] PKError! {
     own: ctx.kind ?? return Err(.BadInput)
     if hash.len() == 0 -> return Err(.BadInput)
     if own == {
@@ -322,7 +322,7 @@ pk_sign: fn<R: RNG>(ctx: &PKContext, md: hashes.Md?, hash: [U8], sig_size: Int, 
     }
 }
 
-rsa_sign_wrap: fn<R: RNG>(key: &rsa.RSAContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: &R) -> [U8] PKError! {
+rsa_sign_wrap: fn<R: RNG>(key: ^rsa.RSAContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: ^R) -> [U8] PKError! {
     if md == None && hash.len() > 0xFFFFFFFF -> return Err(.BadInput)
     if sig_size < key.len -> return Err(.BufferTooSmall)
     sig: rsa.rsa_pkcs1_sign(key, rng, md, hash) ?? return Err(.RSA(err))
@@ -331,7 +331,7 @@ rsa_sign_wrap: fn<R: RNG>(key: &rsa.RSAContext, md: hashes.Md?, hash: [U8], sig_
 
 // ecdsa_sign_wrap: deterministic ECDSA needs the digest; mbedtls refuses
 // MD_NONE with ECP_BAD_INPUT_DATA.
-ecdsa_sign_wrap: fn<R: RNG>(key: ecp.Keypair, md: hashes.Md?, hash: [U8], sig_size: Int, rng: &R) -> [U8] PKError! {
+ecdsa_sign_wrap: fn<R: RNG>(key: ecp.Keypair, md: hashes.Md?, hash: [U8], sig_size: Int, rng: ^R) -> [U8] PKError! {
     digest: md ?? return Err(.ECDSA(.Ecp(.BadInput)))
     sig: ecdsa.ecdsa_write_signature(key, digest, hash, sig_size, rng) ?? return Err(.ECDSA(err))
     Ok(sig)
@@ -352,7 +352,7 @@ rsa_alt_sign_wrap: fn(ctx: PKContext, md: hashes.Md?, hash: [U8], sig_size: Int)
 /// Sign `hash` as a signature of type `kind`: RSASSA-PSS with the largest
 /// salt whatever the key's padding, any other type as pk_sign
 /// (mbedtls_pk_sign_ext).
-pk_sign_ext: fn<R: RNG>(kind: oids.PKType, ctx: &PKContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: &R) -> [U8] PKError! {
+pk_sign_ext: fn<R: RNG>(kind: oids.PKType, ctx: ^PKContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: ^R) -> [U8] PKError! {
     if ctx.kind == None -> return Err(.BadInput)
     if !pk_can_do(ctx, kind) -> return Err(.TypeMismatch)
     if kind != .RSASSAPSS -> return pk_sign(ctx, md, hash, sig_size, rng)
@@ -368,7 +368,7 @@ pk_sign_ext: fn<R: RNG>(kind: oids.PKType, ctx: &PKContext, md: hashes.Md?, hash
 /// length shows only in `bad`, never in the time or the Result. An RSA-alt
 /// key decrypts with its own function, whose failure or other length is
 /// folded into `bad` the same way, though the time is the function's.
-pk_decrypt_fixed: fn<R: RNG>(ctx: &PKContext, input: [U8], len: Int, rng: &R) -> rsa.V15Fixed PKError! {
+pk_decrypt_fixed: fn<R: RNG>(ctx: ^PKContext, input: [U8], len: Int, rng: ^R) -> rsa.V15Fixed PKError! {
     own: ctx.kind ?? return Err(.BadInput)
     if own == .RSA {
         if input.len() != ctx.rsa.len -> return Err(.RSA(.BadInput(None)))
@@ -400,7 +400,7 @@ pk_alt_decrypt_fixed: fn(decrypt: fn([U8], Int) -[]> [U8] PKError!, input: [U8],
 
 /// Encrypt `input` under the key; the ciphertext, a modulus long, must fit
 /// osize bytes (mbedtls_pk_encrypt).
-pk_encrypt: fn<R: RNG>(ctx: &PKContext, input: [U8], osize: Int, rng: &R) -> [U8] PKError! {
+pk_encrypt: fn<R: RNG>(ctx: ^PKContext, input: [U8], osize: Int, rng: ^R) -> [U8] PKError! {
     own: ctx.kind ?? return Err(.BadInput)
     if own != .RSA -> return Err(.TypeMismatch)
     if ctx.rsa.len > osize -> return Err(.RSA(.OutputTooLarge))
@@ -411,7 +411,7 @@ pk_encrypt: fn<R: RNG>(ctx: &PKContext, input: [U8], osize: Int, rng: &R) -> [U8
 /// Check that `prv` is the private key of `public` (mbedtls_pk_check_pair):
 /// both of one type, or an RSA-alt key checked against an RSA one by a
 /// test signature.
-pk_check_pair: fn<R: RNG>(public: &PKContext, prv: &PKContext, rng: &R) PKError! {
+pk_check_pair: fn<R: RNG>(public: ^PKContext, prv: ^PKContext, rng: ^R) PKError! {
     pub_kind: public.kind ?? return Err(.BadInput)
     prv_kind: prv.kind ?? return Err(.BadInput)
     if prv_kind == {
@@ -432,7 +432,7 @@ pk_check_pair: fn<R: RNG>(public: &PKContext, prv: &PKContext, rng: &R) PKError!
 
 // rsa_alt_check_pair: the sizes agree and the alt key's signature of 32
 // bytes of 0x2a verifies under the public key.
-rsa_alt_check_pair: fn(public: &PKContext, prv: PKContext) PKError! {
+rsa_alt_check_pair: fn(public: ^PKContext, prv: PKContext) PKError! {
     if pk_get_bitlen(prv) != rsa.rsa_get_bitlen(public.rsa) {
         return Err(.RSA(.KeyCheckFailed(None)))
     }
@@ -467,14 +467,14 @@ pk_debug: fn(ctx: PKContext) -> [PKDebugItem] PKError! {
 
 /// Load curve `id` into an EC key; a key already on another curve is
 /// KeyInvalidFormat (mbedtls_pk_ecc_set_group).
-pk_ecc_set_group: fn(ctx: &PKContext, id: ecp.GroupID) PKError! {
+pk_ecc_set_group: fn(ctx: ^PKContext, id: ecp.GroupID) PKError! {
     if ctx.ec.grp.id != .Unknown && ctx.ec.grp.id != id -> return Err(.KeyInvalidFormat(None))
     ctx.ec.grp = ecp.group_load(id) ?? return Err(.Ecp(err))
 }
 
 /// Read the private value `key` on the key's curve
 /// (mbedtls_pk_ecc_set_key).
-pk_ecc_set_key: fn(ctx: &PKContext, key: [U8]) PKError! {
+pk_ecc_set_key: fn(ctx: ^PKContext, key: [U8]) PKError! {
     id: ctx.ec.grp.id
     if ecp.read_key(id, ctx.ec, key) == {
         .Ok(_) -> {}
@@ -484,13 +484,13 @@ pk_ecc_set_key: fn(ctx: &PKContext, key: [U8]) PKError! {
 
 /// Read the public point `point` and check it is on the key's curve
 /// (mbedtls_pk_ecc_set_pubkey).
-pk_ecc_set_pubkey: fn(ctx: &PKContext, point: [U8]) PKError! {
+pk_ecc_set_pubkey: fn(ctx: ^PKContext, point: [U8]) PKError! {
     ctx.ec.q = ecp.point_read_binary(ctx.ec.grp, point) ?? return Err(.Ecp(err))
     ecp.check_pubkey(ctx.ec.grp, ctx.ec.q) ?? return Err(.Ecp(err))
 }
 
 /// Set the public point to d G (mbedtls_pk_ecc_set_pubkey_from_prv).
-pk_ecc_set_pubkey_from_prv: fn<R: RNG>(ctx: &PKContext, rng: &R) PKError! {
+pk_ecc_set_pubkey_from_prv: fn<R: RNG>(ctx: ^PKContext, rng: ^R) PKError! {
     ctx.ec.q = ecp.ecp_mul(ctx.ec.grp, ctx.ec.d, ctx.ec.grp.g, rng) ?? return Err(.Ecp(err))
 }
 

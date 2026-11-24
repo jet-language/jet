@@ -21,11 +21,12 @@ use {
     encoding_stream: __core_encoding_stream
     rt: jet.runtime.encoding
     data_rt: jet.runtime.data
+    sys_rt: jet.runtime.sys
 }
 
 /// Read a local file loader's file as its payload; `core.data.snapshot` then
 /// parses and commits it. A failed read is recorded in the loader status.
-read: fn<T>(loader: &DataLoader<T>) -[FS.Read]> DataError! {
+read: fn<T>(loader: ^DataLoader<T>) -[FS.Read]> DataError! {
     core.data.__read_file<T>(loader, fn(path) { Ok(files.read_bytes(path) ?? return Err("{err}")) })
 }
 
@@ -51,7 +52,7 @@ priv JSONRowSource: struct {
 // `jet_data_stream_scan`). The stream pulls one record at a time: the first
 // record names the fields, and every later record must carry exactly that
 // many. A row failure carries its 1-based data row and stays latched.
-csv_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
+csv_reader: fn<T: Decode>(reader: ^^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     core.data.data_limits_check(limits) ?? return Err(err)
     records: csv_codec.reader<FileReader>(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
     state: Shared{CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}}
@@ -131,7 +132,7 @@ data_from_encoding: fn(operation: String, row: Int?, cause: EncodingError) -> Da
 // core-library.md `json_reader<T: Decode>(reader, limits)`). Numbers keep
 // their typed lexemes, each array element folds to one tree under the
 // reader's allocation budget, and a failure stays latched.
-json_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
+json_reader: fn<T: Decode>(reader: ^^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     core.data.data_limits_check(limits) ?? return Err(err)
     parser := encoding_stream.json_reader<FileReader>(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
     parser.typed_numbers = true
@@ -244,7 +245,7 @@ bridge_status: fn(step: String) -[FS, Env]> DataStatus Never! {
 
 bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
     // Keep opaque native path bytes: PATH need not be UTF-8.
-    path: core.sys.__host_env("PATH") ?? return false
+    path: sys_rt.host_env("PATH") ?? return false
     windows: sys.is_windows()
     delimiter: if windows -> U8{59} else -> U8{58}
     directory := [U8]{}

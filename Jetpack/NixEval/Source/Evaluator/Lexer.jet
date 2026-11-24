@@ -80,7 +80,7 @@ NixEvalLexer: struct {
 
     at: fn(self, offset: Int) -> Int Never! { nixeval_byte(self.bytes, self.position + offset) }
 
-    push: fn(&self, token: NixEvalToken) NixEvalError! {
+    push: fn(^self, token: NixEvalToken) NixEvalError! {
         estimated: self.bytes.len() * 4 + (self.tokens.len() + 1) * NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES
         if estimated > NIXEVAL_MEMORY_BYTES {
             return Err(NixEvalError.ResourceLimit("foreign flake evaluator memory budget exceeded"))
@@ -91,7 +91,7 @@ NixEvalLexer: struct {
         self.tokens.push(token.copy())
     }
 
-    skip_space_and_comments: fn(&self) NixEvalError! {
+    skip_space_and_comments: fn(^self) NixEvalError! {
         loop {
             loop nixeval_is_ascii_whitespace(self.at(0)) -> self.position += 1
             if {
@@ -113,12 +113,12 @@ NixEvalLexer: struct {
         }
     }
 
-    single: fn(&self, token: &&NixEvalToken, width: Int) -> NixEvalToken Never! {
+    single: fn(^self, token: ^^NixEvalToken, width: Int) -> NixEvalToken Never! {
         self.position += width
         token
     }
 
-    token: fn(&self) -> NixEvalToken NixEvalError! {
+    token: fn(^self) -> NixEvalToken NixEvalError! {
         byte: self.at(0)
         next_byte: self.at(1)
         if byte == {
@@ -157,7 +157,7 @@ NixEvalLexer: struct {
     }
 
     // Indented strings, integers and identifiers; any other byte is unsupported.
-    word_token: fn(&self, byte: Int, next_byte: Int) -> NixEvalToken NixEvalError! {
+    word_token: fn(^self, byte: Int, next_byte: Int) -> NixEvalToken NixEvalError! {
         if byte == 39 && next_byte == 39 -> return self.indented_string()
         if (byte == 45 && nixeval_is_ascii_digit(next_byte)) || nixeval_is_ascii_digit(byte) {
             return Ok(NixEvalToken.Integer(self.integer()))
@@ -168,7 +168,7 @@ NixEvalLexer: struct {
         Err(nixeval_unsupported_character(byte))
     }
 
-    string: fn(&self) -> NixEvalToken NixEvalError! {
+    string: fn(^self) -> NixEvalToken NixEvalError! {
         self.position += 1
         literal := [U8]{}
         parts := [NixEvalStringTokenPart]{}
@@ -219,7 +219,7 @@ NixEvalLexer: struct {
         Err(NixEvalError.Syntax("unterminated string"))
     }
 
-    indented_string: fn(&self) -> NixEvalToken NixEvalError! {
+    indented_string: fn(^self) -> NixEvalToken NixEvalError! {
         self.position += 2
         start: self.position.copy()
         loop self.position + 1 < self.bytes.len() && !(self.at(0) == 39 && self.at(1) == 39) {
@@ -235,7 +235,7 @@ NixEvalLexer: struct {
         Ok(NixEvalToken.Interpolated(parts))
     }
 
-    path: fn(&self) -> String NixEvalError! {
+    path: fn(^self) -> String NixEvalError! {
         start: self.position.copy()
         loop self.position < self.bytes.len() {
             byte: self.at(0)
@@ -252,7 +252,7 @@ NixEvalLexer: struct {
         Ok(path)
     }
 
-    integer: fn(&self) -> Int NixEvalError! {
+    integer: fn(^self) -> Int NixEvalError! {
         start: self.position.copy()
         if self.at(0) == 45 -> self.position += 1
         loop nixeval_is_ascii_digit(self.at(0)) -> self.position += 1
@@ -263,7 +263,7 @@ NixEvalLexer: struct {
         Ok(value)
     }
 
-    identifier: fn(&self) -> String Never! {
+    identifier: fn(^self) -> String Never! {
         start: self.position.copy()
         self.position += 1
         loop {
@@ -309,7 +309,7 @@ nixeval_interpolated_parts: fn(source: String) -> [NixEvalStringTokenPart] NixEv
 }
 
 // Capture the source of one `${...}` body, leaving `position` after the `}`.
-nixeval_capture_interpolation: fn(bytes: [U8], position: &Int) -> String NixEvalError! {
+nixeval_capture_interpolation: fn(bytes: [U8], position: ^Int) -> String NixEvalError! {
     start: position.copy()
     braces := 0
     parentheses := 0

@@ -42,7 +42,7 @@ ir_ssa_home: fn(s: IRSsa, homes: [Int], used: Int, slot: Int) -> Int Never! {
 // The moves of edge `edge`: (destination home, source home) per phi of its
 // join that is read, skipping Undef arguments, Unit slots and moves within
 // one home.
-ir_ssa_edge_moves: fn(m: IRModule, f: IRFunction, s: IRSsa, live: [Bool], homes: [Int], edge: Int, dsts: &[Int], srcs: &[Int]) Never! {
+ir_ssa_edge_moves: fn(m: IRModule, f: IRFunction, s: IRSsa, live: [Bool], homes: [Int], edge: Int, dsts: ^[Int], srcs: ^[Int]) Never! {
     dsts.clear()
     srcs.clear()
     join: s.edge_join[edge]
@@ -72,7 +72,7 @@ IRSsaCode: struct {
     args: [Int],
 }
 
-ir_ssa_put: fn(code: &IRSsaCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
+ir_ssa_put: fn(code: ^IRSsaCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
     code.op.push(op.copy())
     code.dst.push(dst)
     code.a.push(a)
@@ -84,7 +84,7 @@ ir_ssa_put: fn(code: &IRSsaCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, lin
 // A parallel copy as Moves: a move whose destination no pending move still
 // reads goes first; a cycle saves one destination in a temporary (one per
 // type row, `temps`) and reads it from there.
-ir_ssa_put_moves: fn(f: &IRFunction, code: &IRSsaCode, temps: &[Int:Int], dsts: [Int], srcs_in: [Int], line: Int) -> Int Never! {
+ir_ssa_put_moves: fn(f: ^IRFunction, code: ^IRSsaCode, temps: ^[Int:Int], dsts: [Int], srcs_in: [Int], line: Int) -> Int Never! {
     srcs := srcs_in.copy()
     done := [Bool]{}
     loop _ in dsts -> done.push(false)
@@ -140,7 +140,7 @@ ir_ssa_out_poll: fn(f: IRFunction, s: IRSsa, value: Int) -> Bool Never! {
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
-ir_ssa_out: fn(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutStats Never! {
+ir_ssa_out: fn(m: IRModule, f: ^IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutStats Never! {
     count: f.slot_type.len()
     values: s.val_slot.len()
     live := ir_ssa_live(s, f)
@@ -419,7 +419,7 @@ ir_ssa_out: fn(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutS
 IR_SSA_POSITION_LIMIT: 1073741824
 
 // Records that value `used` (-1: no read) is read at `pos` in `block`.
-ir_ssa_use: fn(s: IRSsa, head: &[Int], next_use: &[Int], blocks: &[Int], positions: &[Int], used: Int, block: Int, pos: Int) Never! {
+ir_ssa_use: fn(s: IRSsa, head: ^[Int], next_use: ^[Int], blocks: ^[Int], positions: ^[Int], used: Int, block: Int, pos: Int) Never! {
     if used < 0 {
         return
     }
@@ -440,7 +440,7 @@ ir_ssa_use: fn(s: IRSsa, head: &[Int], next_use: &[Int], blocks: &[Int], positio
 // range covers the whole block (the reading block's too, when a path from
 // the write reaches it again, as around a loop) / leaves the write's block
 // through it.
-ir_ssa_walk: fn(s: IRSsa, first: [Int], last: [Int], home: Int, start: Int, value: Int, block: Int, pos: Int, entered: &[Int], left: &[Int], work: &[Int], ranges: &[Int]) Never! {
+ir_ssa_walk: fn(s: IRSsa, first: [Int], last: [Int], home: Int, start: Int, value: Int, block: Int, pos: Int, entered: ^[Int], left: ^[Int], work: ^[Int], ranges: ^[Int]) Never! {
     if block == home && start <= pos {
         ranges.push(start)
         ranges.push(pos)

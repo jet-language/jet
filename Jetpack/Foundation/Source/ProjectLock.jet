@@ -53,7 +53,7 @@ RuntimeLock: struct {
     // Rust `drop(lock)`: release the kernel lock now instead of at scope exit.
     // Both files stay on disk so every later opener locks the same owner inode.
     impl Close {
-        close: fn(&&self) {}
+        close: fn(^^self) {}
     }
 }
 
@@ -118,7 +118,7 @@ env_acquire_lock_waiting: fn(root: String, scope: String, wait: Duration) -[FS, 
     env_lock_acquire_opened(env_lock_open_scope(authority, scope), wait)
 }
 
-env_lock_acquire_opened: fn(opened: &&RuntimeLockScope, wait: Duration) -[FS, Env, Time]> RuntimeLock IOError! {
+env_lock_acquire_opened: fn(opened: ^^RuntimeLockScope, wait: Duration) -[FS, Env, Time]> RuntimeLock IOError! {
     deadline: time.instant() + wait
     loop {
         attempt: env_lock_try_owner(opened)
@@ -140,7 +140,7 @@ env_acquire_lease_lock: fn(root: String, scope: String) -[FS, Env, Time]> Runtim
 }
 
 // A scope marker is created/opened only below the original retained root.
-env_lock_open_scope: fn(authority: &&FoundationDirectoryAuthority, scope: String) -[FS]> RuntimeLockScope IOError! {
+env_lock_open_scope: fn(authority: ^^FoundationDirectoryAuthority, scope: String) -[FS]> RuntimeLockScope IOError! {
     marker_parent: authority.child(RUNTIME_LOCK_DIR, true)
     name: "{env_lock_sanitize_scope(scope)}.lock"
     if marker_parent.create_exclusive(name, RUNTIME_LOCK_MARKER_MODE) == {
@@ -195,7 +195,7 @@ env_lock_check_owner_kind: fn(authority: FoundationDirectoryAuthority) -[FS]> IO
 }
 
 // The lock takes the scope's retained handles; nothing else keeps them.
-env_lock_hold: fn(opened: &&RuntimeLockScope, owner: &&FileLock) -> RuntimeLock Never! {
+env_lock_hold: fn(opened: ^^RuntimeLockScope, owner: ^^FileLock) -> RuntimeLock Never! {
     owner_path: env_lock_owner_path(opened.authority)
     RuntimeLock{path: opened.path, owner_path: owner_path, owner: owner.move(), marker: opened.marker.move(), authority: opened.authority.move(), marker_parent: opened.marker_parent.move(), marker_name: opened.name}
 }
@@ -282,7 +282,7 @@ RuntimeLockSession: struct {
 
     new: fn() -> RuntimeLockSession Never! { RuntimeLockSession{held_roots: [FileID]{}} }
 
-    enter: fn(&self, root: String, scope: String) -[FS, Env, Time]> RuntimeLockGuard IOError! {
+    enter: fn(^self, root: String, scope: String) -[FS, Env, Time]> RuntimeLockGuard IOError! {
         authority: foundation_open_directory_authority(root, true)
         identity: authority.identity()
         key: authority.path()
@@ -296,7 +296,7 @@ RuntimeLockSession: struct {
 
     // Forget the claim `guard` added, then release its lock at scope exit.
     // A reused guard added nothing and releases nothing.
-    leave: fn(&self, guard: &&RuntimeLockGuard) Never! {
+    leave: fn(^self, guard: ^^RuntimeLockGuard) Never! {
         if guard.lock == None {
             return
         }

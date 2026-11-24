@@ -6,7 +6,7 @@ Box: struct {
     p: [U64],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             p := self.p.move()
             sum := U64{0}
             loop i in 0..<p.len() -> sum = wrapping(sum + p[i])
@@ -14,16 +14,16 @@ Box: struct {
         }
     }
 
-    renew: fn(&self, name: String) { self = Box{name: name, p: [U64]{U64{4}, U64{4}}} }
+    renew: fn(^self, name: String) { self = Box{name: name, p: [U64]{U64{4}, U64{4}}} }
 }
 
 make: fn(name: String, v: U64) -> Box { Box{name: name, p: [U64]{v, v, v}} }
 
 held_box: fn(name: String, v: U64) -> Box? { Val(make(name, v)) }
 
-replace: fn(x: &Box, name: String) { x = make(name, U64{2}) }
+replace: fn(x: ^Box, name: String) { x = make(name, U64{2}) }
 
-replace_held: fn(x: &Box?, name: String) { x = Val(make(name, U64{3})) }
+replace_held: fn(x: ^Box?, name: String) { x = Val(make(name, U64{3})) }
 
 run: fn() {
     x := make("first", U64{1})

@@ -1,6 +1,6 @@
 // Sema infers the record fields each method reads or
 // changes through `self`; an expert may state them on the receiver with
-// `&self.field` or the member spread `&self.[a, b]`. The body must stay inside
+// `^self.field` or the member spread `^self.[a, b]`. The body must stay inside
 // a stated footprint (E0231), and public methods publish it in the API.
 World: struct {
     bodies: [Int],
@@ -8,13 +8,13 @@ World: struct {
     hits: Int,
 
     // Inferred footprint: `self.[hits, log]`.
-    log_hit: fn(&self, body: Int) {
+    log_hit: fn(^self, body: Int) {
         self.log.push("hit {body}")
         self.hits += 1
     }
 
     // Stated footprint; the sibling call stays inside it.
-    reset: fn(&self.[log, hits]) {
+    reset: fn(^self.[log, hits]) {
         self.log = [String]{}
         self.hits = 0
         self.log_hit(0)

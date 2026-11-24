@@ -131,7 +131,7 @@ census_slice: fn(text: String, start: Int, end: Int) -> String Never! {
     String.from_bytes(text.bytes()[start..(end - 1)]) ?? panic("a census slice must end on UTF-8 boundaries")
 }
 
-census_add: fn(values: &[String], value: String) Never! {
+census_add: fn(values: ^[String], value: String) Never! {
     // copy: `value` is a view into the scanned text.
     if !values.contains(value) -> values.push(value.copy())
 }
@@ -158,7 +158,7 @@ census_code_byte: fn(byte: U8) -> Bool Never! {
 }
 
 // The codes `text` writes alone between quotes or brackets.
-census_quoted_codes: fn(text: String, codes: &[String]) Never! {
+census_quoted_codes: fn(text: String, codes: ^[String]) Never! {
     bytes: text.bytes()
     loop (index, byte) in bytes {
         if byte != (U8{34}) && byte != (U8{91}) -> next
@@ -190,7 +190,7 @@ census_labeled: fn(text: String, index: Int, label: String) -> Bool Never! {
 // The names `text` writes as a report heading's name (`Jet.MissingEngine: `,
 // or after its label, `Error: Jet.MissingEngine`) or links as
 // `jet-lang.dev/e/Jet.MissingEngine`.
-census_names: fn(text: String, names: &[String]) Never! {
+census_names: fn(text: String, names: ^[String]) Never! {
     bytes: text.bytes()
     loop (index, byte) in bytes {
         if byte != (U8{74}) || index + 4 >= bytes.len() || bytes[index + 1] != (U8{101}) || bytes[index + 2] != (U8{116}) || bytes[index + 3] != (U8{46}) {
@@ -210,7 +210,7 @@ census_names: fn(text: String, names: &[String]) Never! {
 }
 
 // The names a case writes alone between quotes (`stderr: ~ "Jet.UnknownName"`).
-census_quoted_names: fn(text: String, names: &[String]) Never! {
+census_quoted_names: fn(text: String, names: ^[String]) Never! {
     pieces: text.split("\"Jet.").to_list()
     loop at in 1..<pieces.len() {
         bytes: pieces[at].bytes()
@@ -278,7 +278,7 @@ census_keeps: fn(kind: CensusFiles, path: String) -> Bool Never! {
 
 // Every file under `directory` that `kind` keeps, skipping dot directories
 // and any directory `skip` names.
-census_walk: fn(directory: String, skip: [String], kind: CensusFiles, out: &[String]) -[FS]> DiagnosticCensusError! {
+census_walk: fn(directory: String, skip: [String], kind: CensusFiles, out: ^[String]) -[FS]> DiagnosticCensusError! {
     if !files.exists(directory) -> return Ok()
     entries: files.list_dir(directory) ?? return Err(census_fail("cannot list {directory}: {err}"))
     loop child in entries {
@@ -341,7 +341,7 @@ census_emitted: fn() -[FS]> CensusEmitters DiagnosticCensusError! {
 // What one rendered output shows: its codes, heading names and name links. A
 // case shows them, and the names it quotes alone, on its lines that are not
 // `#` comments.
-census_carried_text: fn(path: String, text: String, tokens: &CensusTokens) Never! {
+census_carried_text: fn(path: String, text: String, tokens: ^CensusTokens) Never! {
     if !path.ends_with(".case") {
         census_quoted_codes(text, tokens.codes)
         census_names(text, tokens.names)
@@ -360,7 +360,7 @@ census_carried_text: fn(path: String, text: String, tokens: &CensusTokens) Never
 }
 
 // The trail row, when `text` holds a report's trail section.
-census_trail: fn(text: String, names: &[String]) Never! {
+census_trail: fn(text: String, names: ^[String]) Never! {
     if text.starts_with(TRAIL_HEADER) || text.contains("\n{TRAIL_HEADER}") {
         census_add(names, TRAIL_ROW)
     }

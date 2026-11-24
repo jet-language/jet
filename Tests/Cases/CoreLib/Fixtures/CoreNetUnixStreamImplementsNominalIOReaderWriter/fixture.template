@@ -4,11 +4,11 @@ use {
     tasks: core.tasks
 }
 
-receive: fn<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {
+receive: fn<T: Reader>(^stream: T, limit: Int) -[IO]> [U8] IOError! {
     return stream.read(limit)
 }
 
-send_four: fn<T: Writer>(&stream: T) -[IO]> Int IOError! {
+send_four: fn<T: Writer>(^stream: T) -[IO]> Int IOError! {
     first: stream.write([1, 2])
     stream.write_all([3, 4])
     return Ok(first)

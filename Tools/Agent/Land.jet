@@ -245,7 +245,7 @@ GUARD_SHARDS: 4
 // `jet test Tests/Guards` run leaves it out) the census runs, each whole,
 // beside the shards. They compile Compiler packages, so each takes
 // CORE_MEMORY.
-GUARD_PACKAGES: [String]{"ArrowSurface", "CoreCallbacks", "CoreDeclarations", "CorpusAST", "DynSurface", "ImplPlacement", "PackageManifests", "SigilMeaningTable"}
+GUARD_PACKAGES: [String]{"AcronymPathCase", "ArrowSurface", "CoreCallbacks", "CoreDeclarations", "CorpusAST", "DynSurface", "ImplPlacement", "PackageManifests", "SigilMeaningTable"}
 
 // The Jetpack areas' check scopes share area_budget bytes (MemAvailable at
 // launch less TRAIN_FLOOR_GIB, at most AREA_BUDGET_MAX): each is capped at
@@ -1430,7 +1430,7 @@ guard_package: fn(snap: String, out: String, jet: String, identity: String, name
 // `jet test` with `args`, run by `jet` behind the dev shell under `memory`,
 // logged at `log`: its failing tests, and whether it finished. A guard that
 // runs the compiler under test finds `jet` as $JET.
-guard_test: fn(snap: String, jet: String, identity: String, log: String, memory: String, args: &&[String], note: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+guard_test: fn(snap: String, jet: String, identity: String, log: String, memory: String, args: ^^[String], note: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
     watch: time.start()
     argv := [String]{jet, "{snap}/Tools/Agent/JetEnv.jet", jet, "test"}
     argv.extend(args)

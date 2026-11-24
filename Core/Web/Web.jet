@@ -84,7 +84,7 @@ page: fn(title: String, body: String) -> WebPage Never! { WebPage{title: title, 
 
 // One request into a handler adapter: the matched request and the route's
 // encoded loader data ("" when the route has no loader).
-__AppCall: struct {
+priv __AppCall: struct {
     request: HTTPRequest,
     data: String,
 
@@ -121,7 +121,7 @@ __AppCall: struct {
     __failed: fn(self, message: String) -> __AppReply Never! { __AppReply.Failed(message) }
 }
 
-__AppReply: enum {
+priv __AppReply: enum {
     Page(WebPage),
     JSON(String),
     Rejected(String),
@@ -144,7 +144,7 @@ priv AppHandler: struct {
     }
 }
 
-priv app_handler: fn(call: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> AppHandler Never! {
+priv app_handler: fn(call: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> AppHandler Never! {
     AppHandler{__cell: Shared{AppHandlerCell{call: call.move()}}}
 }
 
@@ -289,9 +289,37 @@ RouteTable: struct {
 
 // The compiler's form rule keys on this marker: `web.form(Model, action:)`
 // derives its fields only from a model struct a program marks `#Web.Form`.
+// Its rule hears that call as `form` called on the model with the action
+// alone, and rejects an action that does not take exactly the model.
 Form: struct {
     impl Marker {
         sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            if call.name.text == "form" && call.args.len() == 1 && call.receiver == .Val(model) && call.args[0].function == .Val(action) {
+                params: action.signature.params
+                if params.len() != 1 || params[0].type.identity != model.type.identity {
+                    reject(FormActionInputMismatch{action: action.name, form: model.type.name}, at: call.args[0])
+                }
+            }
+        }
+    }
+}
+
+// The finding E2474 reports for an action that does not take the form's
+// model.
+FormActionInputMismatch: struct {
+    action: String,
+    form: String,
+
+    impl Diagnostic {
+        code: "E2474",
+
+        what: fn(self) -> String { "Form action `{self.action}` does not accept `{self.form}`" }
+
+        why: fn(self) -> String { "The form derives its fields from the model and the one server-function action must receive that exact input type" }
+
+        fix: fn(self) -> String { "Change `{self.action}` to accept `{self.form}` as its only parameter" }
     }
 }
 
@@ -303,7 +331,7 @@ App: struct {
 
     // `route`, `page` and `layout` land here with the handler's adapter, its
     // name and its typed input binding; the page answers GET `path`.
-    __route: fn(self, path: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String, at: SourceLocation{#caller}) -> App Never! {
+    __route: fn(self, path: String, handler: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String, at: SourceLocation{#caller}) -> App Never! {
         target: self.copy()
         page: path.copy()
         http_server.route_add(app_table(self), "GET", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_page_response(target, page, request)) }), "", at)
@@ -337,7 +365,7 @@ App: struct {
     // `pending`, `error` and `not_found`. A pending or error boundary belongs
     // to the route registered just before it; not-found answers every
     // unmatched navigation.
-    __boundary: fn(self, kind: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
+    __boundary: fn(self, kind: String, handler: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
         guard := self.__state.guard_edit()
         boundary: app_handler(handler)
         if kind == "not_found" {
@@ -360,7 +388,7 @@ App: struct {
 
     // `action`, `form` and `data`: one POST `/actions/<name>` server function
     // each. The first action or form after a route is that route's form.
-    __action: fn(self, kind: String, name: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, at: SourceLocation{#caller}) -> App Never! {
+    __action: fn(self, kind: String, name: String, handler: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, at: SourceLocation{#caller}) -> App Never! {
         reply: app_handler(handler)
         served: reply.copy()
         http_server.route_add(app_table(self), "POST", "/actions/{name}", http_server.__handler(fn(request: HTTPRequest) { Ok(app_action_response(served, request)) }), "", at)
@@ -377,7 +405,7 @@ App: struct {
 
     // `loader(route_handler, loader, preload)`: the route registered just
     // before it loads its data through `handler` first.
-    __loader: fn(self, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, data_type: String, preload: Bool) -> App Never! {
+    __loader: fn(self, handler: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, data_type: String, preload: Bool) -> App Never! {
         guard := self.__state.guard_edit()
         last: guard.value.routes.len() - 1
         if last < 0 -> panic("app loader `{identity}` has no preceding route")
@@ -394,7 +422,7 @@ App: struct {
 
     // `mount(prefix, handler[, effect[, policy]])`: the handler answers GET
     // and POST under `prefix`; "" is an absent effect or policy.
-    __mount: fn(self, prefix: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String, at: SourceLocation{#caller}) -> App Never! {
+    __mount: fn(self, prefix: String, handler: ^^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String, at: SourceLocation{#caller}) -> App Never! {
         effects := [String]{}
         if effect_name != "" -> effects.push(effect_name.copy())
         security := [String]{}
@@ -414,7 +442,7 @@ App: struct {
     // call is answered under (`app_remote_reply`); a method whose reply type
     // is cached `.Public` also answers GET `path`
     // (`app_remote_get_response`).
-    __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, reply: String, at: SourceLocation{#caller}) -> App Never! {
+    __remote_public: fn(self, path: String, answer: ^^fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, reply: String, at: SourceLocation{#caller}) -> App Never! {
         endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply, kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
         app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: false, hook: None, mounted: None, upload: None})
@@ -424,7 +452,7 @@ App: struct {
     // An `#App.SignedIn` method of `app.mount(service)` answers POST `path`
     // (sema lowers each here) as `__remote_public` does, for a signed-in
     // caller only (`app_signed_in_response`).
-    __remote_signed_in: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
+    __remote_signed_in: fn(self, path: String, answer: ^^fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
         app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: true, hook: None, mounted: None, upload: None})
@@ -442,7 +470,7 @@ App: struct {
     // steps of its files (the app module's `FileJob`). `service` keys the app
     // graph's `.api` row, whose `max_upload` bounds the body; `limit` and
     // `window_ns` are the marker's `limit:` and `per:` (`AppRemote`).
-    __remote_upload: fn(self, path: String, service: String, upload_at: Int, signed_in: Bool, check: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, files: &&fn(calls.FileJob) -[Net, FS.Read]> builtin.FileDone [FieldError]!, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
+    __remote_upload: fn(self, path: String, service: String, upload_at: Int, signed_in: Bool, check: ^^fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, files: ^^fn(calls.FileJob) -[Net, FS.Read]> builtin.FileDone [FieldError]!, answer: ^^fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
         upload: AppUpload{service: service.copy(), at: upload_at, signed_in: signed_in, check: check, files: files}
         app_traced(self, path, app_endpoint_method(path))
@@ -455,7 +483,7 @@ App: struct {
     // in its order, joined by commas. `key` runs the service's
     // `#App.SigningKey` method on them, and `answer` runs the webhook on them
     // and the delivery's body (`app_webhook_response`).
-    __webhook: fn(self, path: String, signature: Signature, params: String, key: &&fn(RemoteArgs) -[Net, FS.Read]> String? [FieldError]!, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, at: SourceLocation{#caller}) -> App Never! {
+    __webhook: fn(self, path: String, signature: Signature, params: String, key: ^^fn(RemoteArgs) -[Net, FS.Read]> String? [FieldError]!, answer: ^^fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, at: SourceLocation{#caller}) -> App Never! {
         names := [String]{}
         if params != "" -> names = params.split(",").to_list()
         hook: AppWebhook{signature: signature, params: names, key: key, answer: answer}
@@ -469,7 +497,7 @@ App: struct {
     // allows, from when a server first serves the app (`__on_serve`). The
     // schedule waits in a cell of its own, which the start empties, so a
     // second start finds nothing to start.
-    __every: fn(self, name: String, cron: String, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
+    __every: fn(self, name: String, cron: String, run: ^^fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
         waiting: Shared{[AppSchedule]{AppSchedule{name: name.copy(), cron: cron.copy(), run: run.move()}}}
         http_server.__on_serve(app_table(self), fn() { app_schedules_start(waiting) })
         self.copy()
@@ -482,7 +510,7 @@ App: struct {
     // server that stopped left them, and runs them. Once that server stops
     // (`__on_stop`), it waits what is left of its drain for the jobs that
     // run, and leaves the rest unfinished, to run again.
-    __job: fn(self, name: String, retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
+    __job: fn(self, name: String, retries: Int, run: ^^fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
         calls.jobs.know(name, retries, run)
         http_server.__on_serve(app_table(self), fn() { calls.jobs.serve() })
         http_server.__on_stop(app_table(self), fn(wait_ms: Int) { calls.jobs.stop(wait_ms) })
@@ -493,27 +521,27 @@ App: struct {
     // path, handler)` and each marked method of `app.mount(value)` land here
     // with the route's checked contract (sema lowers each). `at` is the
     // registering call's place, which a refused or duplicate row names.
-    __http_route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
+    __http_route: fn(self, method: String, pattern: String, handler: ^^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
         http_server.route_add(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // A route whose pattern is a run-time value: it is checked, and listed,
     // when it registers.
-    __http_route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
+    __http_route_dynamic: fn(self, method: String, pattern: String, handler: ^^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
         http_server.route_add_dynamic(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // `app.custom(method, path, handler)` whose method is a run-time value.
-    __http_route_custom: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
+    __http_route_custom: fn(self, method: String, pattern: String, handler: ^^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
         http_server.route_add_custom(app_table(self), method, pattern, http_server.__handler(handler), contract, at)
         self.copy()
     }
 
     // `app.middleware(layer)`: the first registered layer is the outermost,
     // and every row, pages included, answers through it.
-    __http_middleware: fn(self, middleware: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) -> App Never! {
+    __http_middleware: fn(self, middleware: ^^fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) -> App Never! {
         http_server.layer_add(app_table(self), middleware)
         self.copy()
     }
@@ -806,7 +834,7 @@ requests: core.event.decision_point<HTTPRequest, HTTPResponse>(HookPolicy.FirstC
 // "/admin/users", not "/administrator", and "/" holds every path. Any other
 // request continues unchanged:
 // `web.requests.on(scope, web.under("/admin", require_login))`.
-under: fn(prefix: String, handler: &&fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never!) -[]> (fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never!) Never! {
+under: fn(prefix: String, handler: ^^fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never!) -[]> (fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never!) Never! {
     root: app_trim_slashes(if prefix.starts_with("/") -> prefix else -> "/{prefix}")
     fn(asked: HTTPRequest) { if app_path_under(asked.path, root) -> handler(asked) else -> HookDecision.Continue }
 }
@@ -842,7 +870,7 @@ priv app_request_layer: fn(next: HTTPHandler) -[Net, FS.Read]> HTTPHandler Never
     http_server.__handler(fn(asked: HTTPRequest) { app_request_answer(next, asked.copy()) })
 }
 
-priv app_request_answer: fn(next: HTTPHandler, asked: &&HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+priv app_request_answer: fn(next: HTTPHandler, asked: ^^HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
     if requests.run(asked) == {
         .Continue(kept) -> next.handle(kept)
         .Cancel -> Ok(http_server.response(403, "Forbidden"))
@@ -931,7 +959,7 @@ priv app_table: fn(app: App) -> HTTPMux Never! {
 
 // Holds `service` until the app serves, which adds its rows
 // (`app_service_routes`).
-priv app_service_add: fn(app: App, service: &&AppService) Never! {
+priv app_service_add: fn(app: App, service: ^^AppService) Never! {
     held: app_services(app)
     guard := held.guard_edit()
     guard.value.push(service)
@@ -1009,7 +1037,7 @@ C_APP_DEFAULT_PORT: 8080
 // port, over a `port` the program passes (the platform or `jet dev` that runs
 // the program owns the port); else the program's `port`; else 8080. A
 // `JET_APP_PORT` that holds no port stops with E2809 instead of falling back.
-__app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
+priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
     asked: if requested == .Val(port) -> "serve(port: {port})" else -> ""
     raw: core.sys.__env_value("JET_APP_PORT") ?? return AppPort{port: requested ?? C_APP_DEFAULT_PORT, source: if asked == "" -> "the default, with no JET_APP_PORT and no serve port" else -> asked}
     text: String.from_bytes(raw) ?? ""
@@ -1022,7 +1050,7 @@ __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
 
 // Whether `jet dev` runs this program (it sets JET_DEV=1): `jet dev`
 // restarts the program on every change, and the served pages reload.
-__app_dev: fn() -> Bool Never! {
+priv __app_dev: fn() -> Bool Never! {
     raw: core.sys.__env_value("JET_DEV") ?? return false
     (String.from_bytes(raw) ?? "") == "1"
 }
@@ -1074,7 +1102,7 @@ C_APP_DEV_PORT_TRIES: 100
 // under `jet dev`). A port another program holds stops `jet run` with E2809
 // at `at`, the serving call; `jet dev` moves on to the next free port and
 // names it in the line.
-__app_listen: fn(mux: HTTPMux, port: Int, dev: Bool, at: SourceLocation) -[Net, IO, Time.Wait]> HTTPServer Never! {
+priv __app_listen: fn(mux: HTTPMux, port: Int, dev: Bool, at: SourceLocation) -[Net, IO, Time.Wait]> HTTPServer Never! {
     if port < 1 || port > 65535 {
         app_stop("E2809", "The web app can't listen on 127.0.0.1:{port}: a TCP port is a number from 1 to 65535.", "", at)
     }
@@ -3401,7 +3429,7 @@ C_APP_TRACE_MAX_QUEUE: 2048
 C_APP_TRACE_BATCH: 512
 
 // The OTEL_* variables the export reads, by name; an unset one is absent.
-__app_trace_env: fn() -> [String:String] Never! {
+priv __app_trace_env: fn() -> [String:String] Never! {
     values := [String:String]{}
     app_trace_env_put(values, "OTEL_SDK_DISABLED")
     app_trace_env_put(values, "OTEL_TRACES_EXPORTER")
@@ -3414,7 +3442,7 @@ __app_trace_env: fn() -> [String:String] Never! {
     values
 }
 
-priv app_trace_env_put: fn(values: &[String:String], name: String) Never! {
+priv app_trace_env_put: fn(values: ^[String:String], name: String) Never! {
     raw: core.sys.__env_value(name) ?? return
     values[name.copy()] = String.from_bytes(raw) ?? return
 }
@@ -3613,7 +3641,7 @@ priv app_lower_hex: fn(text: String, size: Int) -> Bool Never! {
 // trace, its trace id: both from the export's start time and the span's
 // count. On a full queue it takes the oldest span's place, and the
 // `jet.trace.dropped_spans` metric counts the loss.
-priv app_trace_push: fn(export: AppTraceExport, span: &&TraceSpan) Never! {
+priv app_trace_push: fn(export: AppTraceExport, span: ^^TraceSpan) Never! {
     capacity: export.settings.max_queue
     guard := export.queue.guard_edit()
     guard.value.ids += 1
@@ -3722,7 +3750,7 @@ priv app_trim_slashes: fn(prefix: String) -> String Never! {
     String.from_bytes(raw.slice(0, end)) ?? ""
 }
 
-priv app_push: fn(out: &[U8], text: String) Never! {
+priv app_push: fn(out: ^[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
 }
 
@@ -3913,7 +3941,7 @@ OpenAPIError: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.message }
+        debug: fn(^^self) -> String { self.message }
     }
 }
 
@@ -3995,7 +4023,7 @@ priv openapi_route_method: fn(route: OpenAPIRoute) -> String Never! {
 
 // The method part of a derived operation id: the Path Item field of a
 // standard method, or `custom_` and the token, which no standard field is.
-__openapi_operation_method: fn(route: OpenAPIRoute) -> String Never! {
+priv __openapi_operation_method: fn(route: OpenAPIRoute) -> String Never! {
     if route.token != "" -> return "custom_{route.token}"
     openapi_methods()[route.method].copy()
 }
@@ -4123,7 +4151,7 @@ priv openapi_integer: fn(fields: [{key: String, value: Dyn}], name: String) -> I
 // jet_openapi_contract_schema then render_json: the schema rendered canonically
 // (object properties by name). Definition problems (validate_definition) are
 // collected in `errors` under `path`.
-priv openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String OpenAPIError! {
+priv openapi_schema: fn(value: Dyn, path: String, errors: ^[String]) -> String OpenAPIError! {
     fields: openapi_object(value) ?? return Err(err)
     if openapi_member(fields, "type") == .Val(kind) {
         return openapi_typed_schema(kind, fields, path, errors)
@@ -4159,7 +4187,7 @@ priv openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String O
     Ok("{{}}")
 }
 
-priv openapi_typed_schema: fn(kind: Dyn, fields: [{key: String, value: Dyn}], path: String, errors: &[String]) -> String OpenAPIError! {
+priv openapi_typed_schema: fn(kind: Dyn, fields: [{key: String, value: Dyn}], path: String, errors: ^[String]) -> String OpenAPIError! {
     name: if kind == {
         .Text(text) -> text
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {

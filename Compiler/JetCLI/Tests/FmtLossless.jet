@@ -14,8 +14,9 @@
 // list; import grouping; a leading parameter sigil riding the type; `Unit` as
 // `()`; `Result<T, E>` as `T E!`; empty marker parentheses (`#X()` is `#X`);
 // dropped positional names in a function type; the `,` ending a wrapped loop
-// header; the choice between `-> statement` and a braced control body; and
-// `->` before a foreign declaration's return type. A dispatch arm's written
+// header; the choice between `-> statement` and a braced control body;
+// `->` before a foreign declaration's return type; and the write and take
+// marks `^` and `^^`, which fmt spells `^` and `^^`. A dispatch arm's written
 // braces stay as written.
 // No rule can reorder or drop an expression operand, operator, marker payload,
 // named tuple member, comment or string interpolation. Not ported: the `=>` arrow rules
@@ -36,9 +37,10 @@ use {
         STRING_PART_INTERPOLATION,
         STRING_PART_TEXT,
         StringPart,
-        TOKEN_AMP,
         TOKEN_AND_AND,
         TOKEN_BANG,
+        TOKEN_CARET,
+        TOKEN_CARET_CARET,
         TOKEN_BLOCK_COMMENT,
         TOKEN_OR_OR,
         TOKEN_CHAR,
@@ -273,7 +275,7 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
             index += 4
             next
         }
-        // The access sigil rides the type: `&&s: T` is `s: &&T`.
+        // The access sigil rides the type: `^^s: T` is `s: ^^T`.
         if fl_leading_param_sigil(kept, index) {
             canonical.push(kept[index + 1])
             canonical.push(kept[index + 2])
@@ -379,7 +381,7 @@ fl_drop_and_groups_in_or: fn(tokens: [FmtTok]) -> [FmtTok] {
             if fl_is_closer(kind) -> depth -= 1
             if depth != 0 -> next
             if kind == TOKEN_AND_AND -> and_chain = true
-            // Only `&&` and operands tighter than it may sit at the top level.
+            // Only `^^` and operands tighter than it may sit at the top level.
             if kind == TOKEN_OR_OR || kind == TOKEN_COMMA || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_PIPE {
                 and_chain = false
                 break
@@ -564,10 +566,10 @@ fl_single_member_import_list: fn(tokens: [FmtTok], index: Int) -> Bool {
     fl_in_use(tokens, index)
 }
 
-// `&name:` or `&&name:` opening a parameter, after any bare `#Marker`.
+// `^name:` or `^^name:` opening a parameter, after any bare `#Marker`.
 fl_leading_param_sigil: fn(tokens: [FmtTok], index: Int) -> Bool {
     kind: fl_kind(tokens, index)
-    if kind != TOKEN_AMP && kind != TOKEN_AND_AND -> return false
+    if kind != TOKEN_CARET && kind != TOKEN_CARET_CARET -> return false
     if fl_kind(tokens, index + 1) != TOKEN_IDENT || fl_kind(tokens, index + 2) != TOKEN_COLON {
         return false
     }
@@ -1628,7 +1630,7 @@ fl_check_preserves: fn(path: String, src: String, formatted: String) -> String {
     ""
 }
 
-fl_collect: fn(dir: String, out: &[String]) {
+fl_collect: fn(dir: String, out: ^[String]) {
     entries: fl_files.list_dir(dir.copy()) ?? panic("cannot list {dir}: {err}")
     loop entry in entries {
         // Generated bindings and caches, not checked source.
@@ -1930,7 +1932,7 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"else arrow bodies", "run: fn() {{\n    if ok {{\n        a()\n    }} else {{\n        b()\n    }}\n}}\n", "run: fn() {{\n    if ok -> a() else -> b()\n}}\n"},
         {"else arm braces around a body broken onto its lines", "run: fn() {{ if {{ ok -> a() else -> if {{ done -> b() }} }} }}\n", "run: fn() {{\n    if {{\n        ok -> a()\n        else -> {{\n            if {{ done -> b() }}\n        }}\n    }}\n}}\n"},
         {"single-member import list", "use core.[files]\nrun: fn() {{}}\n", "use core.files\nrun: fn() {{}}\n"},
-        {"leading parameter sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: &&String) {{}}\n"},
+        {"leading parameter sigil", "f: fn(^^s: String) {{}}\n", "f: fn(s: ^^String) {{}}\n"},
         {"unit type name", "f: fn() -> Unit {{}}\n", "f: fn() -> () {{}}\n"},
         {"import grouping", "use core.files\nuse core.term\nrun: fn() {{}}\n", "use {{\n    core.files\n    core.term\n}}\nrun: fn() {{}}\n"},
         {"wrapped loop header comma", "run: fn() {{\n    loop x in [1, 2] {{\n        print(x)\n    }}\n}}\n", "run: fn() {{\n    loop x in\n        [1, 2], {{\n        print(x)\n    }}\n}}\n"},
@@ -1945,9 +1947,9 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"piped generic bounds", "twice: fn<T: A | B>(x: T) -> T {{ x }}\n", "twice: fn<T: [A, B]>(x: T) -> T {{ x }}\n"},
         {"late effect row", "store: fn(g: fn() -> Int -[IO]>) {{}}\n", "store: fn(g: fn() -[IO]> Int) {{}}\n"},
         {"optional return after an effect arrow", "pick: fn() -[]> (Window?) {{ None }}\n", "pick: fn() -[]> Window? {{ None }}\n"},
-        {"marked parameter sigil", "bad: fn(#Root &value: Int) {{}}\n", "bad: fn(#Root value: &Int) {{}}\n"},
+        {"marked parameter sigil", "bad: fn(#Root &value: Int) {{}}\n", "bad: fn(#Root value: ^Int) {{}}\n"},
         {"pattern field shorthand", "run: fn() {{ if e == .Named{{z: z}} -> print(z) }}\n", "run: fn() {{ if e == .Named{{z}} -> print(z) }}\n"},
-        {"parameter names before an effect arrow", "close: fn(&&handle: Handle) -[FFI.Java]> {{}}\n", "close: fn(handle: &&Handle) -[FFI.Java]> {{}}\n"},
+        {"parameter names before an effect arrow", "close: fn(^^handle: Handle) -[FFI.Java]> {{}}\n", "close: fn(handle: ^^Handle) -[FFI.Java]> {{}}\n"},
         {"foreign return without an arrow", "#Import c.m: module {{\n    get: fn(a: Int) Int = \"get\"\n}}\n", "#Import c.m: module {{\n    get: fn(a: Int) -> Int = \"get\"\n}}\n"},
         {"compound assignment", "run: fn() {{\n    n = n + 1\n    p.hp = p.hp - d\n    self.x = self.x * 2\n}}\n", "run: fn() {{\n    n += 1\n    p.hp -= d\n    self.x *= 2\n}}\n"},
         {"grouped compound assignment value", "run: fn() {{\n    n = ((n / 2))\n}}\n", "run: fn() {{\n    n /= 2\n}}\n"},
@@ -1994,7 +1996,7 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"control-arrow rule keeps the statement boundary", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n    done()\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(i) done()\n}}\n"},
         {"control-arrow rule leaves value-position arrows", "run: fn() {{\n    xs: loop i in 0..<3 -> i\n}}\n", "run: fn() {{\n    xs: loop i in 0..<3 {{ i }}\n}}\n"},
         {"single-member import rule keeps the member", "use core.[files]\nrun: fn() {{}}\n", "use core.term\nrun: fn() {{}}\n"},
-        {"sigil rule keeps the sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: String) {{}}\n"},
+        {"sigil rule keeps the sigil", "f: fn(^^s: String) {{}}\n", "f: fn(s: String) {{}}\n"},
         {"unit rule leaves a Unit value path", "run: fn() {{ x: Unit.default() }}\n", "run: fn() {{ x: ().default() }}\n"},
         {"import grouping keeps import order", "use core.files\nuse core.term\nrun: fn() {{}}\n", "use {{\n    core.term\n    core.files\n}}\nrun: fn() {{}}\n"},
         {"named tuple member order is part of the type", "f: fn(p: {{x: Int, y: Int}}) {{}}\n", "f: fn(p: {{y: Int, x: Int}}) {{}}\n"},

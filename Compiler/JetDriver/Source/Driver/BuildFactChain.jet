@@ -71,7 +71,7 @@ jet_driver_setting_writers: fn(load: JetDriverLoadResult, package: JetDriverPack
 // that a loaded package's entry for `package` gives it. The entry package's
 // entry is the `RootEntry` layer, and any other package's the
 // `DependencyEntry` layer.
-jet_driver_entry_setting_writers: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo, setting: JetDriverPackageSetting, key: String, layer: ContributionLayer, writers: &[JetDriverSettingWriter]) {
+jet_driver_entry_setting_writers: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo, setting: JetDriverPackageSetting, key: String, layer: ContributionLayer, writers: ^[JetDriverSettingWriter]) {
     loop declarer in load.packages {
         declarer_layer: if declarer.identity == load.package_identity -> ContributionLayer.RootEntry else -> ContributionLayer.DependencyEntry
         if declarer_layer != layer -> next

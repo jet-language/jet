@@ -502,7 +502,7 @@ sema_type_carrier_compatible: fn(required: Type, offered: Type) -> Bool Never! {
         }
         // Rust `type_identity_with_callable_values`: two tags of one marker
         // compare their payloads; a `core.crypto` nominal tag on either side
-        // is that payload against the other type (`&Secret` meets the
+        // is that payload against the other type (`^Secret` meets the
         // tagged `Secret` of a vault row).
         .Tagged(required_marker, required_inner) -> {
             if offered == .Tagged(offered_marker, offered_inner) {
@@ -993,7 +993,7 @@ SemaTypeAliasCycleRow: struct {
     edges: [Int],
 }
 
-sema_type_alias_references: fn(ty: Type, names: &[String]) Never! {
+sema_type_alias_references: fn(ty: Type, names: ^[String]) Never! {
     if ty == {
         .Named(name) -> { names.push(name.copy()) }
         .Apply(name, args) -> {
@@ -1021,7 +1021,7 @@ sema_type_alias_references: fn(ty: Type, names: &[String]) Never! {
     }
 }
 
-sema_type_alias_cycle_visit: fn(graph: &SemaRegistrationGraph, rows: [SemaTypeAliasCycleRow], at: Int, marks: &[Int], path: &[Int]) Never! {
+sema_type_alias_cycle_visit: fn(graph: ^SemaRegistrationGraph, rows: [SemaTypeAliasCycleRow], at: Int, marks: ^[Int], path: ^[Int]) Never! {
     marks[at] = 1
     path.push(at)
     loop target in rows[at].edges {
@@ -1052,7 +1052,7 @@ sema_type_alias_cycle_visit: fn(graph: &SemaRegistrationGraph, rows: [SemaTypeAl
     marks[at] = 2
 }
 
-sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
+sema_type_alias_cycles_check: fn(graph: ^SemaRegistrationGraph) Never! {
     rows := [SemaTypeAliasCycleRow]{}
     positions := [U32:Int]{}
     loop module_index in 0..<graph.modules.len() {
@@ -1427,7 +1427,7 @@ sema_type_bare_generic_params: fn(graph: SemaRegistrationGraph, caller: Int, nam
 
 // E0104 at each generic type `ty` writes bare (`b: Box` for `Box: struct<T>`):
 // a type position names one instance, so it spells the type arguments.
-sema_type_bare_generic_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
+sema_type_bare_generic_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: ^[Diagnostic]) {
     if ty == {
         .Named(name) -> {
             if sema_type_bare_generic_params(graph, caller, name, generic_names) == .Val(params) {
@@ -1502,7 +1502,7 @@ sema_type_graph_declares_name: fn(graph: SemaRegistrationGraph, name: String) ->
 // E0119 for every name a declared member type (`field: Foo`, `[Bar]?`,
 // `Foo<Int>`) writes that names nothing, in walk order, and E0363 for a
 // named union case whose name another member of its union takes.
-sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
+sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: ^[Diagnostic]) {
     if ty == {
         .Named(name) -> {
             if sema_type_written_name_unknown(graph, caller, name, generic_names) {
@@ -1557,7 +1557,7 @@ sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, t
 // `geo.Point`, an inline module's `M3GeoPoint` read through `items`, its
 // module's items, sema_name_type_leaf), or an earlier case of that name with
 // another payload type. A case repeated with its payload is one case.
-sema_type_union_case_conflicts: fn(members: [Type], items: [Item], span: Span, diagnostics: &[Diagnostic]) {
+sema_type_union_case_conflicts: fn(members: [Type], items: [Item], span: Span, diagnostics: ^[Diagnostic]) {
     loop index in 0..<members.len() {
         if members[index] == .Case(name, payload) {
             loop other_index in 0..<members.len() {
@@ -1576,7 +1576,7 @@ sema_type_union_case_conflicts: fn(members: [Type], items: [Item], span: Span, d
 
 // sema_type_union_case_conflicts for a union written in the environment's
 // module, whose items name the types it lifted from inline modules.
-sema_type_union_case_conflicts_in: fn(members: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) {
+sema_type_union_case_conflicts_in: fn(members: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: ^[Diagnostic]) {
     if program.registration_graph == .Val(graph) {
         if sema_scope_caller_index(environment, graph) == .Val(row) {
             sema_type_union_case_conflicts(members, graph.modules[row].program.items, span, diagnostics)
@@ -1597,7 +1597,7 @@ sema_type_union_member_leaf: fn(items: [Item], member: Type) -> String Never! {
 // names an integer constant, a generic length, or a module value argument
 // (generic modules are expanded before registration). A name that is none of
 // these is E0963 at the written type, once per type.
-sema_type_unknown_measure_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
+sema_type_unknown_measure_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: ^[Diagnostic]) {
     if ty == {
         .FixedList(inner, len) -> {
             if sema_type_measure_unknown_name(graph, caller, len, generic_names) == .Val(unknown) {
@@ -1653,7 +1653,7 @@ sema_type_measure_unknown_name: fn(graph: SemaRegistrationGraph, caller: Int, me
 // (sema_check_failure_contract_type); its misspelled signature types still
 // report alongside the misspelled member (sema_check_record_unusable_bodies,
 // collect-all).
-sema_type_func_unknown_names: fn(graph: SemaRegistrationGraph, caller: Int, func: Func, owner_names: [String], diagnostics: &[Diagnostic]) {
+sema_type_func_unknown_names: fn(graph: SemaRegistrationGraph, caller: Int, func: Func, owner_names: [String], diagnostics: ^[Diagnostic]) {
     generic_names := owner_names.copy()
     loop param in func.type_params -> generic_names.push(param.name)
     loop param in func.params {
@@ -1842,7 +1842,7 @@ sema_type_alias_shown_params: fn(graph: SemaRegistrationGraph, caller: Int, item
     shown
 }
 
-sema_type_alias_shown_add: fn(graph: SemaRegistrationGraph, caller: Int, params: [Param], shown: &[Int:String]) -[]> {
+sema_type_alias_shown_add: fn(graph: SemaRegistrationGraph, caller: Int, params: [Param], shown: ^[Int:String]) -[]> {
     loop param in params {
         text: sema_type_alias_shown(graph, param.ty, caller, [TGenericParam]{}) ?? next
         shown[param.name_span.start] = text
@@ -2847,7 +2847,7 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
 
 // Whether impl `implementation` declares `bound_name` for `nominal`; an impl
 // declaring it whose target does not resolve sets `unresolved`.
-sema_type_builtin_bound_impl_matches: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal, bound_name: String, unresolved: &Bool) -> Bool {
+sema_type_builtin_bound_impl_matches: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal, bound_name: String, unresolved: ^Bool) -> Bool {
     if implementation.trait_name != (Val(bound_name)) -> return false
     target_matches: sema_type_graph_impl_matches_nominal(graph, implementation, nominal) ?? {
         unresolved = true

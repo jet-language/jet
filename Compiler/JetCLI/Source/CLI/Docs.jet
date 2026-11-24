@@ -306,7 +306,7 @@ JetCLIDocUnit: struct {
     source: String,
 }
 
-jet_cli_doc_add_item: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: String, name: String, parent: String, public: Bool, package_public: Bool, span: Span, name_span: Span, markers: [String]) Never! {
+jet_cli_doc_add_item: fn(output: ^[JetCLIDocItem], unit: JetCLIDocUnit, kind: String, name: String, parent: String, public: Bool, package_public: Bool, span: Span, name_span: Span, markers: [String]) Never! {
     comment: jet_cli_doc_source_docs(unit.source, name_span.start)
     output.push(
         JetCLIDocItem{
@@ -327,14 +327,14 @@ jet_cli_doc_add_item: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: St
     )
 }
 
-jet_cli_doc_add_function: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, function: Func, parent: String, inherited_public: Bool) Never! {
+jet_cli_doc_add_function: fn(output: ^[JetCLIDocItem], unit: JetCLIDocUnit, function: Func, parent: String, inherited_public: Bool) Never! {
     jet_cli_doc_add_item(output, unit, "function", function.name, parent, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, jet_cli_doc_marker_names(function.markers))
 }
 
 // Each re-export as an item under the inline module that declares it: its
 // declaration as written, then `Target: ` and the signature of the
 // declaration its path reaches.
-jet_cli_doc_add_reexports: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, reexports: [SemaPublicAPIReexport]) -[]> {
+jet_cli_doc_add_reexports: fn(output: ^[JetCLIDocItem], unit: JetCLIDocUnit, reexports: [SemaPublicAPIReexport]) -[]> {
     loop reexport in reexports {
         jet_cli_doc_add_item(output, unit, "reexport", reexport.name, reexport.parent, reexport.public, false, reexport.span, reexport.span, [String]{})
         last: output.len() - 1
@@ -350,7 +350,7 @@ jet_cli_doc_sorted_names: fn(functions: [Func]) -> [String] Never! {
 }
 
 // `add_nested_impl`: a trait block written inside a struct or enum.
-jet_cli_doc_add_nested_impl: fn(output: &[JetCLIDocItem], impls: &[JetCLIDocImpl], unit: JetCLIDocUnit, trait_name: String, type_name: String, methods: [Func], public: Bool, span: Span) Never! {
+jet_cli_doc_add_nested_impl: fn(output: ^[JetCLIDocItem], impls: ^[JetCLIDocImpl], unit: JetCLIDocUnit, trait_name: String, type_name: String, methods: [Func], public: Bool, span: Span) Never! {
     impls.push(
         JetCLIDocImpl{
             kind: "trait_impl",
@@ -365,7 +365,7 @@ jet_cli_doc_add_nested_impl: fn(output: &[JetCLIDocItem], impls: &[JetCLIDocImpl
     loop method in methods -> jet_cli_doc_add_function(output, unit, method, type_name, public)
 }
 
-jet_cli_doc_collect_protocol_names: fn(items: [Item], names: &[String]) Never! {
+jet_cli_doc_collect_protocol_names: fn(items: [Item], names: ^[String]) Never! {
     loop item in items {
         if item == {
             .ProtocolDecl(protocol) -> {
@@ -382,7 +382,7 @@ jet_cli_doc_collect_protocol_names: fn(items: [Item], names: &[String]) Never! {
     }
 }
 
-jet_cli_doc_collect_items: fn(items: [Item], unit: JetCLIDocUnit, parent: String, inherited_public: Bool, protocol_names: [String], output: &[JetCLIDocItem], impls: &[JetCLIDocImpl]) Never! {
+jet_cli_doc_collect_items: fn(items: [Item], unit: JetCLIDocUnit, parent: String, inherited_public: Bool, protocol_names: [String], output: ^[JetCLIDocItem], impls: ^[JetCLIDocImpl]) Never! {
     no_markers: [String]{}
     loop item in items {
         if item == {
@@ -552,7 +552,7 @@ jet_cli_doc_module_position: fn(modules: [JetDriverDocModule], path: String) -> 
     None
 }
 
-jet_cli_doc_enrich: fn(items: &[JetCLIDocItem], index: SemIndex) Never! {
+jet_cli_doc_enrich: fn(items: ^[JetCLIDocItem], index: SemIndex) Never! {
     loop item_index in 0..<items.len() {
         if items[item_index].kind == "function" {
             callable: jet_cli_doc_callable_for(index, items[item_index]) ?? next
@@ -678,7 +678,7 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
     tests
 }
 
-jet_cli_doc_sort_strings: fn(values: &[String]) Never! {
+jet_cli_doc_sort_strings: fn(values: ^[String]) Never! {
     loop index in 1..<values.len() {
         value: values[index]
         position := index
@@ -749,7 +749,7 @@ jet_cli_doc_test_order: fn(left: JetCLIDocTest, right: JetCLIDocTest) -> Int Nev
 }
 
 // Stable insertion sorts (Rust `sort_by` is stable).
-jet_cli_doc_sort_modules: fn(values: &[JetCLIDocModule]) Never! {
+jet_cli_doc_sort_modules: fn(values: ^[JetCLIDocModule]) Never! {
     loop index in 1..<values.len() {
         value: values[index]
         position := index
@@ -761,7 +761,7 @@ jet_cli_doc_sort_modules: fn(values: &[JetCLIDocModule]) Never! {
     }
 }
 
-jet_cli_doc_sort_items: fn(values: &[JetCLIDocItem]) Never! {
+jet_cli_doc_sort_items: fn(values: ^[JetCLIDocItem]) Never! {
     loop index in 1..<values.len() {
         value: values[index]
         position := index
@@ -773,7 +773,7 @@ jet_cli_doc_sort_items: fn(values: &[JetCLIDocItem]) Never! {
     }
 }
 
-jet_cli_doc_sort_impls: fn(values: &[JetCLIDocImpl]) Never! {
+jet_cli_doc_sort_impls: fn(values: ^[JetCLIDocImpl]) Never! {
     loop index in 1..<values.len() {
         value: values[index]
         position := index
@@ -785,7 +785,7 @@ jet_cli_doc_sort_impls: fn(values: &[JetCLIDocImpl]) Never! {
     }
 }
 
-jet_cli_doc_sort_tests: fn(values: &[JetCLIDocTest]) Never! {
+jet_cli_doc_sort_tests: fn(values: ^[JetCLIDocTest]) Never! {
     loop index in 1..<values.len() {
         value: values[index]
         position := index

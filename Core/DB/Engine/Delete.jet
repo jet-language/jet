@@ -35,7 +35,7 @@ use {
 // sqlite3SrcListLookup: the table the single FROM item of `src` names, or
 // -1. The item takes a reference on it; an INDEXED BY that names no index
 // of it is an error.
-src_list_lookup: fn(p: &cg.Parse, a: &ast.AST, src: Int) -[DB]> Int Never! {
+src_list_lookup: fn(p: ^cg.Parse, a: ^ast.AST, src: Int) -[DB]> Int Never! {
     si: ast.src_item(a, src, 0)
     t := cat.locate_table_item(p, a, 0, si)
     if a.items[si].tab >= 0 -> ast.tab_unref(a, a.items[si].tab)
@@ -50,7 +50,7 @@ src_list_lookup: fn(p: &cg.Parse, a: &ast.AST, src: Int) -[DB]> Int Never! {
 
 // sqlite3CodeChangeCount: report the number of rows a DELETE, INSERT or
 // UPDATE changed, which register reg counts, as column `name`.
-code_change_count: fn(p: &cg.Parse, reg: Int, name: String) Never! {
+code_change_count: fn(p: ^cg.Parse, reg: Int, name: String) Never! {
     _: cg.op0(p, opc.OP_FK_CHECK)
     _: cg.op2(p, opc.OP_RESULT_ROW, reg, 1)
     cg.v_set_num_cols(p, 1)
@@ -66,7 +66,7 @@ read_only_shadow_tables: fn(db: conn.Conn) -> Bool Never! {
 // tabIsReadOnly: a virtual table (this build has no module with xUpdate),
 // sqlite_schema outside a nested parse without writable_schema, or a
 // shadow table in defensive mode.
-tab_is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
+tab_is_read_only: fn(p: ^cg.Parse, a: ^ast.AST, t: Int) -> Bool Never! {
     if ex.is_virtual(p.db, t) -> return true
     flags: p.db.tables[t].tab_flags
     if flags & (ast.TF_READONLY | ast.TF_SHADOW) == 0 -> return false
@@ -76,7 +76,7 @@ tab_is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
 
 // sqlite3IsReadOnly: an error, and true, when table t may not be modified.
 // With no triggers a view never may be.
-is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
+is_read_only: fn(p: ^cg.Parse, a: ^ast.AST, t: Int) -> Bool Never! {
     name: ast.text(p.db.tables[t].name)
     if tab_is_read_only(p, a, t) {
         ast.error(a, "table {name} may not be modified")
@@ -96,7 +96,7 @@ is_read_only: fn(p: &cg.Parse, a: &ast.AST, t: Int) -> Bool Never! {
 // when given, says which of them (index 0 the table, i+1 index i) to open.
 // n is the number of indices; a virtual table opens nothing and its
 // cursors are -999.
-open_table_and_indices: fn(p: &cg.Parse, a: &ast.AST, t: Int, op: Int, p5_0: Int, i_base0: Int, to_open: [Bool]?) -> {n: Int, data_cur: Int, idx_cur: Int} Never! {
+open_table_and_indices: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, op: Int, p5_0: Int, i_base0: Int, to_open: [Bool]?) -> {n: Int, data_cur: Int, idx_cur: Int} Never! {
     if ex.is_virtual(p.db, t) -> return {n: 0, data_cur: -999, idx_cur: -999}
     i_db: conn.schema_to_index(p.db, p.db.tables[t].schema)
     i_base := if i_base0 < 0 -> p.f.n_tab else -> i_base0
@@ -138,7 +138,7 @@ op_list_item: fn(opcode: Int, p1: Int, p2: Int, p3: Int) -> aux.VdbeOpList Never
 // sqlite3AutoincrementEnd (insert.c): write each AUTOINCREMENT table's
 // largest rowid back to sqlite_sequence when it grew. Coded at the end of
 // a top-level INSERT, UPDATE or DELETE.
-autoincrement_end: fn(p: &cg.Parse, a: &ast.AST) Never! {
+autoincrement_end: fn(p: ^cg.Parse, a: ^ast.AST) Never! {
     x := p.f.ainc
     loop x >= 0 {
         info: p.aincs[x]
@@ -169,7 +169,7 @@ autoincrement_end: fn(p: &cg.Parse, a: &ast.AST) Never! {
 // data cursor is on, from the indices at cursors i_idx_cur+i; only those
 // with a nonzero a_reg_idx[i] when a_reg_idx is given, and never the
 // PRIMARY KEY index of a WITHOUT ROWID table or cursor i_idx_no_seek.
-generate_row_index_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, a_reg_idx: [Int]?, i_idx_no_seek: Int) -[DB]> Never! {
+generate_row_index_delete: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, a_reg_idx: [Int]?, i_idx_no_seek: Int) -[DB]> Never! {
     pk: if ex.has_rowid(p.db, t) -> -1 else -> cat.primary_key_index(p.db, t)
     r1 := -1
     prior := -1
@@ -199,7 +199,7 @@ generate_row_index_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int
 // count the change. C's onconf only matters to triggers, which this build
 // has none of; with no triggers or foreign keys there are no OLD.*
 // registers to fill.
-generate_row_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, i_pk: Int, n_pk: Int, count: Bool, e_mode: Int, i_idx_no_seek: Int) -[DB]> Never! {
+generate_row_delete: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_data_cur: Int, i_idx_cur: Int, i_pk: Int, n_pk: Int, count: Bool, e_mode: Int, i_idx_no_seek: Int) -[DB]> Never! {
     i_label: cg.v_make_label(p)
     op_seek: if ex.has_rowid(p.db, t) -> opc.OP_NOT_EXISTS else -> opc.OP_NOT_FOUND
     if e_mode == we.ONEPASS_OFF -> _: cg.op4_int(p, op_seek, i_data_cur, i_label, i_pk, n_pk)
@@ -223,14 +223,14 @@ generate_row_delete: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_data_cur: Int, i_id
 // single-item SrcList; where_expr is -1 when there is no WHERE. Without
 // SQLITE_ENABLE_UPDATE_DELETE_LIMIT the grammar takes no ORDER BY or
 // LIMIT on DELETE. The statement owns src and where_expr and deletes them.
-delete_from: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) -[DB]> Never! {
+delete_from: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Never! {
     if cg.n_err(a) == 0 -> delete_body(p, a, src, where_expr)
     ast.src_list_delete(a, src)
     ast.expr_delete(a, where_expr)
 }
 
 // The body of sqlite3DeleteFrom up to its delete_from_cleanup label.
-delete_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, where_expr: Int) -[DB]> Never! {
+delete_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, where_expr: Int) -[DB]> Never! {
     t: src_list_lookup(p, a, src)
     if t < 0 {
         return

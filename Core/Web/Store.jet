@@ -41,17 +41,17 @@ WebStore: struct<T> {
 
     state_signal: fn(self) -> Signal<T> Never! { state_signal<T>(self) }
 
-    set: fn(&self, value: T) -> WebStoreTransaction<T> Never! { set<T>(self, value) }
+    set: fn(^self, value: T) -> WebStoreTransaction<T> Never! { set<T>(self, value) }
 
-    transact: fn<E>(&self, label: String, apply: fn(&T) E!) -> WebStoreTransaction<T> E! {
+    transact: fn<E>(^self, label: String, apply: fn(^T) E!) -> WebStoreTransaction<T> E! {
         transaction<T, E>(self, label, [String]{}, apply)
     }
 
-    back: fn(&self) -> WebStore<T>? Never! { back<T>(self) }
+    back: fn(^self) -> WebStore<T>? Never! { back<T>(self) }
 
-    forward: fn(&self) -> WebStore<T>? Never! { forward<T>(self) }
+    forward: fn(^self) -> WebStore<T>? Never! { forward<T>(self) }
 
-    jump: fn(&self, index: Int) -> WebStore<T>? Never! { jump<T>(self, index) }
+    jump: fn(^self, index: Int) -> WebStore<T>? Never! { jump<T>(self, index) }
 }
 
 WebStoreEvent: struct {
@@ -121,7 +121,7 @@ state_signal: fn<T>(store: WebStore<T>) -> Signal<T> Never! { signal<T>(store) }
 // `apply` changes a working copy of the current value; the store then holds
 // the changed copy and records one transaction from the value before it. A
 // failure of `apply` is this call's, unchanged, and leaves the store as it was.
-transaction: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStoreTransaction<T> E! {
+transaction: fn<T, E>(store: ^WebStore<T>, label: String, values: [String], apply: fn(^T) E!) -> WebStoreTransaction<T> E! {
     before: value<T>(store.copy())
     next := value<T>(store.copy())
     apply(next)
@@ -129,15 +129,15 @@ transaction: fn<T, E>(store: &WebStore<T>, label: String, values: [String], appl
     record<T>(store, label, values, before)
 }
 
-update: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStoreTransaction<T> E! {
+update: fn<T, E>(store: ^WebStore<T>, label: String, values: [String], apply: fn(^T) E!) -> WebStoreTransaction<T> E! {
     transaction<T, E>(store, label, values, apply)
 }
 
-batch: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStoreTransaction<T> E! {
+batch: fn<T, E>(store: ^WebStore<T>, label: String, values: [String], apply: fn(^T) E!) -> WebStoreTransaction<T> E! {
     transaction<T, E>(store, label, values, apply)
 }
 
-set: fn<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
+set: fn<T>(store: ^WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
     // The transaction of update/batch with label set, no changed field names,
     // and the root replaced.
     before: get<T>(store.copy())
@@ -145,19 +145,19 @@ set: fn<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
     record<T>(store, "set", [String]{}, before)
 }
 
-set_state: fn<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
+set_state: fn<T>(store: ^WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
     set<T>(store, value)
 }
 
 // The changed value is live at once; the patch keeps the value before it, and
 // until patch_commit, patch_rollback returns the store with that value restored.
-optimistic: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStorePatch<T> E! {
+optimistic: fn<T, E>(store: ^WebStore<T>, label: String, values: [String], apply: fn(^T) E!) -> WebStorePatch<T> E! {
     backup := value<T>(store.copy())
     transaction: transaction<T, E>(store, label, values, apply)
     WebStorePatch<T>{store: store.copy(), backup: backup, transaction: transaction, active: true}
 }
 
-patch: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStorePatch<T> E! {
+patch: fn<T, E>(store: ^WebStore<T>, label: String, values: [String], apply: fn(^T) E!) -> WebStorePatch<T> E! {
     optimistic<T, E>(store, label, values, apply)
 }
 
@@ -169,12 +169,12 @@ patch_transaction: fn<T>(patch: WebStorePatch<T>) -> WebStoreTransaction<T> Neve
     patch.transaction
 }
 
-patch_commit: fn<T>(patch: &WebStorePatch<T>) -> WebStoreTransaction<T> Never! {
+patch_commit: fn<T>(patch: ^WebStorePatch<T>) -> WebStoreTransaction<T> Never! {
     patch.active = false
     patch_transaction<T>(patch)
 }
 
-patch_rollback: fn<T>(patch: &WebStorePatch<T>) -> WebStore<T>? Never! {
+patch_rollback: fn<T>(patch: ^WebStorePatch<T>) -> WebStore<T>? Never! {
     if !patch.active -> return None
     store := patch.store
     before: value<T>(store)
@@ -184,22 +184,22 @@ patch_rollback: fn<T>(patch: &WebStorePatch<T>) -> WebStore<T>? Never! {
     Val(store)
 }
 
-back: fn<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
+back: fn<T>(store: ^WebStore<T>) -> WebStore<T>? Never! {
     cursor: store.cursor
     jump<T>(store, cursor - 1)
 }
 
-forward: fn<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
+forward: fn<T>(store: ^WebStore<T>) -> WebStore<T>? Never! {
     cursor: store.cursor
     jump<T>(store, cursor + 1)
 }
 
-restore: fn<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
+restore: fn<T>(store: ^WebStore<T>) -> WebStore<T>? Never! {
     cursor: store.cursor
     jump<T>(store, cursor)
 }
 
-jump: fn<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! {
+jump: fn<T>(store: ^WebStore<T>, index: Int) -> WebStore<T>? Never! {
     if index < 0 || index > store.history.len() -> return None
     store.state = reactive.set(store.state, if index == 0 -> store.initial else -> store.history[index - 1])
     store.cursor = index
@@ -207,7 +207,7 @@ jump: fn<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! {
     Val(store)
 }
 
-scrub: fn<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! { jump<T>(store, index) }
+scrub: fn<T>(store: ^WebStore<T>, index: Int) -> WebStore<T>? Never! { jump<T>(store, index) }
 
 history: fn<T>(store: WebStore<T>) -> [WebStoreTransaction<T>] Never! { store.transactions }
 
@@ -226,7 +226,7 @@ events_since: fn<T>(store: WebStore<T>, cursor: Int) -> [WebStoreEvent] Never! {
     out
 }
 
-clear_history: fn<T>(store: &WebStore<T>) Never! {
+clear_history: fn<T>(store: ^WebStore<T>) Never! {
     store.initial = value<T>(store.copy())
     store.history = [T]{}
     store.transactions = [WebStoreTransaction<T>]{}
@@ -235,7 +235,7 @@ clear_history: fn<T>(store: &WebStore<T>) Never! {
     store.generation += 1
 }
 
-set_history_limit: fn<T>(store: &WebStore<T>, limit: Int) Never! {
+set_history_limit: fn<T>(store: ^WebStore<T>, limit: Int) Never! {
     n := limit
     if n < 1 -> n = 1
     if n > 1000 -> n = 1000
@@ -255,7 +255,7 @@ cursor: fn<T>(store: WebStore<T>) -> Int Never! { store.cursor }
 
 current_generation: fn<T>(store: WebStore<T>) -> Int Never! { store.generation }
 
-listen: fn<T, E>(store: &WebStore<T>, callback: fn(T) E!) -> WebStoreSubscription E! {
+listen: fn<T, E>(store: ^WebStore<T>, callback: fn(T) E!) -> WebStoreSubscription E! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS {
         return WebStoreSubscription{id: store.subs, active: false, selector: ""}
     }
@@ -264,13 +264,13 @@ listen: fn<T, E>(store: &WebStore<T>, callback: fn(T) E!) -> WebStoreSubscriptio
     WebStoreSubscription{id: store.subs, active: true, selector: ""}
 }
 
-subscription_unsubscribe: fn(subscription: &WebStoreSubscription) Never! {
+subscription_unsubscribe: fn(subscription: ^WebStoreSubscription) Never! {
     subscription.active = false
 }
 
 subscription_active: fn(subscription: WebStoreSubscription) -> Bool Never! { subscription.active }
 
-listen_selector: fn<T, U, E>(store: &WebStore<T>, project: fn(T) -> U E!, callback: fn(U) E!) -> WebStoreSubscription E! {
+listen_selector: fn<T, U, E>(store: ^WebStore<T>, project: fn(T) -> U E!, callback: fn(U) E!) -> WebStoreSubscription E! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS {
         return WebStoreSubscription{id: store.subs, active: false, selector: "derived"}
     }
@@ -308,7 +308,7 @@ event_json: fn<T>(store: WebStore<T>) -> String Never! {
     "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor - (timeline - window)},\"generation\":{store.generation + 1}}}"
 }
 
-record: fn<T>(store: &WebStore<T>, action: String, fields: [String], before: T) -> WebStoreTransaction<T> Never! {
+record: fn<T>(store: ^WebStore<T>, action: String, fields: [String], before: T) -> WebStoreTransaction<T> Never! {
     store.generation += 1
     changed := [String]{}
     loop field in fields -> changed.push("\"{esc_json(field)}\"")
@@ -334,7 +334,7 @@ record: fn<T>(store: &WebStore<T>, action: String, fields: [String], before: T) 
     transaction
 }
 
-trim: fn<T>(store: &WebStore<T>) Never! {
+trim: fn<T>(store: ^WebStore<T>) Never! {
     excess: store.history.len() - store.history_limit
     if excess > 0 {
         store.initial = store.history[excess - 1]

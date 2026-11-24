@@ -97,7 +97,7 @@ SSLExtData: struct {
 /// give its body (mbedtls_ssl_tls13_fetch_handshake_msg). Every message but
 /// those another may follow in the same record must end at a record
 /// boundary. The message is not added to the transcript.
-ssl_tls13_fetch_handshake_msg: fn<R: RNG>(ssl: &ssldefs.SSLContext, hs_type: Int, rng: &R) -> SSLHsBody ssldefs.SSLError! {
+ssl_tls13_fetch_handshake_msg: fn<R: RNG>(ssl: ^ssldefs.SSLContext, hs_type: Int, rng: ^R) -> SSLHsBody ssldefs.SSLError! {
     // The ServerHello's boundary is checked once it is known to be TLS
     // 1.3's, which TLS 1.2's need not keep.
     may_share_record: hs_type == ssldefs.SSL_HS_NEW_SESSION_TICKET || hs_type == ssldefs.SSL_HS_ENCRYPTED_EXTENSIONS || hs_type == ssldefs.SSL_HS_CERTIFICATE || hs_type == ssldefs.SSL_HS_CERTIFICATE_REQUEST || hs_type == ssldefs.SSL_HS_CERTIFICATE_VERIFY || hs_type == ssldefs.SSL_HS_SERVER_HELLO
@@ -113,7 +113,7 @@ ssl_tls13_fetch_handshake_msg: fn<R: RNG>(ssl: &ssldefs.SSLContext, hs_type: Int
 /// The data of the supported_versions extension among the extensions at
 /// in_buf[buf..<end], None when there are none or it is not among them
 /// (mbedtls_ssl_tls13_is_supported_versions_ext_present_in_exts).
-ssl_tls13_is_supported_versions_ext_present_in_exts: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> SSLExtData? ssldefs.SSLError! {
+ssl_tls13_is_supported_versions_ext_present_in_exts: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> SSLExtData? ssldefs.SSLError! {
     p := buf
     if p == end -> return Ok(None)
     ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
@@ -139,7 +139,7 @@ ssl_tls13_is_supported_versions_ext_present_in_exts: fn(ssl: &ssldefs.SSLContext
 /// the extensions allowed there and record it; a response's extension
 /// must answer one we sent (mbedtls_ssl_tls13_check_received_extension,
 /// RFC 8446 4.2).
-ssl_tls13_check_received_extension: fn(ssl: &ssldefs.SSLContext, hs_msg_type: Int, received_extension_type: Int, hs_msg_allowed_extensions_mask: Int) ssldefs.SSLError! {
+ssl_tls13_check_received_extension: fn(ssl: ^ssldefs.SSLContext, hs_msg_type: Int, received_extension_type: Int, hs_msg_allowed_extensions_mask: Int) ssldefs.SSLError! {
     extension_mask: ssltls.ssl_get_extension_mask(received_extension_type)
     if extension_mask & hs_msg_allowed_extensions_mask == 0 {
         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_ILLEGAL_PARAMETER, .IllegalParameter)
@@ -178,7 +178,7 @@ ssl_tls13_pss_options: fn(kind: oids.PKType, md: hashes.Md) -> pk.PSSOptions? Ne
 }
 
 // A CertificateVerify that does not verify: a decrypt_error alert.
-ssl_tls13_certificate_verify_failed: fn(ssl: &ssldefs.SSLContext) -> ssldefs.SSLError Never! {
+ssl_tls13_certificate_verify_failed: fn(ssl: ^ssldefs.SSLContext) -> ssldefs.SSLError Never! {
     sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECRYPT_ERROR, .HandshakeFailure)
     ssldefs.SSLError.HandshakeFailure
 }
@@ -198,7 +198,7 @@ ssl_tls13_key_fits: fn(key: pk.PKContext, algorithm: Int, kind: oids.PKType) -> 
 // offered, one RFC 8446 allows in a CertificateVerify (so not PKCS#1 v1.5,
 // which mbedtls 3.6 lets through when offered for certificates), and suit
 // the key.
-ssl_tls13_parse_certificate_verify: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, verify_buffer: [U8]) ssldefs.SSLError! {
+ssl_tls13_parse_certificate_verify: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int, verify_buffer: [U8]) ssldefs.SSLError! {
     p := buf
     ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     algorithm: ssldefs.ssl_get_u16(ssl.in_buf, p)
@@ -213,7 +213,7 @@ ssl_tls13_parse_certificate_verify: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
         }
     }
     sn: ssl.session_negotiate
-    key_fits: if &ssl.spool[sn].peer_cert == {
+    key_fits: if ^ssl.spool[sn].peer_cert == {
         .Val(chain) -> chain.len() > 0 && ssl_tls13_key_fits(chain[0].pk, algorithm, parts.pk_type)
         None -> false
     }
@@ -225,7 +225,7 @@ ssl_tls13_parse_certificate_verify: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
     verify_hash: hashes.hash(parts.md_alg, verify_buffer)
     options: ssl_tls13_pss_options(parts.pk_type, parts.md_alg)
     signature: ssldefs.ssl_bytes_of(ssl.in_buf, p, signature_len)
-    verified: if &ssl.spool[sn].peer_cert == {
+    verified: if ^ssl.spool[sn].peer_cert == {
         .Val(chain) -> if pk.pk_verify_ext(parts.pk_type, options, chain[0].pk, Val(parts.md_alg), verify_hash, signature) == {
             .Ok(_) -> true
             .Err(_) -> false
@@ -237,7 +237,7 @@ ssl_tls13_parse_certificate_verify: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
 
 /// Read the peer's CertificateVerify and check its signature over the
 /// transcript up to its Certificate (mbedtls_ssl_tls13_process_certificate_verify).
-ssl_tls13_process_certificate_verify: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_process_certificate_verify: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     body: ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_CERTIFICATE_VERIFY, rng) ?? return Err(err)
     // The transcript hash is taken before the message joins it.
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
@@ -286,7 +286,7 @@ ssl_tls13_own_key_matches_sig_alg: fn(ssl: ssldefs.SSLContext, sig_alg: Int) -> 
 // length (ssl_tls13_write_certificate_verify_body): the signature with the
 // first algorithm the peer listed that we offer, CertificateVerify allows
 // and suits our key, trying the next when the key cannot sign with it.
-ssl_tls13_write_certificate_verify_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end: Int, rng: &R) -> Int ssldefs.SSLError! {
+ssl_tls13_write_certificate_verify_body: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: Int, end: Int, rng: ^R) -> Int ssldefs.SSLError! {
     if ssltls.ssl_own_key_cert(ssl) < 0 -> return Err(.InternalError)
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     handshake_hash: ssltls.ssl_get_handshake_transcript(ssl, cs.mac) ?? return Err(err)
@@ -331,7 +331,7 @@ ssl_tls13_write_certificate_verify_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, bu
 }
 
 /// Write our CertificateVerify (mbedtls_ssl_tls13_write_certificate_verify).
-ssl_tls13_write_certificate_verify: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_write_certificate_verify: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_CERTIFICATE_VERIFY)
     msg_len: ssl_tls13_write_certificate_verify_body(ssl, buf, buf + ssldefs.SSL_OUT_CONTENT_LEN - 4, rng) ?? return Err(err)
     ssltls.ssl_add_hs_msg_to_checksum(ssl.handshake, ssldefs.SSL_HS_CERTIFICATE_VERIFY, ssl.out_buf, buf, msg_len)
@@ -347,7 +347,7 @@ ssl_tls13_write_certificate_verify: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R
 /// more and certificates under 128 bytes. Each entry's extensions must be
 /// ones a Certificate allows. The negotiated session's chain, from a
 /// session that failed to resume, is dropped.
-ssl_tls13_parse_certificate: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> [x509crt.X509Crt]? ssldefs.SSLError! {
+ssl_tls13_parse_certificate: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> [x509crt.X509Crt]? ssldefs.SSLError! {
     p := buf
     ssltls.ssl_chk_buf_read(ssl, p, end, 4) ?? return Err(err)
     certificate_request_context_len: ssldefs.ssl_u8(ssl.in_buf, p)
@@ -429,9 +429,9 @@ ssl_tls13_parse_certificate: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ->
 // else the configuration's (ssl_tls13_validate_certificate). A client
 // that sent none fails unless optional; a server must send one whatever
 // the mode (RFC 8446 4.4.2).
-ssl_tls13_validate_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt]?, rng: &R) ssldefs.SSLError! {
+ssl_tls13_validate_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, chain: ^[x509crt.X509Crt]?, rng: ^R) ssldefs.SSLError! {
     authmode: if ssl.handshake.sni_authmode != ssldefs.SSL_VERIFY_UNSET -> ssl.handshake.sni_authmode else -> ssl.conf.authmode
-    if &chain == {
+    if ^chain == {
         .Val(c) -> { ssltls.ssl_verify_certificate(ssl, authmode, c, None, rng) ?? return Err(err) }
         None -> {
             if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER {
@@ -451,7 +451,7 @@ ssl_tls13_validate_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, chain: &[x5
 
 /// Read, parse and verify the peer's Certificate; the negotiated session
 /// keeps the chain, verified or not (mbedtls_ssl_tls13_process_certificate).
-ssl_tls13_process_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_process_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     body: ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_CERTIFICATE, rng) ?? return Err(err)
     chain := ssl_tls13_parse_certificate(ssl, body.buf, body.buf + body.len)
     sn: ssl.session_negotiate
@@ -468,7 +468,7 @@ ssl_tls13_process_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssl
 // Write the Certificate body at out_buf[buf..<end] and give its length
 // (ssl_tls13_write_certificate_body): the certificate request context,
 // then each certificate of our chain with no extensions.
-ssl_tls13_write_certificate_body: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+ssl_tls13_write_certificate_body: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
     ders: ssltls.ssl_own_cert_der(ssl) ?? [[U8]]{}
     context: ssl.handshake.certificate_request_context.copy()
     context_len: context.len()
@@ -497,7 +497,7 @@ ssl_tls13_write_certificate_body: fn(ssl: &ssldefs.SSLContext, buf: Int, end: In
 }
 
 /// Write our Certificate (mbedtls_ssl_tls13_write_certificate).
-ssl_tls13_write_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_write_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_CERTIFICATE)
     msg_len: ssl_tls13_write_certificate_body(ssl, buf, buf + ssldefs.SSL_OUT_CONTENT_LEN - 4) ?? return Err(err)
     ssltls.ssl_add_hs_msg_to_checksum(ssl.handshake, ssldefs.SSL_HS_CERTIFICATE, ssl.out_buf, buf, msg_len)
@@ -509,7 +509,7 @@ ssl_tls13_write_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) sslde
 
 /// Read the peer's Finished and check its verify_data, compared in
 /// constant time (mbedtls_ssl_tls13_process_finished_message).
-ssl_tls13_process_finished_message: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_process_finished_message: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     body: ssl_tls13_fetch_handshake_msg(ssl, ssldefs.SSL_HS_FINISHED, rng) ?? return Err(err)
     // ssl_tls13_preprocess_finished_message: the peer's expected
     // verify_data, over the transcript before its Finished.
@@ -532,7 +532,7 @@ ssl_tls13_process_finished_message: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R
 
 /// Write our Finished over the transcript so far
 /// (mbedtls_ssl_tls13_write_finished_message).
-ssl_tls13_write_finished_message: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_write_finished_message: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     // ssl_tls13_prepare_finished_message.
     digest: keys13.ssl_tls13_calculate_verify_data(ssl, ssldefs.SSL_TLS1_3_MD_MAX_SIZE, ssl.conf.endpoint) ?? return Err(err)
     ssldefs.ssl_wipe(ssl.handshake.finished_digest)
@@ -549,7 +549,7 @@ ssl_tls13_write_finished_message: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) 
 /// End the TLS 1.3 handshake (mbedtls_ssl_tls13_handshake_wrapup): both
 /// directions take the application keys and the negotiated session
 /// replaces the current one.
-ssl_tls13_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_tls13_handshake_wrapup: fn(ssl: ^ssldefs.SSLContext) Never! {
     sslmsg.ssl_set_inbound_transform(ssl, ssl.transform_application)
     sslmsg.ssl_set_outbound_transform(ssl, ssl.transform_application)
     ssldefs.ssl_session_release(ssl, ssl.session)
@@ -559,7 +559,7 @@ ssl_tls13_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! {
 
 /// Send the one ChangeCipherSpec of middlebox compatibility mode, unless
 /// it was sent (mbedtls_ssl_tls13_write_change_cipher_spec, RFC 8446 D.4).
-ssl_tls13_write_change_cipher_spec: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_write_change_cipher_spec: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if ssl.handshake.ccs_sent != 0 {
         return
     }
@@ -574,7 +574,7 @@ ssl_tls13_write_change_cipher_spec: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R
 /// Replace the transcript by the message_hash message of its hash, keeping
 /// the negotiated ciphersuite, for a HelloRetryRequest
 /// (mbedtls_ssl_reset_transcript_for_hrr, RFC 8446 4.4.1).
-ssl_reset_transcript_for_hrr: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_reset_transcript_for_hrr: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     hash: ssltls.ssl_get_handshake_transcript(ssl, cs.mac) ?? return Err(err)
     hash_len: hash.len()
@@ -589,7 +589,7 @@ ssl_reset_transcript_for_hrr: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 
 /// Keep the peer's key share, the KeyShareEntry key_exchange field at
 /// in_buf[buf..<buf + buf_len] (mbedtls_ssl_tls13_read_public_xxdhe_share).
-ssl_tls13_read_public_xxdhe_share: fn(ssl: &ssldefs.SSLContext, buf: Int, buf_len: Int) ssldefs.SSLError! {
+ssl_tls13_read_public_xxdhe_share: fn(ssl: ^ssldefs.SSLContext, buf: Int, buf_len: Int) ssldefs.SSLError! {
     p := buf
     end: buf + buf_len
     ssltls.ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
@@ -616,7 +616,7 @@ ssl_tls13_ffdhe_prime: fn(named_group: Int) -> [U8]? Never! {
 /// forms are psa_export_public_key's: 0x04 || X || Y on a Weierstrass
 /// curve, X on a Montgomery one, and an FFDH value padded to the prime's
 /// length, its exponent drawn from [2, p - 2] as RFC 7919 has it.
-ssl_tls13_generate_and_write_xxdh_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, named_group: Int, buf: Int, end: Int, rng: &R) -> Int ssldefs.SSLError! {
+ssl_tls13_generate_and_write_xxdh_key_exchange: fn<R: RNG>(ssl: ^ssldefs.SSLContext, named_group: Int, buf: Int, end: Int, rng: ^R) -> Int ssldefs.SSLError! {
     buf_size: end - buf
     grp_id: ssltls.ssl_get_ecp_group_id_from_tls_id(named_group)
     if grp_id != ecp.GroupID.Unknown {

@@ -163,7 +163,7 @@ jet_cli_project_status_at: fn(root: String, cwd: String, target: String, json: B
 // `jet status` at a workspace root (the index `index_path` of `root`): no
 // one target is the root's, so it lists the members in index order, each
 // with its directory and the entry a command there starts, or none.
-jet_cli_project_status_workspace: fn(root: String, index_path: String, color: Bool, json: Bool, notices: &[String]) -[FS, Env]> JetCLIPlan Never! {
+jet_cli_project_status_workspace: fn(root: String, index_path: String, color: Bool, json: Bool, notices: ^[String]) -[FS, Env]> JetCLIPlan Never! {
     members := [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, "status", color) == {
         .Refused(plan) -> return plan

@@ -54,7 +54,7 @@ Reads: struct {
     impl Iterator {
         Item: Int,
 
-        next: fn(&self) -> Int? ReadError! {
+        next: fn(^self) -> Int? ReadError! {
             self.calls += 1
             if self.at >= self.end -> return None
             if self.at + 1 == self.torn && self.tears == 0 {
@@ -71,7 +71,7 @@ Reads: struct {
     }
 
     impl Close {
-        close: fn(&&self) { print("close {self.name} after {self.calls} calls") }
+        close: fn(^^self) { print("close {self.name} after {self.calls} calls") }
     }
 }
 
@@ -84,7 +84,7 @@ Source: struct {
     impl Iterable {
         Iter: Reads,
 
-        iter: fn(&&self) -> Reads {
+        iter: fn(^^self) -> Reads {
             Reads{at: 0, end: self.end, torn: self.torn, gone: self.gone, tears: 0, calls: 0, name: self.name}
         }
     }
@@ -102,7 +102,7 @@ Strict: struct {
         Item: Int,
         Error: ReadError,
 
-        next: fn(&self) -> Int? ReadError! {
+        next: fn(^self) -> Int? ReadError! {
             if self.left == 0 -> return Err(ReadError.Gone)
             self.left -= 1
             Val(self.left)
@@ -116,7 +116,7 @@ StrictSource: struct {
     impl Iterable {
         Iter: Strict,
 
-        iter: fn(&&self) -> Strict { Strict{left: self.from} }
+        iter: fn(^^self) -> Strict { Strict{left: self.from} }
     }
 }
 
@@ -130,7 +130,7 @@ Plain: struct {
         Item: Int,
         Error: Never,
 
-        next: fn(&self) -> Int? {
+        next: fn(^self) -> Int? {
             if self.left == 0 -> return None
             self.left -= 1
             Val(self.left)
@@ -144,7 +144,7 @@ PlainSource: struct {
     impl Iterable {
         Iter: Plain,
 
-        iter: fn(&&self) -> Plain { Plain{left: self.from} }
+        iter: fn(^^self) -> Plain { Plain{left: self.from} }
     }
 }
 

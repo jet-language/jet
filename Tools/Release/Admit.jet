@@ -919,7 +919,7 @@ Ctx: struct {
     reused_failures: [SuiteRow]{[SuiteRow]{}},
 }
 
-row: fn(ctx: &Ctx, check: String, status: String, detail: String) -[FS, IO, Time]> Never! {
+row: fn(ctx: ^Ctx, check: String, status: String, detail: String) -[FS, IO, Time]> Never! {
     ctx.rows.push(GateRow{check: check.copy(), status: status.copy(), detail: detail.copy()})
     say("release", ctx.log, "{check}: {status} {detail}")
 }
@@ -1003,7 +1003,7 @@ column_preflight: fn(side: String, jet: String, identity: String, tree: String, 
 
 // The release column's preflight, before any stage runs: its gate row, and
 // the refusal when its compiler can't read its tree's Core.
-release_preflight: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
+release_preflight: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
     if column_preflight("release", ctx.baseline.jet, ctx.baseline.identity, ctx.release_tree, ctx.baseline.commit, ctx.work, ctx.vars) == .Val(refused) {
         row(ctx, "preflight:release", "FAIL", refused)
         return Val(refused.copy())
@@ -1016,7 +1016,7 @@ release_preflight: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> String? 
 
 // The candidate column's preflight, once the chain built s2: a failing row
 // keeps every suite from launching, so neither column is compared.
-candidate_preflight: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+candidate_preflight: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     if !ctx.built {
         return
     }
@@ -1043,13 +1043,13 @@ refused_report: fn(ctx: Ctx, refused: String) -> String Never! {
 
 // The gate's first step: refuses the run, writing REPORT.md, when the
 // release column's compiler can't read its tree's Core.
-gate_preflight: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
+gate_preflight: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
     refused: release_preflight(ctx) ?? return None
     files.write(files.join(ctx.work, "REPORT.md"), refused_report(ctx, refused)) ?? ()
     Val(refused.copy())
 }
 
-chain_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+chain_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     out: files.join(ctx.work, "chain")
     log: files.join(ctx.work, "logs/chain.log")
     result: run_logged([String]{ctx.release.jet.copy(), files.join(ctx.root, "Tools/Agent/Chain.jet"), ctx.tree.copy(), "full", "--out", out}, ctx.work, [Var]{set_var("CHAIN_SEED", ctx.release.dir), set_var("JET_COMPILER_IDENTITY", ctx.release.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.root)}, log, 4 * 3600)
@@ -1117,7 +1117,7 @@ tree_differences: fn(root: String, other: String) -[FS]> {differ: [String], file
     {differ: differ, files: left.len()}
 }
 
-pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+pack_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     log: files.join(ctx.work, "logs/pack.log")
     built: files.join(ctx.tree, "Compiler/JetCLI/.jet/build")
     remove_tree(built)
@@ -1156,14 +1156,14 @@ pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // Builds this host's C toolchain pack with Tools/Agent/cc-pack.nix (Nix runs
 // only on the release machine) and checks it against the hash jet embeds;
 // it goes beside s2 for the suites, and assemble ships it beside jet.
-cc_pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+cc_pack_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     pinned_asset_stage(ctx, "cc-pack", "Tools/Agent/cc-pack.nix", CC_PACK_SOURCE, CC_PACK_TABLE, host_target())
 }
 
 // Builds the sandbox's pinned bubblewrap for this host's architecture with
 // Tools/Agent/bwrap.nix and checks it against the hash jet embeds; assemble
 // ships it beside jet, where jet looks before fetching it from the release.
-bwrap_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+bwrap_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     pinned_asset_stage(ctx, "bwrap", "Tools/Agent/bwrap.nix", BWRAP_SOURCE, BWRAP_TABLE, sys.arch())
 }
 
@@ -1172,7 +1172,7 @@ bwrap_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // put beside s2. Jet looks for a pinned asset beside itself before it fetches
 // it from the release it names, and the seed ships it there. s2 names no
 // release, so without the copy its suites' C rows could get no pack at all.
-pinned_asset_stage: fn(ctx: &Ctx, check: String, nix: String, source: String, table: String, key: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+pinned_asset_stage: fn(ctx: ^Ctx, check: String, nix: String, source: String, table: String, key: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     expected := PinnedAsset?{None}
     loop found in pinned_assets(read_text(files.join(ctx.tree, source)) ?? "", table) {
         if (found.platform == key || found.arch == key) && expected == None {
@@ -1236,7 +1236,7 @@ Census: struct {
 }
 
 // One keep-going Jetpack/Bootstrap check with `jet` on the tree `root`.
-jetpack_census: fn(ctx: &Ctx, side: String, jet: String, identity: String, root: String) -[Env, Exec, FS, Time, Time.Wait]> Census Never! {
+jetpack_census: fn(ctx: ^Ctx, side: String, jet: String, identity: String, root: String) -[Env, Exec, FS, Time, Time.Wait]> Census Never! {
     worker: "release-{side}-{sys.pid()}"
     clear_scratch(worker)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JETPACK_WORKER", worker), set_var("JET", jet)})
@@ -1282,7 +1282,7 @@ shown_keys: fn(keys: [String], count: Int) -> String Never! {
 // (evidence/jetpack-candidate.keys), else a census of the release on its own
 // tree. The candidate must add no row; a census that finishes for the
 // release must finish for the candidate.
-jetpack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+jetpack_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     recorded: files.join(ctx.baseline.dir, "evidence/jetpack-candidate.keys")
     cache: files.join(files.join(ctx.work_root, "cache"), "jetpack-{cache_key([String]{ctx.baseline.jet_sha, ctx.baseline.commit})}.keys")
     before := Census{finished: false, keys: [String]{}, detail: ""}
@@ -1343,7 +1343,7 @@ jetpack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     row(ctx, "jetpack", "PASS", "no new census rows ({after.keys.len()} rows, {fixed.len()} fixed; release {before.detail}; candidate {after.detail})")
 }
 
-hosted_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+hosted_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     worker: "release-hosted-{sys.pid()}"
     clear_scratch(worker)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JETPACK_WORKER", worker), set_var("JET", ctx.candidate.jet), norust_var()})
@@ -1423,7 +1423,7 @@ SuiteBatch: struct {
     jobs: [Job],
 }
 
-suite_batch: fn(ctx: &Ctx, side: String, profile: String, label_tag: String, extra: [String], shards: Int) -[Env]> SuiteBatch Never! {
+suite_batch: fn(ctx: ^Ctx, side: String, profile: String, label_tag: String, extra: [String], shards: Int) -[Env]> SuiteBatch Never! {
     release: side == "release"
     jet: if release -> ctx.baseline.jet.copy() else -> ctx.candidate.jet.copy()
     identity: if release -> ctx.baseline.identity.copy() else -> ctx.candidate.identity.copy()
@@ -1450,7 +1450,7 @@ suite_batch: fn(ctx: &Ctx, side: String, profile: String, label_tag: String, ext
 }
 
 // The rows `batch`'s processes wrote, merged; `results` are their exits in order.
-suite_rows: fn(ctx: &Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRun Never! {
+suite_rows: fn(ctx: ^Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRun Never! {
     kit: files.join(ctx.work, "kit")
     rows := [SuiteRow]{}
     errors := [String]{}
@@ -1478,7 +1478,7 @@ suite_rows: fn(ctx: &Ctx, batch: SuiteBatch, results: [Finished]) -[FS]> SuiteRu
 
 // One side's run of test profile `profile` in one kit process, alone in the
 // slot: a retry or a rerun of a `--cases` list.
-suite_run: fn(ctx: &Ctx, side: String, profile: String, label_tag: String, extra: [String]) -[Env, Exec, FS, Time, Time.Wait]> SuiteRun Never! {
+suite_run: fn(ctx: ^Ctx, side: String, profile: String, label_tag: String, extra: [String]) -[Env, Exec, FS, Time, Time.Wait]> SuiteRun Never! {
     batch: suite_batch(ctx, side, profile, label_tag, extra, 1)
     suite_rows(ctx, batch, run_batch(batch.jobs.copy()))
 }
@@ -1610,7 +1610,7 @@ row_file_problems: fn(file: RowFile, path: String, source: String, suites: [Stri
     problems
 }
 
-reuse_plan: fn(ctx: &Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
+reuse_plan: fn(ctx: ^Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
     plan := ReusePlan{active: false, prior: "", rows: [SuiteRow]{}, paths: [String]{}, ledger: [String]{}, error: ""}
     if ctx.options.reuse == "" -> return plan
     plan.active = true
@@ -1692,7 +1692,7 @@ merged_rows: fn(prior: [SuiteRow], fresh: [SuiteRow], ids: [String]) -> [SuiteRo
 // name, jet, identity and tree, its jetpack engine, the filter and the time
 // limit), holding every release row the last run against that column ran or
 // carried, as of the commit it gated.
-release_cache: fn(ctx: &Ctx) -[FS]> String Never! {
+release_cache: fn(ctx: ^Ctx) -[FS]> String Never! {
     engine: if ctx.baseline.jetpack != "" -> sha256_file(ctx.baseline.jetpack) else -> ""
     key: cache_key([String]{ctx.baseline.name, ctx.baseline.jet_sha, ctx.baseline.identity, ctx.baseline.commit, engine, ctx.options.filter, if ctx.options.timeout > 0 -> "{ctx.options.timeout}" else -> "0"})
     files.join(files.join(ctx.work_root, "cache"), "release-rows-{key}.json")
@@ -1743,7 +1743,7 @@ Carried: struct {
 
 no_carry: fn() -> Carried Never! { Carried{rows: [SuiteRow]{}, from: "", dropped: 0} }
 
-carried_rows: fn(ctx: &Ctx, sources: [String:String]) -[Exec, FS, Time.Wait]> Carried Never! {
+carried_rows: fn(ctx: ^Ctx, sources: [String:String]) -[Exec, FS, Time.Wait]> Carried Never! {
     text: read_text(release_cache(ctx)) ?? return no_carry()
     file: parse_row_file(text) ?? return no_carry()
     if file.compiler != ctx.baseline.identity -> return no_carry()
@@ -1938,7 +1938,7 @@ judged_release: fn(ran: [SuiteRow], candidate: [SuiteRow]) -> [SuiteRow] Never! 
 // `--cases` list in --shards kit processes. When every process wrote its
 // rows, release_cache keeps every row still valid at COMMIT, the fresh ones
 // in place of the carried rows of their IDs.
-release_rows: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time.Wait]> SuiteRun Never! {
+release_rows: fn(ctx: ^Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time.Wait]> SuiteRun Never! {
     diff: git_in(ctx.root, [String]{"diff", "--name-only", "--no-renames", ctx.baseline.commit, ctx.sha})
     paths := [String]{}
     if diff.rc == 0 {
@@ -1995,7 +1995,7 @@ release_rows: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time
 // (evidence/rows-candidate.json, what a later --reuse takes) when they are
 // complete and unfiltered, then the release column release_rows picks from
 // them, then judge_suites.
-judge_columns: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+judge_columns: fn(ctx: ^Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     if candidate.error == "" && ctx.options.filter == "" {
         files.write(files.join(ctx.work, "evidence/rows-candidate.json"), row_file_text(RowFile{commit: ctx.sha.copy(), source: ctx.source.copy(), compiler: ctx.candidate.identity.copy(), rows: candidate.rows.copy()})) ?? ()
     }
@@ -2008,7 +2008,7 @@ judge_columns: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Tim
 // those a changed file reaches and its untracked failures (the failures a
 // reuse exists to verify), which run again on the candidate. The release
 // column follows as in a full run (judge_columns).
-reused_suites: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+reused_suites: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     plan: reuse_plan(ctx)
     if plan.error != "" {
         loop suite in kit_suites(ctx.native) {
@@ -2064,7 +2064,7 @@ reused_suites: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 // run: a row that passes by itself has not failed outright, but it is flaky,
 // listed with both outcomes, and fails the gate unless a disposition names
 // the card that owns it (flaky_row).
-judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [SuiteRun]) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+judge_suites: fn(ctx: ^Ctx, kit: [String], release: [SuiteRun], candidate: [SuiteRun]) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     firsts := [Compared]{}
     judged := [[SuiteRow]]{}
     seen := [String:Bool]{}
@@ -2133,7 +2133,7 @@ judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [Suit
 // shards at once, each in its own process and receipt. Every entry of every
 // shard must pass (registries_verdict), as in Tools/Agent/VerifyFull.jet. A
 // --filter run narrows the kit suites and runs none of it.
-registries_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+registries_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     check: "suite:{REGISTRY_SUITE}"
     if ctx.options.filter != "" {
         why: "not run: --filter {ctx.options.filter} narrows the kit suites, and a filtered run is never a release"
@@ -2234,7 +2234,7 @@ SPEED_RUNS: 3
 
 SPEED_CELL_MODES: "check,O0,release"
 
-speed_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
+speed_stage: fn(ctx: ^Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     if ctx.options.filter != "" {
         row(ctx, "speed", "NOTE", "not measured: --filter {ctx.options.filter} narrows the gate, and a filtered run is never a release")
         return
@@ -2356,7 +2356,7 @@ unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [
 }
 
 // A WARN row naming every disposition that tracks no row.
-disposition_note: fn(ctx: &Ctx) -[FS, IO, Time]> Never! {
+disposition_note: fn(ctx: ^Ctx) -[FS, IO, Time]> Never! {
     unused: unused_dispositions(ctx.dispositions, ctx.suites)
     if unused.len() > 0 {
         row(ctx, "dispositions", "WARN", "{unused.len()} disposition(s) match no lost row, no row failing alike on both columns and no flaky row: {unused.join(" | ")}")

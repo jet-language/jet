@@ -23,7 +23,7 @@ use {
 // Control flow.
 
 // OP_Gosub: P1 = the return address, then jump.
-op_gosub: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_gosub: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     v.mem[i].flags = MEM_INT
     v.mem[i].i = r.pc
@@ -31,14 +31,14 @@ op_gosub: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_Return: back past the OP_Gosub whose address P1 holds.
-op_return: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_return: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     if v.mem[i].flags & MEM_INT != 0 -> r.pc = v.mem[i].i
     GO_NEXT
 }
 
 // OP_InitCoroutine.
-op_init_coroutine: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_init_coroutine: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     v.mem[i].i = r.p3 - 1
     v.mem[i].flags = MEM_INT
@@ -47,7 +47,7 @@ op_init_coroutine: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_EndCoroutine: to the P2 of the OP_Yield that called.
-op_end_coroutine: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_end_coroutine: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     caller: v.mem[i].i
     r.pc = v.ops[caller].p2 - 1
@@ -56,7 +56,7 @@ op_end_coroutine: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_Yield: swap the program counter with the address P1 holds.
-op_yield: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_yield: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     v.mem[i].flags = MEM_INT
     dest: v.mem[i].i
@@ -71,7 +71,7 @@ HALT_TYPES: ["NOT NULL", "UNIQUE", "CHECK", "FOREIGN KEY"]
 // OP_Halt (and OP_HaltIfNull once P3 is NULL). In a trigger program with
 // P1 OK, back to the parent (past its OP_Program, or to its P2 for
 // OE_Ignore); otherwise end the statement with P1, P2 its errorAction.
-op_halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_halt: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if v.frames.len() > 0 && r.p1 == base.OK {
         aux.set_changes(db, v.n_change)
         pcx := aux.frame_restore<H>(h, db, v)
@@ -103,7 +103,7 @@ op_halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int N
 }
 
 // OP_HaltIfNull.
-op_halt_if_null: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_halt_if_null: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if v.mem[v.mem_base + r.p3].flags & MEM_NULL == 0 -> return GO_NEXT
     op_halt<H>(h, db, v, r)
 }
@@ -112,7 +112,7 @@ op_halt_if_null: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB
 // Constants and registers.
 
 // OP_Integer.
-op_integer: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_integer: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
     v.mem[i].i = r.p1
@@ -120,7 +120,7 @@ op_integer: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_Int64.
-op_int64: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_int64: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
     v.mem[i].i = run.p4_int(v, r.pc)
@@ -128,7 +128,7 @@ op_int64: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_Real.
-op_real: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_real: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
     v.mem[i].flags = MEM_REAL
@@ -138,7 +138,7 @@ op_real: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_String8: the UTF-8 text P4, converted to the database encoding once
 // and the op turned into OP_String.
-op_string8: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_string8: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
     z := run.p4_text(v, r.pc) ?? [U8]{}
@@ -161,7 +161,7 @@ op_string8: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_String: the P1 bytes of P4 in the database encoding; a blob when
 // register P3 holds P5 (the LIKE operator's blob test).
-op_string: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_string: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
     v.mem[i].flags = MEM_STR
@@ -175,7 +175,7 @@ op_string: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_BeginSubrtn / OP_Null: registers P2..P3 NULL, MEM_Cleared too with
 // P1 (so that OP_Ne with SQLITE_NULLEQ tells them apart).
-op_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_null: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
     null_flag: if r.p1 != 0 -> MEM_NULL | MEM_CLEARED else -> MEM_NULL
@@ -189,14 +189,14 @@ op_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_SoftNull.
-op_soft_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_soft_null: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     v.mem[i].flags = clear_bits(v.mem[i].flags, base.MEM_AFF_MASK) | MEM_NULL
     GO_NEXT
 }
 
 // OP_Blob: the P1 bytes of P4, or P1 zero bytes without a P4.
-op_blob: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_blob: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p2
     run.out2(v, i)
     if run.p4_text(v, r.pc) == .Val(z) -> _: mem.set_str(v.mem[i], z, r.p1, 0, base.I64_MAX) else {
@@ -208,7 +208,7 @@ op_blob: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_Variable: the value bound to parameter P1.
-op_variable: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_variable: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if mem.too_big(v.vars[r.p1 - 1], db.limits[ast.LIMIT_LENGTH]) -> return GO_TOO_BIG
     i: v.mem_base + r.p2
     m := v.vars[r.p1 - 1].copy()
@@ -219,7 +219,7 @@ op_variable: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_Move: registers P1..P1+P3-1 move to P2..P2+P3-1, leaving the sources
 // undefined.
-op_move: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_move: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     from: v.mem_base + r.p1
     to: v.mem_base + r.p2
     loop k in 0..<r.p3 {
@@ -234,7 +234,7 @@ op_move: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_Copy: registers P1..P1+P3 copy to P2..P2+P3; P5 bit 2 drops the
 // subtype.
-op_copy: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_copy: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     from: v.mem_base + r.p1
     to: v.mem_base + r.p2
     loop k in 0..<r.p3 + 1 {
@@ -247,26 +247,26 @@ op_copy: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_SCopy.
-op_scopy: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_scopy: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     run.reg_copy(v, v.mem_base + r.p2, v.mem_base + r.p1)
     GO_NEXT
 }
 
 // OP_IntCopy.
-op_int_copy: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_int_copy: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     run.reg_int(v, v.mem_base + r.p2, v.mem[v.mem_base + r.p1].i)
     GO_NEXT
 }
 
 // OP_FkCheck: the immediate foreign key constraints hold.
-op_fk_check: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_fk_check: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     r.rc = aux.check_fk(db, v, false)
     if r.rc != base.OK -> return GO_ERROR
     GO_NEXT
 }
 
 // OP_ResultRow: registers P1..P1+P2-1 are a row of the result.
-op_result_row: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_result_row: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     v.cache_ctr = (v.cache_ctr + 2) | 1
     v.result_row = v.mem_base + r.p1
     if db.malloc_failed -> return GO_NO_MEM
@@ -278,7 +278,7 @@ op_result_row: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]>
 
 // OP_Concat: P3 = P2 || P1. A number is rendered as text for the
 // operation only.
-op_concat: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_concat: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i1: v.mem_base + r.p1
     i2: v.mem_base + r.p2
     out: v.mem_base + r.p3
@@ -322,7 +322,7 @@ op_concat: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_Add, OP_Subtract, OP_Multiply, OP_Divide, OP_Remainder: P3 = P2 op
 // P1, in integers while they hold and do not overflow, else in REALs. A
 // NULL operand, division by zero or a NaN gives NULL.
-op_arith: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_arith: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i1: v.mem_base + r.p1
     i2: v.mem_base + r.p2
     out: v.mem_base + r.p3
@@ -394,7 +394,7 @@ op_arith: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_CollSeq: P1, when set, starts at 0 for the function after it to flag
 // a collation change through.
-op_coll_seq: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_coll_seq: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if r.p1 != 0 -> run.reg_int(v, v.mem_base + r.p1, 0)
     GO_NEXT
 }
@@ -404,7 +404,7 @@ U64_MASK: 18446744073709551615
 // OP_BitAnd, OP_BitOr, OP_ShiftLeft, OP_ShiftRight: P3 = P2 op P1 on
 // 64-bit integers; a negative shift shifts the other way and one of 64 or
 // more bits leaves 0 (or -1, shifting a negative number right).
-op_bits: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_bits: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i1: v.mem_base + r.p1
     i2: v.mem_base + r.p2
     out: v.mem_base + r.p3
@@ -436,7 +436,7 @@ op_bits: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_AddImm: P1 = integer(P1) + P2, wrapping at 64 bits.
-op_add_imm: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_add_imm: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     run.release_dyn(v, i)
     mem.integerify(v.mem[i])
@@ -446,7 +446,7 @@ op_add_imm: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_MustBeInt: P1 becomes an integer, or the op jumps to P2 (fails with
 // SQLITE_MISMATCH when P2 is 0).
-op_must_be_int: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_must_be_int: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     if v.mem[i].flags & MEM_INT == 0 {
         mem.apply_affinity(v.mem[i], base.AFF_NUMERIC, r.enc)
@@ -463,14 +463,14 @@ op_must_be_int: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_RealAffinity.
-op_real_affinity: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_real_affinity: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     if v.mem[i].flags & (MEM_INT | MEM_INT_REAL) != 0 -> mem.realify(v.mem[i])
     GO_NEXT
 }
 
 // OP_Cast: CAST(P1 AS affinity P2).
-op_cast: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_cast: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     mem.expand_blob(v.mem[i])
     mem.cast(v.mem[i], r.p2, r.enc)
@@ -499,7 +499,7 @@ cmp_jumps: fn(op: Int, res: Int) -> Bool Never! {
 // the comparison holds. The affinity's conversions of the operands are
 // undone after (their flags restored). iCompare keeps the result for
 // OP_ElseEq.
-op_compare_jump: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_compare_jump: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i1: v.mem_base + r.p1
     i3: v.mem_base + r.p3
     flags1 := v.mem[i1].flags
@@ -559,7 +559,7 @@ op_compare_jump: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_ElseEq: jump when the OP_Lt or OP_Gt before found its operands
 // equal.
-op_else_eq: fn(r: &Run) -> Int Never! {
+op_else_eq: fn(r: ^Run) -> Int Never! {
     if r.i_compare == 0 -> return GO_JUMP
     GO_NEXT
 }
@@ -567,7 +567,7 @@ op_else_eq: fn(r: &Run) -> Int Never! {
 // OP_Compare: iCompare = the comparison of registers P1.. with P2.. over
 // P3 columns under the KeyInfo P4, in the order of the OP_Permutation
 // before when P5 has OPFLAG_PERMUTE.
-op_compare: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_compare: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     permute := [Int]{}
     use_permute: r.p5 & conn.OPFLAG_PERMUTE != 0
     if use_permute {
@@ -598,7 +598,7 @@ op_compare: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_Jump: to P1, P2 or P3 as iCompare is less than, equal to or greater
 // than zero.
-op_jump: fn(r: &Run) -> Int Never! {
+op_jump: fn(r: ^Run) -> Int Never! {
     if r.i_compare < 0 -> r.pc = r.p1 - 1 else if r.i_compare == 0 -> r.pc = r.p2 - 1 else {
         r.pc = r.p3 - 1
     }
@@ -618,7 +618,7 @@ truth: fn(v: conn.Vdbe, i: Int) -> Int Never! {
 }
 
 // OP_And, OP_Or.
-op_and_or: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_and_or: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     v1: truth(v, v.mem_base + r.p1)
     v2: truth(v, v.mem_base + r.p2)
     x: if r.op == opc.OP_AND -> AND_LOGIC[v1 * 3 + v2] else -> OR_LOGIC[v1 * 3 + v2]
@@ -632,7 +632,7 @@ op_and_or: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_IsTrue: P2 = the truth of P1 (P3 for NULL) xor P4.
-op_is_true: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_is_true: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     b: mem.boolean_value(v.mem[v.mem_base + r.p1], r.p3 != 0)
     x: if b -> 1 else -> 0
     mask: run.p4_int(v, r.pc)
@@ -641,7 +641,7 @@ op_is_true: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_Not.
-op_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_not: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i1: v.mem_base + r.p1
     out: v.mem_base + r.p2
     if v.mem[i1].flags & MEM_NULL == 0 {
@@ -652,7 +652,7 @@ op_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_BitNot.
-op_bit_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_bit_not: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i1: v.mem_base + r.p1
     out: v.mem_base + r.p2
     null: v.mem[i1].flags & MEM_NULL != 0
@@ -668,7 +668,7 @@ op_bit_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_Once: fall through the first time, jump to P2 after. The statement's
 // own program counts runs in its P1 against OP_Init's; a trigger program
 // keeps a flag per op.
-op_once: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_once: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if v.frames.len() > 0 {
         k: v.once_base + r.pc
         if v.once[k] -> return GO_JUMP
@@ -681,19 +681,19 @@ op_once: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_If: jump when P1 is true (P3 for NULL).
-op_if: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_if: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if mem.boolean_value(v.mem[v.mem_base + r.p1], r.p3 != 0) -> return GO_JUMP
     GO_NEXT
 }
 
 // OP_IfNot: jump when P1 is false (NULL when P3).
-op_if_not: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_if_not: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if !mem.boolean_value(v.mem[v.mem_base + r.p1], r.p3 == 0) -> return GO_JUMP
     GO_NEXT
 }
 
 // OP_IsNull.
-op_is_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_is_null: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if v.mem[v.mem_base + r.p1].flags & MEM_NULL != 0 -> return GO_JUMP
     GO_NEXT
 }
@@ -704,7 +704,7 @@ IS_TYPE_MASKS: [16, 1, 1, 1, 1, 1, 1, 2, 1, 1, 16, 16]
 // OP_IsType: jump when the datatype of column P3 of cursor P1 (of register
 // P3 when P1 < 0) is one of the P5 bits (1 << (SQLITE_type - 1)); a column
 // past the parsed header has the type P4.
-op_is_type: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_is_type: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     mask := 0
     if r.p1 >= 0 {
         ci: v.csr_base + r.p1
@@ -718,13 +718,13 @@ op_is_type: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_NotNull.
-op_not_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_not_null: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if v.mem[v.mem_base + r.p1].flags & MEM_NULL == 0 -> return GO_JUMP
     GO_NEXT
 }
 
 // OP_ZeroOrNull: P2 = NULL when P1 or P3 is NULL, 0 otherwise.
-op_zero_or_null: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_zero_or_null: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     out: v.mem_base + r.p2
     if v.mem[v.mem_base + r.p1].flags & MEM_NULL != 0 || v.mem[v.mem_base + r.p3].flags & MEM_NULL != 0 {
         run.reg_null(v, out)

@@ -343,7 +343,7 @@ ManagedApplyJournal: struct {
     new_objects: [String],
 }
 
-env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: &FileSyncReport, journal: &ManagedApplyJournal) -[FS, Env]> EnvironmentError! {
+env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: ^FileSyncReport, journal: ^ManagedApplyJournal) -[FS, Env]> EnvironmentError! {
     loop index in 0..<plan.planned.len() {
         file: plan.planned[index]
         if file.action == {
@@ -370,7 +370,7 @@ env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: &FileSyncR
     env_files_write_state_atomic(plan.state_path, plan.state_after)
 }
 
-env_files_read_all: fn(reader: &FileReader) -[FS]> [U8] IOError! {
+env_files_read_all: fn(reader: ^FileReader) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
         chunk: reader.read_bytes(ENV_FILES_READ_CHUNK)
@@ -380,7 +380,7 @@ env_files_read_all: fn(reader: &FileReader) -[FS]> [U8] IOError! {
     Ok(bytes)
 }
 
-env_files_ensure_object: fn(plan: FilePlan, file: PlannedFile, new_objects: &[String]) -[FS, Env]> String EnvironmentError! {
+env_files_ensure_object: fn(plan: FilePlan, file: PlannedFile, new_objects: ^[String]) -[FS, Env]> String EnvironmentError! {
     object: env_files_object_path(plan.objects_dir, file.declaration, file.digest)
     mode: env_files_object_permissions(file.declaration)
     if env_files_open_existing_object(object) == {

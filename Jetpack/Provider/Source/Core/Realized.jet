@@ -288,7 +288,7 @@ DownloadPlan: struct {
         DownloadPlan{new: 0, cached: 0, repaired: 0, download_bytes: Val(0), disk_bytes: Val(0), estimated_seconds: None, items: [PlanItem]{}}
     }
 
-    add_item: fn(&self, item: PlanItem) Never! {
+    add_item: fn(^self, item: PlanItem) Never! {
         if item.state == {
             .New -> { self.new = math.saturating_add(self.new, 1) }
             .Cached -> { self.cached = math.saturating_add(self.cached, 1) }
@@ -299,12 +299,12 @@ DownloadPlan: struct {
         self.items.push(item.copy())
     }
 
-    extend: fn(&self, other: DownloadPlan) Never! {
+    extend: fn(^self, other: DownloadPlan) Never! {
         if other.estimated_seconds != None -> self.estimated_seconds = other.estimated_seconds
         loop item in other.items -> self.add_item(item)
     }
 
-    add_nix: fn(&self, nix: NixDownloadPlan) Never! {
+    add_nix: fn(^self, nix: NixDownloadPlan) Never! {
         self.estimated_seconds = nix.estimated_seconds
         loop item in nix.items {
             state: if item.state == {

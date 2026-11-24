@@ -160,7 +160,7 @@ jet_cli_repl_history_encode: fn(entry: String) -> String Never! {
 }
 
 // Keep one successful submission: in the session, then in the held store.
-jet_cli_repl_history_add: fn(history: &JetCLIReplHistory, entry: &&String) {
+jet_cli_repl_history_add: fn(history: ^JetCLIReplHistory, entry: ^^String) {
     record: "{jet_cli_repl_history_encode(entry)}\n"
     history.entries.push(entry)
     failed := String?{None}
@@ -202,7 +202,7 @@ jet_cli_repl_history_append: fn(held: JetCLIRootedDirectory, record: String, lim
 }
 
 // `:history clear`: the session's entries and the stored file.
-jet_cli_repl_history_clear: fn(history: &JetCLIReplHistory) {
+jet_cli_repl_history_clear: fn(history: ^JetCLIReplHistory) {
     history.entries = [String]{}
     failed := String?{None}
     if history.held == .Val(held) {
@@ -235,7 +235,7 @@ jet_cli_repl_history_search: fn(history: JetCLIReplHistory, text: String) {
 }
 
 // `:history search <text>` or `:history clear`.
-jet_cli_repl_history_meta: fn(history: &JetCLIReplHistory, argument: String?) {
+jet_cli_repl_history_meta: fn(history: ^JetCLIReplHistory, argument: String?) {
     words: (argument ?? "").trim()
     if {
         words == "clear" -> jet_cli_repl_history_clear(history)

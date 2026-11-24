@@ -4,7 +4,7 @@ Error: Jet.ImpureCallInPureContext: `write` writes a cell through `c`
   8 |     c.value += 1
     |     ^^^^^^^
  Why: `c` may hold a module cell, and a write to it outlives the call so a later read sees it, but `write` declares `-[]>`
- Fix: Take the cell as a `&` parameter so the caller lends it for writing, return the new value instead, or drop the `-[]>` bound from `write` so its effects are inferred
+ Fix: Take the cell as a `^` parameter so the caller lends it for writing, return the new value instead, or drop the `-[]>` bound from `write` so its effects are inferred
  Denial: pure
  Call chain: write
 More: jet-lang.dev/e/Jet.ImpureCallInPureContext

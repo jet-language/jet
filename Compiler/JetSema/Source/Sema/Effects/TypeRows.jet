@@ -104,7 +104,7 @@ sema_effect_type_impl_shape: fn(trait_key: String, implementer_key: String, impl
 // The sources a field or payload named `label` of type `ty` adds: the row
 // written on a function type, and each struct, enum or trait the type holds,
 // through lists, maps, optionals, results, tuples and type arguments.
-sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, label: String, span: Span, ty: Type, sources: &[SemaEffectTypeSource]) Never! {
+sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, label: String, span: Span, ty: Type, sources: ^[SemaEffectTypeSource]) Never! {
     if ty == {
         .Fn(_, _, bound, _, _, _) -> {
             row: bound ?? return
@@ -171,7 +171,7 @@ sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: Mod
 
 // A `field type` source for the struct, enum or trait `name` resolves to
 // from `module_identity`; nothing for a name that resolves to neither.
-sema_effect_type_add_named: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, label: String, span: Span, name: String, sources: &[SemaEffectTypeSource]) Never! {
+sema_effect_type_add_named: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, label: String, span: Span, name: String, sources: ^[SemaEffectTypeSource]) Never! {
     key := ""
     if sema_type_graph_lookup_symbol(graph, module_identity, name) == .Val(resolved) {
         if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) {
@@ -189,7 +189,7 @@ sema_effect_type_add_named: fn(graph: SemaRegistrationGraph, module_identity: Mo
     sources.push(SemaEffectTypeSource{kind: "field type", label: label.copy(), effects: [String]{}, type_key: key, span: span})
 }
 
-sema_effect_type_row_add: fn(row: &SemaEffectTypeRow, effect_name: String, source: Int) -> Bool Never! {
+sema_effect_type_row_add: fn(row: ^SemaEffectTypeRow, effect_name: String, source: Int) -> Bool Never! {
     if !sema_effect_set_add(row.effects, effect_name) -> return false
     row.reaches.push(SemaEffectTypeReach{name: effect_name.copy(), source: source})
     true

@@ -39,7 +39,7 @@ sema_call_shared_owner_snapshot_type: fn(inner: Type, projection: Type) -> Type 
     Type.Apply{name: SEMA_SHARED_SNAPSHOT_TYPE, args: [Type]{inner, projection}}
 }
 
-sema_call_shared_owner_host_value: fn(receiver_value: TExpr, method: String, args: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_host_value: fn(receiver_value: TExpr, method: String, args: [TExpr], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     owner: if receiver_value.ty == {
         .Shared(_) -> "Shared"
         .Apply(name, _) -> name
@@ -75,7 +75,7 @@ sema_call_shared_owner_param: fn(name: String, convention: AccessConvention, ty:
 // Capture either the whole cloneable payload or one
 // pure, cloneable projection. The callback runs under the Shared read lock,
 // so its returned value is paired with one committed revision.
-sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() > 1 {
         diagnostics.push(sema_error("E0104", span, "`capture` expects 0 or 1 argument, got {args.len()}", "`capture` takes no argument or one pure projection closure", "call `.capture(fn(value) {{ … }})`"))
         sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -115,7 +115,7 @@ sema_call_shared_owner_capture: fn(receiver: Expr, receiver_value: TExpr, inner:
 // Consume one owner-bound snapshot ticket plus a
 // replacement payload. The runtime performs the atomic owner/revision
 // comparison; sema only fixes the generic source type.
-sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 2 {
         diagnostics.push(sema_error("E0104", span, "`try_replace` expects 2 arguments, got {args.len()}", "`try_replace` takes one snapshot ticket and one replacement value", "call `.try_replace(snapshot, value)`"))
         sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -148,7 +148,7 @@ sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, in
 // `a.same(b)` asks whether two `Shared<T>` handles name one cell. Identity
 // only, like `Rc::ptr_eq`; `==` on `Shared<T>` stays an error. The argument
 // is only read, so neither handle is moved.
-sema_call_shared_owner_same: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_same: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 1 {
         diagnostics.push(sema_error("E0104", span, "`same` expects 1 argument, got {args.len()}", "`same` compares this Shared handle with one other handle", "call `.same(other)`"))
         sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -166,7 +166,7 @@ sema_call_shared_owner_same: fn(receiver: Expr, receiver_value: TExpr, inner: Ty
     sema_call_shared_owner_host_value(receiver_value, "same", [TExpr]{other}, Type.Bool, span, expected, environment, program, scopes, context, diagnostics)
 }
 
-sema_call_shared_owner_nullary: fn(receiver: Expr, receiver_value: TExpr, method: String, result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_nullary: fn(receiver: Expr, receiver_value: TExpr, method: String, result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -177,7 +177,7 @@ sema_call_shared_owner_nullary: fn(receiver: Expr, receiver_value: TExpr, method
 // `try_guard_edit()` take it only when it is free now, and
 // `guard_read_within(limit)`/`guard_edit_within(limit)` wait at most the
 // Duration `limit`; both answer None when the permit stayed taken.
-sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     timed: method == "guard_read_within" || method == "guard_edit_within"
     wanted: if timed -> 1 else -> 0
@@ -220,7 +220,7 @@ sema_call_cell_guard_type: fn(editable: Bool, inner: Type) -> Type Never! {
     Type.Apply{name: if editable -> "CellEditGuard" else -> "CellReadGuard", args: [Type]{inner}}
 }
 
-sema_call_cell_get: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_cell_get: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 0 {
         diagnostics.push(sema_wrong_core_arity("get", 0, args.len(), span))
         sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -233,7 +233,7 @@ sema_call_cell_get: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args:
 }
 
 // `set` and `replace` consume the new value; `replace` returns the old one.
-sema_call_cell_write: fn(receiver: Expr, receiver_value: TExpr, owner: String, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_cell_write: fn(receiver: Expr, receiver_value: TExpr, owner: String, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 1 {
         diagnostics.push(sema_wrong_core_arity(method, 1, args.len(), span))
         sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -254,7 +254,7 @@ sema_call_cell_write: fn(receiver: Expr, receiver_value: TExpr, owner: String, i
 
 // `get_or_set` initializes an empty `Cell<T?>` from a zero-parameter lambda
 // and returns an owned copy of its `T`.
-sema_call_cell_get_or_set: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_cell_get_or_set: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     stored_type := Type?{None}
     if inner == .Option(value) -> stored_type = Val(value)
     stored: stored_type ?? {
@@ -334,7 +334,7 @@ sema_call_cell_guard_paths_overlap: fn(first: [String], second: [String]) -> Boo
 
 // Rust `finish_shared_closure`: one lambda over the guarded value; an edit
 // guard lends the value mutably.
-sema_call_cell_closure: fn(method: String, inner: Type, argument: CallArg, editable: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_cell_closure: fn(method: String, inner: Type, argument: CallArg, editable: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     is_lambda: if argument.expr == {
         .Lambda(_, _) -> true
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
@@ -348,7 +348,7 @@ sema_call_cell_closure: fn(method: String, inner: Type, argument: CallArg, edita
     sema_expression_lambda_host_callback(argument.expr, Val(expected), editable, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-sema_call_cell_guard_map: fn(receiver: Expr, receiver_value: TExpr, editable: Bool, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_cell_guard_map: fn(receiver: Expr, receiver_value: TExpr, editable: Bool, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     projection := [String]?{None}
     if args.len() > 0 {
         projection = sema_call_cell_guard_projection(args[0].expr)
@@ -373,7 +373,7 @@ sema_call_cell_guard_map: fn(receiver: Expr, receiver_value: TExpr, editable: Bo
 }
 
 // An edit guard splits only into disjoint fields; read guards may overlap.
-sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: Bool, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: Bool, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 2 {
         diagnostics.push(sema_wrong_core_arity("split", 2, args.len(), span))
         sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -408,7 +408,7 @@ sema_call_cell_guard_split: fn(receiver: Expr, receiver_value: TExpr, editable: 
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: String, type_args: [Type], method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: String, type_args: [Type], method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if type_args.len() != 1 -> return SemaMethodSpecialCheck{handled: false, value: None}
     inner: type_args[0]
     if name == "Cell" {
@@ -458,9 +458,9 @@ sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: Strin
 // `pool.add(value)` consumes a `T` and returns its `ID<T>`, `pool.remove(id)`
 // returns the removed `T?`, `pool.ids()` lists every live `ID<T>`. `add` and
 // `remove` change the pool, so like `pool[id] = v` they need a writable pool
-// (a `:=` binding or a `&` parameter); the call site needs no `&` mark. Each
+// (a `:=` binding or a `^` parameter); the call site needs no `^` mark. Each
 // lowers to the plain `JetPool<T>` method.
-sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     id_type: Type.Apply{name: "ID", args: [Type]{element}}
     wanted: if method == "ids" -> 0 else -> 1
@@ -494,7 +494,7 @@ sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, 
     sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, scopes, context, diagnostics)
 }
 
-sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty == {
         .Shared(inner) -> {
             if method == "capture" {

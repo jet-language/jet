@@ -124,7 +124,7 @@ canvas_debug_statement: fn(nodes: [CanvasDebugRecord], starts: [String:Int], lin
 // statements that start on `line` (the rest of the line a step left), each
 // as its wire ids joined by newlines, until a second is found. `taken` is the
 // way so far.
-canvas_debug_walk: fn(edges: [CanvasDebugEdge], starts: [String:Int], at: String, to: String, line: Span, taken: &[String], found: &[String]) Never! {
+canvas_debug_walk: fn(edges: [CanvasDebugEdge], starts: [String:Int], at: String, to: String, line: Span, taken: ^[String], found: ^[String]) Never! {
     if found.len() > 1 || taken.len() >= CANVAS_DEBUG_MAX_STEP_WIRES {
         return
     }
@@ -165,7 +165,7 @@ canvas_debug_graph_root: fn(state: Shared<CanvasHostState>, revision: String) ->
 // Every object under `value` that carries a string `id_key` and a
 // `source_span` object, in document order, with its `wire_kind`,
 // `from_pin` and `to_pin` when it has them.
-canvas_debug_records: fn(value: Dyn, id_key: String, records: &[CanvasDebugRecord]) Never! {
+canvas_debug_records: fn(value: Dyn, id_key: String, records: ^[CanvasDebugRecord]) Never! {
     if value == {
         .Object(members) -> {
             id := String?{None}

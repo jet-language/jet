@@ -183,13 +183,13 @@ sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, environment: Sem
     Val(ComponentTypeDescriptor.Record{name: "", fields: fields})
 }
 
-sema_plugin_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_plugin_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
     loop argument in args {
         _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     }
 }
 
-sema_plugin_method_diagnostic: fn(method: String, interface: SemaPluginInterface?, span: Span, diagnostics: &[Diagnostic]) {
+sema_plugin_method_diagnostic: fn(method: String, interface: SemaPluginInterface?, span: Span, diagnostics: ^[Diagnostic]) {
     if interface == {
         .Val(value) -> {
             diagnostics.push(sema_error("E1257", span, "plugin interface `{value.artifact}` has no export `{method}`", "a loaded plugin exposes only its Component's function exports, with `-` in a name written `_`", "call one of the Component's exports, or rebuild the plugin with this export"))
@@ -200,11 +200,11 @@ sema_plugin_method_diagnostic: fn(method: String, interface: SemaPluginInterface
     }
 }
 
-sema_plugin_retired_method_diagnostic: fn(method: String, span: Span, diagnostics: &[Diagnostic]) {
+sema_plugin_retired_method_diagnostic: fn(method: String, span: Span, diagnostics: ^[Diagnostic]) {
     diagnostics.push(sema_error("E1257", span, "`Plugin.{method}` is not a plugin method", "plugin handles expose their Component's named function exports", "write the plugin's exported method directly, for example `plugin.index(rows)`"))
 }
 
-sema_plugin_record_exec: fn(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_plugin_record_exec: fn(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool Never! {
     result := Type.Result{ok: success, err: Type.Named{name: "PluginError"}}
     sema_effect_record_intrinsic_fact(
         environment,
@@ -224,15 +224,15 @@ sema_plugin_record_exec: fn(method: String, success: Type, span: Span, environme
     )
 }
 
-sema_plugin_unsupported_component_diagnostic: fn(export_name: String, ty: Type, span: Span, diagnostics: &[Diagnostic]) {
+sema_plugin_unsupported_component_diagnostic: fn(export_name: String, ty: Type, span: Span, diagnostics: ^[Diagnostic]) {
     diagnostics.push(sema_error("E1260", span, "plugin export `{export_name}` uses unsupported Component value `{type_name(ty)}`", "plugin parameters and results must use recursively closed Component Model shapes", "use Int, Float, Bool, String, or a #Codable record/list/Option/Result shape"))
 }
 
-sema_plugin_unsupported_export_diagnostic: fn(export: SemaPluginInterfaceExport, span: Span, diagnostics: &[Diagnostic]) {
+sema_plugin_unsupported_export_diagnostic: fn(export: SemaPluginInterfaceExport, span: Span, diagnostics: ^[Diagnostic]) {
     diagnostics.push(sema_error("E1260", span, "plugin export `{export.name}` uses unsupported Component value `{export.unsupported}`", "plugin parameters and results must use Component Model shapes with a Jet spelling", "export it with Int, Float, Bool, String, or a list/option/result of them"))
 }
 
-sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, facts: SemaPluginInterfaceFacts, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, facts: SemaPluginInterfaceFacts, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     identity: sema_plugin_handle_identity(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}

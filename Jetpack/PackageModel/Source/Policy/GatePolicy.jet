@@ -112,7 +112,7 @@ pkg_load_organization_gate_policy: fn() -[FS, Env]> PackageOrganizationPolicy Pa
 // then the package's own policy rows. `root` is the package's directory, or
 // an entry file whose Package it declares inline or inherits
 // (pkg_package_facts_for_entry).
-pkg_project_gate_declarations: fn(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> [PolicyDeclaration] PackageGateError! {
+pkg_project_gate_declarations: fn(cache: ^WorkspaceDeclarationCache, root: String) -[FS, Env]> [PolicyDeclaration] PackageGateError! {
     organization := pkg_load_organization_gate_policy()
     declarations := organization.declarations.move()
     loaded: if pkg_gate_package_facts(cache, root) == {
@@ -131,7 +131,7 @@ pkg_project_gate_declarations: fn(cache: &WorkspaceDeclarationCache, root: Strin
     Ok(declarations)
 }
 
-pkg_gate_package_facts: fn(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> PackageFacts? ManifestError! {
+pkg_gate_package_facts: fn(cache: ^WorkspaceDeclarationCache, root: String) -[FS, Env]> PackageFacts? ManifestError! {
     if root.ends_with(".jet") -> return pkg_package_facts_for_entry(cache, root)
     pkg_package_facts_for_root(cache, root)
 }
@@ -188,7 +188,7 @@ pkg_is_forced_override: fn(package: PackageOverride) -> Bool Never! {
 }
 
 // Refuse before process locking.
-pkg_check_workspace_overlay_gates: fn(cache: &WorkspaceDeclarationCache, root: String, policy: OverlayPolicy) -[FS, Env]> PackageGateError! {
+pkg_check_workspace_overlay_gates: fn(cache: ^WorkspaceDeclarationCache, root: String, policy: OverlayPolicy) -[FS, Env]> PackageGateError! {
     gated := false
     loop overlay in policy.overlays {
         loop package in overlay.packages {

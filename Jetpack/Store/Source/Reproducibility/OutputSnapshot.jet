@@ -108,7 +108,7 @@ OutputSnapshot: struct {
 store_repro_invalid: fn(detail: String) -> StoreError Never! { StoreError.InvalidData(detail) }
 
 // Verify both outputs, then compare their canonical trees and entry metadata.
-store_repro_compare_entries: fn(verification: &StoreVerification, left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
+store_repro_compare_entries: fn(verification: ^StoreVerification, left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
     store_repro_verify_existing_output(verification, left_roots, left)
     store_repro_verify_existing_output(verification, right_roots, right)
     left_snapshot: store_repro_snapshot_for_entry(left_roots, left)
@@ -157,7 +157,7 @@ store_repro_snapshot_output: fn(path: String, hangar_root: String?, allow_semant
     Ok(OutputSnapshot{digest: digest, nodes: nodes})
 }
 
-store_repro_observe_node: fn(path: String, relative: String, hardlink_first: &[String:String]) -[FS]> NodeObservation StoreError! {
+store_repro_observe_node: fn(path: String, relative: String, hardlink_first: ^[String:String]) -[FS]> NodeObservation StoreError! {
     info: files.stat(path)
     names: pkg_list_xattr_names(path) ?? return Err(StoreError.Other(err.message()))
     xattrs := [String]{}

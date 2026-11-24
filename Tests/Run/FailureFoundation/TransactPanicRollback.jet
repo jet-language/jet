@@ -13,7 +13,7 @@ Ledger: struct {
 
         snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-        restore: fn(&self, snap: &&LedgerSnap) {
+        restore: fn(^self, snap: ^^LedgerSnap) {
             print("balance {self.balance} restored to {snap.balance}")
             self.balance = snap.balance
         }
@@ -26,7 +26,7 @@ LedgerSnap: struct {
 
 audit: fn() { panic("the audit log is unavailable") }
 
-withdraw: fn(ledger: &Ledger) {
+withdraw: fn(ledger: ^Ledger) {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(fn() { print("hook: release the hold") })

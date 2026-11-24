@@ -223,7 +223,7 @@ pkg_cffi_automatic_operation: fn(name: String, source: String) -> BindingOperati
 
 // One `jet-ffi-obligation: name=…; basis=…; checker=…; assumptions=a|b`
 // marker recorded against the contract's header coverage.
-pkg_cffi_record_obligation_marker: fn(contract: &ForeignBoundaryContract, line: String) ForeignBridgeError! {
+pkg_cffi_record_obligation_marker: fn(contract: ^ForeignBoundaryContract, line: String) ForeignBridgeError! {
     obligation := String?{None}
     basis := FFIEvidenceBasis.Unknown
     checker := ""
@@ -393,7 +393,7 @@ pkg_cffi_binding_cache_boundary: fn(source: String) -> String? Never! {
 
 // Append the selected facade to a generated cache. A cache already carrying
 // that exact plan is accepted; any other recorded plan is a conflict.
-pkg_cffi_append_binding_plan_facade: fn(source: &String, facade: String) ForeignBridgeError! {
+pkg_cffi_append_binding_plan_facade: fn(source: ^String, facade: String) ForeignBridgeError! {
     selected: pkg_cffi_plan_marker(facade) ?? return Err(pkg_bridge_error("binding facade has no plan digest"))
     if pkg_cffi_plan_marker(source) == .Val(existing) {
         if existing != selected {
@@ -416,7 +416,7 @@ pkg_cffi_append_binding_plan_facade: fn(source: &String, facade: String) Foreign
 
 // Fold one cache's typed metadata into the program's; an older cache without
 // a sidecar keeps the explicit program link with no handle facts.
-pkg_cffi_collect_binding_metadata: fn(metadata: &CBindingMetadata, cache: String, lib: String, diagnostics: &[Diagnostic]) -[FS]> Never! {
+pkg_cffi_collect_binding_metadata: fn(metadata: ^CBindingMetadata, cache: String, lib: String, diagnostics: ^[Diagnostic]) -[FS]> Never! {
     if pkg_cffi_read_binding_metadata(cache, lib) == {
         .Ok(found) -> {
             if found == .Val(cache_metadata) {
@@ -453,7 +453,7 @@ pkg_cffi_check_cache_descriptor: fn(source: String, path: String, lib: String) -
 }
 
 // Queue one generated source for the loader after its descriptor check.
-pkg_cffi_queue_load: fn(preparation: &CBindingPreparation, source: String, path: String, lib: String) Never! {
+pkg_cffi_queue_load: fn(preparation: ^CBindingPreparation, source: String, path: String, lib: String) Never! {
     if pkg_cffi_check_cache_descriptor(source, path, lib) == .Val(diagnostic) {
         preparation.diagnostics.push(diagnostic)
         return
@@ -535,7 +535,7 @@ pkg_cffi_select_facade: fn(request: CBindingRequest, source: String, header_sour
 }
 
 // A cache the program already loaded: only its adaptation facade is queued.
-pkg_cffi_prepare_loaded_cache: fn(request: CBindingRequest, cache_path: String, preparation: &CBindingPreparation) -[FS, Env]> ForeignBridgeError! {
+pkg_cffi_prepare_loaded_cache: fn(request: CBindingRequest, cache_path: String, preparation: ^CBindingPreparation) -[FS, Env]> ForeignBridgeError! {
     source: files.read(cache_path) ?? ""
     header_source: pkg_cffi_read_header(request)
     expected_boundary: pkg_cffi_expected_boundary(request, source, header_source)
@@ -548,7 +548,7 @@ pkg_cffi_prepare_loaded_cache: fn(request: CBindingRequest, cache_path: String, 
 
 // Generate a missing or stale cache from its header, or load a present,
 // fresh one, with its sidecars and facade.
-pkg_cffi_prepare_cache: fn(request: CBindingRequest, cache_path: String, preparation: &CBindingPreparation) -[FS, Env, Exec, Time.Wait]> Never! {
+pkg_cffi_prepare_cache: fn(request: CBindingRequest, cache_path: String, preparation: ^CBindingPreparation) -[FS, Env, Exec, Time.Wait]> Never! {
     lib: request.lib
     header_source := String?{None}
     if request.header_path == .Val(header_path) {
@@ -586,7 +586,7 @@ pkg_cffi_prepare_cache: fn(request: CBindingRequest, cache_path: String, prepara
     pkg_cffi_load_fresh_cache(request, cache_path, header_source, preparation)
 }
 
-pkg_cffi_load_headerless_cache: fn(request: CBindingRequest, cache_path: String, preparation: &CBindingPreparation) -[FS, Env]> Never! {
+pkg_cffi_load_headerless_cache: fn(request: CBindingRequest, cache_path: String, preparation: ^CBindingPreparation) -[FS, Env]> Never! {
     source := files.read(cache_path) ?? return
     expected_boundary := String?{None}
     if source.contains("// jet-ffi-plan=") {
@@ -613,7 +613,7 @@ pkg_cffi_load_headerless_cache: fn(request: CBindingRequest, cache_path: String,
 // Run the C binder over the header and publish the cache, its hash, typed
 // metadata, and provenance. A header that no longer binds never revives the
 // previous generation.
-pkg_cffi_generate_cache: fn(request: CBindingRequest, cache_path: String, header_path: String, header: String, preparation: &CBindingPreparation) -[FS, Env, Exec, Time.Wait]> Never! {
+pkg_cffi_generate_cache: fn(request: CBindingRequest, cache_path: String, header_path: String, header: String, preparation: ^CBindingPreparation) -[FS, Env, Exec, Time.Wait]> Never! {
     lib: request.lib
     result: if pkg_cbind_generate_with_overlay(header, lib, request.overlay) == {
         .Ok(generated) -> generated
@@ -663,7 +663,7 @@ pkg_cffi_generate_cache: fn(request: CBindingRequest, cache_path: String, header
 
 // The recorded facade appended to a newly generated cache, or the automatic
 // facade to load beside it.
-pkg_cffi_generated_facade: fn(request: CBindingRequest, header_path: String, header: String, result: CBindResult, generated_source: &String) -[FS, Env]> String? ForeignBridgeError! {
+pkg_cffi_generated_facade: fn(request: CBindingRequest, header_path: String, header: String, result: CBindResult, generated_source: ^String) -[FS, Env]> String? ForeignBridgeError! {
     contract: pkg_cffi_annotated_contract(result.boundary, header, header_path)
     expected_boundary: contract.digest()
     recorded: pkg_cffi_binding_plan_facade(request.project_root, request.lib, Val(header), Val(expected_boundary), request.frozen)
@@ -676,7 +676,7 @@ pkg_cffi_generated_facade: fn(request: CBindingRequest, header_path: String, hea
 
 // A present, fresh cache: publish provenance once (it is an immutable record
 // of the bind that produced the cache), then load it with its facade.
-pkg_cffi_load_fresh_cache: fn(request: CBindingRequest, cache_path: String, header_source: String?, preparation: &CBindingPreparation) -[FS, Env, Exec, Time.Wait]> Never! {
+pkg_cffi_load_fresh_cache: fn(request: CBindingRequest, cache_path: String, header_source: String?, preparation: ^CBindingPreparation) -[FS, Env, Exec, Time.Wait]> Never! {
     lib: request.lib
     source := files.read(cache_path) ?? return
     if request.header_path == .Val(header_path) {
@@ -703,7 +703,7 @@ pkg_cffi_load_fresh_cache: fn(request: CBindingRequest, cache_path: String, head
     }
 }
 
-pkg_cffi_fresh_cache_facade: fn(request: CBindingRequest, source: &String, header_source: String?) -[FS, Env]> String? ForeignBridgeError! {
+pkg_cffi_fresh_cache_facade: fn(request: CBindingRequest, source: ^String, header_source: String?) -[FS, Env]> String? ForeignBridgeError! {
     expected_boundary: pkg_cffi_expected_boundary(request, source, header_source)
     recorded: pkg_cffi_binding_plan_facade(request.project_root, request.lib, header_source, expected_boundary, request.frozen)
     if recorded == .Val(facade) {

@@ -24,7 +24,7 @@ use jet_foundation.[ConstDef, Expr, ImportDecl, ImportKind, ImportedItem, Item, 
 // `name: (core.math.sqrt)`: a re-export target written in parentheses, with
 // the edit that drops them. The line still re-exports (parser_reexport_import),
 // so this is its one error.
-parser_report_parenthesized_reexport: fn(state: &JetParserState, definition: ConstDef) -[]> {
+parser_report_parenthesized_reexport: fn(state: ^JetParserState, definition: ConstDef) -[]> {
     if definition.mutable || definition.is_comptime || definition.markers.len() > 0 || !parser_reexport_value_word(definition.name) {
         return
     }
@@ -50,7 +50,7 @@ parser_has_reexport_candidate: fn(items: [Item]) -> Bool Never! {
 
 // `items` with each re-exporting binding moved out, as a public import, to
 // the end of `imports`; the items as they are when none re-exports.
-parser_reexport_declarations: fn(items: &&[Item], imports: &[ImportDecl]) -> [Item] Never! {
+parser_reexport_declarations: fn(items: ^^[Item], imports: ^[ImportDecl]) -> [Item] Never! {
     found := false
     loop item in items {
         if item == .Const(definition) {

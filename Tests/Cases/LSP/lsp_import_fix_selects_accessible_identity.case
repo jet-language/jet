@@ -1,0 +1,36 @@
+# A name the check cannot resolve offers one import repair per declaration
+# the document's module may reach, titled with the identity the name then
+# resolves to: `area` through the document's own `geo` import, or as a new
+# `shapes.[area]` row; the re-export `geo.squared` as the `shapes.area` it
+# names. A private declaration of another package (`geo.volume`) is no
+# repair. Visibility comes from the check's name facts.
+fixture: LSPImportRepairs.fixture
+env: NO_COLOR=1
+step: jet check --json run.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0102"] #= 3
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
+recv lsp until $.id = 7
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use geo\\n\\nrun: fn() {\\n    print(area(2))\\n    print(squared(2))\\n    print(volume(2))\\n    print(both())\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"range\":{\"start\":{\"line\":3,\"character\":0},\"end\":{\"line\":4,\"character\":0}},\"context\":{\"diagnostics\":[],\"only\":[\"quickfix\"]}}}"
+recv lsp until $.id = 8
+json: stdout doc $.result #= 2
+json: stdout doc $.result[0].title = "Write `geo.area` (geo.area)"
+json: stdout doc $.result[0].edit.documentChanges[0].edits[0].range = {"start":{"line":3,"character":10},"end":{"line":3,"character":14}}
+json: stdout doc $.result[0].edit.documentChanges[0].edits[0].newText = "geo.area"
+json: stdout doc $.result[1].title = "Import `area` from `shapes` (shapes.area)"
+json: stdout doc $.result[1].edit.documentChanges[0].edits[0].range = {"start":{"line":0,"character":0},"end":{"line":0,"character":7}}
+json: stdout doc $.result[1].edit.documentChanges[0].edits[0].newText = "use {\n    geo\n    shapes.[area]\n}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"range\":{\"start\":{\"line\":4,\"character\":0},\"end\":{\"line\":5,\"character\":0}},\"context\":{\"diagnostics\":[],\"only\":[\"quickfix\"]}}}"
+recv lsp until $.id = 9
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].title = "Write `geo.squared` (shapes.area)"
+json: stdout doc $.result[0].isPreferred = true
+json: stdout doc $.result[0].edit.documentChanges[0].edits[0].newText = "geo.squared"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"range\":{\"start\":{\"line\":5,\"character\":0},\"end\":{\"line\":6,\"character\":0}},\"context\":{\"diagnostics\":[],\"only\":[\"quickfix\"]}}}"
+recv lsp until $.id = 10
+json: stdout doc $.result #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 11
+close lsp

@@ -1,0 +1,94 @@
+// A `#` form is one semantic token over its `#` and word: a marker is a
+// decorator; a compiler word, a fact root and a paste are keywords marked
+// macro.
+use jet_lsp.[LSPServer, LSP_SEMANTIC_TOKEN_MODIFIERS]
+
+// Each token as `line:character+length=type/modifiers`.
+lsp_test_marker_tokens: fn(server: ^LSPServer, uri: String) -> [String] {
+    data: lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(uri)}}}"))
+    tokens := [String]{}
+    line := 0
+    character := 0
+    at := 0
+    loop at + 4 < data.len() {
+        if data[at] > 0 -> character = 0
+        line += data[at]
+        character += data[at + 1]
+        tokens.push("{line}:{character}+{data[at + 2]}={data[at + 3]}/{data[at + 4]}")
+        at += 5
+    }
+    tokens
+}
+
+#Test("markers are decorators, and compiler words, fact roots and pastes are macro keywords") {
+    assert_eq(LSP_SEMANTIC_TOKEN_MODIFIERS[3], "macro")
+    server := lsp_test_server()
+    uri: "file:///w/marked.jet"
+    lsp_test_open(
+        server,
+        uri,
+        `#Test("marked") {
+    assert_eq(double(2), 4)
+}
+
+#Pre(x > 0, "positive") double: fn(x: Int) -> Int { x * 2 }
+
+#Inline
+triple: fn(x: Int) -> Int { x * 3 }
+
+TABLE: #run double(2)
+
+run: fn() {
+    #if #build.target.os == {
+        .Web -> print(#here)
+        else -> print(#package.name)
+    }
+    #loop n in [Int]{1, 2} {
+        print(n)
+    }
+}
+`,
+    )
+    tokens: lsp_test_marker_tokens(server, uri)
+    expected: [String]{"0:0+5=12/0", "4:0+4=12/0", "6:0+7=12/0", "9:7+4=0/8", "12:4+3=0/8", "12:8+6=0/8", "13:22+5=0/8", "14:22+8=0/8", "16:4+5=0/8"}
+    loop token in expected -> assert(tokens.contains(token), "{token} in {tokens}")
+    // The word after a `#` is no token of its own.
+    alone: [String]{"0:1+4=1/0", "12:5+2=0/0", "12:9+5=0/0", "16:5+4=0/0"}
+    loop token in alone -> assert(!tokens.contains(token), "{token} not in {tokens}")
+    paste: "file:///w/template.jet"
+    lsp_test_open(
+        server,
+        paste,
+        `make: fn() {
+    print(#{name})
+}
+`,
+    )
+    assert(lsp_test_marker_tokens(server, paste).contains("1:10+7=0/8"), "the paste is one macro keyword")
+    // A package's marker, written through the package, is one decorator.
+    lsp_test_open(
+        server,
+        "file:///w/tools.jet",
+        `Query: struct {
+    impl Marker {
+        sites: [.Block],
+    }
+}
+`,
+    )
+    user: "file:///w/query.jet"
+    lsp_test_open(
+        server,
+        user,
+        `use tools
+
+run: fn() {
+    #tools.Query {
+        print(1)
+    }
+}
+`,
+    )
+    queried: lsp_test_marker_tokens(server, user)
+    assert(queried.contains("3:4+12=12/0"), "`#tools.Query` is one decorator in {queried}")
+}

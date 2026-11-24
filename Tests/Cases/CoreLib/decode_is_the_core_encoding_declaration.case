@@ -1,0 +1,18 @@
+# core.encoding declares `Decode`, and a derived struct, F32 and Dyn each
+# decode through an impl of that declaration on every tier: called directly
+# and under a generic `Decode` bound, with an out-of-range Float and text
+# refused for F32.
+fixture: DecodeIsTheCoreEncodingDeclaration.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = decode_is_the_core_encoding_declaration.out
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0

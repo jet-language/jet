@@ -10,7 +10,7 @@ A program is a file with `run: fn() { … }`.
 
 ## 3. Memory and ownership verbs
 
-`&T` borrows to write, `&&T` hands over.
+`^T` borrows to write, `^^T` hands over.
 
 ## 4. Effects and outcomes
 

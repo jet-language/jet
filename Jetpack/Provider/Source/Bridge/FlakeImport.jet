@@ -92,7 +92,7 @@ provider_last_segment: fn(item: String) -> String Never! {
     if segment == "" -> item else -> segment
 }
 
-provider_add_catalog_json: fn(path: String, names: &[String]) -[FS]> Never! {
+provider_add_catalog_json: fn(path: String, names: ^[String]) -[FS]> Never! {
     text: files.read(path) ?? return
     if json.parse(text) == {
         .Ok(value) -> { provider_add_catalog_value(value, names) }
@@ -102,7 +102,7 @@ provider_add_catalog_json: fn(path: String, names: &[String]) -[FS]> Never! {
 
 // Catalog names from strings, arrays, and objects' `name`, `packages`,
 // `records`, `catalog`, and `recipes` fields.
-provider_add_catalog_value: fn(value: Dyn, names: &[String]) Never! {
+provider_add_catalog_value: fn(value: Dyn, names: ^[String]) Never! {
     if value == {
         .Text(name) -> {
             if provider_is_catalog_name(name) -> names.push(name.copy())
@@ -137,7 +137,7 @@ provider_add_catalog_value: fn(value: Dyn, names: &[String]) Never! {
 }
 
 // Fixture files named `<source>-<name>.<ext>` for the Nix source aliases.
-provider_add_fixture_catalog_names: fn(dir: String, names: &[String]) -[FS]> Never! {
+provider_add_fixture_catalog_names: fn(dir: String, names: ^[String]) -[FS]> Never! {
     entries: files.list_dir(dir) ?? return
     loop entry in entries {
         info: files.stat(entry.path) ?? next
@@ -309,14 +309,14 @@ provider_import_rationale: fn(file: String, provider: String, exact: String, rea
 }
 
 // The imported source file's fingerprint record.
-provider_add_import_source_record: fn(lock: &SemanticLockFile, file: String, fingerprint: String) Never! {
+provider_add_import_source_record: fn(lock: ^SemanticLockFile, file: String, fingerprint: String) Never! {
     key: "nix-import-source:{file}"
     provider_retain_records_without_key(lock, key)
     identity: LockIdentity{kind: LockRecordKind.SourceRef, key: key, exact: fingerprint, hash: fingerprint, platform: ""}
     lock.records.push(SemanticRecord.new(identity, provider_import_rationale(file, "nix-import", fingerprint, "bounded Nix devShell source fingerprint")))
 }
 
-provider_retain_records_without_key: fn(lock: &SemanticLockFile, key: String) Never! {
+provider_retain_records_without_key: fn(lock: ^SemanticLockFile, key: String) Never! {
     kept := [SemanticRecord]{}
     loop record in lock.records {
         if record.identity.key != key -> kept.push(record.copy())
@@ -326,7 +326,7 @@ provider_retain_records_without_key: fn(lock: &SemanticLockFile, key: String) Ne
 
 // Drop every earlier flake-graph, import, and imported-package record before
 // a re-import.
-provider_clear_import_records: fn(lock: &SemanticLockFile) Never! {
+provider_clear_import_records: fn(lock: ^SemanticLockFile) Never! {
     lock.inputs = [LockInput]{}
     kept := [SemanticRecord]{}
     loop record in lock.records {
@@ -345,7 +345,7 @@ provider_clear_import_records: fn(lock: &SemanticLockFile) Never! {
     lock.records = kept
 }
 
-provider_add_import_gap_record: fn(lock: &SemanticLockFile, file: String, gap: ImportGap) Never! {
+provider_add_import_gap_record: fn(lock: ^SemanticLockFile, file: String, gap: ImportGap) Never! {
     item: provider_one_line(gap.item)
     candidate: provider_one_line(gap.candidate)
     key: "nix-import-unmapped:{item}"
@@ -355,7 +355,7 @@ provider_add_import_gap_record: fn(lock: &SemanticLockFile, file: String, gap: I
     lock.records.push(SemanticRecord.new(identity, provider_import_rationale(file, "nix-import", exact, "no catalog package mapping; nearest candidate is `{candidate}`")))
 }
 
-provider_add_import_evaluator_record: fn(lock: &SemanticLockFile, file: String, packages: [String], gaps: [ImportGap], system: String) Never! {
+provider_add_import_evaluator_record: fn(lock: ^SemanticLockFile, file: String, packages: [String], gaps: [ImportGap], system: String) Never! {
     key: "nix-import-evaluator:{file}"
     items := [String]{}
     loop gap in gaps -> items.push(gap.item)

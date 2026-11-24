@@ -1,0 +1,36 @@
+# `Button` implements `Renderable` in its body (line 6) and `Panel` in an
+# `impl Panel.Renderable` head (line 17). Implementation goes from the trait
+# to both heads, from its `render` to both impl methods (lines 7 and 18), and
+# from `Panel` to its head.
+session lsp content-length: jet self lsp
+send lsp: Messages/LSPImplementationTraitImpls/0.json
+recv lsp until $.id = 1
+json: stdout doc $.result.capabilities.implementationProvider = true
+send lsp: Messages/LSPImplementationTraitImpls/1.json
+send lsp: Messages/LSPImplementationTraitImpls/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # the open document's diagnostics arrive before any request is answered
+send lsp: Messages/LSPImplementationTraitImpls/3.json
+recv lsp until $.id = 2
+json: stdout doc $.result #= 2
+json: stdout doc $.result[0].uri = "file:///tmp/lsp_implementation_test.jet"
+json: stdout doc $.result[0].range.start.line = 6
+json: stdout doc $.result[0].range.start.character = 9
+json: stdout doc $.result[1].range.start.line = 17
+json: stdout doc $.result[1].range.start.character = 11
+send lsp: Messages/LSPImplementationTraitImpls/4.json
+recv lsp until $.id = 3
+json: stdout doc $.result #= 2
+json: stdout doc $.result[0].range.start.line = 7
+json: stdout doc $.result[0].range.start.character = 8
+json: stdout doc $.result[1].range.start.line = 18
+json: stdout doc $.result[1].range.start.character = 4
+send lsp: Messages/LSPImplementationTraitImpls/5.json
+recv lsp until $.id = 4
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].range.start.line = 17
+json: stdout doc $.result[0].range.start.character = 11
+send lsp: Messages/LSPImplementationTraitImpls/6.json
+recv lsp until $.id = 99
+close lsp
+exit: any # the session ends at shutdown; the process status is not under test

@@ -605,7 +605,7 @@ publication_tuf_verify_payload: fn(public_key: String, payload: String, signatur
     }
 }
 
-publication_tuf_validate_entries: fn(name: String, entries: &[PublicationIndexEntry]) IOError! {
+publication_tuf_validate_entries: fn(name: String, entries: ^[PublicationIndexEntry]) IOError! {
     if name == "" {
         return Err(publication_tuf_invalid("registry sparse metadata has an empty package name"))
     }
@@ -714,7 +714,7 @@ publication_tuf_atomic_write: fn(root: String, path: String, bytes: [U8]) -[FS, 
 // Rust line: no partial append on unsafe keys/values. The boolean core keeps
 // unsigned construction's intentional ignored refusal without another encoder.
 // Callers accumulate parts and join once, never re-copying the whole payload.
-publication_tuf_append_line: fn(output: &[String], key: String, value: String) -> Bool Never! {
+publication_tuf_append_line: fn(output: ^[String], key: String, value: String) -> Bool Never! {
     if key == "" -> return false
     loop byte in key.bytes() {
         code: Int{byte}
@@ -728,14 +728,14 @@ publication_tuf_append_line: fn(output: &[String], key: String, value: String) -
     true
 }
 
-publication_tuf_line: fn(output: &[String], key: String, value: String) IOError! {
+publication_tuf_line: fn(output: ^[String], key: String, value: String) IOError! {
     if !publication_tuf_append_line(output, key, value) {
         return Err(publication_tuf_invalid("registry metadata contains an unsafe field"))
     }
 }
 
 // Rust `sort(); dedup();` over the transaction's touched paths.
-publication_tuf_sort_unique: fn(paths: &[String]) Never! {
+publication_tuf_sort_unique: fn(paths: ^[String]) Never! {
     paths.sort()
     unique := [String]{}
     loop path in paths {

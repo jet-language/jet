@@ -15,7 +15,7 @@ use {
 }
 
 // Export a package closure into the canonical signed archive.
-store_export_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, key: String?) -> {bytes: [U8], report: HangarArchiveReport} StoreError! {
+store_export_archive: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, key: String?) -> {bytes: [U8], report: HangarArchiveReport} StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     archive: store_archive_build_unlocked(verification, roots, target, include_closure, false)
     signer: store_archive_signing_key(roots, key, true)
@@ -28,7 +28,7 @@ store_export_archive: fn(verification: &StoreVerification, roots: HangarRoots, t
 // request. The broker verifies the contents and applies its own store
 // signature before promotion. The explicit unsigned trailer keeps the bytes
 // structurally complete for the archive decoder.
-store_export_unsigned_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool) -> [U8] StoreError! {
+store_export_unsigned_archive: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, include_closure: Bool) -> [U8] StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     archive: store_archive_build_unlocked(verification, roots, target, include_closure, false)
     archive.encode()
@@ -38,7 +38,7 @@ store_export_unsigned_archive: fn(verification: &StoreVerification, roots: Hanga
 // staging directory before the closure WAL and package projections are
 // touched. Existing identical objects are reused; conflicting objects fail
 // closed.
-store_import_archive: fn(verification: &StoreVerification, roots: HangarRoots, bytes: [U8], key: String?, allow_unsigned: Bool) -> HangarArchiveReport StoreError! {
+store_import_archive: fn(verification: ^StoreVerification, roots: HangarRoots, bytes: [U8], key: String?, allow_unsigned: Bool) -> HangarArchiveReport StoreError! {
     if bytes.len() > STORE_MAX_ARCHIVE_BYTES {
         return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
     }
@@ -52,7 +52,7 @@ store_import_archive: fn(verification: &StoreVerification, roots: HangarRoots, b
 // verified the archive with its private signing key. The client repeats the
 // bounded decode, content hash, and metadata checks before importing, but
 // never reads the administrator's signing secret.
-store_import_broker_archive: fn(verification: &StoreVerification, roots: HangarRoots, bytes: [U8]) -> HangarArchiveReport StoreError! {
+store_import_broker_archive: fn(verification: ^StoreVerification, roots: HangarRoots, bytes: [U8]) -> HangarArchiveReport StoreError! {
     if bytes.len() > STORE_MAX_ARCHIVE_BYTES {
         return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
     }
@@ -66,7 +66,7 @@ store_import_broker_archive: fn(verification: &StoreVerification, roots: HangarR
 
 // Report the archive, renaming a package root to its local entry identity,
 // then import it under the Hangar lock.
-store_archive_import_verified: fn(verification: &StoreVerification, roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool) -> HangarArchiveReport StoreError! {
+store_archive_import_verified: fn(verification: ^StoreVerification, roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool) -> HangarArchiveReport StoreError! {
     report := archive.report()
     loop object in archive.objects {
         if object.id != archive.root_id || object.meta == "" -> next
@@ -90,7 +90,7 @@ store_recover_archive_staging_unlocked: fn(roots: HangarRoots) -> Int StoreError
 // Restore a repair quarantine left by a process crash. Only names written by
 // `store_repair_archive` are considered, and the backup is re-hashed before
 // it can return to the canonical object pool.
-store_recover_repair_quarantine_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
+store_recover_repair_quarantine_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -> Int StoreError! {
     hangar: roots.hangar_dir()
     quarantine: files.join(hangar, "quarantine")
     observed: store_archive_lstat(quarantine)
@@ -112,7 +112,7 @@ store_recover_repair_quarantine_unlocked: fn(verification: &StoreVerification, r
     Ok(recovered)
 }
 
-store_archive_recover_quarantine_entries: fn(verification: &StoreVerification, roots: HangarRoots, quarantine: String, objects: String, permissions: &MovePathPermissions) -> Int StoreError! {
+store_archive_recover_quarantine_entries: fn(verification: ^StoreVerification, roots: HangarRoots, quarantine: String, objects: String, permissions: ^MovePathPermissions) -> Int StoreError! {
     hangar: roots.hangar_dir()
     permissions.make_writable(quarantine, hangar)
     permissions.make_writable(objects, hangar)
@@ -217,7 +217,7 @@ store_write_archive_file: fn(path: String, bytes: [U8]) StoreError! {
 }
 
 // Verify an archive or one live Hangar entry without changing state.
-store_verify_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, key: String?) -> HangarArchiveReport StoreError! {
+store_verify_archive: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, key: String?) -> HangarArchiveReport StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     if files.is_file(target) {
         archive: HangarArchive.decode(store_archive_read_bounded(target))
@@ -243,7 +243,7 @@ store_verify_archive: fn(verification: &StoreVerification, roots: HangarRoots, t
 // Sign an archive in place, or create a signed single-object archive for a
 // live entry. The latter is stored as a hidden sidecar under the entry so
 // signing never mutates immutable package metadata.
-store_sign_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, destination: String?, key: String?) -> HangarArchiveReport StoreError! {
+store_sign_archive: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, destination: String?, key: String?) -> HangarArchiveReport StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     if files.is_file(target) {
         archive: HangarArchive.decode(store_archive_read_bounded(target))
@@ -268,7 +268,7 @@ store_sign_archive: fn(verification: &StoreVerification, roots: HangarRoots, tar
 // requiring a second, unrelated local trust key. Remote archive transport is
 // deliberately not inferred from a URL: SSH/HTTP endpoints fail before any
 // bytes are copied.
-store_copy_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, destination: String, key: String?) -> HangarArchiveReport StoreError! {
+store_copy_archive: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, destination: String, key: String?) -> HangarArchiveReport StoreError! {
     if destination.contains("://") {
         return Err(StoreError.InvalidData("Hangar copy has no configured remote archive transport; use a local Hangar root or export/import the signed archive"))
     }
@@ -281,12 +281,12 @@ store_copy_archive: fn(verification: &StoreVerification, roots: HangarRoots, tar
 // Repair a corrupt live object from a signed archive. No source archive is
 // guessed: a missing repair input is a safe, actionable error. The damaged
 // object is quarantined before import and restored if any import step fails.
-store_repair_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, source_archive: String?, key: String?) -> HangarArchiveReport StoreError! {
+store_repair_archive: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, source_archive: String?, key: String?) -> HangarArchiveReport StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     store_archive_repair_unlocked(verification, roots, target, source_archive, key)
 }
 
-store_archive_repair_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, target: String, source_archive: String?, key: String?) -> HangarArchiveReport StoreError! {
+store_archive_repair_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, source_archive: String?, key: String?) -> HangarArchiveReport StoreError! {
     hangar: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     store_ensure_real_directory(files.join(hangar, "objects"), "Hangar object pool")
@@ -337,7 +337,7 @@ store_archive_repair_unlocked: fn(verification: &StoreVerification, roots: Hanga
 
 // Quarantine the damaged object, import the signed archive, and either drop
 // the backup or roll the object back.
-store_archive_repair_swap: fn(verification: &StoreVerification, roots: HangarRoots, archive: HangarArchive, object_path: String, backup: String, quarantine: String, had_object: Bool, permissions: &MovePathPermissions) -> HangarArchiveReport StoreError! {
+store_archive_repair_swap: fn(verification: ^StoreVerification, roots: HangarRoots, archive: HangarArchive, object_path: String, backup: String, quarantine: String, had_object: Bool, permissions: ^MovePathPermissions) -> HangarArchiveReport StoreError! {
     hangar: roots.hangar_dir()
     object_parent: store_archive_parent_or(object_path, hangar)
     writable_source: if had_object -> object_path else -> object_parent
@@ -369,7 +369,7 @@ store_archive_repair_swap: fn(verification: &StoreVerification, roots: HangarRoo
 // Undo a failed repair import: drop the partial import and move the
 // quarantined object back. Every rollback failure is appended to the import
 // error, which keeps its kind.
-store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup: String, object_parent: String, had_object: Bool, permissions: &MovePathPermissions) -> StoreError Never! {
+store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup: String, object_parent: String, had_object: Bool, permissions: ^MovePathPermissions) -> StoreError Never! {
     rollback_errors := [String]{}
     if files.stat(object_path) == {
         .Ok(_) -> {
@@ -424,7 +424,7 @@ store_archive_repair_output_path: fn(roots: HangarRoots, entry: StoreEntry) -> S
 
 // Assemble the archive for `target`: its output (or complete closure) as
 // content-addressed trees, plus the package records that own those outputs.
-store_archive_build_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, allow_nix_absolute_symlinks: Bool) -> HangarArchive StoreError! {
+store_archive_build_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, allow_nix_absolute_symlinks: Bool) -> HangarArchive StoreError! {
     hangar: roots.hangar_dir()
     store_require_real_directory(hangar, "Hangar root")
     entry: store_archive_select_entry_unlocked(verification, roots, target)
@@ -499,7 +499,7 @@ HangarArchiveMove: struct {
 // Stage, verify, and publish every archived output, then register the
 // package records. Staging is removed on every path; a failure rolls back
 // every published object.
-store_archive_import_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool) -> Int StoreError! {
+store_archive_import_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool) -> Int StoreError! {
     hangar: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     archive_stage: files.join(hangar, STORE_ARCHIVE_STAGE)
@@ -529,7 +529,7 @@ store_archive_import_unlocked: fn(verification: &StoreVerification, roots: Hanga
     Ok(count)
 }
 
-store_archive_import_staged: fn(verification: &StoreVerification, roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool, stage: String, stage_objects: String, objects_dir: String, moved: &[HangarArchiveMove]) -> Int StoreError! {
+store_archive_import_staged: fn(verification: ^StoreVerification, roots: HangarRoots, archive: HangarArchive, allow_nix_absolute_symlinks: Bool, stage: String, stage_objects: String, objects_dir: String, moved: ^[HangarArchiveMove]) -> Int StoreError! {
     hangar: roots.hangar_dir()
     package_records := [StoreEntry]{}
     seen_digests := [String]{}
@@ -670,7 +670,7 @@ store_archive_map_member_path: fn(source_out: String, member: String, destinatio
     Ok("{destination}/{joined}")
 }
 
-store_archive_verify_live_entry_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) StoreError! {
+store_archive_verify_live_entry_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) StoreError! {
     store_verify_hangar_object_unlocked(verification, roots, entry) ?? return Err(StoreError.Other(err.what()))
 }
 
@@ -743,7 +743,7 @@ store_archive_verify_staged: fn(roots: HangarRoots, archive: HangarArchive, stag
 // Archive operations are receipt consumers too. Upgrade legacy package
 // projections before selecting an entry so export, sign, and repair never
 // publish or act on a pre-receipt view.
-store_archive_select_entry_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, target: String) -> StoreEntry StoreError! {
+store_archive_select_entry_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, target: String) -> StoreEntry StoreError! {
     store_migrate_closure_graph_unlocked(verification, roots)
     store_archive_select_entry_from(store_list_unlocked(roots), target)
 }
@@ -783,7 +783,7 @@ store_archive_collect_nodes: fn(root: String, allow_nix_absolute_symlinks: Bool)
     Ok(nodes)
 }
 
-store_archive_collect_nodes_at: fn(path: String, relative: String, canonical_root: String, hardlinks: &[String:String], out: &[HangarArchiveNode], allow_nix_absolute_symlinks: Bool) StoreError! {
+store_archive_collect_nodes_at: fn(path: String, relative: String, canonical_root: String, hardlinks: ^[String:String], out: ^[HangarArchiveNode], allow_nix_absolute_symlinks: Bool) StoreError! {
     if out.len() >= STORE_ARCHIVE_MAX_NODES_PER_OBJECT {
         return Err(StoreError.InvalidData("output tree contains too many nodes"))
     }
@@ -972,7 +972,7 @@ store_archive_validate_import_destinations: fn(roots: HangarRoots, entries: [Sto
 }
 
 // Move every published object back to staging, newest first.
-store_archive_rollback_import_moves: fn(verification: &StoreVerification, moved: [HangarArchiveMove], hangar: String) StoreError! {
+store_archive_rollback_import_moves: fn(verification: ^StoreVerification, moved: [HangarArchiveMove], hangar: String) StoreError! {
     index := moved.len() - 1
     loop index >= 0 {
         entry: moved[index]

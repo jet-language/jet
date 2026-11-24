@@ -8,7 +8,7 @@ overlay_test_event: fn(revision: String, sequence: Int, observed_at_ms: Int, pan
     NativeOverlayEvent.current("session", revision, sequence, observed_at_ms, panels)
 }
 
-overlay_test_rejection: fn(host: &NativeOverlayHost, event: NativeOverlayEvent) -> String {
+overlay_test_rejection: fn(host: ^NativeOverlayHost, event: NativeOverlayEvent) -> String {
     _: host.ingest(event) ?? return err.message
     panic("expected the native overlay to reject the event")
 }

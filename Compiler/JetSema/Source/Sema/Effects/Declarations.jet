@@ -53,12 +53,12 @@ sema_effect_leaf_member: fn(name: String) -> String? {
     Val(name.slice(prefix.len(), name.len()))
 }
 
-sema_effect_leaf_add: fn(leaves: &[SemaEffectLeaf], name: String) Never! {
+sema_effect_leaf_add: fn(leaves: ^[SemaEffectLeaf], name: String) Never! {
     member: sema_effect_leaf_member(name) ?? return
     leaves.push(SemaEffectLeaf{root: sema_effect_root(name), member: member})
 }
 
-sema_effect_leaf_collect: fn(leaves: &[SemaEffectLeaf], items: [Item]) Never! {
+sema_effect_leaf_collect: fn(leaves: ^[SemaEffectLeaf], items: [Item]) Never! {
     loop item in items {
         if item == {
             .EffectDecl(declaration) -> { sema_effect_leaf_add(leaves, declaration.name) }
@@ -71,7 +71,7 @@ sema_effect_leaf_collect: fn(leaves: &[SemaEffectLeaf], items: [Item]) Never! {
     }
 }
 
-sema_effect_leaf_check_name: fn(leaves: [SemaEffectLeaf], name: String, span: Span, diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_name: fn(leaves: [SemaEffectLeaf], name: String, span: Span, diagnostics: ^[Diagnostic]) {
     if sema_effect_parse_name(name) == None {
         return
     }
@@ -128,14 +128,14 @@ sema_effect_leaf_unknown_diagnostic: fn(name: String, root: String, member: Stri
     diagnostic_with_rights(diagnostic, "vocabulary", [String]{name}, [String]{}, None)
 }
 
-sema_effect_leaf_check_row: fn(leaves: [SemaEffectLeaf], row: [EffectRowEntry], diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_row: fn(leaves: [SemaEffectLeaf], row: [EffectRowEntry], diagnostics: ^[Diagnostic]) {
     loop entry in row {
         if entry.name.starts_with("..") -> next
         sema_effect_leaf_check_name(leaves, entry.name, entry.span, diagnostics)
     }
 }
 
-sema_effect_leaf_check_type: fn(leaves: [SemaEffectLeaf], ty: Type, diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_type: fn(leaves: [SemaEffectLeaf], ty: Type, diagnostics: ^[Diagnostic]) {
     if ty == {
         .Fn(params, ret, effect_bound, _, _, _) -> {
             loop parameter in params -> sema_effect_leaf_check_type(leaves, parameter, diagnostics)
@@ -163,7 +163,7 @@ sema_effect_leaf_check_type: fn(leaves: [SemaEffectLeaf], ty: Type, diagnostics:
     }
 }
 
-sema_effect_leaf_check_statements: fn(leaves: [SemaEffectLeaf], statements: [Stmt], diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_statements: fn(leaves: [SemaEffectLeaf], statements: [Stmt], diagnostics: ^[Diagnostic]) {
     loop statement in statements {
         if statement == {
             .Val(binding) -> {
@@ -199,7 +199,7 @@ sema_effect_leaf_check_statements: fn(leaves: [SemaEffectLeaf], statements: [Stm
     }
 }
 
-sema_effect_leaf_check_function: fn(leaves: [SemaEffectLeaf], function: Func, diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_function: fn(leaves: [SemaEffectLeaf], function: Func, diagnostics: ^[Diagnostic]) {
     if function.declared_effects == .Val(row) {
         loop entry in row {
             name := entry.name
@@ -215,12 +215,12 @@ sema_effect_leaf_check_function: fn(leaves: [SemaEffectLeaf], function: Func, di
     sema_effect_leaf_check_statements(leaves, function.body, diagnostics)
 }
 
-sema_effect_leaf_check_cap: fn(leaves: [SemaEffectLeaf], cap: ModuleCap?, diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_cap: fn(leaves: [SemaEffectLeaf], cap: ModuleCap?, diagnostics: ^[Diagnostic]) {
     written: cap ?? return
     sema_effect_leaf_check_cap_entries(leaves, written, diagnostics)
 }
 
-sema_effect_leaf_check_cap_entries: fn(leaves: [SemaEffectLeaf], written: ModuleCap, diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_cap_entries: fn(leaves: [SemaEffectLeaf], written: ModuleCap, diagnostics: ^[Diagnostic]) {
     loop entry in written.entries {
         name := entry.name
         if name.starts_with("!") -> name = name.slice(1, name.len())
@@ -228,7 +228,7 @@ sema_effect_leaf_check_cap_entries: fn(leaves: [SemaEffectLeaf], written: Module
     }
 }
 
-sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == {
             // A library effect's own name and its cases (Library.jet).
@@ -311,7 +311,7 @@ sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagno
 
 // Validate every effect name written in the source modules against the
 // declared leaves of its root. Returns true when a diagnostic was reported.
-sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) -> Bool {
     leaves := [SemaEffectLeaf]{}
     loop name in EFFECT_VOCABULARY_LEAVES -> sema_effect_leaf_add(leaves, name)
     loop source_module_index in 0..<graph.modules.len() {
@@ -342,7 +342,7 @@ sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics:
     found
 }
 
-sema_effect_trait_bound_set: fn(bounds: &[SemaEffectTraitBound], trait_name: String, method: String, bound: [String]) Never! {
+sema_effect_trait_bound_set: fn(bounds: ^[SemaEffectTraitBound], trait_name: String, method: String, bound: [String]) Never! {
     loop index in 0..<bounds.len() {
         if bounds[index].trait_name == trait_name && bounds[index].method == method {
             bounds[index].bound = bound

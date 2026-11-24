@@ -91,7 +91,7 @@ sema_units_dimension_expression: fn(expression: Expr, visible: SemaUnitDimension
 
 // Rust dimension_dependencies includes identifiers on either side of any
 // binary operator; the resolver itself admits only multiplication/division.
-sema_units_dimension_dependencies: fn(expression: Expr, names: &[String]) Never! {
+sema_units_dimension_dependencies: fn(expression: Expr, names: ^[String]) Never! {
     if expression == {
         .Ident(name, _, _) -> { names.push(name.copy()) }
         .Binary(_, left, right, _, _) -> {
@@ -106,7 +106,7 @@ sema_units_dimension_dependencies: fn(expression: Expr, names: &[String]) Never!
 // dependencies. Repeated references to one declaration count only once.
 // Rust dimension_aliases visits field bases even when the outer expression
 // is not a valid dimension expression. Unqualified names never visit a field.
-sema_units_dimension_aliases: fn(expression: Expr, aliases: &NameTable) Never! {
+sema_units_dimension_aliases: fn(expression: Expr, aliases: ^NameTable) Never! {
     if expression == {
         .Field(base, _, _, _) -> {
             if base == .Ident(alias, _, _) -> _ := name_intern(aliases, alias)
@@ -120,7 +120,7 @@ sema_units_dimension_aliases: fn(expression: Expr, aliases: &NameTable) Never! {
     }
 }
 
-sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisibility, dependencies: &[Int:Bool], aliases: &NameTable) Never! {
+sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisibility, dependencies: ^[Int:Bool], aliases: ^NameTable) Never! {
     if expression == {
         .Ident(name, _, _) -> {
             target: sema_units_dimension_target(visible, None, name)
@@ -164,7 +164,7 @@ sema_units_owner: fn(input: SemaRegistrationModuleInput) -> {package: String, mo
     {module_identity: "{input.package_identity}.{input.module_path}", package: input.package_identity}
 }
 
-sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
+sema_units_resolve_standard: fn(prelude: ^[UnitFamilyDef]) Never! {
     local := SemaUnitDimensionRows{}
     known := [Int:Dimension]{}
     loop (index, family) in prelude {
@@ -199,7 +199,7 @@ sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
 // import edges (the name-ledger import target), not guessed source paths.
 // Reverse edges wake only affected claims; forward references and cycles do
 // not incur a declarations × pending-claims scan each iteration.
-sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) Never! {
+sema_units_resolve: fn(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], diagnostics: ^[Diagnostic]) Never! {
     declarations := [SemaUnitDimensionDeclaration]{}
     module_rows := [U32:Int]{}
     visibility := [SemaUnitDimensionVisibility]{}
@@ -296,7 +296,7 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
             sema_attach_diagnostic_source_locations(diagnostics, start, inputs[declaration.module_index].source_segments)
         }
         owner: sema_units_owner(inputs[declaration.module_index]).package
-        if &inputs[declaration.module_index].program.items[declaration.item] == .UnitFamily(definition) {
+        if ^inputs[declaration.module_index].program.items[declaration.item] == .UnitFamily(definition) {
             definition.resolved_dimension = resolved
             if definition.resolved_owner == None -> definition.resolved_owner = Val(owner)
         }
@@ -306,7 +306,7 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
     loop module_index in 0..<inputs.len() {
         owner: sema_units_owner(inputs[module_index]).package
         loop item in 0..<inputs[module_index].program.items.len() {
-            if &inputs[module_index].program.items[item] == .UnitFamily(definition) {
+            if ^inputs[module_index].program.items[item] == .UnitFamily(definition) {
                 if definition.resolved_owner == None -> definition.resolved_owner = Val(owner)
             }
         }
@@ -315,7 +315,7 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
 
 // Every unit family of `inputs` that claims a dimension, with each module's
 // local and exported family rows; each input is read in place.
-sema_units_dimension_declarations: fn(inputs: [SemaRegistrationModuleInput], declarations: &[SemaUnitDimensionDeclaration], module_rows: &[U32:Int], visibility: &[SemaUnitDimensionVisibility], exports: &[SemaUnitDimensionRows]) Never! {
+sema_units_dimension_declarations: fn(inputs: [SemaRegistrationModuleInput], declarations: ^[SemaUnitDimensionDeclaration], module_rows: ^[U32:Int], visibility: ^[SemaUnitDimensionVisibility], exports: ^[SemaUnitDimensionRows]) Never! {
     loop (module_index, input) in inputs {
         module_rows[input.module_identity.id] = module_index
         local := SemaUnitDimensionRows{}

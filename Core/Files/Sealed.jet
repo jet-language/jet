@@ -17,6 +17,7 @@ use {
     random: core.crypto.random
     core.files.[basename, dirname, join]
     rt: jet.runtime.files
+    tasks_rt: jet.runtime.tasks
     jetc: __core_crypto_jetc
     hashes: __core_crypto_md
 }
@@ -36,10 +37,10 @@ use {
 JetcFd: struct {
     priv fd: Int,
 
-    // Close reads the consumed receiver in place. Rebinding it (`owner: &&self`)
+    // Close reads the consumed receiver in place. Rebinding it (`owner: ^^self`)
     // would make a second owner whose scope-end Close re-enters this one.
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if self.fd >= 0 -> _: builtin.jetc_close(self.fd)
         }
     }
@@ -51,10 +52,10 @@ JetcTemp: struct {
     path: String?,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             // Best-effort cleanup: Close cannot fail, so a removal error is dropped.
             if self.path == .Val(path) {
-                core.files.__remove_raw(path).drop("temp removal at close is best-effort")
+                rt.remove_raw(path).drop("temp removal at close is best-effort")
             }
         }
     }
@@ -66,7 +67,7 @@ JetcBytes: struct {
     bytes: [U8],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             bytes := self.bytes.move()
             core.crypto.wipe(bytes)
         }
@@ -257,7 +258,7 @@ jetc_temp: fn(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
         if jetc_stat(file, .DestinationIO).nlink != 0 -> return Err(.DestinationIO)
         return Ok(JetcTemp{file: file.move(), path: None})
     }
-    pid: core.files.__atomic_pid()
+    pid: rt.atomic_pid()
     loop attempt in 0..<128 {
         sequence: parent.directory.fd * 128 + attempt
         name: ".{prefix}-{pid}-{sequence}"
@@ -272,7 +273,7 @@ jetc_temp: fn(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
 jetc_stage: fn(parent: JetcParent) -> JetcTemp FileCryptoError! {
     stage := jetc_temp(parent, "jetc-stage")
     if stage.path == .Val(path) {
-        core.files.__remove_raw(path) ?? return Err(.DestinationIO)
+        rt.remove_raw(path) ?? return Err(.DestinationIO)
         stage.path = None
     }
     Ok(stage)
@@ -369,7 +370,7 @@ jetc_revalidate: fn(parent: JetcParent) FileCryptoError! {
 // Publishes through the caller's temporary, which stays its one owner: a
 // rebound `JetcTemp.move()` parameter became a second owner that closed the same
 // descriptor (and removed the same path) again at scope end.
-jetc_publish: fn(output: &JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
+jetc_publish: fn(output: ^JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
     jetc_cancel_checkpoint()
     if parent.linux {
         jetc_sync(output.file, "{operation}-output-fsync")
@@ -386,14 +387,14 @@ jetc_publish: fn(output: &JetcTemp, parent: JetcParent, operation: String) FileC
         output.file.fd = -1
         jetc_revalidate(parent)
         path: output.path ?? return Err(.DestinationIO)
-        if core.files.__hard_link_raw(path, parent.destination) == {
+        if rt.hard_link_raw(path, parent.destination) == {
             .Err(error) -> {
                 if error == .AlreadyExists(_) -> return Err(.DestinationExists)
                 return Err(.DestinationIO)
             }
             .Ok(_) -> {}
         }
-        core.files.__remove_raw(path) ?? return Err(.DestinationIO)
+        rt.remove_raw(path) ?? return Err(.DestinationIO)
         directory: jetc_fd(builtin.jetc_open_directory(parent.path), .DestinationIO)
         if builtin.jetc_fsync(directory.fd).value < 0 -> return Err(.DestinationIO)
         output.path = None
@@ -466,16 +467,16 @@ jetc_random: fn(length: Int) -[Rand]> [U8] FileCryptoError! {
 }
 
 jetc_exists_errno: fn(errno: Int) -> Bool Never! {
-    errno == 17 || (core.files.__path_windows() && (errno == 80 || errno == 183))
+    errno == 17 || (rt.path_windows() && (errno == 80 || errno == 183))
 }
 
 jetc_cancel_checkpoint: fn() FileCryptoError! {
-    if core.tasks.__task_canceled() ?? false -> return Err(.SourceIO)
+    if tasks_rt.task_canceled() ?? false -> return Err(.SourceIO)
     Ok()
 }
 
 // Consumes the writer: its file key becomes the verifying reader's key.
-jetc_verify_output: fn(input: JetcFd, writer: &&jetc.Writer, length: Int) FileCryptoError! {
+jetc_verify_output: fn(input: JetcFd, writer: ^^jetc.Writer, length: Int) FileCryptoError! {
     jetc_seek(input, .OpenFailed)
     metadata: jetc_stat(input, .OpenFailed)
     if metadata.len != writer.prefix.len() + (jetc.body_length(length) ?? return Err(.OpenFailed)) {
@@ -508,7 +509,7 @@ jetc_verify_output: fn(input: JetcFd, writer: &&jetc.Writer, length: Int) FileCr
 }
 
 #Test("JETC2 never overwrites destinations and removes unauthenticated outputs") {
-    if rt.os_family() == "unix" && !core.files.__path_windows() {
+    if rt.os_family() == "unix" && !rt.path_windows() {
         root: core.files.mktemp("jetc-source-contract")
         core.files.create_dir_all(root) ?? panic("create directory")
         source: Path.from(join(root, "source"))

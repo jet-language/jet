@@ -26,12 +26,12 @@ MetadataEmitter: struct {
     rendered: Int,
 }
 
-metadata_field_name: fn(emitter: &MetadataEmitter, name: String) -> String Never! {
+metadata_field_name: fn(emitter: ^MetadataEmitter, name: String) -> String Never! {
     emitter.rendered += 1
     name.copy()
 }
 
-render_metadata: fn(emitter: &MetadataEmitter) -> [String] Never! {
+render_metadata: fn(emitter: ^MetadataEmitter) -> [String] Never! {
     definition := emitter.definitions[0].copy()
     names := [String]{}
     if definition.kind == .Enum(variants) {

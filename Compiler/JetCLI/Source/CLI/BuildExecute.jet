@@ -398,13 +398,13 @@ JetCLIBuildDone: enum {
 }
 
 // Hands the run loop what a task did; an error means the loop is gone.
-jet_cli_build_done_send: fn(done: Sender<JetCLIBuildDone>, value: &&JetCLIBuildDone) Err! {
+jet_cli_build_done_send: fn(done: Sender<JetCLIBuildDone>, value: ^^JetCLIBuildDone) Err! {
     done.send(value)
 }
 
 // The rows `slots` holds, in slot (node) order: what finished in any order
 // reads the same.
-jet_cli_build_in_node_order: fn<T>(slots: &&[T?]) -> [T] Never! {
+jet_cli_build_in_node_order: fn<T>(slots: ^^[T?]) -> [T] Never! {
     rows := [T]{}
     loop slot in slots.move() {
         if slot.move() == .Val(row) -> rows.push(row)
@@ -475,7 +475,7 @@ jet_cli_build_run_steps: fn(executor: HermeticBuildPlan, ready: [Int], store: Bu
 // One task of jet_cli_build_run_nodes: run the ready steps `ready`
 // (jet_cli_build_run_steps) on a task of its own and hand what they did, or
 // why that task stopped, to `done`.
-jet_cli_build_steps_task: fn(plan: HermeticBuildPlan?, ready: &&[Int], store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], jobs: Int, traces: String?, threads: Int?, graph: BuildPlanExecution, root: String, trace_sink: JetCLITraceSink?, done: Sender<JetCLIBuildDone>) {
+jet_cli_build_steps_task: fn(plan: HermeticBuildPlan?, ready: ^^[Int], store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], jobs: Int, traces: String?, threads: Int?, graph: BuildPlanExecution, root: String, trace_sink: JetCLITraceSink?, done: Sender<JetCLIBuildDone>) {
     executor: plan ?? panic("a build with steps lowered them to the executor")
     steps: ready.move()
     joined := [JetCLIBuildDone]{}
@@ -1024,7 +1024,7 @@ jet_cli_build_cycle: fn(nodes: [JetCLIBuildNode]) -> [String] Never! {
 // none leaves it empty. The why of the refusal when that workspace's
 // authority or its policy does not read: a build never runs under a policy it
 // could not read.
-jet_cli_build_workspace_policy: fn(policy: &OverlayPolicy, root: String) -[FS, Env]> String? Never! {
+jet_cli_build_workspace_policy: fn(policy: ^OverlayPolicy, root: String) -[FS, Env]> String? Never! {
     cache := WorkspaceDeclarationCache.new()
     found: if jet_cli_find_workspace_root_checked(cache, root) == {
         .Ok(nearest) -> nearest
@@ -1277,7 +1277,7 @@ jet_cli_build_action_spec: fn(action: BuildSessionAction, argv: [String], files:
     spec
 }
 
-jet_cli_build_add_target: fn(build: &HermeticBuildContext, target: BuildSessionTarget, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+jet_cli_build_add_target: fn(build: ^HermeticBuildContext, target: BuildSessionTarget, spec: TargetSpec) -> TargetRef HermeticBuildError! {
     if target.kind == {
         "executable" -> build.add_executable(target.name, spec)
         "library" -> build.add_library(target.name, spec)

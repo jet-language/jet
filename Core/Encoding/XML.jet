@@ -217,12 +217,12 @@ XMLReader: struct<R: Reader> {
     eof: Bool,
     allocation: stream.AllocationBudget,
 
-    fail: fn(&self, error: EncodingError) -> Dyn? EncodingError! {
+    fail: fn(^self, error: EncodingError) -> Dyn? EncodingError! {
         self.terminal = Val(error.copy())
         Err(error)
     }
 
-    next: fn(&self) -[IO, Time.Wait]> Dyn? EncodingError! {
+    next: fn(^self) -[IO, Time.Wait]> Dyn? EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         loop {
             candidate: if self.scanner.next() == {
@@ -304,7 +304,7 @@ XMLReader: struct<R: Reader> {
     }
 }
 
-reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader<R> EncodingError! {
+reader: fn<R: Reader>(input: ^^R, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader<R> EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML
@@ -335,12 +335,12 @@ XMLWriter: struct<W: Writer> {
     finished: Bool,
     allocation: stream.AllocationBudget,
 
-    fail: fn(&self, error: EncodingError) EncodingError! {
+    fail: fn(^self, error: EncodingError) EncodingError! {
         self.terminal = Val(error.copy())
         Err(error)
     }
 
-    write: fn(&self, event: Dyn) -[IO]> EncodingError! {
+    write: fn(^self, event: Dyn) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         if self.finished {
             return self.fail(writer_error(.State, self.total, "write called after finish"))
@@ -375,12 +375,12 @@ XMLWriter: struct<W: Writer> {
         self.total = next_total
     }
 
-    flush: fn(&self) -[IO]> EncodingError! {
+    flush: fn(^self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         self.output.flush() ?? return self.fail(io_error(self.total, stream.io_cause(err)))
     }
 
-    finish: fn(&self) -[IO]> EncodingError! {
+    finish: fn(^self) -[IO]> EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         if self.finished {
             return
@@ -393,7 +393,7 @@ XMLWriter: struct<W: Writer> {
     }
 }
 
-writer: fn<W: Writer>(output: &&W, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLRenderOptions{XMLRenderOptions.safe()}) -> XMLWriter<W> EncodingError! {
+writer: fn<W: Writer>(output: ^^W, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLRenderOptions{XMLRenderOptions.safe()}) -> XMLWriter<W> EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML

@@ -21,7 +21,7 @@ impl NixEvaluator {
     // `mkShell` value behind a `pkgs: ...` or `{ pkgs ? ... }:` function. Project
     // that bounded direct form before trying the flake output paths; a flake root
     // still falls through because its `packages` field is not a package list.
-    resolve_shell: fn(&self, root: NixEvalValue, output: String) -> NixEvalValue NixEvalError! {
+    resolve_shell: fn(^self, root: NixEvalValue, output: String) -> NixEvalValue NixEvalError! {
         if root == {
             .Function(lambda, _) -> {
                 argument: self.direct_shell_argument(lambda)
@@ -59,7 +59,7 @@ impl NixEvaluator {
     // The argument a direct shell function receives: a bare `pkgs: ...` names
     // the package set itself; a `{ pkgs, ... }:` pattern receives the flake
     // arguments when every field without a default is one of them.
-    direct_shell_argument: fn(&self, lambda: Int) -> NixEvalValue? Never! {
+    direct_shell_argument: fn(^self, lambda: Int) -> NixEvalValue? Never! {
         node: self.exprs[lambda].copy()
         if node == {
             .Lambda(pattern, _) -> if pattern == {
@@ -79,7 +79,7 @@ impl NixEvaluator {
         }
     }
 
-    is_direct_shell: fn(&self, value: NixEvalValue) -> Bool NixEvalError! {
+    is_direct_shell: fn(^self, value: NixEvalValue) -> Bool NixEvalError! {
         fields: value.attr_fields() ?? return Ok(false)
         if fields.get("shellHook") != None -> return Ok(true)
         loop field in nixeval_shell_package_fields() {
@@ -93,7 +93,7 @@ impl NixEvaluator {
         Ok(false)
     }
 
-    resolve_path: fn(&self, start: NixEvalValue, path: [String]) -> NixEvalValue NixEvalError! {
+    resolve_path: fn(^self, start: NixEvalValue, path: [String]) -> NixEvalValue NixEvalError! {
         value := start
         loop field in path {
             if value.is_function() -> value = self.apply_flake_arguments(value)
@@ -103,7 +103,7 @@ impl NixEvaluator {
         Ok(value)
     }
 
-    project_shell: fn(&self, shell: NixEvalValue) -> NixEvalDevShell NixEvalError! {
+    project_shell: fn(^self, shell: NixEvalValue) -> NixEvalDevShell NixEvalError! {
         fields: shell.attr_fields() ?? return Err(NixEvalError.Unsupported("devShell output must be an attribute set, got {shell.type_name()}"))
         shell_fields: nixeval_sorted(fields.keys().to_list())
         packages := [String]{}
@@ -160,7 +160,7 @@ impl NixEvaluator {
     }
 
     // The items of a devShell package field, which must be a literal list.
-    package_list: fn(&self, binding: Int, field: String) -> [Int] NixEvalError! {
+    package_list: fn(^self, binding: Int, field: String) -> [Int] NixEvalError! {
         if self.force(binding) == {
             .Ok(value) -> {
                 items: value.list_items() ?? return Err(NixEvalError.Unsupported("`{field}` must be a literal package list"))

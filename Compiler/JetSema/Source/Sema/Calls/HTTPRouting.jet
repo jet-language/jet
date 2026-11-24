@@ -463,7 +463,7 @@ sema_http_route_duplicate: fn(method: String, pattern: String, span: Span, sourc
 
 // Router, mux and App route registrations refuse an interpolated or invalid
 // route literal before any other argument check.
-sema_http_route_check_literal: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaHTTPRouteLiteral {
+sema_http_route_check_literal: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaHTTPRouteLiteral {
     if sema_http_route_interpolated_source(argument.expr) == .Val(source) {
         diagnostics.push(sema_http_route_invalid_diagnostic(source, "brace interpolation is not allowed in route patterns", argument.span))
         return SemaHTTPRouteLiteral{pattern: None, interpolated: true, invalid: false}
@@ -477,7 +477,7 @@ sema_http_route_check_literal: fn(argument: CallArg, environment: SemaScopeEnvir
 // A route path is a String or a `Path` (what a checked `Path{…}` literal
 // builds), registered as its text. Every verb, `router` and `#Server` mark
 // takes its path through this one conversion.
-sema_http_route_path_value: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_http_route_path_value: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     checked: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
         text: sema_call_try_stream_handle_method(argument.expr, checked, "to_string", [CallArg]{}, argument.span, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1048,7 +1048,7 @@ sema_http_route_method_name: fn(method: String) -> String Never! { method.upper(
 // method token check, `__method_token_check`, staged as a checked text
 // literal's `check` is; a run-time App token meets the same check when it
 // registers (`App.__http_route_custom`).
-sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
     span: argument.span
     identity: sema_call_core_module_identity(environment, program, "core.http") ?? return
     target: sema_call_core_source_target(environment, program, identity, "__method_token_check", [Type]{}, span, true, diagnostics) ?? return
@@ -1167,7 +1167,7 @@ sema_http_route_contract: fn(method: String, wire: String, pattern: String, path
     Val("{{\"method\":{sema_http_route_json_quote(wire)},\"pattern\":{sema_http_route_json_quote(pattern)},\"path\":{sema_http_route_json_quote(canonical)},\"operation_id\":{sema_http_route_json_quote(sema_http_route_operation_id(sema_http_route_operation_method(method, wire), canonical))},\"summary\":null,\"parameters\":[{params.join(",")}],\"request_body\":{request_body},\"responses\":[{response_json.join(",")}],\"security\":[],\"provenance\":{sema_http_route_json_quote("{source}:{line}")}}}")
 }
 
-sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     app: sema_app_is_route_table(receiver_value.ty, environment, program)
     receiver_name := if app -> "App" else -> sema_call_http_nominal_leaf(receiver_value.ty)
@@ -1414,7 +1414,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
 // at the second; the rows of one builder chain are checked along the chain
 // (sema_app_check_route_registrations), and every other pair when it
 // registers.
-sema_http_route_table_record: fn(receiver: Expr, wire: String, pattern: String, span: Span, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_http_route_table_record: fn(receiver: Expr, wire: String, pattern: String, span: Span, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) {
     root: sema_expr_place_root_ident(receiver) ?? return
     binding_index: sema_scope_resolve_index(scopes, root) ?? return
     key: "{scopes.bindings[binding_index].key}|{wire}|{sema_app_route_shape(pattern)}"

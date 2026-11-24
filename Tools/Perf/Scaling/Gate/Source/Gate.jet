@@ -442,7 +442,7 @@ parse_counters: fn(output: String) -> [String:Float] Err! {
     Ok(counters)
 }
 
-walk_counters: fn(value: Dyn, key: String, counters: &[String:Float]) Err! {
+walk_counters: fn(value: Dyn, key: String, counters: ^[String:Float]) Err! {
     if value == .Object(entries) {
         loop entry in entries {
             walk_counters(entry.value, if key == "" -> entry.key.copy() else -> "{key}.{entry.key}", counters)
@@ -1031,7 +1031,7 @@ series_label: fn(series: Series) -> String Never! {
 
 // Counter-only compiles, at most `config.jobs` at once; each lands in the
 // series (points in ladder order) and the receipt as it finishes.
-measure_counters: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, label: String, receipt: &Receipt, at: Int) Err! {
+measure_counters: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, label: String, receipt: ^Receipt, at: Int) Err! {
     ladder: receipt.series[at].ladder.copy()
     pending := [Int]{}
     if receipt.series[at].baseline == None -> pending.push(1)
@@ -1073,7 +1073,7 @@ measure_counters: fn(config: Config, compiler: Compiler, shape: Shape, layout: S
 
 // The baseline and every rung, one at a time; a rung slower than
 // --stop-after ends the ladder.
-measure_timing: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, label: String, receipt: &Receipt, at: Int) Err! {
+measure_timing: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, label: String, receipt: ^Receipt, at: Int) Err! {
     if receipt.series[at].baseline == None {
         point: measure(config, compiler, corpus(shape, 1, config.seed, layout), 1, where(config, compiler, shape.name, layout, "1"), false)
         text: "{label} N=1 {summary(point)}"
@@ -1108,7 +1108,7 @@ measure_timing: fn(config: Config, compiler: Compiler, shape: Shape, layout: Str
 // Re-run the largest passing rung under `jet perf attach` and attribute its
 // samples to the failing phases (Profile.jet): the responsible functions
 // with their source.
-profile_top: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, n: Int, receipt: &Receipt, at: Int) -> ProfileResult Err! {
+profile_top: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, n: Int, receipt: ^Receipt, at: Int) -> ProfileResult Err! {
     dir: where(config, compiler, shape.name, layout, "{n}-profile")
     phases: combinatorics.unique(receipt.series[at].failures.filter(fn(failure) { failure.kind == "growth" }).map(fn(failure) { (failure.phase ?? "").copy() }))
     if receipt.series[at].profile_point == None {

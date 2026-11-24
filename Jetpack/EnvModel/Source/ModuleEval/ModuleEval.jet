@@ -97,7 +97,7 @@ envmodel_environment_reads: fn(src: String) -> [EnvironmentRead] EnvModelEvalErr
     Ok(reads)
 }
 
-envmodel_collect_environment_reads: fn(all_tokens: [Token], tables: TokenTables, reads: &[EnvironmentRead]) Never! {
+envmodel_collect_environment_reads: fn(all_tokens: [Token], tables: TokenTables, reads: ^[EnvironmentRead]) Never! {
     tokens: lexer_without_comments(all_tokens)
     loop token in tokens {
         // The lexer reads `$NAME` as one identifier word.
@@ -254,7 +254,7 @@ envmodel_compute_values: fn(items: [Item], scope: ModuleEvalScope, environment_g
 // Plan the values written in the integration imports and the environment,
 // dev service, package profile, image, system and host override fields of
 // `decl`. `names` are the source's module values.
-envmodel_plan_module_values: fn(plan: &EnvValueProgram, decl: ModuleDecl, globals: [String:CtValue], names: [String]) EnvModelEvalError! {
+envmodel_plan_module_values: fn(plan: ^EnvValueProgram, decl: ModuleDecl, globals: [String:CtValue], names: [String]) EnvModelEvalError! {
     envmodel_plan_integration_imports(plan, decl.imports, globals)
     loop contribution in decl.contributions {
         if contribution.value == {
@@ -508,7 +508,7 @@ envmodel_host_override_record: fn(bytes: [U8], span: Span) -> HostOverrideRecord
 // generated value its sibling fields read by name, in any order, and the
 // services and options are planned as a system's are. A record that doesn't
 // parse is refused when its host is read (envmodel_evaluate_hosts).
-envmodel_plan_hosts: fn(plan: &EnvValueProgram, entries: [HostEntry], globals: [String:CtValue], names: [String]) EnvModelEvalError! {
+envmodel_plan_hosts: fn(plan: ^EnvValueProgram, entries: [HostEntry], globals: [String:CtValue], names: [String]) EnvModelEvalError! {
     loop entry in entries {
         span: entry.overrides ?? next
         record: envmodel_host_override_record(plan.source, span) ?? next

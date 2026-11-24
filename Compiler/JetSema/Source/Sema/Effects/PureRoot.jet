@@ -43,7 +43,7 @@ sema_pure_root_diagnostic: fn(root: String, call: String, path: [String], span: 
     diagnostic_with_rights(sema_error("E3401", span, "`{root}` calls the impure function `{call}`", why, fix), "pure", chain, [String]{}, None)
 }
 
-sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, expression: Int, shallow: Bool, visited: &[Bool], path: &[String]) -> Diagnostic? Never! {
+sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, expression: Int, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
     node: body_node(owner.tree, expression)
     pure_builtin := false
     if node.kind == .BuiltinMethod(_, op, _) -> pure_builtin = !sema_effect_builtin_may_have_effect(op)
@@ -121,7 +121,7 @@ sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: D
 // One child of a pure-root walk; stops descending once a diagnostic is found.
 // The visitor closures stay expression-bodied: they only re-borrow the walk's
 // write parameters, the shape every other body child visitor uses.
-sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, child: Int, shallow: Bool, visited: &[Bool], path: &[String], found: &Diagnostic?) Never! {
+sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, child: Int, shallow: Bool, visited: ^[Bool], path: ^[String], found: ^Diagnostic?) Never! {
     if found == None {
         found = sema_pure_root_expr(root, modules, decls, symbols, places, calls, owner, child, shallow, visited, path)
     }
@@ -133,7 +133,7 @@ sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: 
 // `path`) until the loop ends, so the next iteration's closure
 // and the `path.pop()` after the loop are rejected there (E0499); here the
 // walk is the last use of those parameters.
-sema_pure_root_statement: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, statement: Int, shallow: Bool, visited: &[Bool], path: &[String]) -> Diagnostic? Never! {
+sema_pure_root_statement: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, statement: Int, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
     found := Diagnostic?{None}
     body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_pure_root_visit(root, modules, decls, symbols, places, calls, function, expression, shallow, visited, path, found) })
     found
@@ -142,7 +142,7 @@ sema_pure_root_statement: fn(root: String, modules: [SemaGraphModuleResult], dec
 // `visited` marks the place (sema_pure_root_position) of each function key
 // the walk entered; every function it enters has one. Only the root is not
 // `nested`: every other function is entered from a call in a walked body.
-sema_pure_root_function: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, nested: Bool, shallow: Bool, visited: &[Bool], path: &[String]) -> Diagnostic? Never! {
+sema_pure_root_function: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, nested: Bool, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
     at: sema_effect_node_index(calls.node_by_key, function.key) ?? panic("a pure-root walk reached an unindexed function")
     if visited[at] -> return None
     visited[at] = true

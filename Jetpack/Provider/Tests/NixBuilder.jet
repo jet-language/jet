@@ -34,7 +34,7 @@ provider_test_fixed_evaluation: fn() -> NixNativeDerivation {
     nix_evaluate_derivation("builtins.derivationStrict {{ name = \"native-hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"{hash}\"; }}", "x86_64-linux") ?? panic("fixed derivation")
 }
 
-provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRoots, source: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry {
+provider_test_native_entry: fn(verification: ^StoreVerification, roots: HangarRoots, source: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry {
     build: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build: {err.message()}")
     provider_nix_admit_built_derivation(verification, roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
 }

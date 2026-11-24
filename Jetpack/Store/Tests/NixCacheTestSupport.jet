@@ -105,7 +105,7 @@ NixTestCacheServer: struct {
         store_nix_test_write_site(self.site, routes)
     }
 
-    stop: fn(&&self) Never! {
+    stop: fn(^^self) Never! {
         _: self.server.shutdown(time.duration_ms(100)) ?? panic("stop test cache")
         self.serving.join() ?? panic("test cache task")
     }

@@ -410,10 +410,10 @@ get_mask: fn(ms: WhereMaskSet, i_cursor: Int) -> Int Never! {
 }
 
 // createMask.
-create_mask: fn(ms: &WhereMaskSet, i_cursor: Int) Never! { ms.ix.push(i_cursor) }
+create_mask: fn(ms: ^WhereMaskSet, i_cursor: Int) Never! { ms.ix.push(i_cursor) }
 
 // sqlite3WhereExprUsageFull.
-expr_usage_full: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
+expr_usage_full: fn(ms: ^WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
     x: a.exprs[e]
     mask := if x.op == tk.TK_IF_NULL_ROW -> get_mask(ms, x.itable) else -> 0
     if x.left >= 0 -> mask |= expr_usage_nn(ms, a, x.left)
@@ -431,7 +431,7 @@ expr_usage_full: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
 }
 
 // sqlite3WhereExprUsageNN: the tables expression `e` (not NULL) uses.
-expr_usage_nn: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
+expr_usage_nn: fn(ms: ^WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
     if a.exprs[e].op == tk.TK_COLUMN && !ast.has(a, e, ast.EP_FIXED_COL) {
         return get_mask(ms, a.exprs[e].itable)
     }
@@ -440,20 +440,20 @@ expr_usage_nn: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
 }
 
 // sqlite3WhereExprUsage.
-expr_usage: fn(ms: &WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
+expr_usage: fn(ms: ^WhereMaskSet, a: ast.AST, e: Int) -> Int Never! {
     if e < 0 -> return 0
     expr_usage_nn(ms, a, e)
 }
 
 // sqlite3WhereExprListUsage.
-expr_list_usage: fn(ms: &WhereMaskSet, a: ast.AST, list: Int) -> Int Never! {
+expr_list_usage: fn(ms: ^WhereMaskSet, a: ast.AST, list: Int) -> Int Never! {
     mask := 0
     loop i in 0..<ast.list_len(a, list) -> mask |= expr_usage(ms, a, ast.list_expr(a, list, i))
     mask
 }
 
 // exprSelectUsage: the tables a SELECT and its compound chain use.
-expr_select_usage: fn(ms: &WhereMaskSet, a: ast.AST, s0: Int) -> Int Never! {
+expr_select_usage: fn(ms: ^WhereMaskSet, a: ast.AST, s0: Int) -> Int Never! {
     mask := 0
     s := s0
     loop s >= 0 {
@@ -478,7 +478,7 @@ expr_select_usage: fn(ms: &WhereMaskSet, a: ast.AST, s0: Int) -> Int Never! {
 // Clauses and terms.
 
 // sqlite3WhereClauseInit: a new empty clause; its index.
-clause_init: fn(wi: &WhereInfo) -> Int Never! {
+clause_init: fn(wi: ^WhereInfo) -> Int Never! {
     wi.wcs.push(WhereClause{outer: -1, op: 0, has_or: false, n_base: 0, a: [Int]{}})
     wi.wcs.len() - 1
 }
@@ -490,13 +490,13 @@ n_term: fn(wi: WhereInfo, wc: Int) -> Int Never! { wi.wcs[wc].a.len() }
 term_at: fn(wi: WhereInfo, wc: Int, i: Int) -> Int Never! { wi.wcs[wc].a[i] }
 
 // pTerm->wtFlags |= f.
-add_wt_flags: fn(wi: &WhereInfo, t: Int, f: Int) Never! {
+add_wt_flags: fn(wi: ^WhereInfo, t: Int, f: Int) Never! {
     wi.terms[t].wt_flags = wi.terms[t].wt_flags | f
 }
 
 // whereClauseInsert: a new term of clause wc for expression `e`; its index
 // in the clause.
-clause_insert: fn(wi: &WhereInfo, a: ast.AST, wc: Int, e: Int, wt_flags: Int) -> Int Never! {
+clause_insert: fn(wi: ^WhereInfo, a: ast.AST, wc: Int, e: Int, wt_flags: Int) -> Int Never! {
     idx: wi.wcs[wc].a.len()
     if wt_flags & TERM_VIRTUAL == 0 -> wi.wcs[wc].n_base = idx + 1
     truth_prob: if e >= 0 && ast.has(a, e, ast.EP_UNLIKELY) -> util.log_est(a.exprs[e].itable) - 270 else -> 1
@@ -511,7 +511,7 @@ allowed_op: fn(op: Int) -> Bool Never! {
 }
 
 // exprCommute: "X op Y" becomes "Y op X"; 0.
-expr_commute: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> Int Never! {
+expr_commute: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -> Int Never! {
     l: a.exprs[e].left
     r: a.exprs[e].right
     if a.exprs[l].op == tk.TK_VECTOR || a.exprs[r].op == tk.TK_VECTOR || ex.binary_compare_coll_seq(p, a, l, r) != ex.binary_compare_coll_seq(p, a, r, l) {
@@ -558,7 +558,7 @@ is_like_function: fn(db: conn.Conn, a: ast.AST, e: Int) -> {ok: Bool, no_case: B
 // inequality constraints: then the TK_STRING of its pattern prefix, whether
 // the pattern ends with its only wildcard (complete) and whether case is
 // insignificant.
-is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> {ok: Bool, prefix: Int, complete: Bool, no_case: Bool} Never! {
+is_like_or_glob: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> {ok: Bool, prefix: Int, complete: Bool, no_case: Bool} Never! {
     lf: is_like_function(p.db, a, e)
     if !lf.ok -> return {ok: false, prefix: -1, complete: false, no_case: false}
     wc: lf.wc
@@ -646,7 +646,7 @@ expr_is_vtab: fn(db: conn.Conn, a: ast.AST, x: Int) -> Bool Never! {
 // the operators virtual tables see but the planner does not otherwise use:
 // 1 or 2 (2 when both sides are virtual table columns), with the
 // SQLITE_INDEX_CONSTRAINT_* op2, the column and the expression; 0 if not.
-is_auxiliary_vtab_operator: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> {n: Int, op2: Int, left: Int, right: Int} Never! {
+is_auxiliary_vtab_operator: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> {n: Int, op2: Int, left: Int, right: Int} Never! {
     op: a.exprs[e].op
     if op == tk.TK_FUNCTION {
         list: a.exprs[e].x
@@ -691,7 +691,7 @@ is_auxiliary_vtab_operator: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> {n: Int
 
 // transferJoinMarkings: `derived`, from the ON or USING clause `base_e`
 // came from, carries its join markings.
-transfer_join_markings: fn(a: &ast.AST, derived: Int, base_e: Int) Never! {
+transfer_join_markings: fn(a: ^ast.AST, derived: Int, base_e: Int) Never! {
     jf: ast.EP_OUTER_ON | ast.EP_INNER_ON
     if derived >= 0 && ast.has(a, base_e, jf) {
         a.exprs[derived].flags = a.exprs[derived].flags | a.exprs[base_e].flags & jf
@@ -701,7 +701,7 @@ transfer_join_markings: fn(a: &ast.AST, derived: Int, base_e: Int) Never! {
 
 // markTermAsChild: term i_child of clause wc is a child of its term
 // i_parent. nChild is a u8.
-mark_term_as_child: fn(wi: &WhereInfo, wc: Int, i_child: Int, i_parent: Int) Never! {
+mark_term_as_child: fn(wi: ^WhereInfo, wc: Int, i_child: Int, i_parent: Int) Never! {
     c: wi.wcs[wc].a[i_child]
     pa: wi.wcs[wc].a[i_parent]
     wi.terms[c].i_parent = i_parent
@@ -723,7 +723,7 @@ where_nth_subterm: fn(wi: WhereInfo, t: Int, n: Int) -> Int Never! {
 
 // whereCombineDisjuncts: "A op1 B OR A op2 B" with compatible operators
 // adds the virtual term "A op B" combining them to clause wc.
-where_combine_disjuncts: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, one: Int, two: Int) -[DB]> Never! {
+where_combine_disjuncts: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^WhereInfo, src: Int, wc: Int, one: Int, two: Int) -[DB]> Never! {
     e_op := wi.terms[one].e_operator | wi.terms[two].e_operator
     if (wi.terms[one].wt_flags | wi.terms[two].wt_flags) & TERM_VNULL != 0 {
         return
@@ -759,7 +759,7 @@ where_combine_disjuncts: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int,
 
 // sqlite3ExprCompare with the Parse: a bound parameter can match a literal
 // under the statement being reprepared.
-expr_compare_p: fn(p: &cg.Parse, a: &ast.AST, x: Int, y: Int, i_tab: Int) -> Int Never! {
+expr_compare_p: fn(p: ^cg.Parse, a: ^ast.AST, x: Int, y: Int, i_tab: Int) -> Int Never! {
     m := ex.ParseVarMatch{vars: p.reprepare_vars, used: [Int]{}}
     r: ast.expr_compare_with<ex.ParseVarMatch>(m, a, x, y, i_tab)
     loop i in m.used -> aux.set_varmask(p.f.v, i)
@@ -769,7 +769,7 @@ expr_compare_p: fn(p: &cg.Parse, a: &ast.AST, x: Int, y: Int, i_tab: Int) -> Int
 // exprAnalyzeOrTerm: analyze OR term idx_term of clause wc: its subterms go
 // to a new clause, and the term may gain an equivalent IN term (case 1), a
 // combined conjunct (case 2) or the tables it is indexable on (case 3).
-expr_analyze_or_term: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, idx_term: Int) -[DB]> Never! {
+expr_analyze_or_term: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^WhereInfo, src: Int, wc: Int, idx_term: Int) -[DB]> Never! {
     t: wi.wcs[wc].a[idx_term]
     e: wi.terms[t].expr
     or_wc: clause_init(wi)
@@ -921,7 +921,7 @@ expr_analyze_or_term: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc
 
 // termIsEquivalence: whether "A == B" (both columns) lets B stand in for A
 // anywhere else in the WHERE clause.
-term_is_equivalence: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> Bool Never! {
+term_is_equivalence: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -> Bool Never! {
     if !cg.opt_enabled(p, cg.OPT_TRANSITIVE) -> return false
     op: a.exprs[e].op
     if op != tk.TK_EQ && op != tk.TK_IS -> return false
@@ -936,7 +936,7 @@ term_is_equivalence: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> Bool Never! {
 
 // exprMightBeIndexed2: whether `e` is a key expression of an index on a
 // table of FROM list `src` from item j0 on: its cursor and XN_EXPR.
-might_be_indexed2: fn(db: conn.Conn, a: &ast.AST, src: Int, e: Int, j0: Int) -> {ok: Bool, cur: Int, col: Int} Never! {
+might_be_indexed2: fn(db: conn.Conn, a: ^ast.AST, src: Int, e: Int, j0: Int) -> {ok: Bool, cur: Int, col: Int} Never! {
     j := j0
     loop {
         si: ast.src_item(a, src, j)
@@ -964,7 +964,7 @@ might_be_indexed2: fn(db: conn.Conn, a: &ast.AST, src: Int, e: Int, j0: Int) -> 
 // exprMightBeIndexed: whether comparison operand `e0` might be indexed: a
 // column always is (an automatic index may come later); its cursor and
 // column (XN_EXPR for an indexed expression).
-might_be_indexed: fn(db: conn.Conn, a: &ast.AST, src: Int, e0: Int, op: Int) -> {ok: Bool, cur: Int, col: Int} Never! {
+might_be_indexed: fn(db: conn.Conn, a: ^ast.AST, src: Int, e0: Int, op: Int) -> {ok: Bool, cur: Int, col: Int} Never! {
     e := e0
     if a.exprs[e].op == tk.TK_VECTOR && op >= tk.TK_GT && op <= tk.TK_GE {
         e = ast.list_expr(a, a.exprs[e].x, 0)
@@ -986,7 +986,7 @@ might_be_indexed: fn(db: conn.Conn, a: &ast.AST, src: Int, e0: Int, op: Int) -> 
 // commuting "<expr> op X" to "X op <expr>" and adding the virtual terms
 // that BETWEEN, OR, IS NOT NULL, LIKE, vector comparisons and virtual table
 // operators imply.
-expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, idx_term: Int) -[DB]> Never! {
+expr_analyze: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^WhereInfo, src: Int, wc: Int, idx_term: Int) -[DB]> Never! {
     if p.db.malloc_failed {
         return
     }
@@ -1247,7 +1247,7 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
 
 // sqlite3WhereSplit: the subexpressions of `e` that operator op separates
 // become the terms of clause wc.
-where_split: fn(wi: &WhereInfo, a: ast.AST, wc: Int, e: Int, op: Int) Never! {
+where_split: fn(wi: ^WhereInfo, a: ast.AST, wc: Int, e: Int, op: Int) Never! {
     e2: ast.skip_collate_and_likely(a, e)
     wi.wcs[wc].op = op
     if e2 < 0 {
@@ -1262,7 +1262,7 @@ where_split: fn(wi: &WhereInfo, a: ast.AST, wc: Int, e: Int, op: Int) Never! {
 // whereAddLimitExpr: a WO_AUX LIMIT or OFFSET term (e_match_op) on cursor
 // i_csr for its expression `e`, whose value register i_reg holds: an integer
 // literal when it is one, for sqlite3_vtab_rhs_value, else a TK_REGISTER.
-where_add_limit_expr: fn(wi: &WhereInfo, a: &ast.AST, wc: Int, i_reg: Int, e: Int, i_csr: Int, e_match_op: Int) Never! {
+where_add_limit_expr: fn(wi: ^WhereInfo, a: ^ast.AST, wc: Int, i_reg: Int, e: Int, i_csr: Int, e_match_op: Int) Never! {
     iv: ast.expr_is_integer(a, e) ?? -1
     ne := -1
     if iv >= 0 {
@@ -1286,7 +1286,7 @@ where_add_limit_expr: fn(wi: &WhereInfo, a: &ast.AST, wc: Int, i_reg: Int, e: In
 // the xBestIndex of its only FROM item, a virtual table, when the query is
 // no aggregate or DISTINCT, every WHERE term goes to that xBestIndex and so
 // does the ORDER BY.
-where_add_limit: fn(db: conn.Conn, wi: &WhereInfo, a: &ast.AST, wc: Int, s: Int) Never! {
+where_add_limit: fn(db: conn.Conn, wi: ^WhereInfo, a: ^ast.AST, wc: Int, s: Int) Never! {
     sel: a.selects[s]
     if sel.group_by >= 0 || sel.sel_flags & (ast.SF_DISTINCT | ast.SF_AGGREGATE) != 0 {
         return
@@ -1329,7 +1329,7 @@ where_add_limit: fn(db: conn.Conn, wi: &WhereInfo, a: &ast.AST, wc: Int, s: Int)
 
 // sqlite3WhereClauseClear: the side effects of freeing clause wc, its
 // dynamic expressions and its OR and AND sub-clauses.
-where_clause_clear: fn(wi: WhereInfo, a: &ast.AST, wc: Int) Never! {
+where_clause_clear: fn(wi: WhereInfo, a: ^ast.AST, wc: Int) Never! {
     loop t in wi.wcs[wc].a {
         f: wi.terms[t].wt_flags
         if f & TERM_DYNAMIC != 0 -> ast.expr_delete(a, wi.terms[t].expr)
@@ -1339,7 +1339,7 @@ where_clause_clear: fn(wi: WhereInfo, a: &ast.AST, wc: Int) Never! {
 
 // sqlite3WhereExprAnalyze: analyze every term of clause wc, last first so
 // that the virtual terms the analysis adds are not analyzed again.
-where_expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int) -[DB]> Never! {
+where_expr_analyze: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^WhereInfo, src: Int, wc: Int) -[DB]> Never! {
     i := wi.wcs[wc].a.len() - 1
     loop i >= 0 {
         expr_analyze(p, a, wi, src, wc, i)
@@ -1349,7 +1349,7 @@ where_expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: 
 
 // sqlite3WhereTabFuncArgs: the arguments of table-valued function item si
 // become equality terms on its HIDDEN columns.
-where_tab_func_args: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, si: Int, wc: Int) Never! {
+where_tab_func_args: fn(p: ^cg.Parse, a: ^ast.AST, wi: ^WhereInfo, si: Int, wc: Int) Never! {
     if !a.items[si].is_tab_func {
         return
     }
@@ -1386,7 +1386,7 @@ where_tab_func_args: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, si: Int, wc: 
 
 // sqlite3SetJoinExpr (select.c): mark `e0` and its subtrees as coming from
 // the ON clause (join_flag EP_OUTER_ON or EP_INNER_ON) of join i_table.
-set_join_expr: fn(a: &ast.AST, e0: Int, i_table: Int, join_flag: Int) Never! {
+set_join_expr: fn(a: ^ast.AST, e0: Int, i_table: Int, join_flag: Int) Never! {
     e := e0
     loop e >= 0 {
         ast.set_flags(a, e, join_flag)

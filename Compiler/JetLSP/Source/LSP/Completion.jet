@@ -8,7 +8,7 @@
 // of its marker's package come first.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, type_name]
+    jet_foundation.[Span, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, jet_error_json_encode_value, type_name]
     jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_RBRACE]
     jet_semindex.[SemKind, SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
     jet_sema.[SEMA_METHOD_IDIOMS, SemaMethodIdiom]
@@ -30,9 +30,45 @@ lsp_completion_item_kind: fn(kind: SemSymbolKind) -> Int Never! {
     }
 }
 
-lsp_completion_item_json: fn(symbol: SemSymbol) -> String Never! {
-    documentation: if symbol.summary == "" -> "" else -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(symbol.summary)}}}"
-    "{{\"label\":{foundation_json_quote(symbol.name)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{documentation}}}"
+// A declaration's item names it in `data` when it has documentation, which
+// `completionItem/resolve` adds once the editor shows the item.
+lsp_completion_item_json: fn(symbol: SemSymbol, uri: String) -> String Never! {
+    data: if symbol.summary == "" -> "" else -> ",\"data\":{{\"uri\":{foundation_json_quote(uri)},\"identity\":{foundation_json_quote(symbol.identity)}}}"
+    "{{\"label\":{foundation_json_quote(symbol.name)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{data}}}"
+}
+
+// `completionItem/resolve`: the item as sent, with the doc comment summary of
+// the declaration its `data` names as its documentation. An item that names
+// none, or a declaration the document's check no longer holds, comes back
+// as it is.
+lsp_completion_resolve_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    item: params ?? return lsp_error_response(id, -32602, "completionItem/resolve needs a completion item")
+    entries: if item == {
+        .Object(fields) -> fields
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
+            return lsp_error_response(id, -32602, "a completion item is an object")
+        }
+    }
+    summary: lsp_completion_summary(server, lsp_member(item, "data") ?? Dyn.Null)
+    if summary == "" -> return lsp_response(id, jet_error_json_encode_value(item))
+    rows := [String]{}
+    loop entry in entries {
+        if entry.key == "documentation" -> next
+        rows.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
+    }
+    rows.push("\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(summary)}}}")
+    lsp_response(id, "{{{rows.join(",")}}}")
+}
+
+// The summary of the declaration `data` names in its document's check, or "".
+lsp_completion_summary: fn(server: LSPServer, data: Dyn) -> String {
+    uri: lsp_text_member(data, "uri") ?? return ""
+    identity: lsp_text_member(data, "identity") ?? return ""
+    view: lsp_view_of(server, uri) ?? return ""
+    loop symbol in view.checked.symbols {
+        if symbol.identity == identity -> return symbol.summary.copy()
+    }
+    ""
 }
 
 // The binding snippets, as `label`, `detail` and snippet text.
@@ -75,16 +111,17 @@ lsp_completion_def_kind: fn(kind: SemKind) -> Int? Never! {
 // below `/w` is `app.store`. "" for a file `root` does not hold.
 lsp_completion_module_name: fn(root: String, path: String) -> String Never! {
     if !lsp_path_below(path, root) || !path.ends_with(".jet") -> return ""
+    bytes: path.bytes()
     from: if root.ends_with("/") -> root.count_bytes() else -> root.count_bytes() + 1
-    if from >= path.count_bytes() - 4 -> return ""
-    path.slice(from, path.count_bytes() - 4).split("/").to_list().join(".")
+    if from >= bytes.len() - 4 -> return ""
+    foundation_byte_text(bytes, from, bytes.len() - 4).split("/").to_list().join(".")
 }
 
 // Adds the top-level declarations matching `prefix` of the saved files below
 // the first workspace folder holding the document, skipping the files its
 // check already reads: each inserts `module.Name` and adds the file's `use`
 // line at the document's start. True once the answer is full.
-lsp_completion_auto_imports: fn(server: LSPServer, view: LSPView, prefix: String, seen: &[String:Bool], items: &[String]) -> Bool {
+lsp_completion_auto_imports: fn(server: LSPServer, view: LSPView, prefix: String, seen: ^[String:Bool], items: ^[String]) -> Bool {
     root := String?{None}
     loop folder in server.workspace_roots {
         if lsp_path_below(view.doc.path, folder) {
@@ -158,18 +195,18 @@ lsp_completion_after: fn(lexed: Lexed, start: Int) -> LSPCompletionAfter Never! 
     LSPCompletionAfter.Receiver{token: receiver}
 }
 
-// The owner name a value of `ty` has members under: a list is `List`, a map
-// `Map`, else the type's last path segment without arguments.
-lsp_type_owner: fn(ty: Type) -> String Never! {
-    name: type_name(ty)
+// The owner name a value of the type named `name` (type_name) has members
+// under: a list is `List`, a map `Map`, else the type's last path segment
+// without arguments.
+lsp_type_owner: fn(name: String) -> String Never! {
     if name.starts_with("[") -> return if name.contains(":") -> "Map" else -> "List"
     // `find` counts bytes, so the head is cut from the bytes.
-    head := name
-    angle: head.find("<")
-    if angle >= 0 -> head = foundation_byte_text(head.bytes(), 0, angle)
-    question: head.find("?")
-    if question >= 0 -> head = foundation_byte_text(head.bytes(), 0, question)
-    parts: head.split(".").to_list()
+    cut := name.count_bytes()
+    angle: name.find("<")
+    if angle >= 0 -> cut = angle
+    question: name.find("?")
+    if question >= 0 && question < cut -> cut = question
+    parts: foundation_byte_text(name.bytes(), 0, cut).split(".").to_list()
     parts[parts.len() - 1]
 }
 
@@ -187,9 +224,9 @@ lsp_member_scope: fn(view: LSPView, receiver_end: Int) -> LSPMemberScope? Never!
     target: lsp_target_at(view, receiver_end) ?? return None
     def: lsp_definition_at(index, target) ?? return None
     if def.kind == {
-        .Local(_, ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(ty ?? return None)})
-        .Param(ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(ty)})
-        .Field(ty, _) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(ty)})
+        .Local(_, ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty ?? return None))})
+        .Param(ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty))})
+        .Field(ty, _) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty))})
         .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> Val(LSPMemberScope.Owner{name: def.name.copy()})
         .Module -> {
             module_path: view.module_path ?? return None
@@ -282,7 +319,7 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
             incomplete = true
             break
         }
-        items.push(lsp_completion_item_json(symbol))
+        items.push(lsp_completion_item_json(symbol, view.uri))
     }
     // A foreign word completes only once a word is written, and only to a
     // method no item already offers.

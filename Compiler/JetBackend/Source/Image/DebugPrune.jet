@@ -37,7 +37,7 @@ use jet_foundation.[compiler_take_rows]
 
 // The bytes of each debug group in `debug.names` order, relocated, with
 // the dropped functions' records removed.
-link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, text_start: Int, text_end: Int) -> [[U8]] Never! {
+link_debug_bytes: fn(c: ^LinkContext, debug: LinkDebug, pieces: ^LinkPieces, text_start: Int, text_end: Int) -> [[U8]] Never! {
     groups := [[U8]]{}
     loop group in 0..<debug.names.len() {
         bytes := [U8]{}
@@ -159,7 +159,7 @@ link_debug_addr: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // The uleb at `at` (advanced past it); -1, with `at` past the end, when it
 // runs out.
-link_debug_uleb: fn(bytes: [U8], at: &Int) -> Int Never! {
+link_debug_uleb: fn(bytes: [U8], at: ^Int) -> Int Never! {
     value := 0
     shift := 0
     loop at < bytes.len() {
@@ -297,7 +297,7 @@ LinkUnitBases: struct {
 // to `bases`. With `record` its ref4, stmt_list, base and list index
 // places join `plan`; `low_pc` is its DW_AT_low_pc address (an index into
 // `addr`, the linked `.debug_addr`, past `bases.addr`), or -1.
-link_info_attributes: fn(info: [U8], table: LinkAbbrevs, entry: Int, from: Int, unit: Int, addr: [U8], bases: &LinkUnitBases, plan: &LinkInfoPlan, record: Bool, low_pc: &Int) -> Int Never! {
+link_info_attributes: fn(info: [U8], table: LinkAbbrevs, entry: Int, from: Int, unit: Int, addr: [U8], bases: ^LinkUnitBases, plan: ^LinkInfoPlan, record: Bool, low_pc: ^Int) -> Int Never! {
     at := from
     loop pair in table.starts[entry]..<table.starts[entry + 1] {
         attribute: table.attributes[pair]
@@ -434,7 +434,7 @@ link_info_plan: fn(info: [U8], abbrev: [U8], addr: [U8], text_start: Int, text_e
 // values follow the DIEs they name, and stmt_list values the moved
 // `.debug_line` units and loclists and rnglists bases the moved offsets
 // tables (link_lists_prune; an offset not in the maps stays).
-link_info_rewrite: fn(info: &[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: [Int:Int], ranges: [Int:Int]) Never! {
+link_info_rewrite: fn(info: ^[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: [Int:Int], ranges: [Int:Int]) Never! {
     sums: link_info_sums(plan.drops)
     loop (k, at) in plan.refs {
         unit: plan.ref_units[k]
@@ -478,7 +478,7 @@ link_info_rewrite: fn(info: &[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: 
 // Drop each sequence of `line` (DWARF 5 units) whose DW_LNE_set_address is
 // outside the live text; `moved` maps each unit's old offset to its new
 // one. A unit it can't read leaves `line` and `moved` as they were.
-link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:Int]) Never! {
+link_line_prune: fn(line: ^[U8], text_start: Int, text_end: Int, moved: ^[Int:Int]) Never! {
     kept := [U8]{}
     olds := [Int]{}
     news := [Int]{}
@@ -613,7 +613,7 @@ link_range_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
 // nothing refers to one empty list at the unit's end. A unit without a
 // table stays whole. `moved` maps each table's old start to its new one.
 // Lists it can't read leave `lists` and `moved` as they were.
-link_lists_prune: fn(lists: &[U8], referred: [Int], moved: &[Int:Int], ranges: Bool{false}) Never! {
+link_lists_prune: fn(lists: ^[U8], referred: [Int], moved: ^[Int:Int], ranges: Bool{false}) Never! {
     starts := [Int]{}
     counts := [Int]{}
     // Per table start, its unit's number.
@@ -704,7 +704,7 @@ link_lists_prune: fn(lists: &[U8], referred: [Int], moved: &[Int:Int], ranges: B
 // `table`'s object blocks as linked blocks (the format above), the dropped
 // functions' records left out; false when a block's records, strings or
 // rows run past it.
-link_jetline_link: fn(table: &[U8], text_start: Int, text_end: Int) -> Bool Never! {
+link_jetline_link: fn(table: ^[U8], text_start: Int, text_end: Int) -> Bool Never! {
     linked := [U8]{}
     at := 0
     loop at < table.len() {
@@ -727,7 +727,7 @@ link_jetline_link: fn(table: &[U8], text_start: Int, text_end: Int) -> Bool Neve
 
 // One object block's live records (`count` from `records`), as one linked
 // block appended to `linked`; nothing when none is live.
-link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, strings: Int, rows: Int, end: Int, text_start: Int, text_end: Int) -> Bool Never! {
+link_jetline_block: fn(linked: ^[U8], table: [U8], records: Int, count: Int, strings: Int, rows: Int, end: Int, text_start: Int, text_end: Int) -> Bool Never! {
     live := [Int]{}
     starts := [Int]{}
     if count > 64 {
@@ -792,7 +792,7 @@ link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, str
 
 // The string at `at` (ending before `limit`) into `texts` unless `moved`
 // has it already; false when it has no NUL before `limit`.
-link_jetline_string: fn(texts: &[U8], moved: &[Int:Int], table: [U8], at: Int, limit: Int) -> Bool Never! {
+link_jetline_string: fn(texts: ^[U8], moved: ^[Int:Int], table: [U8], at: Int, limit: Int) -> Bool Never! {
     if moved.get(at) != .None -> return true
     end: link_debug_cstr_end(table, at)
     if end > limit -> return false

@@ -2,9 +2,9 @@
 // tokens, completion and code actions.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, TextEdit, foundation_json_integer]
+    jet_foundation.[Span, TextEdit, foundation_json_integer, jet_error_json_encode_value]
     jet_parser.[parser_marker_placement_edits]
-    jet_lsp.[LSPServer, lsp_change_workspace_folders, lsp_member]
+    jet_lsp.[LSPServer, lsp_change_workspace_folders, lsp_member, lsp_update_document]
 }
 
 LSP_TEST_SHAPES_URI: "file:///w/shapes.jet"
@@ -57,11 +57,11 @@ lsp_test_symbol_rows: fn(rows: [Dyn]) -> [String] Never! {
     assert_eq(lsp_test_text(lsp_test_field(rows[0], "location"), "uri"), LSP_TEST_MAIN_URI)
 }
 
-lsp_test_workspace_rows: fn(server: &LSPServer) -> [Dyn] {
+lsp_test_workspace_rows: fn(server: ^LSPServer) -> [Dyn] {
     lsp_test_rows(lsp_test_result(server, "workspace/symbol", "{{\"query\":\"\"}}"))
 }
 
-lsp_test_change_folders: fn(server: &LSPServer, added: String, removed: String) Never! {
+lsp_test_change_folders: fn(server: ^LSPServer, added: String, removed: String) Never! {
     lsp_change_workspace_folders(server, Val(lsp_test_json("{{\"event\":{{\"added\":[{added}],\"removed\":[{removed}]}}}}")))
 }
 
@@ -251,6 +251,26 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
     assert_eq(lsp_test_rows(lsp_test_field(after_call, "items")).len(), 0)
 }
 
+#Test("a completion item gets its doc comment through completionItem/resolve") {
+    server := lsp_test_server()
+    uri: "file:///w/docs.jet"
+    lsp_test_open(server, uri, "/// Adds two numbers.\nadd: fn(left: Int, right: Int) -> Int {{ left + right }}\n\nrun: fn() -> Int {{\n    ad\n}}\n")
+    found := Dyn?{None}
+    loop item in lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 4, 6)), "items")) {
+        if lsp_test_text(item, "label") == "add" && lsp_test_int(item, "kind") == 3 -> found = Val(item.copy())
+    }
+    item: found ?? panic("`add` is offered")
+    assert(lsp_member(item, "documentation") == None, "the list carries no documentation")
+    resolved: lsp_test_result(server, "completionItem/resolve", jet_error_json_encode_value(item))
+    assert_eq(lsp_test_text(lsp_test_field(resolved, "documentation"), "value"), "Adds two numbers.")
+    assert_eq(lsp_test_text(resolved, "label"), "add")
+    assert_eq(lsp_test_text(resolved, "detail"), lsp_test_text(item, "detail"))
+    // An item that names no declaration comes back as it is.
+    plain: lsp_test_result(server, "completionItem/resolve", "{{\"label\":\"x\",\"kind\":1}}")
+    assert(lsp_member(plain, "documentation") == None, "nothing is added")
+    assert_eq(lsp_test_text(plain, "label"), "x")
+}
+
 #Test("completion offers the binding snippets at a statement's start in a block") {
     server := lsp_test_server()
     uri: "file:///w/bind.jet"
@@ -292,7 +312,7 @@ Pixel: struct {
 `
 
 // The actions for the whole of line `line`.
-lsp_test_action_rows: fn(server: &LSPServer, uri: String, line: Int) -> [Dyn] {
+lsp_test_action_rows: fn(server: ^LSPServer, uri: String, line: Int) -> [Dyn] {
     params: "{{{lsp_test_text_document(uri)},\"range\":{{\"start\":{{\"line\":{line},\"character\":0}},\"end\":{{\"line\":{line + 1},\"character\":0}}}},\"context\":{{\"diagnostics\":[]}}}}"
     lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", params))
 }
@@ -349,6 +369,29 @@ Pixel: struct {
         assert(lsp_member(edit, "documentChanges") == None, "no documentChanges without the capability")
         assert(lsp_test_rows(lsp_test_field(lsp_test_field(edit, "changes"), uri)).len() == 1, "each action is one edit")
     }
+}
+
+#Test("a client that resolves code actions gets each one's edit from codeAction/resolve") {
+    plain := lsp_test_server()
+    uri: "file:///w/markers.jet"
+    lsp_test_open(plain, uri, LSP_TEST_MARKERS)
+    expected := [String]{}
+    loop action in lsp_test_action_rows(plain, uri, 3) -> expected.push(jet_error_json_encode_value(action))
+    server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"codeAction\":{{\"resolveSupport\":{{\"properties\":[\"edit\"]}}}}}}}}}}")
+    lsp_test_open(server, uri, LSP_TEST_MARKERS)
+    offered: lsp_test_action_rows(server, uri, 3)
+    assert(offered.len() > 0, "the markers line offers actions")
+    resolved := [String]{}
+    loop action in offered {
+        assert(lsp_member(action, "edit") == None, "the list leaves each edit out")
+        resolved.push(jet_error_json_encode_value(lsp_test_result(server, "codeAction/resolve", jet_error_json_encode_value(action))))
+    }
+    // Each resolved action is the one a client that does not resolve gets.
+    assert_eq(resolved, expected)
+    // Once the document moves on, an action offered before is refused.
+    _ := lsp_update_document(server.diagnostic_state, Val(lsp_test_json("{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[]}}")), is_open: false)
+    assert_eq(lsp_test_error_code(server, "codeAction/resolve", jet_error_json_encode_value(offered[0])), -32801)
 }
 
 // The byte offset of an LSP position in ASCII `text`.

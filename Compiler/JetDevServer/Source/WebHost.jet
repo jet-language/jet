@@ -76,7 +76,7 @@ WebHostFacts: struct {
         if self.state == "error" -> self.candidate else -> None
     }
 
-    building: fn(&self) Never! {
+    building: fn(^self) Never! {
         self.state = "building"
         self.code = ""
         self.diagnostic = ""
@@ -84,7 +84,7 @@ WebHostFacts: struct {
     }
 
     // A good build; a rebuild publishes the next version.
-    ready: fn(&self, build_ms: Int, rebuild: Bool) Never! {
+    ready: fn(^self, build_ms: Int, rebuild: Bool) Never! {
         if rebuild -> self.version += 1
         self.published = true
         self.state = "ready"
@@ -95,7 +95,7 @@ WebHostFacts: struct {
     }
 
     // A failed build keeps the candidate it was building.
-    failed: fn(&self, code: String, diagnostic: String) Never! {
+    failed: fn(^self, code: String, diagnostic: String) Never! {
         self.state = "error"
         self.code = "{code}"
         self.diagnostic = "{diagnostic}"

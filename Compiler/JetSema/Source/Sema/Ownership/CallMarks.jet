@@ -1,7 +1,7 @@
 // Call marks under `#Policy(writes: .Explicit)`. Calls are written plain and
 // the signature decides what each does; the policy asks that the text show it
-// too: `grow(&xs)` and `&xs.push(4)` for a call that changes a named value,
-// `archive(&&title)` and `&&buf.seal()` for one that takes it. The parser
+// too: `grow(^xs)` and `^xs.push(4)` for a call that changes a named value,
+// `archive(^^title)` and `^^buf.seal()` for one that takes it. The parser
 // keeps a written argument mark as CallArg.mark and a written receiver mark as
 // an Expr.Place that starts at the mark. Under the policy a missing, wrong or
 // extra mark is E0228, which quotes the callee's signature line and carries a
@@ -62,7 +62,7 @@ sema_call_marks_writes_marker: fn(marker: Marker) -> Bool Never! {
 
 // A package or module `writes: .Explicit` declaration, or the function's own
 // `#Policy(writes: .Explicit)` marker.
-sema_call_marks_apply_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
+sema_call_marks_apply_policy: fn(table: ^SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
     position: sema_scope_module_policy(table, graph, module_identity)
     table.writes_explicit = table.policy_rows[position].writes_explicit
     loop marker in markers {
@@ -72,7 +72,7 @@ sema_call_marks_apply_policy: fn(table: &SemaScopeTable, graph: SemaRegistration
 
 // A block `#Policy(writes: .Explicit) { … }` turns the policy on for its body.
 // Returns the enclosing setting for the matching pop.
-sema_call_marks_push_policy: fn(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
+sema_call_marks_push_policy: fn(table: ^SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
     previous: table.writes_explicit
     loop declaration in declarations {
         if sema_call_marks_writes_declaration(declaration) -> table.writes_explicit = true
@@ -80,7 +80,7 @@ sema_call_marks_push_policy: fn(table: &SemaScopeTable, declarations: [PolicyDec
     previous
 }
 
-// The mark a receiver written `&xs.push(4)` / `&&buf.seal()` carries: the
+// The mark a receiver written `^xs.push(4)` / `^^buf.seal()` carries: the
 // parser's Place starts at the mark, before its value. A Place sema builds
 // spans its value and carries no written mark.
 sema_call_marks_written_receiver: fn(receiver: Expr) -> PlaceAccess? Never! {
@@ -94,7 +94,7 @@ sema_call_marks_written_receiver: fn(receiver: Expr) -> PlaceAccess? Never! {
 
 // One argument of a checked call. `param` is the slot it binds; `signature`
 // is built only when a report needs it.
-sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, receiver: AccessConvention?, params: [SemaCallParam], param: SemaCallParam, arg: CallArg, diagnostics: &[Diagnostic]) {
+sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, receiver: AccessConvention?, params: [SemaCallParam], param: SemaCallParam, arg: CallArg, diagnostics: ^[Diagnostic]) {
     if !scopes.writes_explicit {
         if arg.mark == .Val(mark) {
             diagnostics.push(sema_call_marks_outside_policy(mark.access, mark.span))
@@ -127,7 +127,7 @@ sema_call_marks_check_argument: fn(scopes: SemaScopeTable, callee: String, recei
 // The receiver of a checked method call. `receiver` is the call's receiver
 // as written, `unmarked` the place sema checked, and `frame` the call's
 // resolved receiver convention.
-sema_call_marks_check_receiver: fn(scopes: SemaScopeTable, receiver: Expr, unmarked: Expr, frame: SemaReceiverMarkFrame, method: String, diagnostics: &[Diagnostic]) {
+sema_call_marks_check_receiver: fn(scopes: SemaScopeTable, receiver: Expr, unmarked: Expr, frame: SemaReceiverMarkFrame, method: String, diagnostics: ^[Diagnostic]) {
     have: sema_call_marks_written_receiver(receiver)
     if !scopes.writes_explicit {
         if have == .Val(access) {
@@ -161,7 +161,7 @@ sema_call_marks_receiver_mark_span: fn(receiver: Expr, access: PlaceAccess) -> S
 }
 
 sema_call_marks_text: fn(access: PlaceAccess) -> String Never! {
-    if access == PlaceAccess.Take -> "&&" else -> "&"
+    if access == PlaceAccess.Take -> "^^" else -> "^"
 }
 
 // E0228 for a missing, wrong or extra mark. `place` is the marked value's

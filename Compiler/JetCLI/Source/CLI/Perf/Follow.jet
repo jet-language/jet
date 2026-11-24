@@ -245,7 +245,7 @@ jet_cli_perf_attach_follow: fn(pid: Int, home: String, source: String, quiet: Bo
 
 // End a follow's hold: its lease, so the window closes once no other
 // attach holds it, and its link to the live file.
-jet_cli_perf_follow_leave: fn(follow: &JetCLIPerfFollow, lease: String) -[FS]> {
+jet_cli_perf_follow_leave: fn(follow: ^JetCLIPerfFollow, lease: String) -[FS]> {
     follow_files.remove(lease).drop("a lease the program no longer sees ends this follow's hold")
     if follow.link != "" {
         follow_files.remove(follow.link).drop("the live file's pages go once its last name and reader do")
@@ -274,7 +274,7 @@ jet_cli_perf_follow_gone: fn(pid: Int) -[FS.Read]> Bool {
 // `jet-perf-attach-<its pid>-<pid>-<ns>.live`, so it reads on to the end
 // once the program removes its own. Only a regular file this user owns,
 // in a directory no one else can open, is taken.
-jet_cli_perf_follow_link: fn(follow: &JetCLIPerfFollow, home: String) -[FS, Env, Time]> {
+jet_cli_perf_follow_link: fn(follow: ^JetCLIPerfFollow, home: String) -[FS, Env, Time]> {
     owner: follow_sys.geteuid()
     loop dir in ([String]{home, "/dev/shm/jet-{owner}"}) {
         place: follow_files.lstat(dir) ?? next
@@ -311,7 +311,7 @@ JetCLIPerfFollowPolled: struct {
 // length, kind and time is checked against its buffer, and a record that
 // fails ends its slot's read at the head, drawn as a damaged gap. A file
 // cut short reads as no new record.
-jet_cli_perf_follow_poll: fn(follow: &JetCLIPerfFollow) -[FS.Read]> JetCLIPerfFollowPolled JetCLIReadError! {
+jet_cli_perf_follow_poll: fn(follow: ^JetCLIPerfFollow) -[FS.Read]> JetCLIPerfFollowPolled JetCLIReadError! {
     header: follow_files.read_at(follow.link, 0, JET_CLI_PERF_LIVE_HEADER) ?? return Ok(JetCLIPerfFollowPolled{text: "", end: JET_CLI_PERF_LIVE_RUNNING})
     if header.len() < JET_CLI_PERF_LIVE_HEADER {
         return Ok(JetCLIPerfFollowPolled{text: "", end: JET_CLI_PERF_LIVE_RUNNING})
@@ -350,7 +350,7 @@ jet_cli_perf_follow_poll: fn(follow: &JetCLIPerfFollow) -[FS.Read]> JetCLIPerfFo
 
 // Slot `index`'s new records, from the follower's position to `head`, its
 // buffer's tail `tail` as the poll read it.
-jet_cli_perf_follow_slot: fn(follow: &JetCLIPerfFollow, index: Int, head: Int, tail: Int, thread: Int, clock: JetCLIPerfFollowClock) -[FS.Read]> String {
+jet_cli_perf_follow_slot: fn(follow: ^JetCLIPerfFollow, index: Int, head: Int, tail: Int, thread: Int, clock: JetCLIPerfFollowClock) -[FS.Read]> String {
     slot := follow.slots[index]
     if slot.at < tail -> slot.at = tail
     // A head behind the follower, or further ahead than the buffer holds,
@@ -472,7 +472,7 @@ jet_cli_perf_follow_timed: fn(kind: Int, start: Int, end: Int) -> JetCLIPerfFoll
 // One row the follow read: kept for the trace as a spans file holds it
 // (jet_cli_perf_log_spans_read), within JET_CLI_PERF_FOLLOW_ROWS_MOST,
 // and its line, as `jet perf view`'s timeline shows it.
-jet_cli_perf_follow_row: fn(follow: &JetCLIPerfFollow, kind: Int, edges: JetCLIPerfFollowEdges, task: Int, name: &&[U8], text: &&String) -> String Never! {
+jet_cli_perf_follow_row: fn(follow: ^JetCLIPerfFollow, kind: Int, edges: JetCLIPerfFollowEdges, task: Int, name: ^^[U8], text: ^^String) -> String Never! {
     row := [U8]{}
     loop word in ([Int]{edges.start, edges.end, task, name.len() | (kind << 32)}) {
         loop shift in 0..<8 -> row.push(U8{(word >> (shift * 8)) & 255})
@@ -483,7 +483,7 @@ jet_cli_perf_follow_row: fn(follow: &JetCLIPerfFollow, kind: Int, edges: JetCLIP
 }
 
 // Keep `rows` for the trace, within JET_CLI_PERF_FOLLOW_ROWS_MOST.
-jet_cli_perf_follow_keep: fn(follow: &JetCLIPerfFollow, rows: &&[U8]) Never! {
+jet_cli_perf_follow_keep: fn(follow: ^JetCLIPerfFollow, rows: ^^[U8]) Never! {
     if follow.rows.len() + rows.len() > JET_CLI_PERF_FOLLOW_ROWS_MOST {
         follow.unkept += 1
         return
@@ -493,7 +493,7 @@ jet_cli_perf_follow_keep: fn(follow: &JetCLIPerfFollow, rows: &&[U8]) Never! {
 
 // `[start..end] source#name`, timed from the window's opening; a plot's
 // `name = value` at its one instant.
-jet_cli_perf_follow_line: fn(follow: &JetCLIPerfFollow, kind: Int, edges: JetCLIPerfFollowEdges, text: &&String) -> String Never! {
+jet_cli_perf_follow_line: fn(follow: ^JetCLIPerfFollow, kind: Int, edges: JetCLIPerfFollowEdges, text: ^^String) -> String Never! {
     if follow.opened <= 0 -> follow.opened = edges.start
     since: jet_cli_perf_since(edges.start, follow.opened)
     shown: jet_cli_perf_follow_shown(text.move())
@@ -505,7 +505,7 @@ jet_cli_perf_follow_line: fn(follow: &JetCLIPerfFollow, kind: Int, edges: JetCLI
 
 // A name as a line shows it: each control character escaped, so a
 // program's name can't move the terminal's cursor.
-jet_cli_perf_follow_shown: fn(name: &&String) -> String Never! {
+jet_cli_perf_follow_shown: fn(name: ^^String) -> String Never! {
     bytes: name.bytes()
     plain := true
     loop byte in bytes {
@@ -530,7 +530,7 @@ jet_cli_perf_follow_shown: fn(name: &&String) -> String Never! {
 // publication and appends to while zones stay on, kept for the trace in
 // case the program ends first. A file shorter than the follower has read
 // was emptied by a later window, so it is read again from its start.
-jet_cli_perf_follow_turn: fn(follow: &JetCLIPerfFollow, path: String) -[FS.Read]> String {
+jet_cli_perf_follow_turn: fn(follow: ^JetCLIPerfFollow, path: String) -[FS.Read]> String {
     facts: follow_files.stat(path) ?? return ""
     if facts.size < follow.spans_at {
         follow.spans_at = 0

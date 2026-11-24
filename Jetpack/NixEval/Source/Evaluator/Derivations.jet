@@ -15,19 +15,19 @@ nixeval_derivation_reserved_fields: fn() -> [String] Never! {
 }
 
 impl NixEvaluator {
-    derivation: fn(&self, source: String) -> NixEvalDerivation NixEvalError! {
+    derivation: fn(^self, source: String) -> NixEvalDerivation NixEvalError! {
         if self.derivation_steps(source) == {
             .Ok(request) -> return Ok(request)
             .Err(error) -> return Err(nixeval_public_error(error))
         }
     }
 
-    derivation_steps: fn(&self, source: String) -> NixEvalDerivation NixEvalError! {
+    derivation_steps: fn(^self, source: String) -> NixEvalDerivation NixEvalError! {
         root: self.evaluate_source(source, "")
         self.derivation_evaluation(root)
     }
 
-    derivation_output: fn(&self, source: String, attribute: String) -> NixEvalDerivation NixEvalError! {
+    derivation_output: fn(^self, source: String, attribute: String) -> NixEvalDerivation NixEvalError! {
         if self.derivation_output_steps(source, attribute) == {
             .Ok(request) -> return Ok(request)
             .Err(error) -> return Err(nixeval_public_error(error))
@@ -36,7 +36,7 @@ impl NixEvaluator {
 
     // packages.<system>.<attribute>, falling back to legacyPackages only when
     // the first path is missing.
-    derivation_output_steps: fn(&self, source: String, attribute: String) -> NixEvalDerivation NixEvalError! {
+    derivation_output_steps: fn(^self, source: String, attribute: String) -> NixEvalDerivation NixEvalError! {
         root: self.evaluate_source(source, "")
         if self.resolve_path(root, [String]{"packages", self.system, attribute}) == {
             .Ok(output) -> return self.derivation_evaluation(output)
@@ -48,7 +48,7 @@ impl NixEvaluator {
         self.derivation_evaluation(legacy)
     }
 
-    derivation_evaluation: fn(&self, value: NixEvalValue) -> NixEvalDerivation NixEvalError! {
+    derivation_evaluation: fn(^self, value: NixEvalValue) -> NixEvalDerivation NixEvalError! {
         if value == {
             .Derivation(fields, request) -> {
                 if request == {
@@ -61,7 +61,7 @@ impl NixEvaluator {
         Err(NixEvalError.Unsupported("derivation evaluation must return a derivation, got {value.type_name()}"))
     }
 
-    derivation_from_value: fn(&self, value: NixEvalValue, strict: Bool) -> NixEvalValue NixEvalError! {
+    derivation_from_value: fn(^self, value: NixEvalValue, strict: Bool) -> NixEvalValue NixEvalError! {
         fields: value.attr_fields() ?? return Err(NixEvalError.TypeMismatch{expected: "derivation attribute set", actual: value.type_name()})
         if !strict -> return Ok(NixEvalValue.Derivation{fields: fields, request: None})
         request: self.derivation_from_fields(fields)
@@ -70,7 +70,7 @@ impl NixEvaluator {
 
     // Attribute selection on a derivation value. A strict derivation answers
     // from its evaluated request; a lazy one forces only the selected field.
-    derivation_field: fn(&self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> Int? NixEvalError! {
+    derivation_field: fn(^self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> Int? NixEvalError! {
         if field == "drvPath" || field == "outPath" || field == "out" {
             return Err(NixEvalError.Unsupported("derivation store paths are assigned by Jetpack's private materializer"))
         }
@@ -86,7 +86,7 @@ impl NixEvaluator {
 
     // Any other derivation field: a strict derivation answers from its
     // environment, a lazy one from its unforced fields.
-    derivation_env_field: fn(&self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> Int? Never! {
+    derivation_env_field: fn(^self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> Int? Never! {
         if request == {
             .Val(evaluated) -> {
                 text: evaluated.env.get(field) ?? return None
@@ -98,7 +98,7 @@ impl NixEvaluator {
 
     // `name`, `system`, `builder` or `args`: from the evaluated request of a
     // strict derivation, else forced from the lazy fields.
-    derivation_attribute: fn(&self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> NixEvalValue NixEvalError! {
+    derivation_attribute: fn(^self, fields: [String:Int], request: NixEvalDerivation?, field: String) -> NixEvalValue NixEvalError! {
         if request == {
             .Val(evaluated) -> Ok(self.request_field(evaluated, field))
             .None -> {
@@ -110,7 +110,7 @@ impl NixEvaluator {
     }
 
     // A strict derivation's evaluated `name`, `system`, `builder` or `args`.
-    request_field: fn(&self, request: NixEvalDerivation, field: String) -> NixEvalValue Never! {
+    request_field: fn(^self, request: NixEvalDerivation, field: String) -> NixEvalValue Never! {
         if field == {
             "name" -> NixEvalValue.Str(request.name)
             "system" -> NixEvalValue.Str(request.system)
@@ -125,26 +125,26 @@ impl NixEvaluator {
         }
     }
 
-    field_value: fn(&self, fields: [String:Int], name: String) -> NixEvalValue? NixEvalError! {
+    field_value: fn(^self, fields: [String:Int], name: String) -> NixEvalValue? NixEvalError! {
         binding: self.attr_field(fields, name) ?? return Ok(None)
         value: self.force(binding)
         Ok(Val(value))
     }
 
-    required_string_field: fn(&self, fields: [String:Int], name: String) -> String NixEvalError! {
+    required_string_field: fn(^self, fields: [String:Int], name: String) -> String NixEvalError! {
         found: self.field_value(fields, name)
         value: found ?? return Err(NixEvalError.Missing(name))
         nixeval_derivation_string(value)
     }
 
-    optional_string_field: fn(&self, fields: [String:Int], name: String) -> String? NixEvalError! {
+    optional_string_field: fn(^self, fields: [String:Int], name: String) -> String? NixEvalError! {
         found: self.field_value(fields, name)
         value: found ?? return Ok(None)
         text: nixeval_derivation_string(value)
         Ok(Val(text))
     }
 
-    derivation_from_fields: fn(&self, fields: [String:Int]) -> NixEvalDerivation NixEvalError! {
+    derivation_from_fields: fn(^self, fields: [String:Int]) -> NixEvalDerivation NixEvalError! {
         name: self.required_string_field(fields, "name")
         nixeval_validate_derivation_name(name)
         system: self.required_string_field(fields, "system")
@@ -278,7 +278,7 @@ nixeval_derivation_string: fn(value: NixEvalValue) -> String NixEvalError! {
     Ok(text.value)
 }
 
-nixeval_record_derivation_contexts: fn(contexts: [String], inputs: &[String]) NixEvalError! {
+nixeval_record_derivation_contexts: fn(contexts: [String], inputs: ^[String]) NixEvalError! {
     loop context in contexts {
         if !nixeval_has_prefix(context, "path:") {
             return Err(NixEvalError.Unsupported("derivation inputs must have canonical store-path context"))

@@ -24,17 +24,17 @@ stream_error: fn(kind: DataErrorKind, reason: String, operation: String) -> Data
 // construct DataStream<T> before these operations are called, so this module
 // never coerces a String into T.
 
-from_items: fn<T>(items: &&[T]) -> DataStream<T> Never! {
+from_items: fn<T>(items: ^^[T]) -> DataStream<T> Never! {
     DataStream<T>{items: items, index: 0, canceled: false, __source: None}
 }
 
-next: fn<T>(stream: &DataStream<T>) -> T? DataError! { core.data.__stream_pull<T>(stream) }
+next: fn<T>(stream: ^DataStream<T>) -> T? DataError! { core.data.__stream_pull<T>(stream) }
 
-collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! { core.data.__stream_collect<T>(stream) }
+collect: fn<T>(stream: ^DataStream<T>) -> [T] DataError! { core.data.__stream_collect<T>(stream) }
 
-cancel: fn<T>(stream: &DataStream<T>) Never! { stream.canceled = true }
+cancel: fn<T>(stream: ^DataStream<T>) Never! { stream.canceled = true }
 
-skip: fn<T>(stream: &DataStream<T>, count: Int) Never! {
+skip: fn<T>(stream: ^DataStream<T>, count: Int) Never! {
     remaining := count
     loop remaining > 0 {
         if core.data.__stream_pull<T>(stream) == {
@@ -49,7 +49,7 @@ skip: fn<T>(stream: &DataStream<T>, count: Int) Never! {
     }
 }
 
-take_n: fn<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
+take_n: fn<T>(stream: ^DataStream<T>, count: Int) -> [T] DataError! {
     if stream.canceled {
         return Err(stream_error(DataErrorKind.State, "stream was canceled", "data.stream"))
     }

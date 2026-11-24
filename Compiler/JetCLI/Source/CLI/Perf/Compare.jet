@@ -196,7 +196,7 @@ jet_cli_perf_compare_rows: fn(base: [JetCLIPerfLineTotals], head: [JetCLIPerfLin
 // Add each capture's samples of `captures`, the head side's when `head`,
 // to the row of its function (and line, when `by_line`) in `rows`, which
 // `places` finds by key.
-jet_cli_perf_compare_add: fn(rows: &[JetCLIPerfCompareRow], places: &[String:Int], captures: [JetCLIPerfLineTotals], head: Bool, by_line: Bool, base_count: Int, head_count: Int) Never! {
+jet_cli_perf_compare_add: fn(rows: ^[JetCLIPerfCompareRow], places: ^[String:Int], captures: [JetCLIPerfLineTotals], head: Bool, by_line: Bool, base_count: Int, head_count: Int) Never! {
     loop (capture, totals) in captures {
         loop total in totals.rows {
             if total.samples <= 0 -> next
@@ -253,7 +253,7 @@ jet_cli_perf_compare_before: fn(left: JetCLIPerfCompareRow, right: JetCLIPerfCom
 // adjusted value, and at most 1 (Benjamini-Hochberg). Below
 // JET_CLI_PERF_SIGNIFICANT_PPM it is `slower` when the head captures
 // sampled it more, else `faster`; at or above it, `no significant change`.
-jet_cli_perf_compare_judge: fn(rows: &[JetCLIPerfCompareRow], base_total: Int, head_total: Int) Never! {
+jet_cli_perf_compare_judge: fn(rows: ^[JetCLIPerfCompareRow], base_total: Int, head_total: Int) Never! {
     // The judged rows, the smallest p first.
     judged := [Int]{}
     loop at in 0..<rows.len() {

@@ -115,7 +115,7 @@ ir_x64_stack_callee: fn(walk: IRX64StackWalk, reloc: X64Reloc) -> Int Never! {
 
 // Visits `row` and its callees, settling each part once all its rows are
 // visited (Tarjan's strongly connected components).
-ir_x64_stack_visit: fn(walk: &IRX64StackWalk, compiled: IRX64Result, row: Int) Never! {
+ir_x64_stack_visit: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, row: Int) Never! {
     walk.order[row] = walk.visited
     walk.low[row] = walk.visited
     walk.visited += 1
@@ -138,7 +138,7 @@ ir_x64_stack_visit: fn(walk: &IRX64StackWalk, compiled: IRX64Result, row: Int) N
 
 // Settles the part `root` was visited first in: every row visited after it
 // that is still pending.
-ir_x64_stack_settle: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int) Never! {
+ir_x64_stack_settle: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, root: Int) Never! {
     members := [Int]{}
     loop {
         member := walk.pending.pop() ?? {
@@ -227,7 +227,7 @@ ir_x64_stack_settle: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int)
 // unmarked functions closes, or -1. The chain's next step replaces the row's
 // deepest outside callee in walk.next, and a call into a marked function of
 // the part stands in when the row has neither.
-ir_x64_stack_segment: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int, row: Int) -> Int Never! {
+ir_x64_stack_segment: fn(walk: ^IRX64StackWalk, compiled: IRX64Result, root: Int, row: Int) -> Int Never! {
     walk.segment[row] = -3
     outside: walk.next[row]
     deepest := 0

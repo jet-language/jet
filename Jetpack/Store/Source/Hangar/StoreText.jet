@@ -106,7 +106,7 @@ store_text_split_last: fn(text: String, needle: String) -> {before: String, afte
 }
 
 // Append `value` as 8 big-endian bytes.
-store_push_u64_be: fn(out: &[U8], value: Int) Never! {
+store_push_u64_be: fn(out: ^[U8], value: Int) Never! {
     shift := 56
     loop shift >= 0 {
         out.push(U8{((value >> shift)) & 255})
@@ -115,24 +115,24 @@ store_push_u64_be: fn(out: &[U8], value: Int) Never! {
 }
 
 // Append `value` as 8 little-endian bytes.
-store_push_u64_le: fn(out: &[U8], value: Int) Never! {
+store_push_u64_le: fn(out: ^[U8], value: Int) Never! {
     loop shift in 0..<8 -> out.push(U8{((value >> (shift * 8))) & 255})
 }
 
 // Append `value` as 16 little-endian bytes (Rust `i128::to_le_bytes`).
-store_push_i128_le: fn(out: &[U8], value: Int) Never! {
+store_push_i128_le: fn(out: ^[U8], value: Int) Never! {
     loop shift in 0..<8 -> out.push(U8{((value >> (shift * 8))) & 255})
     fill: if value < 0 -> 255 else -> 0
     loop _ in 0..<8 -> out.push(U8{fill})
 }
 
 // Append every byte of `bytes`.
-store_push_bytes: fn(out: &[U8], bytes: [U8]) Never! {
+store_push_bytes: fn(out: ^[U8], bytes: [U8]) Never! {
     loop byte in bytes -> out.push(byte)
 }
 
 // A big-endian length frame followed by the bytes.
-store_push_frame: fn(out: &[U8], field: [U8]) Never! {
+store_push_frame: fn(out: ^[U8], field: [U8]) Never! {
     store_push_u64_be(out, field.len())
     store_push_bytes(out, field)
 }

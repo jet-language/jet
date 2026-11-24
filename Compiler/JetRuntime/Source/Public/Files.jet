@@ -3,8 +3,8 @@
 // their declared effect rows. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
 // (RouteAFiles.jet, FilesWalk.jet, CompilerFS.jet, CompilerMapped.jet,
-// FilesPathOps.jet, FilesStreams.jet, HostFileLock.jet,
-// HostHeldDirectory.jet, HostPathFacts.jet).
+// CompilerFileLeaves.jet, FilesPathOps.jet, FilesStreams.jet,
+// HostFileLock.jet, HostHeldDirectory.jet, HostPathFacts.jet).
 // An entries context or a walk is a key, and each path in it a slot. A key
 // that is not live, or a slot that is out of range or released, panics. A
 // tuple result's items cross in the checked tuple's written order, which
@@ -292,17 +292,61 @@ files: module {
     // end of the file), a whole write, and a flush. Like the handles' other
     // methods they only wait: the authority is checked where the handle is
     // opened.
-    #Import(c) priv reader_read: fn(reader: &FileReader, limit: Int) -[Time.Wait]> [U8] IOError! = "jet_std_file_reader_read"
+    #Import(c) priv reader_read: fn(reader: ^FileReader, limit: Int) -[Time.Wait]> [U8] IOError! = "jet_std_file_reader_read"
 
-    #Import(c) priv reader_read_into: fn(reader: &FileReader, buffer: &[U8], limit: Int) -[Time.Wait]> Int IOError! = "jet_std_file_reader_read_into"
+    #Import(c) priv reader_read_into: fn(reader: ^FileReader, buffer: ^[U8], limit: Int) -[Time.Wait]> Int IOError! = "jet_std_file_reader_read_into"
 
-    #Import(c) priv writer_write_all: fn(writer: &FileWriter, bytes: [U8]) -[Time.Wait]> IOError! = "jet_std_file_writer_write_all"
+    #Import(c) priv writer_write_all: fn(writer: ^FileWriter, bytes: [U8]) -[Time.Wait]> IOError! = "jet_std_file_writer_write_all"
 
-    #Import(c) priv writer_flush: fn(writer: &FileWriter) -[Time.Wait]> IOError! = "jet_std_file_writer_flush"
+    #Import(c) priv writer_flush: fn(writer: ^FileWriter) -[Time.Wait]> IOError! = "jet_std_file_writer_flush"
+
+    #Import(c) priv reader_seek: fn(reader: ^FileReader, position: Int) -[Time.Wait]> IOError! = "jet_std_file_reader_seek"
+
+    #Import(c) priv writer_fsync: fn(writer: ^FileWriter) -[Time.Wait]> IOError! = "jet_std_file_writer_fsync"
+
+    // The compiler's `Path` handle: its text in and out, the lexical path
+    // math of RoutePath.jet, the home directory (HOME) and a recursive walk.
+    #Import(c) priv path_from: fn(text: String) -> Path = "jet_path_from"
+
+    #Import(c) priv path_home: fn() -[Env]> Path = "jet_path_home"
+
+    #Import(c) priv path_to_string: fn(path: Path) -> String = "jet_path_to_string"
+
+    #Import(c) priv path_join: fn(path: Path, other: String) -> Path = "jet_path_join"
+
+    #Import(c) priv path_parent: fn(path: Path) -> Path? = "jet_path_parent"
+
+    #Import(c) priv path_extension: fn(path: Path) -> String? = "jet_path_extension"
+
+    #Import(c) priv path_stem: fn(path: Path) -> String? = "jet_path_stem"
+
+    #Import(c) priv path_normalize: fn(path: Path) -> Path = "jet_path_normalize"
+
+    #Import(c) priv path_is_within: fn(path: Path, base: Path) -> Bool = "jet_path_is_within"
+
+    #Import(c) priv path_walk: fn(path: Path) -> [Path] = "jet_path_walk"
 
     // Whether the process may access `path` in `mode`, and the space row of
     // the filesystem holding `path`.
     #Import(c) priv access_raw: fn(path: String, mode: Int) -[FS.Read]> IOError! = "jet_std_fs_access_raw"
 
     #Import(c) priv space: fn(path: String) -[FS.Read]> [Int] IOError! = "jet_fs_space"
+
+    // The `_raw` opens and remove under a held directory (Directory.open_raw,
+    // create_raw and remove_raw): the entry name is its exact bytes, which
+    // need not be UTF-8. An open refuses a final link, never following it.
+    #Import(c) priv open_reader_raw: fn(handle: Int, name: [U8]) -[FS.Read]> FileReader IOError! = "jet_std_files_open_reader_raw"
+
+    #Import(c) priv open_writer_raw: fn(handle: Int, name: [U8], if_exists: Int, mode: Int) -[FS.Write]> FileWriter IOError! = "jet_std_files_open_writer_raw"
+
+    #Import(c) priv remove_at_raw: fn(handle: Int, name: [U8]) -[FS.Write]> IOError! = "jet_fs_remove_at_raw"
+
+    // The entries of the directory at `path`, sorted by name.
+    #Import(c) priv list_dir_raw: fn(path: String) -[FS.Read]> [DirEntry] IOError! = "jet_std_fs_list_dir_raw"
+
+    // The reader's bytes up to and including the next newline.
+    #Import(c) priv reader_line_bytes: fn(reader: ^FileReader) -[FS.Read]> [U8] IOError! = "jet_file_reader_line_bytes_raw"
+
+    // Opens `path` for reading without waiting for a FIFO's writer.
+    #Import(c) priv open_reader_nonblocking: fn(path: String) -[FS.Read]> FileReader IOError! = "jet_std_files_open_reader_nonblocking"
 }

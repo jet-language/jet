@@ -66,7 +66,7 @@ ir_x64_loop_align: fn(length: Int) -> Int Never! {
 // which stay long; aligns the loop heads `heads` (old offsets of
 // instruction starts, in any order, no loop inside another), each loop
 // ending at `ends` (the same index), and returns the layout map.
-ir_x64_relax: fn(code: &[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
+ir_x64_relax: fn(code: ^[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
     r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, gone: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
     if sites.len() == 0 && heads.len() == 0 -> return r
     sorted := true
@@ -218,7 +218,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
 
 // How many bytes the code up to and including each branch shrank by, from
 // the branches short now and the jmps gone.
-ir_x64_relax_shrink: fn(r: &IRX64Relax) Never! {
+ir_x64_relax_shrink: fn(r: ^IRX64Relax) Never! {
     total := 0
     loop index in 0..<r.sites.len() {
         if r.gone[index] -> total += r.lengths[index] else if r.short[index] {
@@ -235,7 +235,7 @@ ir_x64_relax_shrink: fn(r: &IRX64Relax) Never! {
 // has this shape. It is left alone when another listed branch lands on the
 // jmp or a loop head starts there, as that code would no longer exist. A
 // tail jump is a relocation, not a listed branch, so it never fuses.
-ir_x64_relax_fuse: fn(code: &[U8], r: &IRX64Relax, targets: &[Int]) Never! {
+ir_x64_relax_fuse: fn(code: ^[U8], r: ^IRX64Relax, targets: ^[Int]) Never! {
     if r.sites.len() < 2 -> return
     landed := targets.copy()
     landed.sort()
@@ -258,7 +258,7 @@ ir_x64_relax_fuse: fn(code: &[U8], r: &IRX64Relax, targets: &[Int]) Never! {
 // Each head's no-ops in the layout of the branches short now, in code
 // order: the head's place after the shrinking and the no-ops before it,
 // and its loop's length there (no head is inside it).
-ir_x64_relax_pad: fn(r: &IRX64Relax) Never! {
+ir_x64_relax_pad: fn(r: ^IRX64Relax) Never! {
     total := 0
     loop index in 0..<r.heads.len() {
         at: r.heads[index] - ir_x64_relax_shrunk(r, r.heads[index]) + total
@@ -298,7 +298,7 @@ ir_x64_relax_walk: fn() -> IRX64RelaxWalk Never! { IRX64RelaxWalk{branches: 0, h
 // ir_x64_relaxed_at of `at`, found from where `walk` stood, which moves to
 // `at`: an offset a little after the last one steps over the few branches
 // and heads between them; any other searches for its place.
-ir_x64_relaxed_next: fn(r: IRX64Relax, walk: &IRX64RelaxWalk, at: Int) -> Int Never! {
+ir_x64_relaxed_next: fn(r: IRX64Relax, walk: ^IRX64RelaxWalk, at: Int) -> Int Never! {
     branches := walk.branches
     if branches > r.sites.len() || (branches > 0 && r.starts[branches - 1] + r.lengths[branches - 1] > at) {
         branches = ir_x64_relax_branches_to(r, at)

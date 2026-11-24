@@ -13,24 +13,24 @@ Order: struct {
 
     start: fn(id: Int) -> Order.Draft { Order{id: id} }
 
-    confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
+    confirm: fn(self: ^^Order.Draft) -> Order.Confirmed { self }
 
-    ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
+    ship: fn(self: ^^Order.Confirmed) -> Order.Shipped { self }
 
-    label: fn(self: &Order.Confirmed) -> String { "confirmed:{self.id}" }
+    label: fn(self: ^Order.Confirmed) -> String { "confirmed:{self.id}" }
 
-    cancel: fn(self: &&Order.Open) -> Order.Canceled { self }
+    cancel: fn(self: ^^Order.Open) -> Order.Canceled { self }
 }
 
 make_draft: fn(id: Int) -> Order.Draft { Order.start(id) }
 
-ship_draft_param: fn(order: &&Order.Draft) -> String { "{order.ship().id}" }
+ship_draft_param: fn(order: ^^Order.Draft) -> String { "{order.ship().id}" }
 
-ship_open_group_param: fn(order: &&Order.Open) -> String { "{order.ship().id}" }
+ship_open_group_param: fn(order: ^^Order.Open) -> String { "{order.ship().id}" }
 
-label_draft_param: fn(order: &Order.Draft) -> String { order.label() }
+label_draft_param: fn(order: ^Order.Draft) -> String { order.label() }
 
-ship_confirmed_param: fn(order: &&Order.Confirmed) -> Order.Shipped { order.ship() }
+ship_confirmed_param: fn(order: ^^Order.Confirmed) -> Order.Shipped { order.ship() }
 
 run: fn() {
     ok: make_draft(1).confirm()

@@ -94,7 +94,7 @@ vocabulary](vocabulary.md).
   engine. In `Sh`, literal words become argv items and each hole becomes one
   argv item; no word splitting, glob expansion, or shell parsing is applied to
   a hole. In `HTML`, a hole typed `HTML` composes as markup, and any other
-  hole is escaped for where it sits: in text `&`, `<` and `>`; inside an
+  hole is escaped for where it sits: in text `^`, `<` and `>`; inside an
   attribute value its quotes as well, and inside an unquoted value its
   whitespace, `=` and backtick too. Converting a runtime `String` to checked
   text is E0149; the audited
@@ -132,18 +132,27 @@ vocabulary](vocabulary.md).
   `check: fn(self, call: CompilerCall) { … }` (D-CORE-CHECK1=A). While the
   compiler checks a program it runs the rule at each call of a function or
   method that carries the marker, and at each method call on a type that
-  carries it, a call of a member the type lacks included. `call` is a
+  carries it, a call of a member the type lacks included. A
+  `web.form(Model, action: submit)` call is heard by the rules of the
+  model's markers as `form` called on the model with the action alone; Core's
+  `#Web.Form` rule rejects an action that does not take exactly the model
+  (E2474). `call` is a
   CompilerCall: its written `name` (a CompilerName), its `args` in written
   order and its `receiver`, each a CompilerArg with its `label`, `type` (a
   TypeId; `_` when the argument's own check fails), `value`, the
-  `function` it names (None) and its `span`. `value` is the Dyn the
+  `function` it names and its `span`. An argument that names a declared
+  function by its bare name, as `f.reflect()` resolves it, carries that
+  function's FunctionInfo in `function`; any other argument's is None. A type
+  name (`Checkout`) checks where a `Type` is expected and is heard as that
+  `Type` value. `value` is the Dyn the
   argument's `encode()` returns when the build knows the argument (a
   literal, a module constant, also one that names another constant, or a
   struct, enum case or list literal of known parts): a Bool, an Int or
   fixed-width integer, a Float or F32, a Char or a String, a list of these,
   and a struct or enum whose Encode is the derived one with no codec option,
   its fields plain values and its cases without payload or with one value.
-  A `Path{…}` literal has no Encode and is heard as the Text of its path.
+  A `Path{…}` literal has no Encode and is heard as the Text of its path, and
+  a `Type` as the Text of the path it names (`"main.Checkout"`).
   Any other argument's `value` is None
   (an optional field, a byte list, a generic type, a written codec, a
   value only the run knows). The call's `span` runs from its name to its
@@ -348,8 +357,8 @@ assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "/%=" | "%=" | "%%="
                  | "<<=" | ">>=" ) expr NL ;
 ```
 
-A parameter's access marker is on its type (`x: &T` or `x: &&T`); receivers
-write `&self` or `&&self`. A type is never written between a binding name and its
+A parameter's access marker is on its type (`x: ^T` or `x: ^^T`); receivers
+write `^self` or `^^self`. A type is never written between a binding name and its
 binding sigil. Types ride values (`Type{…}` or an expected-type-inferred
 `{…}`), or appear on signatures and fields. The old `name: Type: value` and
 `name: Type := value` forms are retired (D-BIND-BARE1=A).
@@ -468,7 +477,7 @@ run-time locals or parameters (E0640).
 In an entry file whose top level holds
 statements and no `run: fn`, every top-level line is the program's entry, in order: its statements
 run, and its bindings other than ALL_CAPS constants are locals of that entry. A function declared
-in the file may use them: the checker gives it one label-only parameter per local it names, `&`
+in the file may use them: the checker gives it one label-only parameter per local it names, `^`
 when its body changes the local, whose default is the local itself, so each call in the file
 passes the caller's binding and a call from elsewhere, such as a `#Test`, passes it by name
 (`note("x", count: c)`). The function's own parameter or top-level local of the same spelling
@@ -719,7 +728,7 @@ as an argument, a return value, a struct field, an assignment or a list
 element, `keep: fn(cell: Int | String) { store(cell) }` hands its value to
 `store: fn(cell: Int | String | Bool)`, and each member keeps its payload as
 its own case of the wider union. A union with a member the expected one lacks
-is E0112. Only the value widens: a `&` parameter takes exactly its union type,
+is E0112. Only the value widens: a `^` parameter takes exactly its union type,
 and a list, optional or other container of the smaller union is not one of the
 larger (D-ALT-SUBSET1=A).
 
@@ -951,7 +960,7 @@ Float. Otherwise the head's notation applies, so `[[Int]]{xs}` is a one-element
 list when `xs: [Int]` (D-DOTCTOR3 amendment, 2026-09-28, #3739).
 
 `self` is the receiver and follows the same access law as any parameter. In an
-`&self` method, field assignment, compound assignment, and whole-receiver
+`^self` method, field assignment, compound assignment, and whole-receiver
 replacement are legal. The same write in a read method is E0205. Calling a
 write-receiver method needs a changeable receiver: on a `:` binding it is E0111,
 on a read parameter E0205, and the error quotes the method's signature line.
@@ -1003,10 +1012,10 @@ type arguments from it. The receiver is evaluated once, at the read: a name
 or a field path of one is captured as a closure captures it, and any other
 receiver (`hire("Lin").tell`) is computed there and kept. A bound value that
 cannot keep a lent receiver is refused naming it, as the closure is (E0120
-for `counter.bump` returned past the call that lent `counter`). A `&self`
+for `counter.bump` returned past the call that lent `counter`). A `^self`
 method binds where its closure borrows or moves the receiver, as an argument
 the call runs; stored or passed on over a copy of the receiver, its changes
-would land on the copy, so it is E0924, as is a `&&self` method. Anywhere
+would land on the copy, so it is E0924, as is a `^^self` method. Anywhere
 else, a union with a function member included, the read is a forgotten call:
 E0924, whose edit adds `()`. Where a function type is expected and the type
 has both a field and a method of the name, the read is E0950, which offers
@@ -1513,7 +1522,7 @@ the same way, and a distinct type its base's bytes. The compiler places the
 bytes with the same computation it reports, so a reported offset or size is
 where the compiled program keeps the field. A C
 declaration that follows them, with explicit padding fields, takes such a
-struct by reference: an `#Import` C function with a `&T` parameter receives the
+struct by reference: an `#Import` C function with a `^T` parameter receives the
 address of the value's own bytes when every field is a machine integer, float,
 `Bool`, or such a struct.
 
@@ -1577,7 +1586,7 @@ use exactly `N` names. When `N` is a literal and `T` is plain data (`Bool`,
 list of those), code generation stores the `N` elements inline, with no heap
 storage; any other `[T#N]` has the list representation of `[T]` (S76). Either
 way a fixed list is a value: assignment and a by-value parameter copy its
-elements, and a `&` parameter writes the caller's.
+elements, and a `^` parameter writes the caller's.
 
 ```ebnf
 type_fixed_list = "[" type "#" int_literal "]" ;
@@ -1732,7 +1741,7 @@ Function values use a function type with parameter types and a result:
 function-value effect bound is written `fn(T1, T2) -[]> R`; other effect sets
 replace the empty set. Unmarked parameters have plain read access. A named
 function becomes a value only when every parameter can be called with that read
-access; parameters requiring `&` or `&&` keep the function direct-call-only
+access; parameters requiring `^` or `^^` keep the function direct-call-only
 (**E0227**; S47, D-MEM-PARAM1).
 
 A qualified enum payload case written without a call is that case's
@@ -1742,7 +1751,7 @@ builds one case per name. A named payload keeps its labels label-only, so
 `Message.Pair` is `fn(*, left: Int, right: Int) -[]> Message` and fills the
 slots such a declared function fills. A payload that the copy law can't copy
 out of a read parameter is taken, so its constructor value fits only a
-function type that marks the take (`fn(&&FileWriter) -> Sink`); anywhere else
+function type that marks the take (`fn(^^FileWriter) -> Sink`); anywhere else
 it reports **E0227**. The enum's type arguments are written on the case
 (`Holder<Int>.Full`) or come from the result of the expected function type. In
 a slot whose function fails (`request: fn(Reply<R>) -> M E!`), the constructor
@@ -1806,7 +1815,7 @@ reads, made when the lambda is made, so a call after that name changed is
 **E0204** (`v := [1]; f: fn() -> Int { v.len() }; v.push(2); f()`): make the
 lambda after the change, or pass the value as a parameter. An escaping
 lambda—one stored in a binding that is passed, stored, or returned, returned
-itself, stored in a struct field, or passed to a `&&T` parameter—must own its
+itself, stored in a struct field, or passed to a `^^T` parameter—must own its
 captures.
 Copy values are copied at closure creation; other clonable values are cloned;
 an owned non-clonable value moves. A borrowed non-clonable parameter cannot
@@ -1815,7 +1824,7 @@ function's write parameter (**E0120**): the caller lent it only until the call
 returns. A lambda that runs inside the call, or is stored and passed down to a
 callee, may write it. The old `take(...)` prefix is rejected with
 **E0057**. An escaping lambda that writes a captured local (by assignment or a
-`&self` method call) writes its own copy, so the scope that makes it can no
+`^self` method call) writes its own copy, so the scope that makes it can no
 longer use that local (**E0204**); a write parameter it captures is the
 caller's storage and is written in place. A lambda that writes what it
 captures runs one call at a time: `task.group` children and their owner that
@@ -1828,7 +1837,7 @@ non-function is **E0803** (S47).
 shows each capture mode with its output.
 
 A lambda whose body moves a captured owner (`name.move()`, or an argument to
-a `&&T` parameter) gives that owner away when it runs, so it may run only
+a `^^T` parameter) gives that owner away when it runs, so it may run only
 once. A `task` body, a lambda called where it is written, the callback a
 `Cell` `read` or `edit` runs, a `Shared` field read or update outside a
 transaction, and a lambda bound to a local that only direct calls reach run
@@ -2071,7 +2080,7 @@ D-DISCARD1=A, D-NO-WARNINGS1=A): `jet check` and `jet build` list them and
 fail, and `jet run` and `jet dev` neither stop on them nor print them. A
 statement that calls a pure function and ignores a non-Unit result does
 nothing: the call is pure when its solved effect row is empty, it cannot
-fail, and it passes nothing with `&`. Calls with effects or `&` arguments may
+fail, and it passes nothing with `^`. Calls with effects or `^` arguments may
 still drop their result, and an arrow loop body that is a Unit statement
 (`loop n in xs -> sum += n`) loses nothing. The last line of a named function
 with no written return type is the other case: the function returns nothing,
@@ -2123,17 +2132,17 @@ it to write or take access from body usage. The public surface is:
 | Source type | Access | Call site |
 | --- | --- | --- |
 | `T` | read; the callee cannot mutate the caller's value | plain |
-| `&T` | exclusive write/edit access | plain; needs a `:=` binding |
-| `&&T` | take; ownership moves to the callee | plain; the name is gone after the call |
+| `^T` | exclusive write/edit access | plain; needs a `:=` binding |
+| `^^T` | take; ownership moves to the callee | plain; the name is gone after the call |
 
 Calls carry no marks (D-CALLSITE-MARK2=A): the signature decides. For
 non-scalar values, a read call borrows the existing value without an
 allocation. A body write through an unmarked parameter, or passing it to a
 write or take position, is a hard error at the definition or call site; add
-`&` or `&&` to the contract. A cloneable read value entering an owning
+`^` or `^^` to the contract. A cloneable read value entering an owning
 destination is materialized automatically. A bare `:` binding of a place
 remains a read window; non-cloneable values and `#Policy(copies: .Explicit)`
-require an explicit `.copy()` or an owning `&&` contract (D-MEM1,
+require an explicit `.copy()` or an owning `^^` contract (D-MEM1,
 D-MEM-COPYSEM1).
 
 Move facts follow executable control-flow paths. A loop repeats a move only
@@ -2151,9 +2160,9 @@ for example `Dyn.Text(text.move())`; the payload stays moved and is not copied.
 
 Public Jet APIs return newly computed answers (D-OUTPUT-RETURNS1=A). Use one
 value, tuple, or named struct for multiple results, including trait requirements
-and callback contracts. Do not make callers initialize a dummy `&T` merely to
+and callback contracts. Do not make callers initialize a dummy `^T` merely to
 receive an answer. This is an API-review rule, not a syntax prohibition.
-Keep `&` for genuine edits, stateful handles, accumulation, reusable capacity,
+Keep `^` for genuine edits, stateful handles, accumulation, reusable capacity,
 checked byte readers and fixed storage, streams/writers, and raw foreign
 signatures. A buffer's capacity can be an input even when its prior bytes are
 not. Private helpers and compiler-generated machine destinations remain internal
@@ -2161,8 +2170,8 @@ choices; source returns do not guarantee copy elision or allocation avoidance.
 Those performance claims require exercised proof.
 
 ```jet
-bump: fn(n: &Int) { n += 1 }
-archive: fn(name: &&String) -> String { name }
+bump: fn(n: ^Int) { n += 1 }
+archive: fn(name: ^^String) -> String { name }
 
 run: fn() {
     score := 41
@@ -2173,7 +2182,7 @@ run: fn() {
 ```
 
 The sigil on a method receiver is written at its definition. Plain `self` is a
-read receiver; `&self` is a write receiver; `&&self` consumes the receiver.
+read receiver; `^self` is a write receiver; `^^self` consumes the receiver.
 
 ```jet
 Player: struct {
@@ -2182,7 +2191,7 @@ Player: struct {
 
 impl Player {
     show: fn(self) -> Int { self.hp }
-    heal: fn(&self, amount: Int) { self.hp = self.hp + amount }
+    heal: fn(^self, amount: Int) { self.hp = self.hp + amount }
 }
 
 run: fn() {
@@ -2192,8 +2201,8 @@ run: fn() {
 }
 ```
 
-Writing through a read receiver is E0205 and points to `&self`. Calling a
-`&self` method needs a changeable receiver: a `:` binding is E0111 and a read
+Writing through a read receiver is E0205 and points to `^self`. Calling a
+`^self` method needs a changeable receiver: a `:` binding is E0111 and a read
 parameter is E0205, each quoting the method's signature line.
 Calls carry no marks (D-CALLSITE-MARK2=A): the signature says what a call does
 to each input, so `bump(score)`, `items.push(3)` and `buf.seal()` are written
@@ -2206,7 +2215,7 @@ writes is still E0204, and so is `x` passed on to a nested call
 (`grow(xs, f(xs))`), whose parameter may keep or take it. A part of a list
 passed to a writing parameter is a write window by itself
 (`sort_part(values[0..2])`). A write window bound to a name keeps its mark:
-`edit: &values[2..3]`.
+`edit: ^values[2..3]`.
 
 ### Copies, moves, and owned destinations
 
@@ -2265,7 +2274,7 @@ each holder has its own value, so a write through one never shows in the other.
 A use in `return`, or in a loop's `break` value, is the last use for the loops
 it leaves. Values that cannot be copied (resources, one-pass iterators, consume
 duties, tasks) keep E0121 on the later use. A call is always written plain: its
-signature's `&` or `&&` decides whether it writes or takes. Under
+signature's `^` or `^^` decides whether it writes or takes. Under
 `#Policy(copies: .Explicit)`, every implicit copy that `jet audit copies`
 reports is a diagnostic with a Safe `.copy()` edit, and an unmarked move that a
 later use reaches stays E0121.
@@ -2278,8 +2287,8 @@ moved ancestor or an unrelated moved field.
 
 ### Named views and places
 
-Raw reference syntax is not a first-class Jet value: `-> &T` return types,
-`&T` fields, and `#Ref` provenance are not in the grammar. A named `View<T>` or
+Raw reference syntax is not a first-class Jet value: `-> ^T` return types,
+`^T` fields, and `#Ref` provenance are not in the grammar. A named `View<T>` or
 `ViewMut<T>` can cross a return or aggregate boundary only when sema proves a
 bounded set of receiver, parameter, or static owner paths for each output slot.
 Every possible owner remains live while the view is live. Lists, tuples, options,
@@ -2290,15 +2299,15 @@ and incompatible read/write paths are E2305, or E2307 for string views
 Constructing a struct prefixes each contained view's output path with its field
 name, including nested structs and views already bound to local names. This
 does not turn a local owner into a caller-owned one: returning such an aggregate
-still rejects views into values made here or consumed by a `&&` parameter.
+still rejects views into values made here or consumed by a `^^` parameter.
 A positional enum constructor preserves the payload's access: with
-`edit: &values[0..1]`, `Choice.First(edit)` fills a declared `ViewMut<Int>`
+`edit: ^values[0..1]`, `Choice.First(edit)` fills a declared `ViewMut<Int>`
 payload with that write window. It cannot grant write access to a read-only
 parameter or turn an unmarked owned slice into a write view.
-A name bound to one map value (`w: &m[key]`) reads and writes as that value.
+A name bound to one map value (`w: ^m[key]`) reads and writes as that value.
 Where a `ViewMut<V>` of the value's type is expected (a return, a parameter),
 it is a window over that one value, used as `w[0]` like the one-element list
-window `&xs[i..i]`. A `slot: fn(m: &[String: [Int]], key: String) ->
+window `^xs[i..i]`. A `slot: fn(m: &[String: [Int]], key: String) ->
 ViewMut<[Int]> from m` whose body binds `w: &m[key]` and returns `w` lets the
 caller edit the entry by `s[0].push(1)`. A missing key stops as `m[key]` does,
 and while the window lives the map cannot gain or lose entries (E0220, E0212).
@@ -2334,13 +2343,13 @@ rule is shared by AOT, interpreter, comptime, and web lowering; each engine
 marshals the sema-approved result.
 
 A place is a name followed by its maximal field, index, or range projection. A
-bare place is a checked read window; `&place` is the exclusive write window; and
+bare place is a checked read window; `^place` is the exclusive write window; and
 `place.copy()` creates independent owned storage.
 
 ```jet
 values := [10, 20, 30, 40]
 read: values[0..1]
-edit: &values[2..3]
+edit: ^values[2..3]
 copy: values[0..1].copy()
 ```
 
@@ -2351,7 +2360,7 @@ dynamic projections conservatively overlap. Jet's sema validates these facts.
 A call or temporary is not a place: bind it first (E0213). The
 retired `values.view(0..1)` spelling is E0214 and points to `values[0..1]`.
 Method calls do not extend a place, so `values[0..1].sort()` calls `sort` on
-the maximal range, which `sort`'s `&self` makes a write window
+the maximal range, which `sort`'s `^self` makes a write window
 (D-SHAPE-PLACE1=A, D-CALLSITE-MARK2=A).
 
 Sema keeps one provenance and alias graph for every borrowed window, regardless
@@ -2412,7 +2421,7 @@ with the D-MEMREF1 link build.
 A method's field footprint (D-METHOD-FOOTPRINT1=A) is the set of receiver
 fields its body reads or changes through `self`, including the footprints of
 sibling methods it calls on `self`; any other use of the whole `self` makes it
-the whole record. A receiver may state it, `&self.log` or `&self.[log, hits]`;
+the whole record. A receiver may state it, `^self.log` or `^self.[log, hits]`;
 the stated set must name stored fields and cover the body (E0231). Public
 methods publish the footprint (stated, else inferred) in the API snapshot as
 `; footprint = self.[a, b]`. Calls still count as touching the whole receiver
@@ -2450,7 +2459,7 @@ it like any typed literal's field (#6281 c130). `shared` is an ordinary name,
 not a construction word. A field read takes one read lock and a field write one
 write lock; a read-modify-write such as `config.hits += 1` holds one lock across
 both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
-cheap handle, not the payload, so it can cross a task boundary without `&&`
+cheap handle, not the payload, so it can cross a task boundary without `^^`
 (D-SHARED-API1, D-CONC-SHARE1=A).
 A type may declare strong `Shared` edges back to itself (a linked list, a tree);
 the cycle check runs at the write. A write into a shared cell, its edit guard's
@@ -2510,7 +2519,7 @@ Expert code can hold a lock across helper calls with `guard_read()` or
 exit. `.map(fn(value) { value.field })` narrows one guard to a field. `.split(first,
 second)` is legal only when sema proves the stored field paths disjoint. Guards
 are task-local and cannot be copied or sent. A public guard parameter reads by
-default; `&guard: SharedGuard<T>` requires and preserves edit access
+default; `^guard: SharedGuard<T>` requires and preserves edit access
 (D-SHAREDGUARD1=A, D-SHAREDGUARD2=A). `try_guard_read()`/`try_guard_edit()`
 take the guard only when the lock is free now, and `guard_read_within(limit)`/
 `guard_edit_within(limit)` wait at most the `Duration` `limit`; each returns
@@ -2584,7 +2593,7 @@ returns an ID, `pool[id]` indexes for read or write, and `ids()` walks live
 entries. Removing an entry bumps its generation and returns `T?`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
 storage. `add`, `remove` and `pool[id] = v` change the pool, so they need a
-writable pool: a `:=` binding or a `&` parameter. Through an unmarked
+writable pool: a `:=` binding or a `^` parameter. Through an unmarked
 parameter, `add` and `remove` are **E0205**.
 
 ```jet
@@ -2641,7 +2650,7 @@ row, a `#FX(…)` cap or an authority `deny:` names it like any other deny-only
 leaf, and the denial follows every reachable call.
 
 ```jet
-integrate: fn(e: &Entity, dt: Float) -[!Mem.Alloc]> {
+integrate: fn(e: ^Entity, dt: Float) -[!Mem.Alloc]> {
     e.pos += e.vel * dt
 }
 ```
@@ -2715,26 +2724,26 @@ ratified narrow teaching diagnostic.
 
 Access markers are prefix sigils on the type, not on the binding name. The
 unmarked type is the enforced read default; the only explicit access sigils are
-`&` for exclusive write and `&&` for take (D-MOVE-SIGIL1=A). They appear on
+`^` for exclusive write and `^^` for take (D-MOVE-SIGIL1=A). They appear on
 parameters; calls stay plain, because the signature decides
 (D-CALLSITE-MARK2=A).
 
 | Written type | Meaning | Native lowering of a non-scalar parameter |
 | --- | --- | --- |
 | `T` | read; the callee cannot elevate it | shared borrow |
-| `&T` | exclusive edit access | mutable borrow |
-| `&&T` | ownership moves to the callee | owned value |
+| `^T` | exclusive edit access | mutable borrow |
+| `^^T` | ownership moves to the callee | owned value |
 
 ```jet
 Player: struct {
     hp: Int,
 }
 
-damage: fn(player: &Player, amount: Int) {
+damage: fn(player: ^Player, amount: Int) {
     player.hp = player.hp - amount
 }
 
-consume: fn(resource: &&String) { print(resource) }
+consume: fn(resource: ^^String) { print(resource) }
 
 run: fn() {
     player := Player{hp: 10}
@@ -2743,8 +2752,8 @@ run: fn() {
 }
 ```
 
-An access marker composes with the optional mark: `&User?` is write access to
-an optional `User`, and `&&Texture?` takes an optional `Texture`. A marker both
+An access marker composes with the optional mark: `^User?` is write access to
+an optional `User`, and `^^Texture?` takes an optional `Texture`. A marker both
 before the parameter name and on its type is E0029:
 
 ```text
@@ -2758,8 +2767,8 @@ Error: Jet.DuplicateAccessMarker: `p` has two access markers
 ```
 
 The three marks outside signatures are a write window bound to a name
-(`edit: &values[2..3]`), a match that writes into its subject
-(`if &shape == { … }`), and `task &&name`. `^` has no meaning in the grammar.
+(`edit: ^values[2..3]`), a match that writes into its subject
+(`if ^shape == { … }`), and `task ^^name`. `&` and `&&` are only operators.
 
 `.copy()` is a method call, not an access marker. Raw-pointer access (`p.*` or
 prefix `*x`) is a separate `#Unsafe`-gated mechanism. It does not change the
@@ -3012,7 +3021,7 @@ value, a module `Cell`, and a `#Persist` or `#Unsafe` module `:=` binding all
 outlive the call, so a later call could see the write. A cell reached through
 a read parameter, `self`, an alias or a lambda capture may be such a cell, so
 writing it, taking its `guard_edit()` lease included, is E3401 too. Its own
-locals, a cell it builds (`Shared{…}`, `Cell.new(…)`), and a `&` parameter
+locals, a cell it builds (`Shared{…}`, `Cell.new(…)`), and a `^` parameter
 its caller lends for writing stay free to change.
 `Mem.Alloc(above: N)` and `Mem.Stack(above: N)` are the parameterized
 memory-denial spellings. An explicit memory, waiting, or panic denial still
@@ -3555,7 +3564,7 @@ canvas when the next frame begins unless the program presented its own pixels.
 blits a named region of it onto the canvas. The collision checks
 (`check_collision_*` and `get_collision_rec`) are pure `Float` functions that
 need no effect, as are the CPU image functions (`gen_image_*`,
-`get_image_color` and `image_*`), which change an `Image` in place through `&`;
+`get_image_color` and `image_*`), which change an `Image` in place through `^`;
 `window.load_image_from_screen()` copies the canvas. `core.game` is
 scene-first: `game.Scene.new`, `scene.assets.image` and `sound`,
 `scene.input.bind`, `scene.component<T>()`, `scene.query<T...>()`,
@@ -3731,7 +3740,7 @@ checked before any byte moves. See
 `None` when `size` is not above zero, `align` is not a power of two, or the
 heap refuses. It is not generic; `p.cast<U>()` gives the typed view, and
 `mem.copy` over the bytes is overlap-safe (a memmove). `mem.free_raw(p)`
-releases the block. Its parameter takes the pointer (`&&mem.Ptr<U8>`), so the
+releases the block. Its parameter takes the pointer (`^^mem.Ptr<U8>`), so the
 binding is gone after the call and a second release of it is E0209. Both are
 E3101 outside `#Unsafe`. Under the memory sentry the bytes are a live
 allocation until their release and are quarantined after it, so a read
@@ -3813,7 +3822,7 @@ view is live. The runtime has one narrowly contained lifetime-extension helper
 inside the memory implementation; that lifetime never appears in user syntax.
 
 A view must stay inside its region and before the arena is reset or closed.
-E0631 rejects a view returned, stored in another owner, passed to a `&` or `&&`
+E0631 rejects a view returned, stored in another owner, passed to a `^` or `^^`
 parameter, or captured by an escaping closure. E0632 rejects a read after the
 arena reset. Regions are implicit and scope-inferred from the lexical scope of
 the arena binding. Expert code may use `#Region(r) { ... }` for a named or
@@ -4042,6 +4051,8 @@ module` keeps a module's contents to its enclosing module, and `priv(package)
 module name` keeps them inside the package; a `priv` struct field is usable
 only by its type's module. Reaching a private declaration, module or field from
 outside reports **E0605**, importing a member of a private module **E0609**.
+A Core item named `__…` belongs to Core and the code the compiler generates,
+and is `priv`; a public one is **E0645**.
 These markers are errors whose fix deletes them: an unknown `priv(...)`
 qualifier or `priv(package)` on a top-level declaration other than a module
 (**E0414**), section labels (**E0415**) and `priv(package)` on a field
@@ -4381,7 +4392,7 @@ capture instead (see below). A task-boundary value must be sendable
 (**E1102**). Mutable or otherwise non-sendable captures report **E1101** or
 **E1102**. A `view` borrow, a struct
 containing `ref` fields, a trait value, or a closure with non-sendable captures
-cannot cross. Give ownership to a child with `task &&name`, make an immutable owned
+cannot cross. Give ownership to a child with `task ^^name`, make an immutable owned
 snapshot with `freeze`, or use `Shared` and a lock for deliberate shared
 mutation (D-CONC-CROSS1).
 
@@ -4407,7 +4418,7 @@ values. Mutating methods and write windows report the same E1113 with the
 original freeze location; a control-flow merge preserves the proof only when
 every reaching path carries a frozen value.
 
-`task &&name { ... }` consumes `name` into the child. Using `name` after child
+`task ^^name { ... }` consumes `name` into the child. Using `name` after child
 creation is the ordinary **E0121** use-after-move. This capture mark is one of
 the three marks written outside a signature (D-CALLSITE-MARK2=A).
 `Shared` and `Cell` retain their synchronized and local-only semantics.
@@ -5118,11 +5129,11 @@ and `= "rust::path"`; `extern rust "std"` needs no extra dependency. A
 non-`core` crate requires an exact version pin (E0701). By-value boundary types
 include scalars, `String`, `Char`, lists/maps/options/results built from allowed
 types, and structs or enums whose fields obey the same rule.
-Capability parameters use the `&` and `&&` conventions; a raw foreign call that
+Capability parameters use the `^` and `^^` conventions; a raw foreign call that
 carries one requires an audited `#Unsafe` boundary (E0702).
 
 A returned resource may declare `#Close(close)`. Its close function must consume
-exactly `&&` of the handle and return no value, so `close(handle)` owns one
+exactly `^^` of the handle and return no value, so `close(handle)` owns one
 release. When a dependency is needed, `jet run`, `jet build` and `jet test` build
 a hidden cached cargo bridge under `~/.cache/jet/ffi/` or the directory selected
 by `JET_FFI_CACHE_DIR`; it does not add a manifest to the user's project.
@@ -6536,6 +6547,20 @@ The server's protocol loop accepts JSON-RPC requests and emits framed
 `Content-Length` responses; clients do not need a second compiler process.
 The LSP coverage is in `Compiler/JetLSP/Tests/LSP/` and
 `Tests/Cases/LSP/`.
+
+A name the check cannot resolve (E0102, E0107) gets one quick-fix per
+declaration the document's module may reach under that name, each titled
+with the identity the name then resolves to (`geo.area`): written through
+the document's own import of the declaring module (`geo.area`), or added as
+a `module.[name]` row to the document's imports. A re-export resolves to the
+declaration it names. Which declarations a module may reach comes from the
+check's name facts, never from the source text: a private declaration of
+another package, a member, and a compiler-generated name are never offered,
+and a name of the document's own package needs no import. The
+`source.organizeImports` action drops the import rows and members the check
+reports unused (L0103), keeps every other row as written, and keeps a row an
+unresolved name's quick-fix writes through. A code action request whose
+`context.only` names kinds gets the actions of those kinds alone.
 
 The VS Code/Cursor client in `Tools/Editors/Vscode/` provides the TextMate grammar
 and LSP transport. `install.sh` packages the extension. Server discovery uses

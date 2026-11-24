@@ -11,7 +11,7 @@ run: fn() {
     task.group g {
         { sender, receiver: ch }: channel<Int>(1)
         sender.send(1)
-        blocked: task &&sender {
+        blocked: task ^^sender {
             sender.send(2)
             sender.close()
         }

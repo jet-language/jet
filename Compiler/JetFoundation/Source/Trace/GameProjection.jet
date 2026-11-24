@@ -14,7 +14,7 @@ trace_game_function: fn(value: JetDevtoolsFunctionIdentity) -> TraceGameFunction
     }
 }
 
-trace_game_project_into: fn(bodies: [JetDevtoolsEventBody], frames: &[TraceGameFrame], draws: &[TraceGameDrawEvent]) Never! {
+trace_game_project_into: fn(bodies: [JetDevtoolsEventBody], frames: ^[TraceGameFrame], draws: ^[TraceGameDrawEvent]) Never! {
     loop body in bodies {
         if body == {
             .GameFrameSample(sequence, frame_id, scene, frame_index, build, revision, id, start_ns, cpu_ns, gpu_ns, responsible) -> {
@@ -72,7 +72,7 @@ project_game_devtools_bodies: fn(bodies: [JetDevtoolsEventBody]) -> {frames: [Tr
     Ok({draws: draws.move(), frames: frames.move()})
 }
 
-trace_skeleton_add_game_devtools_bodies: fn(skeleton: &TraceSkeleton, bodies: [JetDevtoolsEventBody]) JetTraceError! {
+trace_skeleton_add_game_devtools_bodies: fn(skeleton: ^TraceSkeleton, bodies: [JetDevtoolsEventBody]) JetTraceError! {
     trace_game_project_into(bodies, skeleton.game_frames, skeleton.game_draw_events)
     return
 }

@@ -1,0 +1,26 @@
+# Organize imports drops only the import rows the check reports unused
+# (L0103) and keeps every other row as written: `tidy` keeps `shapes`. An
+# import an unresolved name's repair writes through stays, so `run` keeps
+# `geo` while `area` is unresolved, though the check reports it unused.
+fixture: LSPImportRepairs.fixture
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
+recv lsp until $.id = 7
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/tidy.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use {\\n    geo\\n    shapes\\n}\\n\\ntidy: fn() -> Int {\\n    shapes.area(1)\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use geo\\n\\nrun: fn() {\\n    print(area(2))\\n    print(squared(2))\\n    print(volume(2))\\n    print(both())\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/tidy.jet\"},\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":0}},\"context\":{\"diagnostics\":[],\"only\":[\"source.organizeImports\"]}}}"
+recv lsp collect until ndjson $[?id=8] #>= 1
+json: stdout ndjson $[?params.uri="file://{work}/tidy.jet"][-1].params.diagnostics[?code="L0103"] #= 1
+json: stdout ndjson $[?params.uri="file://{work}/run.jet"][-1].params.diagnostics[?code="L0103"] #= 1
+json: stdout ndjson $[?id=8][0].result #= 1
+json: stdout ndjson $[?id=8][0].result[0].kind = "source.organizeImports"
+json: stdout ndjson $[?id=8][0].result[0].title = "Organize imports"
+json: stdout ndjson $[?id=8][0].result[0].edit.documentChanges[0].edits #= 1
+json: stdout ndjson $[?id=8][0].result[0].edit.documentChanges[0].edits[0].range = {"start":{"line":0,"character":0},"end":{"line":3,"character":1}}
+json: stdout ndjson $[?id=8][0].result[0].edit.documentChanges[0].edits[0].newText = "use shapes"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":0}},\"context\":{\"diagnostics\":[],\"only\":[\"source\"]}}}"
+recv lsp until $.id = 9
+json: stdout doc $.result #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 10
+close lsp

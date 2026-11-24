@@ -1,7 +1,7 @@
 # Claim (D-SCRIPT-HELPERS1=A): a function declared in a file of top-level
 # statements may use the file's variables. The checker gives `note` one
 # label-only parameter per variable it names: `count`, which it writes, as
-# `&`, and `limit` as a read; each call in the file fills them in. The file
+# `^`, and `limit` as a read; each call in the file fills them in. The file
 # checks clean and prints the same lines on O0, O1 and O2. A method gets no
 # such parameter and keeps E0107 (Tests/UI/script_local_unseen_by_function).
 # `jet inspect expand --facts callable-signature` shows the two parameters,
@@ -18,7 +18,7 @@ stderr: = "OK: `main.jet` has no problems\n"
 step: jet inspect expand --facts callable-signature main.jet
 exit: 0
 stdout: ~ "note [" # the script function's checked signature row
-stdout: ~ "write count{count}: Int [label_only]" # the written variable is an extra `&` label-only parameter defaulting to itself
+stdout: ~ "write count{count}: Int [label_only]" # the written variable is an extra `^` label-only parameter defaulting to itself
 stdout: ~ "limit{limit}: Int [label_only]" # the read one is an extra label-only parameter too
 step file_o0: jet run -O0 main.jet
 exit: 0

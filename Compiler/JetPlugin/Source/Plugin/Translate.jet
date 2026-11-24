@@ -167,7 +167,7 @@ PlugRows: struct {
     flag: Int,
 }
 
-plug_rows: fn(m: &IRModule) -> PlugRows Never! {
+plug_rows: fn(m: ^IRModule) -> PlugRows Never! {
     PlugRows{
         word: ir_word_row(m),
         i32: ir_type_row(m, Type.IntN{signed: true, bits: 32}) ?? 0,
@@ -253,65 +253,65 @@ PlugCx: struct {
     dummy: Int,
     at: Int,
 
-    temp: fn(&self, row: Int) -> Int Never! { ir_slot(self.f, row, IRSlotKind.Temp, -1, 0) }
+    temp: fn(^self, row: Int) -> Int Never! { ir_slot(self.f, row, IRSlotKind.Temp, -1, 0) }
 
-    emit: fn(&self, op: IROp, dst: Int, a: Int, b: Int, c: Int) Never! {
+    emit: fn(^self, op: IROp, dst: Int, a: Int, b: Int, c: Int) Never! {
         _: ir_emit(self.f, op, dst, a, b, c, 0)
     }
 
-    konst: fn(&self, row: Int, value: Int) -> Int Never! {
+    konst: fn(^self, row: Int, value: Int) -> Int Never! {
         slot: self.temp(row)
         self.emit(IROp.Const, slot, value, -1, -1)
         slot
     }
 
-    word: fn(&self, value: Int) -> Int Never! { self.konst(self.rows.word, value) }
+    word: fn(^self, value: Int) -> Int Never! { self.konst(self.rows.word, value) }
 
     // A wrapping integer operation, or a float one.
-    op2: fn(&self, op: IROp, row: Int, left: Int, right: Int) -> Int Never! {
+    op2: fn(^self, op: IROp, row: Int, left: Int, right: Int) -> Int Never! {
         dst: self.temp(row)
         policy: if row == self.rows.f64 -> -1 else -> IR_OVERFLOW_WRAP
         self.emit(op, dst, left, right, policy)
         dst
     }
 
-    cmp: fn(&self, op: IROp, left: Int, right: Int) -> Int Never! {
+    cmp: fn(^self, op: IROp, left: Int, right: Int) -> Int Never! {
         dst: self.temp(self.rows.flag)
         self.emit(op, dst, left, right, -1)
         dst
     }
 
-    emit_copy: fn(&self, row: Int, value: Int) -> Int Never! {
+    emit_copy: fn(^self, row: Int, value: Int) -> Int Never! {
         dst: self.temp(row)
         self.emit(IROp.Copy, dst, value, -1, -1)
         dst
     }
 
-    convert: fn(&self, row: Int, value: Int) -> Int Never! {
+    convert: fn(^self, row: Int, value: Int) -> Int Never! {
         dst: self.temp(row)
         self.emit(IROp.Convert, dst, value, -1, -1)
         dst
     }
 
-    load: fn(&self, row: Int, pointer: Int, offset: Int) -> Int Never! {
+    load: fn(^self, row: Int, pointer: Int, offset: Int) -> Int Never! {
         dst: self.temp(row)
         self.emit(IROp.Load, dst, pointer, offset, -1)
         dst
     }
 
-    store: fn(&self, pointer: Int, offset: Int, value: Int) Never! {
+    store: fn(^self, pointer: Int, offset: Int, value: Int) Never! {
         self.emit(IROp.Store, -1, pointer, offset, value)
     }
 
     // A runtime helper's call; `row` -1 for none.
-    rt: fn(&self, name: String, args: [Int], row: Int) -> Int Never! {
+    rt: fn(^self, name: String, args: [Int], row: Int) -> Int Never! {
         dst: if row >= 0 -> self.temp(row) else -> -1
         start: ir_args(self.f, args)
         self.emit(IROp.CallRuntime, dst, self.names.get(name) ?? panic("plugin runtime name {name} not interned"), start, args.len())
         dst
     }
 
-    call: fn(&self, callee: Int, args: [Int], row: Int) -> Int Never! {
+    call: fn(^self, callee: Int, args: [Int], row: Int) -> Int Never! {
         dst: if row >= 0 -> self.temp(row) else -> -1
         start: ir_args(self.f, args)
         self.emit(IROp.Call, dst, callee, start, args.len())
@@ -320,7 +320,7 @@ PlugCx: struct {
 
     // The out area a call to a function of type `ty` passes after the
     // instance: one frame word per result past the first, or -1.
-    out_area: fn(&self, ty: WasmFuncType) -> Int Never! {
+    out_area: fn(^self, ty: WasmFuncType) -> Int Never! {
         if ty.results.len() < 2 -> return -1
         area: self.temp(self.rows.word)
         self.emit(IROp.StackAddress, area, 8 * (ty.results.len() - 1), 8, -1)
@@ -329,7 +329,7 @@ PlugCx: struct {
 
     // Pushes a finished call's results: `first` as returned, the rest read
     // back from its out area.
-    push_results: fn(&self, ty: WasmFuncType, first: Int, area: Int) Never! {
+    push_results: fn(^self, ty: WasmFuncType, first: Int, area: Int) Never! {
         if ty.results.len() == 0 {
             return
         }
@@ -340,14 +340,14 @@ PlugCx: struct {
         }
     }
 
-    push: fn(&self, slot: Int) Never! { self.stack.push(slot) }
+    push: fn(^self, slot: Int) Never! { self.stack.push(slot) }
 
-    pop: fn(&self) -> Int Never! {
+    pop: fn(^self) -> Int Never! {
         self.stack.pop() ?? panic("plugin translation popped an empty operand stack")
     }
 
     // The top `count` operands, in stack order.
-    pops: fn(&self, count: Int) -> [Int] Never! {
+    pops: fn(^self, count: Int) -> [Int] Never! {
         out := [Int]{}
         loop _ in 0..<count -> out.push(-1)
         k := count
@@ -358,13 +358,13 @@ PlugCx: struct {
         out
     }
 
-    truncate: fn(&self, height: Int) Never! {
+    truncate: fn(^self, height: Int) Never! {
         loop self.stack.len() > height -> _: self.stack.pop()
     }
 
     // Copies `values` into `slots`, through fresh temporaries when a value
     // is itself one of the slots.
-    transfer: fn(&self, values: [Int], slots: [Int]) Never! {
+    transfer: fn(^self, values: [Int], slots: [Int]) Never! {
         overlap := false
         loop value in values {
             if slots.contains(value) -> overlap = true
@@ -380,10 +380,10 @@ PlugCx: struct {
         loop (k, slot) in slots -> self.emit(IROp.Copy, slot, sources[k], -1, -1)
     }
 
-    ret_dummy: fn(&self) Never! { self.emit(IROp.Return, -1, self.dummy, -1, -1) }
+    ret_dummy: fn(^self) Never! { self.emit(IROp.Return, -1, self.dummy, -1, -1) }
 
     // Records trap `code` at this instruction and returns.
-    trap: fn(&self, code: Int) Never! {
+    trap: fn(^self, code: Int) Never! {
         number: self.word(code)
         fid: self.word(self.fid)
         at: self.word(self.at)
@@ -391,7 +391,7 @@ PlugCx: struct {
         self.ret_dummy()
     }
 
-    guard: fn(&self, test: Int, code: Int) Never! {
+    guard: fn(^self, test: Int, code: Int) Never! {
         _: ir_open_if(self.f, test, 0)
         self.trap(code)
         ir_end(self.f, 0)
@@ -399,7 +399,7 @@ PlugCx: struct {
 
     // Returns when the instance holds a trap; `frame` adds this function's
     // frame first (a helper that trapped recorded its own).
-    check: fn(&self, frame: Bool) Never! {
+    check: fn(^self, frame: Bool) Never! {
         trapped: self.load(self.rows.word, self.inst, PLUG_INST_TRAP)
         zero: self.word(0)
         test: self.cmp(IROp.Ne, trapped, zero)
@@ -415,7 +415,7 @@ PlugCx: struct {
 
     // Spends one unit of the fuel slice; a spent slice asks the runtime for
     // the next one, which traps instead when the call is out of fuel or time.
-    fuel: fn(&self) Never! {
+    fuel: fn(^self) Never! {
         left: self.load(self.rows.word, self.inst, PLUG_INST_FUEL)
         one: self.word(1)
         rest: self.op2(IROp.Sub, self.rows.word, left, one)
@@ -431,57 +431,57 @@ PlugCx: struct {
     }
 
     // An i32 slot's value zero-extended to a word.
-    zext: fn(&self, value: Int) -> Int Never! {
+    zext: fn(^self, value: Int) -> Int Never! {
         wide: self.emit_copy(self.rows.word, value)
         mask: self.word(4294967295)
         self.op2(IROp.BitAnd, self.rows.word, wide, mask)
     }
 
     // A word sign-extended from its low `bits`.
-    sext: fn(&self, value: Int, bits: Int) -> Int Never! {
+    sext: fn(^self, value: Int, bits: Int) -> Int Never! {
         shift: self.word(64 - bits)
         up: self.op2(IROp.Shl, self.rows.word, value, shift)
         self.op2(IROp.Shr, self.rows.word, up, shift)
     }
 
     // The i32 of a word's low 32 bits.
-    narrow32: fn(&self, value: Int) -> Int Never! {
+    narrow32: fn(^self, value: Int) -> Int Never! {
         low: self.sext(value, 32)
         self.emit_copy(self.rows.i32, low)
     }
 
-    unsigned: fn(&self, value: Int, wide: Bool) -> Int Never! {
+    unsigned: fn(^self, value: Int, wide: Bool) -> Int Never! {
         if wide -> return self.emit_copy(self.rows.u64, value)
         low: self.zext(value)
         self.emit_copy(self.rows.u32, low)
     }
 
-    signed: fn(&self, value: Int, wide: Bool) -> Int Never! {
+    signed: fn(^self, value: Int, wide: Bool) -> Int Never! {
         bits: self.emit_copy(self.rows.word, value)
         if wide -> return bits
         self.narrow32(bits)
     }
 
     // A comparison's Bool as an i32.
-    flag: fn(&self, test: Int) -> Int Never! {
+    flag: fn(^self, test: Int) -> Int Never! {
         slot: self.emit_copy(self.rows.i32, test)
         self.flags[slot] = test
         slot
     }
 
     // An i32's truth as a Bool.
-    truth: fn(&self, value: Int) -> Int Never! {
+    truth: fn(^self, value: Int) -> Int Never! {
         if self.flags.get(value) == .Val(test) -> return test
         zero: self.konst(self.rows.i32, 0)
         self.cmp(IROp.Ne, value, zero)
     }
 
-    promote: fn(&self, value: Int) -> Int Never! { self.convert(self.rows.f64, value) }
+    promote: fn(^self, value: Int) -> Int Never! { self.convert(self.rows.f64, value) }
 
-    demote: fn(&self, value: Int) -> Int Never! { self.convert(self.rows.f32, value) }
+    demote: fn(^self, value: Int) -> Int Never! { self.convert(self.rows.f32, value) }
 
     // A value's bits read back as `row` through frame storage.
-    reinterpret: fn(&self, value: Int, row: Int) -> Int Never! {
+    reinterpret: fn(^self, value: Int, row: Int) -> Int Never! {
         area: self.temp(self.rows.word)
         self.emit(IROp.StackAddress, area, 8, 8, -1)
         self.store(area, 0, value)
@@ -490,7 +490,7 @@ PlugCx: struct {
 
     // The checked native address of `width` bytes at `address` + `offset`
     // of flat memory `memory`.
-    address: fn(&self, memory: Int, address: Int, offset: Int, width: Int) -> Int Never! {
+    address: fn(^self, memory: Int, address: Int, offset: Int, width: Int) -> Int Never! {
         start: self.zext(address)
         displacement: self.word(offset)
         effective: self.op2(IROp.Add, self.rows.word, start, displacement)
@@ -505,7 +505,7 @@ PlugCx: struct {
     }
 
     // A branch to the label `depth` blocks out, carrying its values.
-    branch: fn(&self, depth: Int) Never! {
+    branch: fn(^self, depth: Int) Never! {
         target: self.frames.len() - 1 - depth
         slots: if self.frames[target].kind == PLUG_FRAME_LOOP -> self.frames[target].param_slots else -> self.frames[target].result_slots
         values := [Int]{}
@@ -515,7 +515,7 @@ PlugCx: struct {
         self.emit(IROp.Br, -1, out, -1, -1)
     }
 
-    enter_else: fn(&self) Never! {
+    enter_else: fn(^self) Never! {
         top: self.frames.len() - 1
         if !self.dead {
             values: self.pops(self.frames[top].results.len())
@@ -529,7 +529,7 @@ PlugCx: struct {
         self.dead = false
     }
 
-    leave: fn(&self) Never! {
+    leave: fn(^self) Never! {
         frame: self.frames.pop() ?? panic("plugin translation closed an unopened block")
         if !self.dead {
             values: self.pops(frame.results.len())
@@ -561,7 +561,7 @@ PlugCx: struct {
         }
     }
 
-    open: fn(&self, kind: Int, sig: WasmFuncType, test: Int) Never! {
+    open: fn(^self, kind: Int, sig: WasmFuncType, test: Int) Never! {
         args: self.pops(sig.params.len())
         params := [Int]{}
         loop (k, arg) in args {
@@ -647,7 +647,7 @@ plug_translate: fn(kit: PlugKit, scope: PlugScope, fid: Int, ty: WasmFuncType, c
     Ok(cx.f.move())
 }
 
-plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int) WasmError! {
+plug_op: fn(cx: ^PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int) WasmError! {
     op: code.op[k]
     a: code.a[k]
     b: code.b[k]
@@ -862,7 +862,7 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
 }
 
 // Loads (0x28..0x35) and stores (0x36..0x3e) at offset `offset`.
-plug_memory_access: fn(cx: &PlugCx, scope: PlugScope, op: Int, offset: Int) Never! {
+plug_memory_access: fn(cx: ^PlugCx, scope: PlugScope, op: Int, offset: Int) Never! {
     rows: cx.rows
     narrow := rows.i32
     width := 4
@@ -917,7 +917,7 @@ plug_memory_access: fn(cx: &PlugCx, scope: PlugScope, op: Int, offset: Int) Neve
 }
 
 // i32 (eqz … ge_u) or, `wide`, i64 comparisons by their index in the group.
-plug_int_compare: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
+plug_int_compare: fn(cx: ^PlugCx, index: Int, wide: Bool) Never! {
     row: if wide -> cx.rows.word else -> cx.rows.i32
     if index == 0 {
         value: cx.pop()
@@ -946,7 +946,7 @@ plug_int_compare: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
 }
 
 // i32 or, `wide`, i64 clz … rotr by their index in the group.
-plug_int_arith: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
+plug_int_arith: fn(cx: ^PlugCx, index: Int, wide: Bool) Never! {
     row: if wide -> cx.rows.word else -> cx.rows.i32
     urow: if wide -> cx.rows.u64 else -> cx.rows.u32
     width: if wide -> 64 else -> 32
@@ -1030,7 +1030,7 @@ plug_int_arith: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
 }
 
 // f32 (`narrow`) or f64 eq … ge by their index in the group.
-plug_float_compare: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
+plug_float_compare: fn(cx: ^PlugCx, index: Int, narrow: Bool) Never! {
     right := cx.pop()
     left := cx.pop()
     if narrow {
@@ -1052,7 +1052,7 @@ plug_float_compare: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
 
 // f32 (`narrow`, computed in binary64 and rounded once) or f64 abs …
 // copysign by their index in the group.
-plug_float_arith: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
+plug_float_arith: fn(cx: ^PlugCx, index: Int, narrow: Bool) Never! {
     result := -1
     if {
         index <= 6 -> {
@@ -1103,7 +1103,7 @@ plug_float_arith: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
 
 // A float-to-integer truncation: `from32` an f32 operand, `mode` 1 unsigned
 // + 2 i64 + 4 saturating (PluginHost.jet jet_plugin_trunc).
-plug_trunc: fn(cx: &PlugCx, value: Int, from32: Bool, mode: Int) Never! {
+plug_trunc: fn(cx: ^PlugCx, value: Int, from32: Bool, mode: Int) Never! {
     operand: if from32 -> cx.promote(value) else -> value
     flags: cx.word(mode)
     fid: cx.word(cx.fid)
@@ -1115,7 +1115,7 @@ plug_trunc: fn(cx: &PlugCx, value: Int, from32: Bool, mode: Int) Never! {
 }
 
 // The numeric conversions 0xa7 … 0xc4.
-plug_convert: fn(cx: &PlugCx, op: Int) Never! {
+plug_convert: fn(cx: ^PlugCx, op: Int) Never! {
     rows: cx.rows
     value: cx.pop()
     if op >= 0xa8 && op <= 0xab {
@@ -1166,7 +1166,7 @@ plug_convert: fn(cx: &PlugCx, op: Int) Never! {
 }
 
 // The bulk memory and table instructions 0xfc08 … 0xfc11.
-plug_bulk: fn(cx: &PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
+plug_bulk: fn(cx: ^PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
     rows: cx.rows
     fid: cx.word(cx.fid)
     at: cx.word(cx.at)
@@ -1232,7 +1232,7 @@ plug_bulk: fn(cx: &PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
 
 // ---- entry thunks, dispatchers and import stubs ------------------------------------
 
-plug_cx: fn(kit: PlugKit, f: &&IRFunction, fid: Int) -> PlugCx Never! {
+plug_cx: fn(kit: PlugKit, f: ^^IRFunction, fid: Int) -> PlugCx Never! {
     PlugCx{
         f: f.move(),
         rows: kit.rows,

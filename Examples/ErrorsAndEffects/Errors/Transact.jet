@@ -31,7 +31,7 @@ place_order: fn(items: Int) -> Int Fail! {
 // then a `?`-failure while crediting `to`. The auto-snapshot restores `from` (and `to`)
 // to their pre-block values — so the caller observes the balances unchanged after a
 // failed transfer, with zero rollback annotation.
-transfer: fn(from: &Int, to: &Int, amount: Int) -> Int Fail! {
+transfer: fn(from: ^Int, to: ^Int, amount: Int) -> Int Fail! {
     #Transact {
         from -= amount  // debit — `from` auto-snapshotted on entry
         to += amount  // credit — `to` auto-snapshotted on entry

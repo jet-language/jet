@@ -1,5 +1,5 @@
 // Inlay hints: from the checked index, the type of each local, the parameter
-// each positional argument binds, the `&` or `&&` of each argument or
+// each positional argument binds, the `^` or `^^` of each argument or
 // receiver a call writes or takes, and on a type each method an impl declares
 // outside its body; the `?` after each call that passes a failure up by
 // itself; then the `lsp.inlay_hints` hooks of a marked block's package label
@@ -7,7 +7,7 @@
 // range past the end of the document stops at its end.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[AccessConvention, ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, Type, access_sigil, failure_contract_shown_return, foundation_json_quote, type_name]
+    jet_foundation.[AccessConvention, ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, Type, access_sigil, failure_contract_signature_return, foundation_json_quote, type_name]
     jet_lexer.[Lexed, Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_DOT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, token_text]
     jet_semindex.[SemCallable, SemDef, SemIndex]
 }
@@ -78,7 +78,7 @@ lsp_checked_inlay_hints: fn(view: LSPView) -> [LSPInlayHint] Never! {
 // On a type's name, each method an impl written outside the type's
 // declaration adds, with its checked signature, so a reader of the type sees
 // what was scattered. Methods a derive generated have no written name.
-lsp_breadcrumb_hints: fn(checked: LSPChecked, index: SemIndex, def: SemDef, hints: &[LSPInlayHint]) Never! {
+lsp_breadcrumb_hints: fn(checked: LSPChecked, index: SemIndex, def: SemDef, hints: ^[LSPInlayHint]) Never! {
     declaration := Span?{None}
     loop node in index.nodes {
         if node.class != "item" || node.module_path != def.module_path -> next
@@ -123,7 +123,7 @@ lsp_method_breadcrumb: fn(name: String, callable: SemCallable) -> String Never! 
         }
         arrow = "{arrow}]>"
     }
-    shown_return: if callable.failure_contract == .Val(contract) -> failure_contract_shown_return(contract) else -> callable.return_type
+    shown_return: if callable.failure_contract == .Val(contract) -> failure_contract_signature_return(contract) else -> callable.return_type
     result: if shown_return == .Val(ty) -> " {type_name(ty)}" else -> " Unit"
     "{name}: fn({params.join(", ")}){arrow}{result}"
 }
@@ -140,10 +140,10 @@ LSPCallMark: struct {
 }
 
 // Each call's positional arguments named by the parameter they bind, and
-// marked `&` or `&&` when the callee writes or takes them, as is a method's
+// marked `^` or `^^` when the callee writes or takes them, as is a method's
 // receiver. A labeled argument, a rest argument, and an argument that
 // already spells its parameter's name get no name.
-lsp_parameter_hints: fn(view: LSPView, index: SemIndex, hints: &[LSPInlayHint]) Never! {
+lsp_parameter_hints: fn(view: LSPView, index: SemIndex, hints: ^[LSPInlayHint]) Never! {
     loop mark in lsp_call_marks(view, index) {
         name: if mark.name == "" -> "" else -> "{mark.name}: "
         hints.push(LSPInlayHint{at: mark.at, label: "{name}{access_sigil(mark.access)}", kind: Val(LSP_INLAY_HINT_PARAMETER)})
@@ -179,7 +179,7 @@ lsp_call_callable: fn(view: LSPView, index: SemIndex, position: Int) -> SemCalla
     }
     if position < 2 || tokens[position - 1].kind != TOKEN_DOT -> return None
     receiver: lsp_target_at(view, tokens[position - 2].span.start) ?? return None
-    owner: lsp_type_owner(lsp_checked_type(lsp_definition_at(index, receiver) ?? return None) ?? return None)
+    owner: lsp_type_owner(type_name(lsp_checked_type(lsp_definition_at(index, receiver) ?? return None) ?? return None))
     method: token_text(view.lexed.tables, tokens[position])
     loop member in index.members {
         if member.owner != owner || member.name != method || member.kind != "method" -> next
@@ -191,16 +191,16 @@ lsp_call_callable: fn(view: LSPView, index: SemIndex, position: Int) -> SemCalla
     None
 }
 
-// The type a local or parameter was checked to have.
+// The type a local, parameter or field was checked to have.
 lsp_checked_type: fn(def: SemDef) -> Type? Never! {
     if def.kind == {
         .Local(_, ty) -> ty
-        .Param(ty) -> Val(ty)
-        .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> None
+        .Param(ty) | .Field(ty, _) -> Val(ty)
+        .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) -> None
     }
 }
 
-lsp_argument_marks: fn(lexed: Lexed, callable: SemCallable, first_token: Int, marks: &[LSPCallMark]) Never! {
+lsp_argument_marks: fn(lexed: Lexed, callable: SemCallable, first_token: Int, marks: ^[LSPCallMark]) Never! {
     tokens: lexed.tokens
     params: callable.params
     loop (argument, first) in lsp_call_arguments(lexed, first_token) {
@@ -230,7 +230,7 @@ lsp_argument_marks: fn(lexed: Lexed, callable: SemCallable, first_token: Int, ma
     }
 }
 
-lsp_push_call_mark: fn(marks: &[LSPCallMark], tokens: [Token], first: Int, name: String, access: AccessConvention) Never! {
+lsp_push_call_mark: fn(marks: ^[LSPCallMark], tokens: [Token], first: Int, name: String, access: AccessConvention) Never! {
     if name == "" && access == AccessConvention.Read -> return
     place: if tokens[first].kind == TOKEN_IDENT && lsp_lone_token(tokens, first) -> Span?{Val(tokens[first].span)} else -> Span?{None}
     marks.push(LSPCallMark{at: tokens[first].span.start, name: name, access: access, place: place})

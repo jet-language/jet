@@ -169,7 +169,7 @@ Ucd: struct {
 
 new_mapping: fn() -> Mapping { Mapping{cps: [Int]{}, seqs: [Int:[Int]]{}} }
 
-put: fn(mapping: &Mapping, cp: Int, seq: [Int]) {
+put: fn(mapping: ^Mapping, cp: Int, seq: [Int]) {
     if !mapping.seqs.has_key(cp) -> mapping.cps.push(cp)
     mapping.seqs[cp] = seq
 }
@@ -325,7 +325,7 @@ read_pinned: fn(name: String, sums: String) -[FS]> String TableError! {
     String.from_bytes(bytes) ?? return Err(fail("{path} is not UTF-8"))
 }
 
-parse_unicode_data: fn(text: String, ucd: &Ucd) TableError! {
+parse_unicode_data: fn(text: String, ucd: ^Ucd) TableError! {
     pending := -1
     pending_gc := ""
     loop raw in text.split("\n") {
@@ -384,7 +384,7 @@ gc_tag: fn(gc: String) -> Int {
 
 // Unconditional SpecialCasing rows override the simple mappings; conditional
 // rows (Final_Sigma, tr/az/lt) are not table rows.
-parse_special_casing: fn(text: String, ucd: &Ucd) TableError! {
+parse_special_casing: fn(text: String, ucd: ^Ucd) TableError! {
     loop raw in text.split("\n") {
         line: raw.partition("#").head.trim()
         if line == "" -> next
@@ -401,7 +401,7 @@ parse_special_casing: fn(text: String, ucd: &Ucd) TableError! {
 
 // Status C and F define the default full fold; C and S one-scalar rows the
 // simple fold. Turkic T rows are excluded.
-parse_case_folding: fn(text: String, ucd: &Ucd) TableError! {
+parse_case_folding: fn(text: String, ucd: ^Ucd) TableError! {
     loop raw in text.split("\n") {
         line: raw.partition("#").head.trim()
         if line == "" -> next
@@ -544,7 +544,7 @@ POOL_FLAG: 8388608
 
 ASCII_SCALARS: 128
 
-table_digits: fn(out: &[U8], value: Int, width: Int) TableError! {
+table_digits: fn(out: ^[U8], value: Int, width: Int) TableError! {
     if value < 0 || value >= 1 << (6 * width) {
         return Err(fail("table field {value} exceeds {width} digits"))
     }
@@ -812,7 +812,7 @@ runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
 
 // --- JUCD assets -------------------------------------------------------------------
 
-push_le: fn(out: &[U8], value: Int, width: Int) TableError! {
+push_le: fn(out: ^[U8], value: Int, width: Int) TableError! {
     if value < 0 || value >= 1 << (8 * width) {
         return Err(fail("asset field overflow: {value}/{width}"))
     }
@@ -871,7 +871,7 @@ segmentation_entry: fn(assets: [Asset], symbol: String) -> String TableError! {
     Err(fail("SegmentationTables.jet names {symbol}, which no asset carries"))
 }
 
-asset: fn(assets: &[Asset], symbol: String, kind: Int, rows: [Int], widths: [Int], pool: [U8]) TableError! {
+asset: fn(assets: ^[Asset], symbol: String, kind: Int, rows: [Int], widths: [Int], pool: [U8]) TableError! {
     stride := 0
     loop width in widths -> stride += width
     count: rows.len() /% widths.len()
@@ -883,7 +883,7 @@ asset: fn(assets: &[Asset], symbol: String, kind: Int, rows: [Int], widths: [Int
 }
 
 // A mapping as a scalar pool and [scalar, start, length] index rows.
-mapping_asset: fn(assets: &[Asset], name: String, mapping: Mapping) TableError! {
+mapping_asset: fn(assets: ^[Asset], name: String, mapping: Mapping) TableError! {
     pool := [Int]{}
     index := [Int]{}
     loop entry in entries(mapping) {

@@ -72,7 +72,7 @@ sema_receipt_section_name_valid: fn(name: String) -> Bool Never! {
 
 // A `#Receipt` declaration must be `#Codable` and name its section with one
 // valid compile-time string.
-sema_receipt_validate_declaration: fn(definition: StructDef, diagnostics: &[Diagnostic]) {
+sema_receipt_validate_declaration: fn(definition: StructDef, diagnostics: ^[Diagnostic]) {
     marker: sema_receipt_marker(definition) ?? return
     if !sema_receipt_codable(definition) {
         diagnostics.push(sema_error("E2411", marker.span, "receipt section type `{definition.name}` must be `#Codable`", "typed receipt sections use the shared Codable wire contract", "add `#Codable` beside `#Receipt`"))
@@ -127,7 +127,7 @@ sema_receipt_text: fn(text: String, span: Span) -> TExpr Never! {
 }
 
 // `receipt.attach(value)` while no local binding named `receipt` exists.
-sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "attach" -> return SemaMethodSpecialCheck{handled: false, value: None}
     receiver_name: if receiver == .Ident(name, _, _) -> name else -> ""
     if receiver_name != "receipt" || sema_scope_resolve_index(scopes, "receipt") != None {

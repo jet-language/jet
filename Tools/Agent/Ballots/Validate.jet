@@ -220,7 +220,7 @@ sentences: fn(text: String) -> [String] Never! { sentence_list(text.trim()) }
 
 // Ends a whitespace run inside `paragraph_list`: a run holding two or more
 // newlines (`\n\s*\n`) closes the current paragraph.
-close_run: fn(out: &[String], current: &[String], run: &[String]) Never! {
+close_run: fn(out: ^[String], current: ^[String], run: ^[String]) Never! {
     first := -1
     last := -1
     loop index in 0..<run.len() {
@@ -633,7 +633,7 @@ why_not_reason: fn(why_not: [Dyn], key: String) -> String Never! {
 
 // One `need` of store.mjs `surfaceGaps`: a missing value is a gap, a present
 // one is prose and may have a word limit (0 for none).
-need: fn(gaps: &[String], prose: &[Prose], label: String, value: Dyn, limit: Int) Never! {
+need: fn(gaps: ^[String], prose: ^[Prose], label: String, value: Dyn, limit: Int) Never! {
     text: string_value(value).trim()
     if text == "" {
         gaps.push("surface.{label}")

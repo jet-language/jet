@@ -103,7 +103,7 @@ normalize: fn(text: String, compat: Bool, recompose: Bool) -> String Never! {
 }
 
 // Recursive expansion appends to one buffer, including algorithmic Hangul LV/LVT.
-decompose_cp: fn(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View<U8>) Never! {
+decompose_cp: fn(out: ^[Int], cp: Int, compat: Bool, index: View<U8>, pool: View<U8>) Never! {
     sindex: cp - C_SBASE
     if sindex >= 0 && sindex < C_SCOUNT {
         out.push(C_LBASE + sindex /% C_NCOUNT)
@@ -142,7 +142,7 @@ normal_ccc: fn(table: View<U8>, cp: Int) -> Int Never! { normal_assets.range_tag
 // Rust `nfc` canonical ordering. Stable counting sort of each nonstarter run gives
 // linear time even for hostile descending CCC sequences. Sorted runs (the usual
 // case) need no scratch allocation.
-canon_order: fn(cps: &[Int], ccc: View<U8>) Never! {
+canon_order: fn(cps: ^[Int], ccc: View<U8>) Never! {
     positions := [Int]{}
     scratch := [Int]{}
     at := 0
@@ -188,7 +188,7 @@ canon_order: fn(cps: &[Int], ccc: View<U8>) Never! {
 
 // Rust `nfc` composition/blocking. Compact in place: a successful composition
 // does not change last_class.
-compose: fn(cps: &[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
+compose: fn(cps: ^[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
     length := 0
     starter := 0
     last_class := 0

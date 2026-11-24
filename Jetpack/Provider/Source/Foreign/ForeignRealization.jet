@@ -23,7 +23,7 @@ ForeignRealization: struct {
 
 // Realize and project every foreign dependency without publishing the project
 // lock. Fetch commits the complete graph and semantic records in one write.
-provider_realize_foreign_dependencies: fn(verification: &StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
+provider_realize_foreign_dependencies: fn(verification: ^StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
     realized := [ForeignRealization]{}
     names := manifest.dependencies.keys().to_list()
     names.sort()
@@ -38,7 +38,7 @@ provider_realize_foreign_dependencies: fn(verification: &StoreVerification, root
     Ok(realized)
 }
 
-provider_realize_foreign_one: fn(verification: &StoreVerification, roots: HangarRoots, project_root: String, name: String, language: String, reference: String, ctx: ProviderCtx) -[FS, Env, Time]> ForeignRealization ProviderError! {
+provider_realize_foreign_one: fn(verification: ^StoreVerification, roots: HangarRoots, project_root: String, name: String, language: String, reference: String, ctx: ProviderCtx) -[FS, Env, Time]> ForeignRealization ProviderError! {
     provider_validate_library_name(name)
     spec: ProviderRef.classify(reference) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has an invalid provider ref {reference}: {err}"))
     source: provider_foreign_artifact_root(project_root, spec, ctx, name)
@@ -215,7 +215,7 @@ provider_write_verified_file: fn(destination: String, bytes: [U8]) -[FS, Env]> P
     }
 }
 
-provider_write_synced: fn(writer: &&FileWriter, bytes: [U8]) -[FS]> IOError! {
+provider_write_synced: fn(writer: ^^FileWriter, bytes: [U8]) -[FS]> IOError! {
     held := writer
     held.write_bytes(bytes)
     held.fsync()

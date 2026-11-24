@@ -443,14 +443,14 @@ DiagnosticNames1Edits: struct {
 }
 
 // Replaces `bytes[start..<end]` with `with`.
-diagnostic_names1_splice: fn(edits: &DiagnosticNames1Edits, bytes: [U8], start: Int, end: Int, with: &&String) Never! {
+diagnostic_names1_splice: fn(edits: ^DiagnosticNames1Edits, bytes: [U8], start: Int, end: Int, with: ^^String) Never! {
     edits.out.push(String.from_bytes(bytes[edits.cursor..<start]) ?? "")
     edits.out.push(with)
     edits.cursor = end
     edits.rewritten += 1
 }
 
-diagnostic_names1_skip: fn(edits: &DiagnosticNames1Edits, path: String, bytes: [U8], at: Int, token: String) Never! {
+diagnostic_names1_skip: fn(edits: ^DiagnosticNames1Edits, path: String, bytes: [U8], at: Int, token: String) Never! {
     line := 1
     loop byte in bytes[0..<at] {
         if byte == 10 -> line += 1

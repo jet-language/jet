@@ -13,7 +13,7 @@ Tag: struct {
     name: String,
 
     impl Close {
-        close: fn(&&self) { print("close {self.name}") }
+        close: fn(^^self) { print("close {self.name}") }
     }
 }
 
@@ -30,14 +30,14 @@ Failure: enum {
 
 held: fn(name: String) -> Held Never! { Held{name: name, lock: None, tag: Tag{name: name}} }
 
-hold: fn(items: &&[Held]) -> Int {
+hold: fn(items: ^^[Held]) -> Int {
     count: items.len()
     loop item in items.move() { print("keep {item.name}") }
     count
 }
 
 // The Option's payload moves on in one arm of a valued match.
-pick: fn(warm: &&[Held]?) -> Int {
+pick: fn(warm: ^^[Held]?) -> Int {
     count: if warm.move() == {
         .Val(list) -> hold(list)
         .None -> 0
@@ -47,7 +47,7 @@ pick: fn(warm: &&[Held]?) -> Int {
 }
 
 // The payload moves on only on one path; on the other the carrier keeps it.
-maybe: fn(warm: &&[Held]?, moving: Bool) -> Int {
+maybe: fn(warm: ^^[Held]?, moving: Bool) -> Int {
     if warm.move() == {
         .Val(list) -> {
             if moving -> return hold(list)
@@ -59,7 +59,7 @@ maybe: fn(warm: &&[Held]?, moving: Bool) -> Int {
 }
 
 // A Result's Ok payload moves on the same way.
-settle: fn(got: &&[Held] Failure!) -> Int {
+settle: fn(got: ^^[Held] Failure!) -> Int {
     if got.move() == {
         .Ok(list) -> return hold(list)
         .Err(_) -> {}

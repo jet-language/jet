@@ -27,7 +27,7 @@ use combinatorics: core.math.combinatorics
 
 // ---------------------------------------------------------------- stress
 
-modules: fn(n: Int, r: &Seeded) -> [String:String] {
+modules: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     loop i in 0..<n {
@@ -80,7 +80,7 @@ small_body: fn(i: Int, a: Int, b: Int) -> String {
     bodies[i % 4]
 }
 
-small_fns: fn(n: Int, r: &Seeded) -> [String:String] {
+small_fns: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     per_file: (n + 15) /% 16
     items := [String]{}
@@ -101,7 +101,7 @@ small_fns: fn(n: Int, r: &Seeded) -> [String:String] {
 // Four functions of n/4 statements each: straight-line updates, branches and
 // locals, each read by the statement after it (or by a final update when the
 // function ends on one).
-huge_fns: fn(n: Int, r: &Seeded) -> [String:String] {
+huge_fns: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     loop f in 0..<4 {
@@ -130,7 +130,7 @@ huge_fns: fn(n: Int, r: &Seeded) -> [String:String] {
 
 // Nesting depth n: statement blocks (if / loop / value-if) and one
 // parenthesized expression, each n deep, in four functions.
-deep_nesting: fn(n: Int, r: &Seeded) -> [String:String] {
+deep_nesting: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     body := [String]{}
     loop f in 0..<3 {
@@ -162,7 +162,7 @@ deep_nesting: fn(n: Int, r: &Seeded) -> [String:String] {
 }
 
 // One enum of n variants and four n-arm tables over it.
-wide_enums: fn(n: Int, r: &Seeded) -> [String:String] {
+wide_enums: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     kinds: ["Plain", "Count", "Span", "Named"]
     decl := [String]{"Opcode: enum {{"}
@@ -220,7 +220,7 @@ trait_word: fn() -> String { "{"Capabil"}ity" }
 
 // n types, n/8 traits (at least 4), four trait impls and one inherent impl
 // per type, trait values consumed per trait.
-impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
+impls_traits: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     trait_count: max(4, n /% 8)
     named: trait_word()
@@ -268,7 +268,7 @@ impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
             lines(
                 """
                 impl Entity{i} {{
-                    bump: fn(&self) {{ self.id += {r.int(1, 9)} }}
+                    bump: fn(^self) {{ self.id += {r.int(1, 9)} }}
                     weight: fn(self) -> Int {{ self.id + self.name.len() }}
                 }}
 
@@ -293,7 +293,7 @@ impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
 // A fixed generic library instantiated with n distinct record types, all in
 // the entry file: generic code outside the entry file does not compile today
 // (Domains.jet explains the two compilers' errors).
-generics: fn(n: Int, r: &Seeded) -> [String:String] {
+generics: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     text := """
@@ -352,7 +352,7 @@ generics: fn(n: Int, r: &Seeded) -> [String:String] {
 
 // n comptime constants (a third chained on the previous one) with n/2
 // record types whose methods read them.
-comptime_items: fn(n: Int, r: &Seeded) -> [String:String] {
+comptime_items: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     items := [[String]]{}
     entries := [String]{}
@@ -385,7 +385,7 @@ comptime_items: fn(n: Int, r: &Seeded) -> [String:String] {
 
 // n table elements: four Int tables, a record table and a string-keyed map,
 // as functions returning literal tables, plus one long string literal.
-data_tables: fn(n: Int, r: &Seeded) -> [String:String] {
+data_tables: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     body := [String]{}
     quarter: max(16, n /% 4)
@@ -453,7 +453,7 @@ data_tables: fn(n: Int, r: &Seeded) -> [String:String] {
 // n files, each importing four Core modules and calling into each. core.time
 // is left out: the generated compiler rejects Core/Time today (E0312/E0109 on
 // LocalDate comparisons).
-imports: fn(n: Int, r: &Seeded) -> [String:String] {
+imports: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     loop i in 0..<n {
@@ -478,7 +478,7 @@ imports: fn(n: Int, r: &Seeded) -> [String:String] {
 }
 
 // One call chain n deep across eight files.
-call_chains: fn(n: Int, r: &Seeded) -> [String:String] {
+call_chains: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     per_file: (n + 7) /% 8
     loop f in 0..<8 {
@@ -495,7 +495,7 @@ call_chains: fn(n: Int, r: &Seeded) -> [String:String] {
 
 // n fallible functions: typed error families (one per 16 functions),
 // propagation, recovery by `??` and by result tables, inferred text errors.
-errors: fn(n: Int, r: &Seeded) -> [String:String] {
+errors: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     items := [[String]]{}
     entries := [String]{}
@@ -561,7 +561,7 @@ errors: fn(n: Int, r: &Seeded) -> [String:String] {
 }
 
 // n functions with one undefined name each: n diagnostics expected.
-diagnostics: fn(n: Int, r: &Seeded) -> [String:String] {
+diagnostics: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     items := [[String]]{}
     entries := [String]{}
@@ -576,7 +576,7 @@ diagnostics: fn(n: Int, r: &Seeded) -> [String:String] {
 }
 
 // n interpolation holes and 64n literal bytes, in n/16 functions.
-strings: fn(n: Int, r: &Seeded) -> [String:String] {
+strings: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     items := [[String]]{}
     entries := [String]{}
@@ -604,7 +604,7 @@ strings: fn(n: Int, r: &Seeded) -> [String:String] {
 }
 
 // n call sites into two shared helpers.
-fan_in: fn(n: Int, r: &Seeded) -> [String:String] {
+fan_in: fn(n: Int, r: ^Seeded) -> [String:String] {
     files := [String:String]{}
     files["shared.jet"] = """
     shared_scale: fn(x: Int) -> Int {{ (x * 3 + 1) % 1000003 }}
@@ -645,7 +645,7 @@ Shape: struct {
     make: fn(Int, Int) -> [String:String] Err!,
 }
 
-stress: fn(name: String, dimension: String, base: Int, make: &&fn(Int, Int) -> [String:String] Err!) -> Shape {
+stress: fn(name: String, dimension: String, base: Int, make: ^^fn(Int, Int) -> [String:String] Err!) -> Shape {
     Shape{name: name, kind: .Stress, dimension: dimension, base: base, make: make}
 }
 

@@ -14,7 +14,7 @@ jet_cli_record_entry_order: fn(left: JetCLIRecordIndexEntry, right: JetCLIRecord
     (left_rank <=> right_rank).then(left.artifact_id <=> right.artifact_id).then(left.identity.target_inputs_sha256 <=> right.identity.target_inputs_sha256).then(left.identity.tool_version <=> right.identity.tool_version).then(left.identity.engine <=> right.identity.engine).then(left.path <=> right.path)
 }
 
-jet_cli_record_visit_cycle: fn(key: String, graph: [String:[String]], state: &[String:Int]) -> Bool Never! {
+jet_cli_record_visit_cycle: fn(key: String, graph: [String:[String]], state: ^[String:Int]) -> Bool Never! {
     phase: state.get(key) ?? 0
     if phase == 1 -> return true
     if phase == 2 -> return false

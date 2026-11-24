@@ -156,13 +156,13 @@ cli_env_info_service_json: fn(service: DevServicePlan) -> Dyn Never! {
 }
 
 // Record `source` for variable `name` once, keeping first-seen order.
-cli_add_variable_source: fn(sources: &[String:[String]], name: String, source: String) Never! {
+cli_add_variable_source: fn(sources: ^[String:[String]], name: String, source: String) Never! {
     known := sources.get(name) ?? [String]{}
     if !known.contains(source) -> known.push(source.copy())
     sources[name] = known
 }
 
-cli_cmd_env_info: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
+cli_cmd_env_info: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
     plan: cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return cli_exit_for(theme, err)
     cli_validate_integration_facts(plan) ?? {
         theme.error_coded(

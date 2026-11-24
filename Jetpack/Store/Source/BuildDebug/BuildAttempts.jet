@@ -82,7 +82,7 @@ BuildAttempt: struct {
     }
 
     // Record a step; the first non-ok step marks the attempt failed there.
-    push_step: fn(&self, step: StepLog) Never! {
+    push_step: fn(^self, step: StepLog) Never! {
         if step.status != "ok" && self.failed_step == 0 {
             self.failed_step = step.index
             self.status = "failed"
@@ -90,13 +90,13 @@ BuildAttempt: struct {
         self.steps.push(step.copy())
     }
 
-    mark_ok: fn(&self) Never! { self.status = "ok" }
+    mark_ok: fn(^self) Never! { self.status = "ok" }
 
-    mark_failed: fn(&self) Never! { self.status = "failed" }
+    mark_failed: fn(^self) Never! { self.status = "failed" }
 
     // Write every step's output logs, `attempt.json`, and the package's
     // `latest.json` under `<hangar>/build-logs/<package>/<id>`.
-    persist: fn(&self, hangar_dir: String) -[FS, Env, Rand]> StoreError! {
+    persist: fn(^self, hangar_dir: String) -[FS, Env, Rand]> StoreError! {
         recipe_debug_validate_id(self.id)
         package_dir: recipe_debug_log_dir(hangar_dir, self.package)
         dir: files.join(package_dir, self.id)
@@ -116,7 +116,7 @@ BuildAttempt: struct {
     // Copy the failed build's source and output trees into
     // `<hangar>/failed-scratch/<id>` through a private staging directory.
     // A symlinked output or any error leaves no recorded scratch path.
-    preserve_scratch: fn(&self, hangar_dir: String, source: String, output: String) -[FS, Env, Rand]> StoreError! {
+    preserve_scratch: fn(^self, hangar_dir: String, source: String, output: String) -[FS, Env, Rand]> StoreError! {
         recipe_debug_validate_id(self.id)
         root: files.join(hangar_dir, BUILD_DEBUG_SCRATCH_ROOT)
         recipe_debug_ensure_real_directory(root, "failed-build scratch root")
@@ -252,7 +252,7 @@ recipe_promote_failed_attempt: fn(source_hangar: String, target_hangar: String, 
     }
 }
 
-recipe_debug_promote_stage: fn(stage: String, source_scratch: String, target_scratch: String, target_hangar: String, attempt: &BuildAttempt) -[FS, Env, Rand]> StoreError! {
+recipe_debug_promote_stage: fn(stage: String, source_scratch: String, target_scratch: String, target_hangar: String, attempt: ^BuildAttempt) -[FS, Env, Rand]> StoreError! {
     recipe_debug_ensure_absent(stage, "promoted failed-build scratch staging")
     recipe_debug_copy_tree(source_scratch, stage)
     files.rename(stage, target_scratch)

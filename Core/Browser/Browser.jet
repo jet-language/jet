@@ -193,7 +193,7 @@ priv BrowserState: struct {
     // reply, skipping events, until the session's timeout. A gone peer needs
     // no end. The engine, if any, stops after this, when its field drops.
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if self.closed || !self.session_started {
                 return
             }
@@ -226,7 +226,7 @@ priv BrowserEngine: struct {
     session_url: String,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             // Close cannot fail: an engine that already exited cannot be
             // signaled, and wait still reaps it.
             if self.session_url != "" {
@@ -1092,7 +1092,7 @@ priv launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net,
 // The BiDi socket of a session a driver already created: no `session.status`
 // or `session.new`, and close ends it through the engine's driver session.
 priv connect_session: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
-    conn: if core.net.ws.__connect(endpoint) == {
+    conn: if net_rt.ws_connect(endpoint) == {
         .Ok(value) -> value
         .Err(error) -> {
             return Err(browser_ws_error(error))
@@ -1142,7 +1142,7 @@ connect: fn(endpoint: String) -[Net, Time]> Browser BrowserError! {
 }
 
 connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
-    conn: if core.net.ws.__connect(endpoint) == {
+    conn: if net_rt.ws_connect(endpoint) == {
         .Ok(value) -> value
         .Err(error) -> {
             return Err(browser_ws_error(error))
@@ -1253,7 +1253,7 @@ browser_mark_closed: fn(browser: Browser) Never! {
     guard.value.engine = None
 }
 
-priv browser_own_engine: fn(browser: Browser, engine: &&BrowserEngine) Never! {
+priv browser_own_engine: fn(browser: Browser, engine: ^^BrowserEngine) Never! {
     guard := browser.__state.guard_edit()
     guard.value.engine = Val(engine)
 }
@@ -1344,14 +1344,14 @@ browser_next_id: fn(browser: Browser) -> Int Never! {
 
 // ---- Command transport ------------------------------------------------------
 
-browser_command: fn(browser: Browser, method: String, params: &&Dyn) -[Net, Time]> Dyn BrowserError! {
+browser_command: fn(browser: Browser, method: String, params: ^^Dyn) -[Net, Time]> Dyn BrowserError! {
     browser_command_with_timeout(browser, method, params, browser_timeout_ms(browser))
 }
 
 // One command: send `{id, method, params}`, queue interleaved events, drop
 // late replies (browser_late_reply), and accept only the matching success
 // reply before the deadline.
-browser_command_with_timeout: fn(browser: Browser, method: String, params: &&Dyn, timeout_ms: Int) -[Net, Time]> Dyn BrowserError! {
+browser_command_with_timeout: fn(browser: Browser, method: String, params: ^^Dyn, timeout_ms: Int) -[Net, Time]> Dyn BrowserError! {
     browser_check_command(browser, method)
     started: time.instant()
     browser_ws_timeout(browser, remaining_ms(started, timeout_ms))
@@ -1538,7 +1538,7 @@ phase_ok: fn(phase: String) -> Bool Never! {
 
 // ---- Dyn helpers ------------------------------------------------------------
 
-obj: fn(entries: &&[{key: String, value: Dyn}]) -> Dyn Never! { tree.object_from_entries(entries) }
+obj: fn(entries: ^^[{key: String, value: Dyn}]) -> Dyn Never! { tree.object_from_entries(entries) }
 
 empty_object: fn() -> Dyn Never! { tree.object_from_entries([{key: String, value: Dyn}]{}) }
 
@@ -1719,7 +1719,7 @@ page_frame: fn(page: BrowserPage, id: String) -> BrowserFrame Never! {
     BrowserFrame{__browser: page.__browser, __context: page.__context, __page: page.__scope, __scope: new_scope(id)}
 }
 
-collect_frame_ids: fn(node: Dyn, out: &[String]) BrowserError! {
+collect_frame_ids: fn(node: Dyn, out: ^[String]) BrowserError! {
     id: browser_string(node, "context")
     out.push(id)
     children: browser_get(node, "children") ?? return Ok()
@@ -1753,7 +1753,7 @@ storage_name: fn(kind: String) -> String? Never! {
     None
 }
 
-page_storage_call: fn(page: BrowserPage, function: String, arguments: &&[Dyn]) -[Net, Time]> Dyn BrowserError! {
+page_storage_call: fn(page: BrowserPage, function: String, arguments: ^^[Dyn]) -[Net, Time]> Dyn BrowserError! {
     page_live(page)
     target: obj([{key: "context", value: Dyn.Text(scope_id(page.__scope))}])
     browser_command(
@@ -2046,7 +2046,7 @@ priv attempt_records: fn(config: BrowserTestConfig, attempt: Int) -> Bool Never!
 // screenshot bytes are page payloads: a snapshot keeps only their hash and
 // size, unless UI mode or `trace_payloads` asks for them; then each is
 // written under the artifact folder and attached.
-priv record_attempt: fn(config: BrowserTestConfig, fixture: BrowserTestFixture, out: &BrowserTestAttempt) -[FS, Net, Time]> Never! {
+priv record_attempt: fn(config: BrowserTestConfig, fixture: BrowserTestFixture, out: ^BrowserTestAttempt) -[FS, Net, Time]> Never! {
     out.trace = fixture.__browser.trace().entries
     out.actions = trace_actions(out.trace)
     loop {
@@ -2101,7 +2101,7 @@ priv event_fact: fn(event: BrowserEvent) -> BrowserTestEventFact Never! {
 
 // One snapshot of `bytes`. With a `path`, the bytes are written there and
 // attached; a payload that can't be written leaves the snapshot's path "".
-priv record_snapshot: fn(out: &BrowserTestAttempt, kind: String, bytes: [U8], path: String, mime: String) -[FS]> Never! {
+priv record_snapshot: fn(out: ^BrowserTestAttempt, kind: String, bytes: [U8], path: String, mime: String) -[FS]> Never! {
     hash: bytes_fact_hash(bytes)
     kept: if path != "" && write_report_bytes(path, bytes) == .Ok(_) -> path else -> ""
     if kept != "" {
@@ -2422,7 +2422,7 @@ server_url: fn(server: BrowserTestServer) -> String Never! { server.url() }
 
 server_logs: fn(server: BrowserTestServer) -> String Never! { server.logs() }
 
-push_str: fn(out: &[U8], s: String) Never! {
+push_str: fn(out: ^[U8], s: String) Never! {
     loop b in s.bytes() -> out.push(b)
 }
 

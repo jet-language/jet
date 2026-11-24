@@ -1,0 +1,167 @@
+// File renames: before an editor renames or moves `.jet` files or folders,
+// each file import (`use "helper"`) that names a moved file is rewritten to
+// name its new path, and a moved file's own file imports are rewritten to
+// name, from its new place, the files they named from the old one. A
+// module-path import names a module through its package and is left as it
+// is. The edits apply to the documents as they are before the rename.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[ImportDecl, Span, foundation_byte_text, foundation_json_quote]
+    jet_parser.[parse_source]
+    jet_driver.[JetDriverSourceDocument, jet_driver_file_import_path]
+    jet_pkg_model.[pkg_mask_inline_package_source]
+}
+
+// One renamed file or folder, as paths.
+LSPFileRename: struct {
+    from: String,
+    to: String,
+}
+
+// `workspace/willRenameFiles`: the import edits of every open document and
+// of every saved `.jet` file below a workspace folder, or null when no
+// import names a renamed file.
+lsp_will_rename_files_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    renames := [LSPFileRename]{}
+    loop row in lsp_member_rows(params ?? Dyn.Null, "files") {
+        from: lsp_text_member(row, "oldUri") ?? next
+        to: lsp_text_member(row, "newUri") ?? next
+        renames.push(LSPFileRename{from: lsp_folder_path(from), to: lsp_folder_path(to)})
+    }
+    files := [String]{}
+    loop source in lsp_rename_sources(server) {
+        own: lsp_renamed_path(renames, source.path)
+        if own == None && !lsp_may_name_renamed(source.source, renames) -> next
+        edits := [String]{}
+        loop import in lsp_source_imports(source.source) {
+            if import.kind == .File(written, span) {
+                new_text: lsp_file_import_text(source, import, written, span, renames, own) ?? next
+                edits.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(source.source, span))},\"newText\":{foundation_json_quote(new_text)}}}")
+            }
+        }
+        if edits.len() == 0 -> next
+        uri: foundation_json_quote(lsp_path_to_uri(source.path))
+        files.push(if server.document_changes -> "{{\"textDocument\":{{\"uri\":{uri},\"version\":{lsp_open_version(server, source.path)}}},\"edits\":[{edits.join(",")}]}}" else -> "{uri}:[{edits.join(",")}]")
+    }
+    if files.len() == 0 -> return lsp_response(id, "null")
+    edit: if server.document_changes -> "\"documentChanges\":[{files.join(",")}]" else -> "\"changes\":{{{files.join(",")}}}"
+    lsp_response(id, "{{{edit}}}")
+}
+
+// The open documents, then each saved file below a workspace folder that no
+// editor holds, each once.
+lsp_rename_sources: fn(server: LSPServer) -> [JetDriverSourceDocument] {
+    sources := server.overlays()
+    loop root in server.workspace_roots {
+        saved: server.checker.sources(root)
+        loop file in saved.move() {
+            if lsp_path_open(server, file.path) -> next
+            seen: loop source in sources {
+                if source.path == file.path -> break true
+            } ?? false
+            if !seen -> sources.push(file)
+        }
+    }
+    sources
+}
+
+// Where `path` is after the renames: its new path when it or a folder above
+// it is renamed.
+lsp_renamed_path: fn(renames: [LSPFileRename], path: String) -> String? Never! {
+    loop rename in renames {
+        if path == rename.from -> return Val(rename.to.copy())
+        if lsp_path_below(path, rename.from) -> return Val("{rename.to}{path.slice(rename.from.count_bytes(), path.count_bytes())}")
+    }
+    None
+}
+
+// A file that names a renamed file or folder in an import writes its last
+// segment, so a file that writes none of them is skipped unparsed.
+lsp_may_name_renamed: fn(text: String, renames: [LSPFileRename]) -> Bool Never! {
+    loop rename in renames {
+        if text.contains(lsp_file_stem(rename.from)) -> return true
+    }
+    false
+}
+
+// The imports `text` declares; an inline package block is masked first, as
+// the loader does, keeping every byte offset.
+lsp_source_imports: fn(text: String) -> [ImportDecl] Never! {
+    if pkg_mask_inline_package_source(text) == .Ok(masked) {
+        if masked.block != None {
+            parsed: parse_source(masked.source.bytes())
+            return parsed.program.imports.move()
+        }
+    }
+    parsed: parse_source(text.bytes())
+    parsed.program.imports.move()
+}
+
+// The text that replaces the path literal at `span` of a file import, or
+// None when the import keeps naming its file. Only a plain string literal is
+// rewritten. A name the import took from its path keeps its spelling, written
+// as the import's alias when the new path would name it otherwise. A file
+// that moves out of `.jet` is no longer imported, and is left to the user.
+lsp_file_import_text: fn(source: JetDriverSourceDocument, import: ImportDecl, written: String, span: Span, renames: [LSPFileRename], own: String?) -> String? Never! {
+    bytes: source.source.bytes()
+    if span.end > bytes.len() || foundation_byte_text(bytes, span.start, span.end) != "\"{written}\"" -> return None
+    target: lsp_file_import_target(source.path, written) ?? return None
+    moved: lsp_renamed_path(renames, target)
+    if own == None && moved == None -> return None
+    to: moved ?? target
+    if !to.ends_with(".jet") -> return None
+    from: own ?? source.path
+    path := lsp_relative_import(from, to, extension: written.ends_with(".jet"))
+    if written.starts_with("./") && !path.starts_with("../") -> path = "./{path}"
+    if path == written || path.contains("\"") || path.contains("\\") || path.contains("{") || path.contains("}") -> return None
+    implicit: import.alias_span.start == span.start && import.alias_span.end == span.end
+    if implicit && lsp_import_basename(path) != import.alias && lsp_valid_identifier(import.alias) {
+        return Val("{import.alias}: \"{path}\"")
+    }
+    Val("\"{path}\"")
+}
+
+// The file a file import names from `importer`, as the loader resolves it:
+// beside the importer, with `.jet` in place of any extension.
+lsp_file_import_target: fn(importer: String, written: String) -> String? Never! {
+    resolved: jet_driver_file_import_path(importer, written)
+    if !resolved.valid -> return None
+    if importer.starts_with("/") -> return Val("/{resolved.path}")
+    Val(resolved.path.copy())
+}
+
+// The path that names the file `to` from a file at `from`. It ends without
+// `.jet` unless `extension` asks for it or the file's stem holds a dot, which
+// the loader would read as an extension.
+lsp_relative_import: fn(from: String, to: String, extension: Bool{false}) -> String Never! {
+    from_parts: from.split("/").to_list()
+    to_parts: to.split("/").to_list()
+    common := 0
+    loop common < from_parts.len() - 1 && common < to_parts.len() - 1 && from_parts[common] == to_parts[common] -> common += 1
+    parts := [String]{}
+    ups := from_parts.len() - 1 - common
+    loop ups > 0 {
+        parts.push("..")
+        ups -= 1
+    }
+    loop index in common..<to_parts.len() -> parts.push(to_parts[index].copy())
+    joined: parts.join("/")
+    stem: lsp_file_stem(to)
+    if extension || stem.contains(".") -> return joined
+    joined.slice(0, joined.count_bytes() - 4)
+}
+
+// The name a file import binds when it writes no alias: its path's last
+// segment.
+lsp_import_basename: fn(path: String) -> String Never! {
+    segments: path.split("/").to_list()
+    segments[segments.len() - 1].copy()
+}
+
+// An open document's version, or null for a file no editor holds.
+lsp_open_version: fn(server: LSPServer, path: String) -> String Never! {
+    loop (_, doc) in server.diagnostic_state.docs {
+        if lsp_source_paths_equal(doc.path, path) -> return "{doc.version}"
+    }
+    "null"
+}

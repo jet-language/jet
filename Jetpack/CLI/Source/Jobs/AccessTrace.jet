@@ -19,7 +19,7 @@ cli_task_access_trace_path: fn(cache_key: String) -[Env]> String Never! {
 }
 
 // Run `argv` in `env` under the file-access tracer, writing `trace_path`.
-cli_run_job_with_access_trace: fn(env: &ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int CLIError! {
+cli_run_job_with_access_trace: fn(env: ^ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int CLIError! {
     if !sys.is_linux() {
         return Err(CLIError.Other("strict cached job access tracing is currently supported only on Linux"))
     }

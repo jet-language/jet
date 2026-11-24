@@ -257,7 +257,7 @@ js_imports: fn(repo: String, path: String) -[FS]> [String] Never! {
 }
 
 // The names of the directories in `repo`/`root`, in name order.
-subdirectories: fn(repo: String, root: String, found: &Entries) -[FS]> [String] Never! {
+subdirectories: fn(repo: String, root: String, found: ^Entries) -[FS]> [String] Never! {
     names := [String]{}
     if !files.is_dir(files.join(repo, root)) -> return names
     listed: files.list_dir(files.join(repo, root)) ?? {
@@ -291,7 +291,7 @@ read_entries: fn(repo: String, paths: [String]) -[FS]> Entries Never! {
 }
 
 // Records the pairing an in-scope tool entry makes, or each part it lacks.
-tool_entry: fn(repo: String, name: String, tree: Dyn, found: &Entries) -[FS]> () {
+tool_entry: fn(repo: String, name: String, tree: Dyn, found: ^Entries) -[FS]> () {
     dir: "{ENTRIES_ROOT}/{name}"
     tool: field(tree, "tool")
     original: text_field(tool, "original")

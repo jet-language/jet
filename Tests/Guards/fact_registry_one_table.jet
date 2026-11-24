@@ -50,7 +50,7 @@ frt_constant: fn(line: String) -[]> Bool {
 // Every module constant under `path` whose line spells a registration table,
 // as `path:line`, except the one table in its home. Symbolic links, hidden
 // entries and build output are skipped, and so are files that are not Jet.
-frt_tables: fn(path: String, out: &[String]) -[FS]> {
+frt_tables: fn(path: String, out: ^[String]) -[FS]> {
     if frt_files.is_symlink(path) -> return
     if frt_files.is_dir(path) {
         loop child in (frt_files.list_dir(path) ?? panic("list {path}: {err}")) {

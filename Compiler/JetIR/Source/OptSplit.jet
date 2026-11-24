@@ -19,7 +19,7 @@
 use jet_foundation.[Type]
 
 // Splits `f`'s Loops (the header comment); returns how many slots it split.
-ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+ir_opt_split_loops: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     count: f.op.len()
     slots: f.slot_type.len()
     reads := [Int]{}
@@ -180,7 +180,7 @@ ir_opt_splittable: fn(m: IRModule, f: IRFunction, slot: Int, writes: Int, last: 
 }
 
 // Counts a reference to `slot` (-1: none) in the Loop at `head`.
-ir_opt_split_note: fn(mark: &[Int], inside: &[Int], changed: &[Bool], touched: &[Int], slot: Int, head: Int, write: Bool) Never! {
+ir_opt_split_note: fn(mark: ^[Int], inside: ^[Int], changed: ^[Bool], touched: ^[Int], slot: Int, head: Int, write: Bool) Never! {
     if slot < 0 || slot >= mark.len() {
         return
     }
@@ -212,7 +212,7 @@ ir_opt_split_exits: fn(f: IRFunction, head: Int, tail: Int) -> Bool Never! {
 
 // Puts instruction `at` with each slot it reads or writes under its
 // `current` name; renamed call arguments get a list of their own.
-ir_opt_split_put: fn(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) Never! {
+ir_opt_split_put: fn(code: ^IROptCode, f: ^IRFunction, current: [Int], at: Int) Never! {
     op: f.op[at]
     form: ir_x64_read_form(op)
     a := f.a[at]

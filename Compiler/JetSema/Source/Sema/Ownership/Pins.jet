@@ -22,7 +22,7 @@ sema_pin_write_window: fn(argument: CallArg) -> Bool Never! {
 
 // Rust `core_call` arm ("core.mem", "pin") for the one argument of
 // `mem.pin` (sema_call_memory_pin). False when the call is rejected.
-sema_pin_check_call: fn(args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
+sema_pin_check_call: fn(args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool {
     if sema_pin_write_window(args[0]) -> return true
     diagnostics.push(sema_error("E0218", expr_span(args[0].expr), "`pin` needs a named place to pin", "a pin promises one storage location will not move, so it has to name that location instead of a temporary value", "bind the value to a `:=` name, then write `mem.pin(place)`"))
     false
@@ -69,7 +69,7 @@ sema_pin_call_argument: fn(expr: Expr) -> CallArg? {
 // Rust `core_call` ("core.mem", "pin") view fact: `pinned: mem.pin(place)`
 // keeps an exclusive write window on `place` for as long as `pinned` lives.
 // True when the binding is a pin and its fact was recorded.
-sema_pin_record_binding: fn(state: &SemaOwnershipState, binding: Binding, init_ty: Type, scopes: SemaScopeTable) -> Bool {
+sema_pin_record_binding: fn(state: ^SemaOwnershipState, binding: Binding, init_ty: Type, scopes: SemaScopeTable) -> Bool {
     if !sema_pin_type(init_ty) -> return false
     argument: sema_pin_call_argument(binding.init) ?? return false
     if !sema_pin_write_window(argument) -> return false
@@ -85,7 +85,7 @@ sema_pin_record_binding: fn(state: &SemaOwnershipState, binding: Binding, init_t
 
 // Rust `check_owner_change(name, "be moved")` for the exact move `place.move()`:
 // moving a pinned place is E0219. Runs before the moved place is read.
-sema_pin_check_move: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+sema_pin_check_move: fn(state: ^SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     loop place in sema_ownership_places_from_expr_in_state(expr, scopes, state) {
         if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Move, expr, scopes) == .Val(fact) {
             if sema_pin_view_fact(fact, scopes) {

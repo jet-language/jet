@@ -233,7 +233,7 @@ provider_nix_identity_key: fn(object: [String:Dyn]) -> [String?] Never! {
 }
 
 // The non-blank string at `key`; a blank or non-string value is a loss.
-provider_nix_string_field: fn(object: [String:Dyn], key: String, label: String, losses: &[String]) -> String? Never! {
+provider_nix_string_field: fn(object: [String:Dyn], key: String, label: String, losses: ^[String]) -> String? Never! {
     value: object.get(key) ?? return None
     text: pkg_json_text(value) ?? {
         losses.push("Nix `{label}` must be a string")
@@ -247,7 +247,7 @@ provider_nix_string_field: fn(object: [String:Dyn], key: String, label: String, 
 }
 
 // Every present value that disagrees with the first present one.
-provider_nix_conflicting_values: fn(conflicts: &[String], message: String, values: [{label: String, value: String?}]) Never! {
+provider_nix_conflicting_values: fn(conflicts: ^[String], message: String, values: [{label: String, value: String?}]) Never! {
     selected_label := ""
     selected_value := ""
     has_selected := false
@@ -266,7 +266,7 @@ provider_nix_conflicting_values: fn(conflicts: &[String], message: String, value
 }
 
 // The `outputs.out` (else `outputs.bin`) path.
-provider_nix_output_path: fn(object: [String:Dyn], losses: &[String]) -> String? Never! {
+provider_nix_output_path: fn(object: [String:Dyn], losses: ^[String]) -> String? Never! {
     raw_outputs: object.get("outputs") ?? return None
     outputs: pkg_json_object(raw_outputs) ?? {
         losses.push("Nix `outputs` must be a JSON object")
@@ -277,7 +277,7 @@ provider_nix_output_path: fn(object: [String:Dyn], losses: &[String]) -> String?
 }
 
 // The first declared top-level content hash, which must be an exact digest.
-provider_nix_hash_field: fn(object: [String:Dyn], losses: &[String]) -> String? Never! {
+provider_nix_hash_field: fn(object: [String:Dyn], losses: ^[String]) -> String? Never! {
     keys: [String]{"narHash", "outputHash", "hash", "sha256", "contentHash"}
     loop key in keys {
         if !object.has_key(key) -> next
@@ -322,7 +322,7 @@ provider_nix_version_suffix: fn(name: String, package: String) -> String? Never!
 }
 
 // The dependency names in a Nix input field.
-provider_nix_dependency_values: fn(value: Dyn, losses: &[String], label: String) -> [String] Never! {
+provider_nix_dependency_values: fn(value: Dyn, losses: ^[String], label: String) -> [String] Never! {
     if pkg_json_text(value) == {
         .Val(text) -> return [String]{text}
         .None -> {}
@@ -367,7 +367,7 @@ provider_nix_dependency_values: fn(value: Dyn, losses: &[String], label: String)
     fields.keys().to_list()
 }
 
-provider_nix_dependencies: fn(facts: &MetadataFacts, object: [String:Dyn], losses: &[String], fields: [{field: String, kind: String}]) Never! {
+provider_nix_dependencies: fn(facts: ^MetadataFacts, object: [String:Dyn], losses: ^[String], fields: [{field: String, kind: String}]) Never! {
     loop entry in fields {
         value: object.get(entry.field) ?? next
         facts.add_typed_json("provider.nix.dependency.{entry.kind}", value)
@@ -385,7 +385,7 @@ provider_nix_dependencies: fn(facts: &MetadataFacts, object: [String:Dyn], losse
     facts.build_dependencies = provider_sorted_unique(facts.build_dependencies)
 }
 
-provider_nix_hooks: fn(facts: &MetadataFacts, object: [String:Dyn], losses: &[String]) Never! {
+provider_nix_hooks: fn(facts: ^MetadataFacts, object: [String:Dyn], losses: ^[String]) Never! {
     keys: [String]{"builder", "args", "buildCommand", "shellHook", "setupHook", "hooks", "configurePhase", "buildPhase", "checkPhase", "installPhase", "postInstall"}
     loop key in keys {
         value: object.get(key) ?? next
@@ -401,7 +401,7 @@ provider_nix_hooks: fn(facts: &MetadataFacts, object: [String:Dyn], losses: &[St
     facts.scripts = provider_sorted_unique(facts.scripts)
 }
 
-provider_nix_variants: fn(facts: &MetadataFacts, object: [String:Dyn], meta: [String:Dyn]?, losses: &[String]) Never! {
+provider_nix_variants: fn(facts: ^MetadataFacts, object: [String:Dyn], meta: [String:Dyn]?, losses: ^[String]) Never! {
     keys: [String]{"system", "platform", "hostPlatform", "buildPlatform", "targetPlatform", "crossSystem", "features", "platforms", "outputs", "variants"}
     loop key in keys {
         value: object.get(key) ?? next
@@ -429,7 +429,7 @@ provider_nix_variants: fn(facts: &MetadataFacts, object: [String:Dyn], meta: [St
 
 // A string or string array; the object-valued fields named below are kept
 // only as typed facts.
-provider_nix_string_list_value: fn(value: Dyn, label: String, losses: &[String]) -> [String] Never! {
+provider_nix_string_list_value: fn(value: Dyn, label: String, losses: ^[String]) -> [String] Never! {
     if pkg_json_text(value) == {
         .Val(text) -> return [String]{text}
         .None -> {}
@@ -467,7 +467,7 @@ provider_nix_field: fn(object: [String:Dyn], meta: [String:Dyn]?, key: String) -
     fields.get(key)
 }
 
-provider_nix_license: fn(facts: &MetadataFacts, object: [String:Dyn], meta: [String:Dyn]?, losses: &[String]) Never! {
+provider_nix_license: fn(facts: ^MetadataFacts, object: [String:Dyn], meta: [String:Dyn]?, losses: ^[String]) Never! {
     value: provider_nix_field(object, meta, "license") ?? return
     facts.add_typed_json("provider.nix.license", value)
     if !provider_graph_is_text(value) && pkg_json_object(value) == None && pkg_json_array(value) == None {
@@ -476,7 +476,7 @@ provider_nix_license: fn(facts: &MetadataFacts, object: [String:Dyn], meta: [Str
     facts.license = provider_graph_json_value_text(value)
 }
 
-provider_nix_signatures: fn(facts: &MetadataFacts, object: [String:Dyn], losses: &[String]) Never! {
+provider_nix_signatures: fn(facts: ^MetadataFacts, object: [String:Dyn], losses: ^[String]) Never! {
     keys: [String]{"signature", "signatures", "publicKey", "public_key", "signingKey", "signedBy", "trustedKeys"}
     loop key in keys {
         value: object.get(key) ?? next
@@ -488,7 +488,7 @@ provider_nix_signatures: fn(facts: &MetadataFacts, object: [String:Dyn], losses:
     facts.trust_roots = provider_sorted_unique(facts.trust_roots)
 }
 
-provider_nix_advisories: fn(facts: &MetadataFacts, object: [String:Dyn], meta: [String:Dyn]?, losses: &[String]) Never! {
+provider_nix_advisories: fn(facts: ^MetadataFacts, object: [String:Dyn], meta: [String:Dyn]?, losses: ^[String]) Never! {
     flags: [String]{"yanked", "broken", "insecure", "unfree", "available"}
     loop key in flags {
         value: provider_nix_field(object, meta, key) ?? next
@@ -513,7 +513,7 @@ provider_nix_advisories: fn(facts: &MetadataFacts, object: [String:Dyn], meta: [
     }
 }
 
-provider_nix_sources: fn(facts: &MetadataFacts, object: [String:Dyn], locked: [String:Dyn]?, drv_path: String?) Never! {
+provider_nix_sources: fn(facts: ^MetadataFacts, object: [String:Dyn], locked: [String:Dyn]?, drv_path: String?) Never! {
     keys: [String]{"source", "sourceInfo", "sourceProvenance", "origin", "owner", "repository", "repo", "url", "homepage", "downloadPage"}
     loop key in keys {
         value: object.get(key) ?? next

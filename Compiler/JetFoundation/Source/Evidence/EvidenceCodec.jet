@@ -24,7 +24,7 @@ EvidenceDecoded: struct {
     derivations: [DerivationRecord],
 }
 
-evidence_get_number: fn(cursor: &EvidenceCursor, width: Int) -> U64 EvidenceCodecError! {
+evidence_get_number: fn(cursor: ^EvidenceCursor, width: Int) -> U64 EvidenceCodecError! {
     // read_byte checks only bounds; read_u16/u32/u64 check addition first.
     end: if width == 1 -> cursor.at + 1 else -> (Int{evidence_checked_offset(U64{cursor.at}, U64{width}, cursor.usize_max) ?? return Err(evidence_codec_error("evidence report offset overflow"))})
     if end > cursor.bytes.len() -> return Err(evidence_codec_error("truncated evidence report"))
@@ -36,11 +36,11 @@ evidence_get_number: fn(cursor: &EvidenceCursor, width: Int) -> U64 EvidenceCode
     Ok(value)
 }
 
-evidence_get_byte: fn(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
+evidence_get_byte: fn(cursor: ^EvidenceCursor) -> Int EvidenceCodecError! {
     Ok(Int{evidence_get_number(cursor, 1)})
 }
 
-evidence_get_string: fn(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
+evidence_get_string: fn(cursor: ^EvidenceCursor) -> String EvidenceCodecError! {
     length: evidence_get_number(cursor, 8)
     if length > cursor.usize_max {
         return Err(evidence_codec_error("evidence report field length is too large"))
@@ -59,7 +59,7 @@ evidence_get_string: fn(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
     Ok(text)
 }
 
-evidence_get_len: fn(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
+evidence_get_len: fn(cursor: ^EvidenceCursor) -> Int EvidenceCodecError! {
     raw_length: evidence_get_number(cursor, 4)
     if raw_length > cursor.usize_max {
         return Err(evidence_codec_error("evidence report collection length is too large"))
@@ -70,7 +70,7 @@ evidence_get_len: fn(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
     Ok(Int{raw_length})
 }
 
-evidence_get_optional: fn(cursor: &EvidenceCursor) -> String? EvidenceCodecError! {
+evidence_get_optional: fn(cursor: ^EvidenceCursor) -> String? EvidenceCodecError! {
     marker: evidence_get_byte(cursor)
     if marker == {
         0 -> Ok(None)
@@ -79,7 +79,7 @@ evidence_get_optional: fn(cursor: &EvidenceCursor) -> String? EvidenceCodecError
     }
 }
 
-evidence_decode_derivation: fn(cursor: &EvidenceCursor) -> DerivationRecord EvidenceCodecError! {
+evidence_decode_derivation: fn(cursor: ^EvidenceCursor) -> DerivationRecord EvidenceCodecError! {
     id: evidence_get_string(cursor)
     subject: evidence_get_string(cursor)
     claim: evidence_get_string(cursor)
@@ -140,7 +140,7 @@ EvidenceDecodedRecord: struct {
     derivation: DerivationRecord?,
 }
 
-evidence_decode_record: fn(cursor: &EvidenceCursor) -> EvidenceDecodedRecord EvidenceCodecError! {
+evidence_decode_record: fn(cursor: ^EvidenceCursor) -> EvidenceDecodedRecord EvidenceCodecError! {
     kind_code: evidence_get_byte(cursor)
     producer_code: evidence_get_byte(cursor)
     facet_code: evidence_get_byte(cursor)

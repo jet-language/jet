@@ -112,7 +112,7 @@ rmlr_raw_call: fn(line: String) -> Bool Never! {
 }
 
 // The raw routine calls of one builder source, by the function holding them.
-rmlr_census: fn(path: String, source: String, found: &[String:Int]) {
+rmlr_census: fn(path: String, source: String, found: ^[String:Int]) {
     function := ""
     loop line in source.split("\n") {
         if rmlr_function_opened(line) == .Val(name) -> function = name
@@ -181,7 +181,7 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
 }
 
 #Test("the lowering-row census reads emitted calls, not mentions") {
-    assert_eq(rmlr_function_opened("ir_list_append: fn(m: &IRModule) -> Int Never!") ?? "", "ir_list_append")
+    assert_eq(rmlr_function_opened("ir_list_append: fn(m: ^IRModule) -> Int Never!") ?? "", "ir_list_append")
     assert(rmlr_function_opened("    inner: fn() -> Int") == None)
     assert(rmlr_raw_call("    _: ir_runtime(m, b, \"jet_rt_mem_move\", [Int]{{to, from, bytes}}, -1)"))
     assert(!rmlr_raw_call("        \"jet_rt_alloc\" | \"jet_rt_free\" -> false"))

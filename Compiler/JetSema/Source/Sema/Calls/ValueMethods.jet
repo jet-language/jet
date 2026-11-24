@@ -35,7 +35,7 @@ use jet_foundation.[
 // labels name output fields rather than parameters; `Map.merge`'s optional
 // conflict callback and `para_map`'s limit are the only labeled built-in
 // method parameters.
-sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
+sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool {
     if method == "zip" || method == "zip_short" || method == "zip_pad" -> return true
     valid := true
     loop (index, argument) in args {
@@ -54,7 +54,7 @@ sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics:
 // the expected type, so `bytes.write([66, 67])` types the literal as [U8].
 // A quoted pattern in a `Regex` slot (`text.has_line(r"^(a|b)")`) is a checked
 // `Regex{…}` literal: the pattern is checked now, never at run time.
-sema_value_method_argument: fn(argument: CallArg, method: String, index: Int, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_value_method_argument: fn(argument: CallArg, method: String, index: Int, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if sema_expression_is_regex_head(required) && argument.expr == .Str(_, _, _) {
         return sema_expression_typed_literal_regex(argument.expr, expr_span(argument.expr), None, environment, program, scopes, state, tail_store, context, diagnostics)
     }
@@ -82,7 +82,7 @@ sema_value_method_argument_mismatch: fn(method: String, index: Int, required: Ty
 // The argument's own check rejected it against the parameter with the generic
 // E0108 at the value; that report becomes the method-argument one, with the
 // value's own type inferred without the parameter as a target.
-sema_value_method_replace_mismatch: fn(argument: Expr, method: String, index: Int, required: Type, start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_value_method_replace_mismatch: fn(argument: Expr, method: String, index: Int, required: Type, start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) {
     value_span: expr_span(argument)
     mismatch_index: sema_value_mismatch_index(diagnostics, start, value_span) ?? return
     probe_diagnostics := [Diagnostic]{}
@@ -144,7 +144,7 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
 // A CoreSource row (`text.matches(pattern)`, `text.first_lines(n)`) calls its
 // Core source helper with the receiver first, typed by the helper's declared
 // result; the loader loads the helper's module for the spelling.
-sema_value_method_core_source: fn(owner: String, member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_value_method_core_source: fn(owner: String, member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     unavailable: sema_error("E0906", span, "the source `{owner}.{member}` declaration is unavailable", "this String method's body is the `{owner}` source helper", "restore the `{owner}` source module")
     identity: sema_call_core_module_identity(environment, program, owner) ?? {
         diagnostics.push(unavailable)
@@ -169,7 +169,7 @@ sema_value_method_core_source: fn(owner: String, member: String, receiver_value:
 // stays at the call boundary, so the result wraps its success value. The
 // callback result is open (Rust `finish_builtin_method` adopts it), so it is
 // checked like a collection callback and validated below.
-sema_value_method_option_map: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_value_method_option_map: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     required := Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     callback: sema_expression_lambda_collection_callback(args[0].expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if sema_call_host_callback_assignable(required, callback.ty, environment, program) != (Val(true)) {
@@ -205,7 +205,7 @@ sema_value_method_source_arg: fn(value: TExpr) -> TCallArg Never! {
 // those evaluated copies to its canonical source body's move parameters; it
 // does not move the user place or establish a general Read-checked call to a
 // move parameter.
-sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     why: sema_value_method_argument(args[0], "or_err", 0, Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     updated_args := args
     params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
@@ -237,9 +237,9 @@ sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner
 // test of the outcome, so the outcome is read and never consumed, and a
 // success answers a clean absence or an empty list on every tier. A report
 // without the field answers the ordinary E0302 at the method name. The
-// receiver's `&` mark (`outcome.partial()`) names the outcome it reads. The
+// receiver's `^` mark (`outcome.partial()`) names the outcome it reads. The
 // names are Syntax's METHOD_OUTCOME_PARTIAL/NOTES and FIELD_OUTCOME_PARTIAL/NOTES.
-sema_value_method_outcome_read: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_value_method_outcome_read: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     partial: method == "partial"
     if args.len() != 0 || (!partial && method != "notes") {
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -301,7 +301,7 @@ sema_value_method_precise_result: fn(owner: String, method: String, argc: Int) -
     None
 }
 
-sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     owner: sema_expr_precise_name(sema_expr_unwrap_tag(receiver_value.ty)) ?? ""
     result: sema_value_method_precise_result(owner, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_value_method_check_labels(method, args, diagnostics) {
@@ -319,7 +319,7 @@ sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: Str
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if sema_expr_unwrap_tag(receiver_value.ty) == .Option(inner) && args.len() == 1 {
         if method == "map" {
             return sema_value_method_option_map(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

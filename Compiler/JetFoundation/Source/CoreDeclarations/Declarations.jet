@@ -199,7 +199,7 @@ core_decl_text_of: fn(texts: CoreDeclTexts, name: String) -> String? Never! {
     Val(texts.values[name_index(id)])
 }
 
-core_decl_text_put: fn(texts: &CoreDeclTexts, name: String, value: &&String) Never! {
+core_decl_text_put: fn(texts: ^CoreDeclTexts, name: String, value: ^^String) Never! {
     row: name_index(name_intern(texts.names, name))
     if row == texts.values.len() -> texts.values.push(value.move()) else -> texts.values[row] = value.move()
 }

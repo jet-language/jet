@@ -627,7 +627,7 @@ ExtensionSession: struct {
 
     staged: fn(self) -> AnalyzeResponse? Never! { self.staged_response }
 
-    on_loaded: fn(&self, handle: Int) ExtensionProtocolError! {
+    on_loaded: fn(^self, handle: Int) ExtensionProtocolError! {
         if self.session_phase != ExtensionSessionPhase.Idle {
             return Err(ExtensionProtocolError.new("extension session can only load from Idle"))
         }
@@ -637,7 +637,7 @@ ExtensionSession: struct {
     }
 
     // Validate guest bytes and stage them; nothing reaches compiler state.
-    stage_response: fn(&self, snapshot: TypedSnapshot, bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {
+    stage_response: fn(^self, snapshot: TypedSnapshot, bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {
         if self.session_phase != ExtensionSessionPhase.Loaded {
             return Err(ExtensionProtocolError.new("stage_response requires a Loaded session"))
         }
@@ -651,10 +651,10 @@ ExtensionSession: struct {
 
     // Discard staged findings and edits only. The accept latch stays set:
     // after `accept_staged`, open a new session instead.
-    rollback: fn(&self) Never! { self.staged_response = None }
+    rollback: fn(^self) Never! { self.staged_response = None }
 
     // The host's explicit accept of staged output.
-    accept_staged: fn(&self) -> AnalyzeResponse ExtensionProtocolError! {
+    accept_staged: fn(^self) -> AnalyzeResponse ExtensionProtocolError! {
         if self.session_phase != ExtensionSessionPhase.Loaded {
             return Err(ExtensionProtocolError.new("accept requires Loaded session"))
         }
@@ -667,7 +667,7 @@ ExtensionSession: struct {
     // Close the session and drop the guest through `close_guest(handle)`,
     // returning what the closer reports (false when no handle was live).
     // Staged output is cleared and the session ends Closed.
-    close: fn(&self, close_guest: fn(Int) -> Bool Never!) -> Bool Never! {
+    close: fn(^self, close_guest: fn(Int) -> Bool Never!) -> Bool Never! {
         live: self.handle.copy()
         self.handle = None
         self.staged_response = None

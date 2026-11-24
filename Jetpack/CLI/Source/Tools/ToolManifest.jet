@@ -154,7 +154,7 @@ ToolManifest: struct {
     }
 }
 
-cli_tool_parse_manifest_source: fn(value: Dyn, names: &[String]) -> ToolManifestSource CLIError! {
+cli_tool_parse_manifest_source: fn(value: Dyn, names: ^[String]) -> ToolManifestSource CLIError! {
     source: pkg_json_object(value) ?? return Err(CLIError.Other("user-tools manifest source entry is not an object"))
     cli_json_expect_exact_keys(source, [String]{"name", "policy", "provider", "raw", "upstream"}, "user-tools manifest source")
     name: cli_tool_bounded_json_string(source, "name")
@@ -169,7 +169,7 @@ cli_tool_parse_manifest_source: fn(value: Dyn, names: &[String]) -> ToolManifest
     Ok(ToolManifestSource{name: name, upstream: upstream, provider: provider, policy: policy, raw: raw})
 }
 
-cli_tool_parse_manifest_entry: fn(value: Dyn, names: &[String], seen_bins: &[String]) -> ToolManifestEntry CLIError! {
+cli_tool_parse_manifest_entry: fn(value: Dyn, names: ^[String], seen_bins: ^[String]) -> ToolManifestEntry CLIError! {
     tool: pkg_json_object(value) ?? return Err(CLIError.Other("user-tools manifest tool entry is not an object"))
     cli_json_expect_exact_keys(tool, [String]{"bins", "members", "name", "reference", "resolved", "tier"}, "user-tools manifest tool")
     name: cli_tool_bounded_json_string(tool, "name")
@@ -267,7 +267,7 @@ cli_tool_source_name: fn(reference: String) -> String? Never! {
 // becomes an exact package ref when the source channel advances, so Store
 // gets a new immutable reference instead of treating a changed channel as a
 // corrupted prior output.
-cli_refresh_manifest_tool_pins: fn(manifest: &ToolManifest, table: SourceTable) Never! {
+cli_refresh_manifest_tool_pins: fn(manifest: ^ToolManifest, table: SourceTable) Never! {
     loop decl in table.declarations() {
         selector: decl.upstream.cut_last(REF_CHANNEL_MARKER)?.after ?? next
         if selector == "" || selector == "latest" || selector == "main" || (selector.starts_with("v") && selector.ends_with(".x")) {

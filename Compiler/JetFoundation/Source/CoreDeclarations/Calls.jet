@@ -290,7 +290,7 @@ core_decl_rust_string: fn(expression: String, context: String, constants: CoreDe
     Err(core_decl_fail("unknown Rust string constant `{value}` in {context}"))
 }
 
-// The items of a `&[…]` slice.
+// The items of a Rust `&[…]` slice.
 core_decl_rust_slice: fn(expression: String, context: String) -> [String] CoreDeclarationError! {
     value: expression.trim()
     inner: if value.starts_with("&") -> value.removeprefix("&").trim_start() else -> ""
@@ -486,12 +486,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         }
     }
     if module_name == {
-        "core.files" -> if member == {
-            "__temp_path_sample" -> Val("Time")
-            "__temp_directory" -> Val("Env")
-            "__host_path_is_absolute" | "__host_path_join" | "__path_windows" | "__atomic_pid" | "__reader_path" | "__map_kind" -> None
-            else -> Val("FS")
-        }
+        "core.files" -> Val("FS")
         "core.log" -> Val("Log")
         // core.web's OpenAPI helpers: in-process state (Core/Web/Web.jet), not a
         // browser API.
@@ -518,7 +513,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         }
         "core.net" -> if member == {
             "gethostname" -> Val("Env")
-            "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4" | "__ip_from_bytes" | "__ip_bytes" | "__ip_is_v4" | "__socket_from_parts" | "__socket_ip" | "__socket_port" | "__socket_scope" | "__udp_packet_addr" | "is_ipv6" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string" | "ready_readable" | "ready_writable" | "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code" | "dns_srv_target" | "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight" | "udp_packet_data" | "udp_packet_addr" | "udp_packet_bytes" | "udp_packet_original_len" | "udp_packet_truncated" -> None
+            "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4" | "__ip_from_bytes" | "__socket_from_parts" | "is_ipv6" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string" | "ready_readable" | "ready_writable" | "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code" | "dns_srv_target" | "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight" | "udp_packet_data" | "udp_packet_addr" | "udp_packet_bytes" | "udp_packet_original_len" | "udp_packet_truncated" -> None
             else -> Val("Net")
         }
         "core.watcher" -> if member == {
@@ -554,7 +549,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
         "core.perf" -> if member == {
-            "__heap_mark" | "__read_bits" | "__write_bits" | "fidelity" | "heap_mark" | "override_fidelity" | "reset_fidelity" -> Val("Env")
+            "__heap_mark" | "fidelity" | "heap_mark" | "override_fidelity" | "reset_fidelity" -> Val("Env")
             else -> None
         }
         // fork and setsid change the process tree, like every other child launch.
@@ -562,14 +557,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "success" -> None
             "__fork" | "__setsid" -> Val("Exec")
             else -> Val("Env")
-        }
-        // Joining the scheduler's threads readies the process for a raw exec
-        // or fork, so it needs the same root as a child launch. The running
-        // task's CPU clock is Time, as core.tasks.cpu_ns declares.
-        "core.tasks" -> if member == {
-            "__quiesce" -> Val("Exec")
-            "__task_cpu_ns" -> Val("Time")
-            else -> None
         }
         "core.db" | "core.jobs" -> Val("DB")
         "core.auth" -> if member == {
@@ -610,7 +597,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
     if module_name == {
         "core.net" -> if member == {
             "gethostname" -> Val("FS.Read")
-            "socket_addr" | "socket_addrs" | "__tcp_reply" | "__unix_accept" | "__unix_read" | "__unix_write_all_bytes" | "__unix_send_fds_raw" | "__unix_receive_fds_raw" | "__unix_wait_raw" | "__unix_wait_wake_raw" | "__unix_connect_host" | "__unix_connect_deadline_host" | "tcp_accept" | "tcp_connect" | "tcp_connect_addr" | "tcp_connect_happy" | "tcp_read" | "tcp_write" | "tcp_read_bytes" | "tcp_read_text" | "tcp_write_bytes" | "tcp_write_all_bytes" | "tcp_write_text" | "tcp_ready" | "sendfile" | "tcp_reply" | "udp_send_to" | "udp_recv_from" | "udp_send_bytes_to" | "udp_receive" | "unix_accept" | "unix_connect" | "unix_read" | "unix_write" | "unix_read_bytes" | "unix_write_all_bytes" | "unix_send" | "unix_receive" | "unix_wait" | "unix_wait_wake" | "dns_a" | "dns_aaaa" | "dns_a_at" | "dns_aaaa_at" | "dns_txt" | "dns_txt_at" | "dns_ptr" | "dns_srv" | "dns_srv_at" | "getservbyname" | "getservbyport" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "__dns_a_lookup" | "__dns_aaaa_lookup" | "__dns_a_at_lookup" | "__dns_aaaa_at_lookup" | "__dns_srv_lookup" | "__dns_srv_at_lookup" -> Val("Time.Wait")
+            "socket_addr" | "socket_addrs" | "__tcp_reply" | "__unix_wait_wake_raw" | "__unix_connect_deadline_host" | "tcp_accept" | "tcp_connect" | "tcp_connect_addr" | "tcp_connect_happy" | "tcp_read" | "tcp_write" | "tcp_read_bytes" | "tcp_read_text" | "tcp_write_bytes" | "tcp_write_all_bytes" | "tcp_write_text" | "tcp_ready" | "sendfile" | "tcp_reply" | "udp_send_to" | "udp_recv_from" | "udp_send_bytes_to" | "udp_receive" | "unix_accept" | "unix_connect" | "unix_read" | "unix_write" | "unix_read_bytes" | "unix_write_all_bytes" | "unix_send" | "unix_receive" | "unix_wait" | "unix_wait_wake" | "dns_a" | "dns_aaaa" | "dns_a_at" | "dns_aaaa_at" | "dns_txt" | "dns_txt_at" | "dns_ptr" | "dns_srv" | "dns_srv_at" | "getservbyname" | "getservbyport" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" -> Val("Time.Wait")
             else -> None
         }
         "core.sys" -> if member == {
@@ -636,18 +623,18 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         }
         // A timer's deadline is a monotonic clock read, the waiting leaf.
         "core.tasks" -> if member == {
-            "yield_now" | "__yield_now" | "after" | "__interval_ms" -> Val("Time.Wait")
+            "yield_now" | "after" | "__interval_ms" -> Val("Time.Wait")
             else -> None
         }
         "core.files" -> if member == {
-            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__read_bytes_os" | "__read_at_os" | "__read_link_os" | "__reader_line_bytes" | "__open_reader" | "__open_reader_raw" | "__open_directory" | "__close_directory" | "__list_directory" | "__stat_at" | "__path_kind" | "__read_link_at" | "__space" | "__access_raw" | "__reader_advise" | "__map_advise" | "__xattr_names" | "__xattr_get" | "__reader_stat" | "__writer_stat" | "__metadata_directory" | "__directory_fd" | "__reader_fd" | "__writer_fd" | "__lock_fd" | "__map_raw" | "__list_dir_raw" | "__stat_mode_raw" | "__canonicalize_raw" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
+            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__reader_line_bytes" | "__open_reader_raw" | "__list_directory" | "__directory_fd" | "__list_dir_raw" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
             // #3593 provider leaves behind Core/Files/files.jet.
             // The compiler-private non-blocking open only reads (RawHostKeys.jet).
-            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "__write_bytes_os" | "__append_bytes_os" | "__create_dirs_os" | "__write_at_os" | "__writer_refusal" | "__atomic_reserve" | "__atomic_finish" | "__atomic_remove" | "__atomic_rename" | "__atomic_sync_parent" | "__atomic_close" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__open_writer" | "__create_directory" | "__fsync_directory" | "__rename_at" | "__remove_at" | "__xattr_set" | "__writer_set_mode" | "__writer_allocate" | "__flock" | "__open_writer_raw" | "__remove_at_raw" | "__remove_raw" | "__remove_dir_raw" | "__remove_all_raw" | "__hard_link_raw" | "__fsync_raw" | "__syncfs_raw" | "__chown_raw" | "__set_mode_raw" | "__symlink_directory_raw" | "__symlink_raw" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw" | "try_lock" -> Val("FS.Write")
+            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__open_writer_raw" | "__remove_at_raw" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw" | "try_lock" -> Val("FS.Write")
             else -> None
         }
         "core.term" -> if member == {
-            "confirm" | "choose" | "input_secret" | "read_all_input" | "readline" | "read_until" | "take" | "binread" | "binwrite" | "progress" | "read_key" -> Val("Time.Wait")
+            "confirm" | "choose" | "input_secret" | "read_all_input" | "readline" | "read_until" | "take" | "take_within" | "binread" | "binwrite" | "progress" | "read_key" -> Val("Time.Wait")
             else -> None
         }
         "core.net.tls" -> if member == {

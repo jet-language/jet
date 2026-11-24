@@ -199,7 +199,7 @@ JetDevtoolsPanelDescriptor: struct {
     freshness: JetDevtoolsPanelFreshnessPolicy,
 
     // A descriptor every host supports, ordered by its id's canonical order.
-    canonical: fn(id: JetDevtoolsPanelID, required_capabilities: &&[JetDevtoolsPanelCapability], authority: JetDevtoolsPanelCapability, freshness: JetDevtoolsPanelFreshnessPolicy) -> JetDevtoolsPanelDescriptor Never! {
+    canonical: fn(id: JetDevtoolsPanelID, required_capabilities: ^^[JetDevtoolsPanelCapability], authority: JetDevtoolsPanelCapability, freshness: JetDevtoolsPanelFreshnessPolicy) -> JetDevtoolsPanelDescriptor Never! {
         JetDevtoolsPanelDescriptor{id, title: id.title(), order: id.canonical_order(), required_capabilities: required_capabilities.move(), authority, supported_hosts: JetDevtoolsHostKind.all(), freshness}
     }
 
@@ -316,7 +316,7 @@ JetDevtoolsPanelCatalog: struct {
     descriptor_list: [JetDevtoolsPanelDescriptor],
 
     // Validate `descriptors` and keep them sorted by their unique order.
-    new: fn(descriptors: &&[JetDevtoolsPanelDescriptor]) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
+    new: fn(descriptors: ^^[JetDevtoolsPanelDescriptor]) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
         if descriptors.len() == 0 -> return Err(JetDevtoolsPanelCatalogError.Empty)
         loop descriptor in descriptors {
             id: descriptor.id

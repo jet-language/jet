@@ -508,7 +508,7 @@ nixeval_test_shell_error: fn(source: String, system: String) -> NixEvalError {
     }
 }
 
-nixeval_test_authority_shell_error: fn(source: String, system: String, authority: &&NixEvalAuthority) -> NixEvalError {
+nixeval_test_authority_shell_error: fn(source: String, system: String, authority: ^^NixEvalAuthority) -> NixEvalError {
     if nixeval_evaluate_devshell_with_import_authority(source, system, Val(authority)) == {
         .Ok(_) -> panic("authorized devShell source must fail closed")
         .Err(error) -> error

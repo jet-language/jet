@@ -104,7 +104,7 @@ ROUND_PARTS: 6
 // How long one round takes, in nanoseconds, then its tasks' parts
 // (ROUND_PARTS) pushed onto `parts`, in their order, the wide ones' three
 // each.
-timed: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int, parts: &[[Int]]) -> Int {
+timed: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int, parts: ^[[Int]]) -> Int {
     started: time.instant()
     runs: play_round(seed, narrow_tenths, wide_tenths)
     wall: started.elapsed().ns
@@ -126,7 +126,7 @@ timed: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int, parts: &[[Int]]) -> I
 }
 
 // The median of each of `parts`, joined by spaces.
-medians: fn(parts: &[[Int]]) -> String {
+medians: fn(parts: ^[[Int]]) -> String {
     words := [String]{}
     loop part in parts {
         sorted := part.copy()
@@ -157,7 +157,7 @@ cpu_times: fn() -> [Int] {
 // (by thread) last held it, which it now holds; 0 for both when none could
 // be read. A thread's CPU is field 39 of its stat, the 37th after the
 // state that follows its name's last `)`.
-clocks: fn(runs: &[String:Int]) -> [Int] {
+clocks: fn(runs: ^[String:Int]) -> [Int] {
     high := 0
     low := 0
     entries: files.list_dir("/proc/self/task") ?? return [Int]{0, 0}

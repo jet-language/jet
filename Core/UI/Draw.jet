@@ -181,7 +181,7 @@ get_collision_rec: fn(rec1: Rect, rec2: Rect) -> Rect Never! {
 
 // CPU image functions on an RGBA8 Image, premultiplied as drawing keeps
 // it. They need no window and no effect. The functions that change an
-// image take it through `&` and leave an image with no pixels as it is.
+// image take it through `^` and leave an image with no pixels as it is.
 
 // A plain image. A side below 1, a side above 16384 or more than 2^24 pixels
 // makes no image.
@@ -219,7 +219,7 @@ get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! {
 
 // Image drawing stores the color, premultiplied, alpha included; it does
 // not blend.
-image_clear_background: fn(image: &Image, color: Color) Never! {
+image_clear_background: fn(image: ^Image, color: Color) Never! {
     rgba: premultiply(pack_rgba(color))
     at := 0
     loop at < image.pixels.len() {
@@ -228,14 +228,14 @@ image_clear_background: fn(image: &Image, color: Color) Never! {
     }
 }
 
-image_draw_pixel: fn(image: &Image, x: Int, y: Int, color: Color) Never! {
+image_draw_pixel: fn(image: ^Image, x: Int, y: Int, color: Color) Never! {
     if x < 0 || x >= image.width || y < 0 || y >= image.height {
         return
     }
     put_rgba(image.pixels, (y * image.width + x) * 4, premultiply(pack_rgba(color)))
 }
 
-image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
+image_draw_rectangle: fn(image: ^Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
     image_draw_rectangle_rec(image, int_rectangle(x, y, width, height), color)
 }
 
@@ -243,7 +243,7 @@ image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int,
 // rectangle left with less than
 // one column still sets its first pixel unless it sits at the left edge, and
 // one with columns but less than one row fills its first row.
-image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
+image_draw_rectangle_rec: fn(image: ^Image, rec: Rect, color: Color) Never! {
     if image.width == 0 || image.height == 0 {
         return
     }
@@ -290,7 +290,7 @@ image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
 // whole pixels; one past the right or bottom edge leaves the image as it is.
 // One with no whole column or row leaves no pixels, its truncated sides (not
 // below 0) as the size.
-image_crop: fn(image: &Image, crop: Rect) Never! {
+image_crop: fn(image: ^Image, crop: Rect) Never! {
     if image.width == 0 || image.height == 0 {
         return
     }
@@ -338,7 +338,7 @@ image_crop: fn(image: &Image, crop: Rect) Never! {
 // last column or row, which the C original reads beyond the image at extreme
 // enlargements, takes the last one. A new size outside gen_image_color's
 // limits leaves the image as it is.
-image_resize_nn: fn(image: &Image, new_width: Int, new_height: Int) Never! {
+image_resize_nn: fn(image: ^Image, new_width: Int, new_height: Int) Never! {
     if image.width == 0 || image.height == 0 || !image_size_ok(new_width, new_height) {
         return
     }
@@ -357,7 +357,7 @@ image_resize_nn: fn(image: &Image, new_width: Int, new_height: Int) Never! {
     image.height = new_height
 }
 
-image_flip_vertical: fn(image: &Image) Never! {
+image_flip_vertical: fn(image: ^Image) Never! {
     pixels := [U8]{}
     row := image.height - 1
     loop row >= 0 {
@@ -368,7 +368,7 @@ image_flip_vertical: fn(image: &Image) Never! {
     image.pixels = pixels
 }
 
-image_flip_horizontal: fn(image: &Image) Never! {
+image_flip_horizontal: fn(image: ^Image) Never! {
     pixels := [U8]{}
     loop y in 0..<image.height {
         loop x in 0..<image.width {
@@ -381,7 +381,7 @@ image_flip_horizontal: fn(image: &Image) Never! {
 
 // A quarter turn clockwise: column x of the result is row height - 1 - x of
 // the image read left to right.
-image_rotate_cw: fn(image: &Image) Never! {
+image_rotate_cw: fn(image: ^Image) Never! {
     pixels := [U8]{}
     loop x in 0..<image.width {
         y := image.height - 1
@@ -396,7 +396,7 @@ image_rotate_cw: fn(image: &Image) Never! {
 
 // A quarter turn counterclockwise: row i of the result is column
 // width - 1 - i of the image read top to bottom.
-image_rotate_ccw: fn(image: &Image) Never! {
+image_rotate_ccw: fn(image: ^Image) Never! {
     pixels := [U8]{}
     x := image.width - 1
     loop x >= 0 {
@@ -414,7 +414,7 @@ image_rotate_ccw: fn(image: &Image) Never! {
 
 // Each channel becomes channel * tint / 255, rounded
 // down, alpha included.
-image_color_tint: fn(image: &Image, color: Color) Never! {
+image_color_tint: fn(image: ^Image, color: Color) Never! {
     tint: pack_rgba(color)
     at := 0
     loop at + 4 <= image.pixels.len() {
@@ -431,7 +431,7 @@ image_color_tint: fn(image: &Image, color: Color) Never! {
 }
 
 // Red, green and blue become 255 minus themselves.
-image_color_invert: fn(image: &Image) Never! {
+image_color_invert: fn(image: ^Image) Never! {
     at := 0
     loop at + 4 <= image.pixels.len() {
         rgba: straight_at(image.pixels, at)
@@ -443,7 +443,7 @@ image_color_invert: fn(image: &Image) Never! {
 // Brightness is clamped to -255..255 and added to red, green and blue. A
 // sum above 255 becomes 255 and, as in the C original, a
 // sum below 0 becomes 1.
-image_color_brightness: fn(image: &Image, brightness: Int) Never! {
+image_color_brightness: fn(image: ^Image, brightness: Int) Never! {
     amount: max_int(min_int(brightness, 255), -255)
     at := 0
     loop at + 4 <= image.pixels.len() {
@@ -464,7 +464,7 @@ image_color_brightness: fn(image: &Image, brightness: Int) Never! {
 // Pixels that hold `color` become `replace`: a pixel holds a color when its
 // bytes are that color premultiplied, so every clear pixel holds every
 // color of alpha 0.
-image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! {
+image_color_replace: fn(image: ^Image, color: Color, replace: Color) Never! {
     target: premultiply(pack_rgba(color))
     rgba: premultiply(pack_rgba(replace))
     at := 0
@@ -478,7 +478,7 @@ image_size_ok: fn(width: Int, height: Int) -> Bool {
     width >= 1 && height >= 1 && width <= C_PNG_SIDE_MAX && height <= C_PNG_SIDE_MAX && width * height <= C_PNG_PIXELS_MAX
 }
 
-push_rgba: fn(pixels: &[U8], rgba: Int) {
+push_rgba: fn(pixels: ^[U8], rgba: Int) {
     pixels.push(U8{rgba >> 24})
     pixels.push(U8{(rgba >> 16) & 255})
     pixels.push(U8{(rgba >> 8) & 255})
@@ -527,7 +527,7 @@ unpremultiply: fn(rgba: Int) -> Int {
     (red << 24) + (green << 16) + (blue << 8) + alpha
 }
 
-turn_image: fn(image: &Image, pixels: [U8]) {
+turn_image: fn(image: ^Image, pixels: [U8]) {
     width: image.width
     image.pixels = pixels
     image.width = image.height
@@ -541,13 +541,13 @@ trunc_int: fn(value: Float) -> Int {
 }
 
 // Clears copy the color, alpha included.
-clear_background: fn(target: &Image, color: Color) Never! {
+clear_background: fn(target: ^Image, color: Color) Never! {
     fill(target, 0, 0, target.width, target.height, pack_rgba(color), true)
 }
 
 // A rectangle is the hot call of a frame, so it fills directly, without a
 // run list; `fill` clips it.
-draw_rectangle: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
+draw_rectangle: fn(target: ^Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
     fill(target, x, y, width, height, pack_rgba(color), false)
 }
 
@@ -578,7 +578,7 @@ typeset: fn() -> Typeset { Typeset{face: regular_face(), cache: font.cache()} }
 // does with its alpha scaled by the pixel's coverage. A size below 1 draws
 // nothing. Returns the pixels its glyphs' masks cover, unclipped (width
 // 0 when none).
-draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size: Int, color: Color) -> UIRect Never! {
+draw_text: fn(target: ^Image, set: ^Typeset, text: String, x: Int, y: Int, size: Int, color: Color) -> UIRect Never! {
     none: UIRect{x: x, y: y, width: 0, height: 0}
     if size < 1 || target.pixels.len() != target.width * target.height * 4 -> return none
     rgba: pack_rgba(color)
@@ -679,7 +679,7 @@ coverage_ramp: fn(rgba: Int) -> [Int] {
 
 // Blends a glyph mask whose origin, on the baseline, is pixel (x, y), in
 // the color whose coverage_ramp is `ramp`.
-paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]) {
+paint_mask: fn(target: ^Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]) {
     if mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height || ramp.len() < 256 {
         return
     }
@@ -733,7 +733,7 @@ paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]
 // The pixel at byte `at` src-over the straight color (red, green, blue) at
 // alpha `alpha`, premultiplied and blended as `fill` does; alpha 255
 // copies and alpha 0 leaves it.
-blend_pixel: fn(pixels: &[U8], at: Int, red: Int, green: Int, blue: Int, alpha: Int) {
+blend_pixel: fn(pixels: ^[U8], at: Int, red: Int, green: Int, blue: Int, alpha: Int) {
     if alpha == 0 {
         return
     }
@@ -758,45 +758,45 @@ round_px: fn(value: Float) -> Int { checked(Int{core.math.floor(value + 0.5)}) ?
 floor_px: fn(value: Float) -> Int { checked(Int{core.math.floor(value)}) ?? 0 }
 
 // A line; both endpoints are drawn.
-draw_line: fn(target: &Image, start_x: Int, start_y: Int, end_x: Int, end_y: Int, color: Color) Never! {
+draw_line: fn(target: ^Image, start_x: Int, start_y: Int, end_x: Int, end_y: Int, color: Color) Never! {
     extent: extent_of(target)
     paint(target, line_runs(extent, start_x, start_y, end_x, end_y, pack_rgba(color)))
 }
 
 // A filled circle with a whole-pixel radius; a radius below 1 draws nothing.
-draw_circle: fn(target: &Image, center_x: Int, center_y: Int, radius: Int, color: Color) Never! {
+draw_circle: fn(target: ^Image, center_x: Int, center_y: Int, radius: Int, color: Color) Never! {
     extent: extent_of(target)
     paint(target, circle_runs(extent, center_x, center_y, radius, pack_rgba(color)))
 }
 
 // A filled triangle on integer vertices. Either winding fills; a
 // degenerate triangle draws nothing.
-draw_triangle: fn(target: &Image, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int, color: Color) Never! {
+draw_triangle: fn(target: ^Image, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int, color: Color) Never! {
     extent: extent_of(target)
     paint(target, triangle_runs(extent, x0, y0, x1, y1, x2, y2, pack_rgba(color)))
 }
 
 // One pixel.
-draw_pixel: fn(target: &Image, x: Int, y: Int, color: Color) Never! {
+draw_pixel: fn(target: ^Image, x: Int, y: Int, color: Color) Never! {
     extent: extent_of(target)
     paint(target, rect_runs(extent, x, y, 1, 1, pack_rgba(color)))
 }
 
 // A rectangle in Float geometry.
-draw_rectangle_rec: fn(target: &Image, rec: Rect, color: Color) Never! {
+draw_rectangle_rec: fn(target: ^Image, rec: Rect, color: Color) Never! {
     extent: extent_of(target)
     paint(target, rec_runs(extent, rec, pack_rgba(color)))
 }
 
 // A one-pixel border inside the rectangle.
-draw_rectangle_lines: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
+draw_rectangle_lines: fn(target: ^Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
     extent: extent_of(target)
     paint(target, rect_lines_runs(extent, x, y, width, height, pack_rgba(color)))
 }
 
 // Four bands `line_thick` wide inside the rectangle, drawn one after
 // another.
-draw_rectangle_lines_ex: fn(target: &Image, rec: Rect, line_thick: Float, color: Color) Never! {
+draw_rectangle_lines_ex: fn(target: ^Image, rec: Rect, line_thick: Float, color: Color) Never! {
     extent: extent_of(target)
     rgba: pack_rgba(color)
     loop band in lines_ex_bands(rec, line_thick) -> paint(target, rec_runs(extent, band, rgba))
@@ -804,7 +804,7 @@ draw_rectangle_lines_ex: fn(target: &Image, rec: Rect, line_thick: Float, color:
 
 // A vertical gradient: `top` along the top edge, `bottom` along
 // the bottom edge, shaded as gradient_runs shades (see axis_rgba).
-draw_rectangle_gradient_v: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, top: Color, bottom: Color) Never! {
+draw_rectangle_gradient_v: fn(target: ^Image, x: Int, y: Int, width: Int, height: Int, top: Color, bottom: Color) Never! {
     rec: int_rectangle(x, y, width, height)
     box: gradient_box(extent_of(target), rec)
     if box.left >= box.right || box.top >= box.bottom || target.pixels.len() != target.width * target.height * 4 {
@@ -840,7 +840,7 @@ draw_rectangle_gradient_v: fn(target: &Image, x: Int, y: Int, width: Int, height
 
 // A horizontal gradient: `left` along the left edge, `right` along
 // the right edge, shaded as gradient_runs shades (see axis_rgba).
-draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, left: Color, right: Color) Never! {
+draw_rectangle_gradient_h: fn(target: ^Image, x: Int, y: Int, width: Int, height: Int, left: Color, right: Color) Never! {
     rec: int_rectangle(x, y, width, height)
     box: gradient_box(extent_of(target), rec)
     if box.left >= box.right || box.top >= box.bottom || target.pixels.len() != target.width * target.height * 4 {
@@ -1018,7 +1018,7 @@ centers: fn(start: Int, end: Int, origin: Float, size: Float) -> [Float] {
 
 // A four-corner gradient: the corner colors run counter-clockwise
 // from the top left.
-draw_rectangle_gradient_ex: fn(target: &Image, rec: Rect, top_left: Color, bottom_left: Color, bottom_right: Color, top_right: Color) Never! {
+draw_rectangle_gradient_ex: fn(target: ^Image, rec: Rect, top_left: Color, bottom_left: Color, bottom_right: Color, top_right: Color) Never! {
     extent: extent_of(target)
     paint(target, gradient_runs(extent, rec, pack_rgba(top_left), pack_rgba(bottom_left), pack_rgba(bottom_right), pack_rgba(top_right)))
 }
@@ -1026,7 +1026,7 @@ draw_rectangle_gradient_ex: fn(target: &Image, rec: Rect, top_left: Color, botto
 // A rounded rectangle: one convex outline of four corner arcs. A segment
 // count below 4 picks one from the radius; a roundness at
 // or below 0, or a side below 1, draws the plain rectangle.
-draw_rectangle_rounded: fn(target: &Image, rec: Rect, roundness: Float, segments: Int, color: Color) Never! {
+draw_rectangle_rounded: fn(target: ^Image, rec: Rect, roundness: Float, segments: Int, color: Color) Never! {
     extent: extent_of(target)
     rgba: pack_rgba(color)
     if roundness <= 0.0 || rec.width < 1.0 || rec.height < 1.0 {
@@ -1038,7 +1038,7 @@ draw_rectangle_rounded: fn(target: &Image, rec: Rect, roundness: Float, segments
 
 // A one-pixel band just outside the
 // rounded rectangle.
-draw_rectangle_rounded_lines: fn(target: &Image, rec: Rect, roundness: Float, segments: Int, color: Color) Never! {
+draw_rectangle_rounded_lines: fn(target: ^Image, rec: Rect, roundness: Float, segments: Int, color: Color) Never! {
     extent: extent_of(target)
     rgba: pack_rgba(color)
     if roundness <= 0.0 {
@@ -1053,21 +1053,21 @@ draw_rectangle_rounded_lines: fn(target: &Image, rec: Rect, roundness: Float, se
 
 // A circle outline with a whole-pixel radius: the pixels of
 // draw_circle's disc that touch a pixel outside it.
-draw_circle_lines: fn(target: &Image, center_x: Int, center_y: Int, radius: Int, color: Color) Never! {
+draw_circle_lines: fn(target: ^Image, center_x: Int, center_y: Int, radius: Int, color: Color) Never! {
     extent: extent_of(target)
     paint(target, outline_runs(extent, disc_cover(extent, center_x, center_y, radius), pack_rgba(color)))
 }
 
 // A filled ellipse: the pixels at whole offsets (dx, dy) from the center
 // with (dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2.
-draw_ellipse: fn(target: &Image, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: Color) Never! {
+draw_ellipse: fn(target: ^Image, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: Color) Never! {
     extent: extent_of(target)
     paint(target, cover_runs(extent, ellipse_cover(extent, center_x, center_y, radius_h, radius_v), pack_rgba(color)))
 }
 
 // An ellipse outline: the pixels of draw_ellipse's area that touch a
 // pixel outside it.
-draw_ellipse_lines: fn(target: &Image, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: Color) Never! {
+draw_ellipse_lines: fn(target: ^Image, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: Color) Never! {
     extent: extent_of(target)
     paint(target, outline_runs(extent, ellipse_cover(extent, center_x, center_y, radius_h, radius_v), pack_rgba(color)))
 }
@@ -1075,7 +1075,7 @@ draw_ellipse_lines: fn(target: &Image, center_x: Int, center_y: Int, radius_h: F
 // A ring: the annulus sector between the radii from `start_angle` to
 // `end_angle` in degrees, as quads (a sector when the inner
 // radius is 0 or less). Each pixel is drawn once.
-draw_ring: fn(target: &Image, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) Never! {
+draw_ring: fn(target: ^Image, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) Never! {
     extent: extent_of(target)
     pieces: ring_pieces(center, inner_radius, outer_radius, start_angle, end_angle, segments)
     paint(target, cover_runs(extent, pieces_cover(extent, pieces), pack_rgba(color)))
@@ -1083,7 +1083,7 @@ draw_ring: fn(target: &Image, center: Point, inner_radius: Float, outer_radius: 
 
 // A ring outline: the pixels of draw_ring's area that touch a pixel
 // outside it.
-draw_ring_lines: fn(target: &Image, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) Never! {
+draw_ring_lines: fn(target: ^Image, center: Point, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: Color) Never! {
     extent: extent_of(target)
     pieces: ring_pieces(center, inner_radius, outer_radius, start_angle, end_angle, segments)
     paint(target, outline_runs(extent, pieces_cover(extent, pieces), pack_rgba(color)))
@@ -1091,14 +1091,14 @@ draw_ring_lines: fn(target: &Image, center: Point, inner_radius: Float, outer_ra
 
 // A regular polygon with its first vertex at `rotation`
 // degrees; fewer than 3 sides draw 3.
-draw_poly: fn(target: &Image, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) Never! {
+draw_poly: fn(target: ^Image, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) Never! {
     extent: extent_of(target)
     paint(target, cover_runs(extent, pieces_cover(extent, poly_pieces(center, sides, radius, rotation)), pack_rgba(color)))
 }
 
 // A polygon outline: the pixels of draw_poly's area that touch a pixel
 // outside it.
-draw_poly_lines: fn(target: &Image, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) Never! {
+draw_poly_lines: fn(target: ^Image, center: Point, sides: Int, radius: Float, rotation: Float, color: Color) Never! {
     extent: extent_of(target)
     paint(target, outline_runs(extent, pieces_cover(extent, poly_pieces(center, sides, radius, rotation)), pack_rgba(color)))
 }
@@ -1184,7 +1184,7 @@ sprite_bounds: fn(atlas: TextureAtlas, source: String, x: Int, y: Int) -> UIRect
 // blends: alpha 255 copies and alpha 0 leaves the image as it was. The
 // parts of the region outside the texture or the image draw nothing, as
 // does an unknown region or an atlas without a texture.
-draw_sprite: fn(target: &Image, atlas: TextureAtlas, source: String, x: Int, y: Int) Never! {
+draw_sprite: fn(target: ^Image, atlas: TextureAtlas, source: String, x: Int, y: Int) Never! {
     texture: atlas.texture
     if texture.width == 0 || target.pixels.len() != target.width * target.height * 4 {
         return
@@ -1336,7 +1336,7 @@ Extent: struct {
 extent_of: fn(image: Image) -> Extent { Extent{width: image.width, height: image.height} }
 
 // Paints the runs as `fill` does.
-paint: fn(target: &Image, runs: [Run]) {
+paint: fn(target: ^Image, runs: [Run]) {
     loop run in runs -> fill(target, run.x, run.y, run.width, run.height, run.rgba, false)
 }
 
@@ -1345,7 +1345,7 @@ paint: fn(target: &Image, runs: [Run]) {
 // stores the premultiplied color (a clear); otherwise it goes src-over
 // (see over), and alpha 0 leaves the image as it was. An image whose
 // pixels do not match its size takes nothing.
-fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, replace: Bool) {
+fill: fn(target: ^Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, replace: Bool) {
     if width <= 0 || height <= 0 {
         return
     }
@@ -1475,7 +1475,7 @@ isqrt_floor: fn(n: Int) -> Int {
 // round(n / d) for d > 0, halves rounding up.
 round_div: fn(n: Int, d: Int) -> Int { (2 * n + d) /% (2 * d) }
 
-push_clipped: fn(runs: &[Run], extent: Extent, x: Int, y: Int, width: Int, height: Int, rgba: Int) {
+push_clipped: fn(runs: ^[Run], extent: Extent, x: Int, y: Int, width: Int, height: Int, rgba: Int) {
     left: max_int(x, 0)
     top: max_int(y, 0)
     right: min_int(x + width, extent.width)
@@ -1755,7 +1755,7 @@ Piece: struct {
 }
 
 // Snaps a convex polygon given in either winding and keeps it if it has area.
-push_piece: fn(pieces: &[Piece], xs: [Float], ys: [Float]) {
+push_piece: fn(pieces: ^[Piece], xs: [Float], ys: [Float]) {
     sx := [Int]{}
     sy := [Int]{}
     loop at in 0..<xs.len() {
@@ -1845,7 +1845,7 @@ pieces_cover: fn(extent: Extent, pieces: [Piece]) -> Cover {
 
 // Appends the union of `spans` in column order, joining spans that overlap
 // or touch.
-merge_spans: fn(out: &[Span], spans: [Span]) {
+merge_spans: fn(out: ^[Span], spans: [Span]) {
     taken := [Bool]{}
     loop _ in 0..<spans.len() -> taken.push(false)
     lo := 0
@@ -1991,7 +1991,7 @@ difference_runs: fn(extent: Extent, outer: Cover, inner: Cover, rgba: Int) -> [R
 }
 
 // Runs for the columns lo..hi of `row` outside the sorted `holes`.
-push_gaps: fn(runs: &[Run], extent: Extent, row: Int, lo: Int, hi: Int, holes: [Span], rgba: Int) {
+push_gaps: fn(runs: ^[Run], extent: Extent, row: Int, lo: Int, hi: Int, holes: [Span], rgba: Int) {
     pen := lo
     loop hole in holes {
         if hole.hi < pen || hole.lo > hi -> next
@@ -2152,7 +2152,7 @@ no_image: fn() -> Image { Image{width: 0, height: 0, pixels: [U8]{}} }
 // Makes `image` a `width` x `height` image of zero pixels unless it is one
 // already: a window frame's drawing target follows the frame's size, which
 // no PNG limit bounds.
-fit: fn(image: &Image, width: Int, height: Int) {
+fit: fn(image: ^Image, width: Int, height: Int) {
     if image.width == width && image.height == height && image.pixels.len() == width * height * 4 {
         return
     }
@@ -2179,7 +2179,7 @@ decode_png: fn(data: [U8]) -> Image {
     Image{width: decoded.width, height: decoded.height, pixels: decoded.pixels}
 }
 
-put_rgba: fn(pixels: &[U8], at: Int, rgba: Int) {
+put_rgba: fn(pixels: ^[U8], at: Int, rgba: Int) {
     red: rgba >> 24
     green: (rgba >> 16) & 255
     blue: (rgba >> 8) & 255
@@ -2375,7 +2375,7 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
 }
 
 // Paints runs pixel by pixel with blend: the plain reading of `fill`.
-reference_paint: fn(image: &Image, runs: [Run]) {
+reference_paint: fn(image: ^Image, runs: [Run]) {
     loop run in runs {
         alpha: run.rgba & 255
         rest: 255 - alpha
@@ -2730,7 +2730,7 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
     assert_eq(set.face.layout(sample, 16.0).advance, now.layout(sample, 16.0).advance)
 }
 
-push_be32: fn(out: &[U8], value: Int) {
+push_be32: fn(out: ^[U8], value: Int) {
     shifts: [Int]{24, 16, 8, 0}
     loop shift in shifts {
         byte: (value >> shift) & 255
@@ -2738,7 +2738,7 @@ push_be32: fn(out: &[U8], value: Int) {
     }
 }
 
-push_chunk: fn(out: &[U8], kind: Int, body: [U8]) {
+push_chunk: fn(out: ^[U8], kind: Int, body: [U8]) {
     push_be32(out, body.len())
     push_be32(out, kind)
     loop byte in body -> out.push(byte)

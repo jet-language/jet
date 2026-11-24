@@ -47,7 +47,7 @@ BLOCK_SIZE: 16
 /// A key whose schedule runs one 16-byte block in place; the shared modes
 /// run on it. `s` is four words of scratch state the caller wipes.
 Block128: trait {
-    crypt_block: fn(self, s: &[U32], b: &[U8]) Never!,
+    crypt_block: fn(self, s: ^[U32], b: ^[U8]) Never!,
 }
 
 get_le32: fn(b: [U8], off: Int) -> U32 Never! {
@@ -55,7 +55,7 @@ get_le32: fn(b: [U8], off: Int) -> U32 Never! {
 }
 
 // The bytes are cut from the word without a range check on a secret.
-put_le32: fn(out: &[U8], at: Int, w: U32) Never! {
+put_le32: fn(out: ^[U8], at: Int, w: U32) Never! {
     out[at] = wrapping(U8{w})
     out[at + 1] = wrapping(U8{w >> 8})
     out[at + 2] = wrapping(U8{w >> 16})
@@ -67,11 +67,11 @@ sbox: fn(packed: [U64], x: U32, shift: Int) -> U32 Never! {
     wrapping(U32{ctime.table_entry(packed, 3, U64{(x >> shift) & U32{255}})})
 }
 
-wipe_u32s: fn(w: &[U32]) Never! {
+wipe_u32s: fn(w: ^[U32]) Never! {
     loop i in 0..<w.len() -> w[i] = U32{0}
 }
 
-wipe_bytes: fn(b: &[U8]) Never! {
+wipe_bytes: fn(b: ^[U8]) Never! {
     loop i in 0..<b.len() -> b[i] = U8{0}
 }
 
@@ -86,24 +86,24 @@ ARIAKey: struct {
     nr: Int,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             rk := self.rk.move()
             loop i in 0..<rk.len() -> rk[i] = U32{0}
         }
     }
 
     impl Block128 {
-        crypt_block: fn(self, s: &[U32], b: &[U8]) Never! { aria_block(self, s, b) }
+        crypt_block: fn(self, s: ^[U32], b: ^[U8]) Never! { aria_block(self, s, b) }
     }
 
     impl cipher.ForwardBlock {
-        encrypt_one: fn(self, b: &[U8]) Never! { forward_one(self, b) }
+        encrypt_one: fn(self, b: ^[U8]) Never! { forward_one(self, b) }
 
-        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+        ctr32_blocks: fn(self, ctr: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
             forward_ctr32(self, ctr, src, off, count, out)
         }
 
-        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+        cbc_blocks: fn(self, iv: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
             forward_cbc(self, iv, src, off, count, out)
         }
     }
@@ -137,7 +137,7 @@ aria_p3: fn(x: U32) -> U32 Never! {
 }
 
 // The affine diffusion layer A on the four words at s[at..] (aria_a).
-aria_a: fn(s: &[U32], at: Int) Never! {
+aria_a: fn(s: ^[U32], at: Int) Never! {
     a := s[at]
     b := s[at + 1]
     c := s[at + 2]
@@ -171,35 +171,35 @@ aria_sub: fn(x: U32, sa: [U64], sb: [U64], sc: [U64], sd: [U64]) -> U32 Never! {
 }
 
 // The substitution layer SL1 (the odd rounds) on s[0..4].
-aria_sl1: fn(s: &[U32]) Never! {
+aria_sl1: fn(s: ^[U32]) Never! {
     loop i in 0..<4 -> s[i] = aria_sub(s[i], ARIA_SB1, ARIA_SB2, ARIA_IS1, ARIA_IS2)
 }
 
 // The substitution layer SL2 (the even rounds) on s[0..4].
-aria_sl2: fn(s: &[U32]) Never! {
+aria_sl2: fn(s: ^[U32]) Never! {
     loop i in 0..<4 -> s[i] = aria_sub(s[i], ARIA_IS1, ARIA_IS2, ARIA_SB1, ARIA_SB2)
 }
 
 // t = w[p..] ^ CK, the step FO and FE start with.
-aria_round_key_in: fn(w: [U32], p: Int, ck: Int, t: &[U32]) Never! {
+aria_round_key_in: fn(w: [U32], p: Int, ck: Int, t: ^[U32]) Never! {
     loop i in 0..<4 -> t[i] = w[p + i] ~ ARIA_RC[4 * ck + i]
 }
 
 // w[r..] = A(t) ^ w[x..], the step FO and FE end with.
-aria_round_key_out: fn(w: &[U32], r: Int, x: Int, t: &[U32]) Never! {
+aria_round_key_out: fn(w: ^[U32], r: Int, x: Int, t: ^[U32]) Never! {
     aria_a(t, 0)
     loop i in 0..<4 -> w[r + i] = t[i] ~ w[x + i]
 }
 
 // w[r..] = FO(w[p..], CK) ^ w[x..] (aria_fo_xor); `t` is scratch.
-aria_fo_xor: fn(w: &[U32], r: Int, p: Int, ck: Int, x: Int, t: &[U32]) Never! {
+aria_fo_xor: fn(w: ^[U32], r: Int, p: Int, ck: Int, x: Int, t: ^[U32]) Never! {
     aria_round_key_in(w, p, ck, t)
     aria_sl1(t)
     aria_round_key_out(w, r, x, t)
 }
 
 // w[r..] = FE(w[p..], CK) ^ w[x..] (aria_fe_xor); `t` is scratch.
-aria_fe_xor: fn(w: &[U32], r: Int, p: Int, ck: Int, x: Int, t: &[U32]) Never! {
+aria_fe_xor: fn(w: ^[U32], r: Int, p: Int, ck: Int, x: Int, t: ^[U32]) Never! {
     aria_round_key_in(w, p, ck, t)
     aria_sl2(t)
     aria_round_key_out(w, r, x, t)
@@ -207,7 +207,7 @@ aria_fe_xor: fn(w: &[U32], r: Int, p: Int, ck: Int, x: Int, t: &[U32]) Never! {
 
 // rk[r..] = w[a..] ^ (w[b..] <<< n), the big-endian 128-bit rotation of the
 // key schedule (aria_rot128).
-aria_rot128: fn(rk: &[U32], r: Int, w: [U32], a: Int, b: Int, n: Int) Never! {
+aria_rot128: fn(rk: ^[U32], r: Int, w: [U32], a: Int, b: Int, n: Int) Never! {
     n1: n %% 32
     n2: if n1 != 0 -> 32 - n1 else -> 0
     j := (n /% 32) %% 4
@@ -270,12 +270,12 @@ aria_setkey_dec: fn(key: [U8]) -> ARIAKey BlockError! {
     Ok(k)
 }
 
-aria_add_key: fn(s: &[U32], rk: [U32], round: Int) Never! {
+aria_add_key: fn(s: ^[U32], rk: [U32], round: Int) Never! {
     loop c in 0..<4 -> s[c] = s[c] ~ rk[4 * round + c]
 }
 
 // One block in place through the key's rounds (mbedtls_aria_crypt_ecb).
-aria_block: fn(k: ARIAKey, s: &[U32], b: &[U8]) Never! {
+aria_block: fn(k: ARIAKey, s: ^[U32], b: ^[U8]) Never! {
     loop c in 0..<4 -> s[c] = get_le32(b, 4 * c)
     i := 0
     loop {
@@ -304,24 +304,24 @@ CamelliaKey: struct {
     nr: Int,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             rk := self.rk.move()
             loop i in 0..<rk.len() -> rk[i] = U32{0}
         }
     }
 
     impl Block128 {
-        crypt_block: fn(self, s: &[U32], b: &[U8]) Never! { camellia_block(self, s, b) }
+        crypt_block: fn(self, s: ^[U32], b: ^[U8]) Never! { camellia_block(self, s, b) }
     }
 
     impl cipher.ForwardBlock {
-        encrypt_one: fn(self, b: &[U8]) Never! { forward_one(self, b) }
+        encrypt_one: fn(self, b: ^[U8]) Never! { forward_one(self, b) }
 
-        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+        ctr32_blocks: fn(self, ctr: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
             forward_ctr32(self, ctr, src, off, count, out)
         }
 
-        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+        cbc_blocks: fn(self, iv: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
             forward_cbc(self, iv, src, off, count, out)
         }
     }
@@ -576,7 +576,7 @@ CAMELLIA_TRANSPOSES: [Int]{
 rotl1: fn(x: U32) -> U32 Never! { (x << 1) | x >> 31 }
 
 // s[z..z + 2] ^= F(s[x..x + 2], k0 k1) (camellia_feistel).
-camellia_feistel: fn(s: &[U32], x: Int, k0: U32, k1: U32, z: Int) Never! {
+camellia_feistel: fn(s: ^[U32], x: Int, k0: U32, k1: U32, z: Int) Never! {
     a := s[x] ~ k0
     b := s[x + 1] ~ k1
     a = (sbox(CAMELLIA_SB1, a, 24) << 24) | sbox(CAMELLIA_SB2, a, 16) << 16 | sbox(CAMELLIA_SB3, a, 8) << 8 | sbox(CAMELLIA_SB4, a, 0)
@@ -676,7 +676,7 @@ camellia_setkey_dec: fn(key: [U8]) -> CamelliaKey BlockError! {
 
 // One block in place through the key's subkeys (mbedtls_camellia_crypt_ecb;
 // the direction is the schedule's).
-camellia_block: fn(k: CamelliaKey, s: &[U32], b: &[U8]) Never! {
+camellia_block: fn(k: CamelliaKey, s: ^[U32], b: ^[U8]) Never! {
     loop c in 0..<4 -> s[c] = des.get_be32(b, 4 * c) ~ k.rk[c]
     r := 4
     groups := k.nr
@@ -719,7 +719,7 @@ block_crypt_ecb: fn<K: Block128>(k: K, block: [U8]) -> [U8] BlockError! {
 /// CBC over whole 16-byte blocks; `iv` carries the chaining value to the
 /// next call. The key's schedule must match `mode` (mbedtls_aria_crypt_cbc,
 /// mbedtls_camellia_crypt_cbc).
-block_crypt_cbc: fn<K: Block128>(k: K, mode: BlockMode, iv: &[U8], input: [U8]) -> [U8] BlockError! {
+block_crypt_cbc: fn<K: Block128>(k: K, mode: BlockMode, iv: ^[U8], input: [U8]) -> [U8] BlockError! {
     if input.len() %% BLOCK_SIZE != 0 || iv.len() != BLOCK_SIZE -> return Err(.InvalidInputLength)
     s := des.subkeys(4)
     out := cipher.zero_bytes(input.len())
@@ -753,7 +753,7 @@ block_crypt_cbc: fn<K: Block128>(k: K, mode: BlockMode, iv: &[U8], input: [U8]) 
 /// CFB128 with an encryption schedule; `iv_off` bytes of the current block
 /// are used, and it ends holding the new offset (mbedtls_aria_crypt_cfb128,
 /// mbedtls_camellia_crypt_cfb128).
-block_crypt_cfb128: fn<K: Block128>(k: K, mode: BlockMode, iv_off: &Int, iv: &[U8], input: [U8]) -> [U8] BlockError! {
+block_crypt_cfb128: fn<K: Block128>(k: K, mode: BlockMode, iv_off: ^Int, iv: ^[U8], input: [U8]) -> [U8] BlockError! {
     n := iv_off
     if n < 0 || n >= BLOCK_SIZE || iv.len() != BLOCK_SIZE -> return Err(.BadInputData)
     s := des.subkeys(4)
@@ -774,7 +774,7 @@ block_crypt_cfb128: fn<K: Block128>(k: K, mode: BlockMode, iv_off: &Int, iv: &[U
 /// `nonce_counter`. `stream_block` holds the current keystream block and
 /// `nc_off` the bytes of it used; it ends holding the new offset
 /// (mbedtls_aria_crypt_ctr, mbedtls_camellia_crypt_ctr).
-block_crypt_ctr: fn<K: Block128>(k: K, nc_off: &Int, nonce_counter: &[U8], stream_block: &[U8], input: [U8]) -> [U8] BlockError! {
+block_crypt_ctr: fn<K: Block128>(k: K, nc_off: ^Int, nonce_counter: ^[U8], stream_block: ^[U8], input: [U8]) -> [U8] BlockError! {
     n := nc_off
     if n < 0 || n >= BLOCK_SIZE || nonce_counter.len() != BLOCK_SIZE || stream_block.len() != BLOCK_SIZE {
         return Err(.BadInputData)
@@ -800,13 +800,13 @@ block_crypt_ctr: fn<K: Block128>(k: K, nc_off: &Int, nonce_counter: &[U8], strea
 // gcm.c and ccm.c run ARIA and Camellia through the cipher layer. The key
 // must hold an encryption schedule (aria_setkey_enc, camellia_setkey_enc).
 
-forward_one: fn<K: Block128>(k: K, b: &[U8]) Never! {
+forward_one: fn<K: Block128>(k: K, b: ^[U8]) Never! {
     s := des.subkeys(4)
     k.crypt_block(s, b)
     wipe_u32s(s)
 }
 
-forward_ctr32: fn<K: Block128>(k: K, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+forward_ctr32: fn<K: Block128>(k: K, ctr: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
     if count <= 0 {
         return
     }
@@ -824,7 +824,7 @@ forward_ctr32: fn<K: Block128>(k: K, ctr: &[U8], src: [U8], off: Int, count: Int
     wipe_bytes(ks)
 }
 
-forward_cbc: fn<K: Block128>(k: K, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+forward_cbc: fn<K: Block128>(k: K, iv: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
     if count <= 0 {
         return
     }

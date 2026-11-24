@@ -3,6 +3,6 @@ Error: Jet.ConcurrentCaptureNotOwned: `bump` changes the script's `count`, so it
     |
   8 |     child: task { bump() }
     |                   ^^^^
- Why: Each call of `bump` passes the script's `count` to its extra `&` parameter `count:`, and a task runs beside the script, so the change would race it
+ Why: Each call of `bump` passes the script's `count` to its extra `^` parameter `count:`, and a task runs beside the script, so the change would race it
  Fix: Call `bump` outside the task, or pass the task's own value by name: `bump(…, count: …)`
 More: jet-lang.dev/e/Jet.ConcurrentCaptureNotOwned

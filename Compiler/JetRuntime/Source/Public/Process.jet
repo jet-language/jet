@@ -1,8 +1,9 @@
 // `jet.runtime.process` (#6615): the runtime's public signal subscription
-// functions, the program's argv and its exit, in Jet types with their declared
-// effect rows. Each member is a runtime binding (Guest.jet
-// sema_guest_runtime_binding) of the runtime export that is its one body
-// (ProcessSignal.jet, HostStartup.jet, HostProcess.jet, ProcessPipeline.jet).
+// functions, the program's argv and its exit, and core.process's spec and
+// status leaves, in Jet types with their declared effect rows. Each member
+// is a runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
+// export that is its one body (ProcessSignal.jet, HostStartup.jet,
+// HostProcess.jet, ProcessPipeline.jet, ProcessSpec.jet, CompilerHost.jet).
 // A tuple result's items cross in the checked tuple's written order,
 // which is the export's slot order.
 process: module {
@@ -34,4 +35,12 @@ process: module {
     // step's stdin, and answers its receipt. `priv`: only Core calls it
     // (`process.pipeline`).
     #Import(c) priv pipeline: fn(steps: [ProcessSpec]) -[Exec]> ProcessReceipt IOError! = "jet_std_process_pipeline"
+
+    // The exit status text of the finished child `pid`, None when this
+    // process holds none for it. `priv`: only Core calls these.
+    #Import(c) priv exit_status: fn(pid: Int) -[Exec]> String? = "jet_process_exit_status_raw"
+
+    // The spec with `parent_death` set: the child gets SIGKILL when this
+    // process dies, unless the spec is detached.
+    #Import(c) priv spec_parent_death: fn(spec: ProcessSpec) -[Exec]> ProcessSpec = "jet_process_spec_parent_death"
 }

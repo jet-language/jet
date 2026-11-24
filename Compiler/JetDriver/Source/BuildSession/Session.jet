@@ -364,14 +364,14 @@ build_session_new: fn(session_id: Int, package: String, compiler_version: String
     }
 }
 
-build_session_abort: fn(session: &BuildSession) Never! {
+build_session_abort: fn(session: ^BuildSession) Never! {
     permit := session.storage.guard_edit()
     permit.value.active = false
 }
 
 // The run stopped at a call the session refused: the evaluator reports that
 // refusal, as the build's own report.
-build_session_refuse: fn(session: &BuildSession) Never! {
+build_session_refuse: fn(session: ^BuildSession) Never! {
     permit := session.storage.guard_edit()
     permit.value.refused = true
 }
@@ -393,7 +393,7 @@ build_session_promised: fn(session: BuildSession) -> [BuildSessionGeneratedModul
 // The next call's span is in source file `file` (a dependency's function's
 // call as well as the build file's), which an option it sets names as its
 // site.
-build_session_at: fn(session: &BuildSession, file: String) Never! {
+build_session_at: fn(session: ^BuildSession, file: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.file = file
 }
@@ -403,7 +403,7 @@ build_session_at: fn(session: &BuildSession, file: String) Never! {
 // method's name, as sema places a method call), which the next call's
 // reports are at. A file the driver named no lines of places the call at
 // its start.
-build_session_place: fn(session: &BuildSession, file: String, line: Int, column: Int, length: Int) -> Span Never! {
+build_session_place: fn(session: ^BuildSession, file: String, line: Int, column: Int, length: Int) -> Span Never! {
     permit := session.storage.guard_edit()
     start := 0
     if permit.value.lines.get(file) == .Val(starts) && line >= 1 && line <= starts.len() {
@@ -414,14 +414,14 @@ build_session_place: fn(session: &BuildSession, file: String, line: Int, column:
 }
 
 // The words after `--` on `jet build` (`b.args()`); a new session has none.
-build_session_set_args: fn(session: &BuildSession, args: [String]) Never! {
+build_session_set_args: fn(session: ^BuildSession, args: [String]) Never! {
     permit := session.storage.guard_edit()
     permit.value.args = args.copy()
 }
 
 // The source key the running compiler was built from, "" for none
 // (`b.jet_built_from`).
-build_session_set_jet_source: fn(session: &BuildSession, key: String) Never! {
+build_session_set_jet_source: fn(session: ^BuildSession, key: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.jet_source = key.copy()
 }
@@ -433,27 +433,27 @@ build_session_tree_source: fn(session: BuildSession) -> String Never! {
     permit.value.tree_source.copy()
 }
 
-build_session_set_tree_source: fn(session: &BuildSession, key: String) Never! {
+build_session_set_tree_source: fn(session: ^BuildSession, key: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.tree_source = key.copy()
 }
 
 // The folders of the packages the build's package.jet lists, by name.
-build_session_set_dependencies: fn(session: &BuildSession, dependencies: [String:String]) Never! {
+build_session_set_dependencies: fn(session: ^BuildSession, dependencies: [String:String]) Never! {
     permit := session.storage.guard_edit()
     permit.value.dependencies = dependencies.copy()
 }
 
 // The loader's identity of the build's package (`package` may name it
 // otherwise, as a lone file's stem).
-build_session_set_identity: fn(session: &BuildSession, identity: String) Never! {
+build_session_set_identity: fn(session: ^BuildSession, identity: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.identity = identity.copy()
 }
 
 // The build file's display path and source, whose lines the `site` of each
 // module `b.generate` makes and each step counts (build_session_site).
-build_session_set_source: fn(session: &BuildSession, file: String, source: String) Never! {
+build_session_set_source: fn(session: ^BuildSession, file: String, source: String) Never! {
     build_session_add_source(session, file, source)
     permit := session.storage.guard_edit()
     permit.value.build_file = file.copy()
@@ -461,7 +461,7 @@ build_session_set_source: fn(session: &BuildSession, file: String, source: Strin
 
 // The lines of source file `file`, where a Core method's `at` may place a
 // call (build_session_place).
-build_session_add_source: fn(session: &BuildSession, file: String, source: String) Never! {
+build_session_add_source: fn(session: ^BuildSession, file: String, source: String) Never! {
     permit := session.storage.guard_edit()
     lines := [Int]{0}
     loop (index, byte) in source.bytes() {
@@ -651,9 +651,9 @@ BuildSessionCall: struct {
 // core.build (build_session_run, build_session_found, ...), to a call on
 // `args` (and the generated source `generated`) at `start..<end`. A session
 // whose build returned refuses every call.
-build_session_call: fn(session: &BuildSession, operation: fn(&BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, args: [BuildSessionValue], generated: String?, in_impure_gate: Bool, start: Int, end: Int) -> BuildSessionReply Never! {
+build_session_call: fn(session: ^BuildSession, operation: fn(^BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, args: [BuildSessionValue], generated: String?, in_impure_gate: Bool, start: Int, end: Int) -> BuildSessionReply Never! {
     permit := session.storage.guard_edit()
-    state := &permit.value
+    state := ^permit.value
     state.start = start
     state.end = end
     if !state.active -> return build_session_fail(state, "build context expired")
@@ -661,77 +661,77 @@ build_session_call: fn(session: &BuildSession, operation: fn(&BuildSessionState,
 }
 
 // `b.run(name, tool, effects)`.
-build_session_run: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_run: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     caps: build_session_strings(call.args, 2) ?? return build_session_fail(state, "a step's effects must be a list of strings")
     if caps.len() > 0 && !call.impure -> return build_session_impure(state, "run")
     build_session_add_run(state, call.args, call.start, call.end)
 }
 
 // `b.action(step)`, the step's five values.
-build_session_action: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_action: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     caps: build_session_strings(call.args, 4) ?? return build_session_fail(state, "a step's effects must be a list of strings")
     if caps.len() > 0 && !call.impure -> return build_session_impure(state, "action")
     build_session_add_action(state, call.args, call.start, call.end)
 }
 
-build_session_add_executable: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_add_executable: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_target(state, "add_executable", "executable", call.args)
 }
 
-build_session_add_library: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_add_library: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_target(state, "add_library", "library", call.args)
 }
 
-build_session_add_test: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_add_test: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_target(state, "add_test", "test", call.args)
 }
 
-build_session_add_asset_bundle: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_add_asset_bundle: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_target(state, "add_asset_bundle", "asset-bundle", call.args)
 }
 
-build_session_add_doc: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_add_doc: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_target(state, "add_doc", "doc", call.args)
 }
 
-build_session_add_install: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_add_install: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_target(state, "add_install", "install", call.args)
 }
 
-build_session_add_package: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_add_package: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_target(state, "add_package", "package", call.args)
 }
 
-build_session_add_publish: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_add_publish: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_target(state, "add_publish", "publish", call.args)
 }
 
-build_session_toolchain: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_toolchain: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_toolchain(state, call.args)
 }
 
-build_session_signing: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_signing: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_signing(state, call.args)
 }
 
-build_session_probe: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_probe: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_add_probe(state, call.args, call.impure)
 }
 
 // `b.optimize(.O2)` (args: the option's row name, the value).
-build_session_option: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_option: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_set_option(state, call.args, false, call.start, call.end)
 }
 
 // `b.pin(.optimize, .O2)`.
-build_session_pin: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_pin: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     build_session_set_option(state, call.args, true, call.start, call.end)
 }
 
 // `b.generate(name) { items }`: the name, then the place of the `Code`
 // value that carried the items, if one did; the items are the call's
 // generated source.
-build_session_generate: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_generate: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     args: call.args
     if args.len() != 1 && args.len() != 2 {
         return build_session_fail(state, "`b.generate` requires a name and typed item block")
@@ -745,7 +745,7 @@ build_session_generate: fn(state: &BuildSessionState, call: BuildSessionCall) ->
     build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: call.start, end: call.end, site: site, code_site: code_site})
 }
 
-build_session_default: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_default: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     if call.args.len() != 1 -> return build_session_fail(state, "`b.default` takes one target")
     state.default_target = build_session_handle(state, call.args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
@@ -757,7 +757,7 @@ build_session_default: fn(state: &BuildSessionState, call: BuildSessionCall) -> 
 // handle. A second compile (a workspace) is another value from this same
 // call, and none is made over an option that weakens checking
 // (build_session_unchecked_option).
-build_session_compiler: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_compiler: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     if call.args.len() != 1 -> return build_session_fail(state, "`b.compiler` takes one target")
     target: build_session_handle(state, call.args[0], "BuildTarget") ?? return build_session_fail(state, "compiler target does not belong to this build")
     loop option in state.options {
@@ -776,7 +776,7 @@ build_session_compiler: fn(state: &BuildSessionState, call: BuildSessionCall) ->
 // with `Meta.Code.Types` and `Meta.Code.Raw` for text) are its recorded
 // authority. `meta.add_struct` also sends the name of the struct it
 // declares.
-build_session_compiler_add: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_compiler_add: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     args: call.args
     if args.len() != 4 && args.len() != 5 {
         return build_session_fail(state, "`meta.add` takes one `Code` value or source text and `scope:`")
@@ -799,7 +799,7 @@ build_session_compiler_add: fn(state: &BuildSessionState, call: BuildSessionCall
 // `meta.allow_rewrite(package: name)` on a `Compiler` value: the root's
 // consent that the value rewrites the functions of the dependency `name`.
 // A handed value's consent is its root's, which every handoff shares.
-build_session_compiler_allow_rewrite: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_compiler_allow_rewrite: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     if call.args.len() != 2 {
         return build_session_fail(state, "`meta.allow_rewrite` takes one `package:` name")
     }
@@ -816,7 +816,7 @@ build_session_compiler_allow_rewrite: fn(state: &BuildSessionState, call: BuildS
 // handed it to `install` at main.jet:9"), and the callee gets a new value
 // of this build whose chain ends with it, so what the callee makes names
 // every handoff. The new value expires with the build like the root's.
-build_session_compiler_handoff: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_compiler_handoff: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     if call.args.len() != 2 {
         return build_session_fail(state, "a `Compiler` handoff takes one value and its place")
     }
@@ -832,7 +832,7 @@ build_session_compiler_handoff: fn(state: &BuildSessionState, call: BuildSession
 
 // The check `meta.events` makes before it reads a `Compiler` value's
 // checked program: the value belongs to this build, which still runs.
-build_session_compiler_live: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_compiler_live: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     if call.args.len() != 1 {
         return build_session_fail(state, "a `Compiler` value check takes one value")
     }
@@ -850,7 +850,7 @@ build_session_compiler_live: fn(state: &BuildSessionState, call: BuildSessionCal
 // wrote `f` with, is `f`'s body before this rewrite. Rewrites of one
 // function compose in the order they run: a later rewrite's paste line is
 // the body the earlier rewrites made.
-build_session_compiler_rewrite_body: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_compiler_rewrite_body: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     args: call.args
     start: call.start
     end: call.end
@@ -902,7 +902,7 @@ build_session_compiler_rewrite_body: fn(state: &BuildSessionState, call: BuildSe
 // `meta.report(finding, at: c)`: the finding is kept with the build and
 // reported once it returns, with the replacement its `syntax.rewrite` fix
 // calls at `c` ("" for none).
-build_session_compiler_report: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_compiler_report: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     args: call.args
     if args.len() != 9 {
         return build_session_fail(state, "`meta.report` takes a compiler value, a finding's code, tier and texts, the call it names and its rewrite")
@@ -930,13 +930,13 @@ build_session_compiler_report: fn(state: &BuildSessionState, call: BuildSessionC
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 
-build_session_args: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_args: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     if call.args.len() != 0 -> return build_session_fail(state, "`b.args` takes no arguments")
     BuildSessionReply.Value{value: BuildSessionValue.List{values: loop word in state.args -> BuildSessionValue.Text{value: word.copy()}}}
 }
 
 // `b.plan(default)`: an absent default arrives as Unit.
-build_session_plan: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_plan: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     if call.args.len() > 1 {
         return build_session_fail(state, "`b.plan` accepts zero or one default target")
     }
@@ -947,7 +947,7 @@ build_session_plan: fn(state: &BuildSessionState, call: BuildSessionCall) -> Bui
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildPlan", session: state.id, id: default}}
 }
 
-build_session_contribute: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_contribute: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     args: call.args
     if args.len() != 2 {
         return build_session_fail(state, "`b.contribute` requires a fact name and one value")
@@ -974,7 +974,7 @@ build_session_contribute: fn(state: &BuildSessionState, call: BuildSessionCall) 
 
 // `b.plugin(manifest, component)`: the host loads the plugin
 // (HostRequest).
-build_session_plugin: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_plugin: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     if call.args.len() != 2 || build_session_text(call.args, 0) == None || build_session_text(call.args, 1) == None {
         return build_session_fail(state, "`b.plugin` requires manifest and component paths")
     }
@@ -988,7 +988,7 @@ build_session_plugin: fn(state: &BuildSessionState, call: BuildSessionCall) -> B
 // `b.optimize(.O2)` (args: the row name, the value) or `b.pin(...)`: the
 // last call's value holds; a pinned value can't change in the same fn
 // build.
-build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue], pinned: Bool, start: Int, end: Int) -> BuildSessionReply {
+build_session_set_option: fn(state: ^BuildSessionState, args: [BuildSessionValue], pinned: Bool, start: Int, end: Int) -> BuildSessionReply {
     if args.len() != 2 {
         return build_session_fail(state, "a build option call takes an option and a value")
     }
@@ -1064,7 +1064,7 @@ build_session_safe_name: fn(name: String) -> String {
     String.from_bytes(bytes) ?? panic("invalid generated module name")
 }
 
-build_session_add_generated: fn(state: &BuildSessionState, generated: BuildSessionGeneratedModule) -> BuildSessionReply {
+build_session_add_generated: fn(state: ^BuildSessionState, generated: BuildSessionGeneratedModule) -> BuildSessionReply {
     if generated.name.trim() == "" || generated.path.trim() == "" || generated.source.trim() == "" {
         return build_session_error_fail(state, BuildSessionError.EmptyGeneratedModuleField{value: generated.name})
     }
@@ -1145,7 +1145,7 @@ build_session_replace_paste: fn(source: String, paste: String, body: String) -> 
 
 // `b.toolchain`: its name, target triple and host triple, then its SDK,
 // linker and sysroot, each `()` when the call leaves it out.
-build_session_add_toolchain: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+build_session_add_toolchain: fn(state: ^BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() < 2 || args.len() > 6 {
         return build_session_fail(state, "`b.toolchain` accepts two through six string arguments")
     }
@@ -1180,7 +1180,7 @@ build_session_add_toolchain: fn(state: &BuildSessionState, args: [BuildSessionVa
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildToolchain", session: state.id, id: id}}
 }
 
-build_session_add_signing: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+build_session_add_signing: fn(state: ^BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() != 2 -> return build_session_fail(state, "`b.signing` requires name and label")
     name: build_session_text(args, 0) ?? return build_session_fail(state, "signing name must be a string")
     label: build_session_text(args, 1) ?? return build_session_fail(state, "signing label must be a string")
@@ -1201,7 +1201,7 @@ build_session_add_signing: fn(state: &BuildSessionState, args: [BuildSessionValu
 // `b.probe`: its name, kind and value, then the source a `compile_check`
 // compiles, its reproducibility (`ambient` or `reproducible`) and its
 // toolchain, each `()` when the call leaves it out.
-build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue], in_impure_gate: Bool) -> BuildSessionReply {
+build_session_add_probe: fn(state: ^BuildSessionState, args: [BuildSessionValue], in_impure_gate: Bool) -> BuildSessionReply {
     if args.len() < 3 || args.len() > 6 {
         return build_session_fail(state, "`b.probe` accepts three through six arguments")
     }
@@ -1267,7 +1267,7 @@ build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue]
 
 // `b.error(span, code, what, why, fix)`: a project rule's report, kept
 // with the build.
-build_session_project_error: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+build_session_project_error: fn(state: ^BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
     args: call.args
     if args.len() != 5 {
         return build_session_fail(state, "`b.error` requires SourceSpan, code, what, why, and fix")
@@ -1312,7 +1312,7 @@ build_session_contains_string: fn(values: [String], value: String) -> Bool Never
     false
 }
 
-build_session_append_unique: fn(values: &[String], value: String) Never! {
+build_session_append_unique: fn(values: ^[String], value: String) Never! {
     if !build_session_contains_string(values, value) -> values.push(value.copy())
 }
 

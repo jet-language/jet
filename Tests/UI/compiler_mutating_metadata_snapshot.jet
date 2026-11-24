@@ -13,9 +13,9 @@ MetadataBuilder: struct {
     mutations: Int,
 }
 
-mutate: fn(builder: &MetadataBuilder) Never! { builder.mutations += 1 }
+mutate: fn(builder: ^MetadataBuilder) Never! { builder.mutations += 1 }
 
-read_snapshot: fn(builder: &MetadataBuilder) -> MetadataType Never! {
+read_snapshot: fn(builder: ^MetadataBuilder) -> MetadataType Never! {
     loop row_view in builder.deferred {
         if row_view.key != 7 -> next
         row := row_view.copy()

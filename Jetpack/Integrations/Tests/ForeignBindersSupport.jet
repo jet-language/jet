@@ -44,7 +44,7 @@ pkg_binders_test_php_discover: fn(php: String, source: String, serial: Int) -[FS
 }
 
 // Read exactly `count` bytes from a streamed child output.
-pkg_binders_test_read_exact: fn(child: &ProcessChild, count: Int) -[Exec, Time.Wait]> [U8] {
+pkg_binders_test_read_exact: fn(child: ^ProcessChild, count: Int) -[Exec, Time.Wait]> [U8] {
     out := [U8]{}
     loop out.len() < count {
         chunk: child.stdout.read_bytes(count - out.len()) ?? panic("read worker output")

@@ -13,24 +13,24 @@ held: fn() -[FS]> Int {
 
 lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
-consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
+consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 
 // `n ?? return …` moves the lock only where `n` is absent: where it is
 // present the parameter still owns the lock, which closes as this returns.
-return_fallback: fn(l: &&FileLock, n: Int?) -[FS]> Int {
+return_fallback: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
     value := n ?? return consume_lock(l.move())
     value + held()
 }
 
 // The guard `if n == None -> return …` is the same refinement.
-none_guard: fn(l: &&FileLock, n: Int?) -[FS]> Int {
+none_guard: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
     if n == None -> return consume_lock(l.move())
     n + held()
 }
 
 // A value fallback moves the lock on one path only: the other path's owner
 // still ends it at the scope end.
-value_fallback: fn(l: &&FileLock, n: Int?) -[FS]> Int {
+value_fallback: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
     value := n ?? consume_lock(l.move())
     value
 }

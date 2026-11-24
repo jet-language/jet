@@ -41,7 +41,7 @@ jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram 
 // (JetDriverComptimeEntry.computed) read them by calling their item
 // functions for this build. Either builds on up to `threads` compiler
 // threads.
-jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable, symbols: SymbolTable, interner: Interner, table: ModuleTable, threads: CompilerThreads) -> JetEvalIRComptime {
+jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: ^JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable, symbols: SymbolTable, interner: Interner, table: ModuleTable, threads: CompilerThreads) -> JetEvalIRComptime {
     functions := batch.functions.copy()
     keys := [String]{}
     computed := [TConstantDef]{}
@@ -98,7 +98,7 @@ JetDriverInvocationRun: struct {
     problem: String?,
 }
 
-jet_driver_invocation_run: fn(inputs: &&JetDriverLoweringInputs, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetDriverInvocationRun {
+jet_driver_invocation_run: fn(inputs: ^^JetDriverLoweringInputs, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetDriverInvocationRun {
     checked := inputs.move()
     keys := [String]{}
     if checked.entry_key == .Val(key) -> keys.push(key.copy())

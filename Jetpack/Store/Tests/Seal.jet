@@ -6,7 +6,7 @@ use {
     sys: core.sys
 }
 
-store_test_seal_fixture: fn(verification: &StoreVerification, roots: HangarRoots, name: String, platform_artifact_kind: String) -> IngestedObject Never! {
+store_test_seal_fixture: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, platform_artifact_kind: String) -> IngestedObject Never! {
     source: files.join(roots.root, "seal-source-{name}")
     files.create_dir_all(source) ?? panic("fixture dir")
     files.write(files.join(source, "payload"), "trusted") ?? panic("fixture payload")
@@ -267,7 +267,7 @@ store_test_make_writable: fn(path: String) Never! {
     assert_eq(store_verified_digest_get(other, other_key), None)
 }
 
-store_test_set_census_enabled: fn(verification: &StoreVerification, enabled: Bool) Never! {
+store_test_set_census_enabled: fn(verification: ^StoreVerification, enabled: Bool) Never! {
     state: verification.state
     permit := state.guard_edit()
     permit.value.seal_census_enabled = enabled

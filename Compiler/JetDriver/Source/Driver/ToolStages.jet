@@ -282,7 +282,7 @@ jet_driver_tool_stage_reaches: fn(written: String, marker: String, alias: String
 
 // Each call's answer rows, read from the values of the program's compile, in
 // call order; a call with no readable value answers nothing.
-jet_driver_tool_stage_answers: fn(stage: String, bodies: [Span], values: &&[SemaComptimeItemValue]) -> [[JetDriverToolStageItem]] Never! {
+jet_driver_tool_stage_answers: fn(stage: String, bodies: [Span], values: ^^[SemaComptimeItemValue]) -> [[JetDriverToolStageItem]] Never! {
     answers := [[JetDriverToolStageItem]]{}
     loop _ in bodies -> answers.push([JetDriverToolStageItem]{})
     loop value in values.move() {
@@ -296,7 +296,7 @@ jet_driver_tool_stage_answers: fn(stage: String, bodies: [Span], values: &&[Sema
     answers
 }
 
-jet_driver_tool_stage_rows: fn(stage: String, body: Span, value: &&TComptimeValue) -> [JetDriverToolStageItem] Never! {
+jet_driver_tool_stage_rows: fn(stage: String, body: Span, value: ^^TComptimeValue) -> [JetDriverToolStageItem] Never! {
     rows := [JetDriverToolStageItem]{}
     if stage == TOOL_STAGE_FMT_BLOCK {
         if jet_driver_tool_stage_text(value.move()) == .Val(text) {
@@ -318,7 +318,7 @@ jet_driver_tool_stage_rows: fn(stage: String, body: Span, value: &&TComptimeValu
 
 // One element of a list answer as a row, None when it is malformed or out of
 // its block.
-jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: &&[TComptimeField]) -> JetDriverToolStageItem? Never! {
+jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: ^^[TComptimeField]) -> JetDriverToolStageItem? Never! {
     row := JetDriverToolStageItem{at: 0, length: 0, label: ""}
     labeled := false
     kinded := false
@@ -358,7 +358,7 @@ jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: &&[TComptimeFie
 }
 
 // A String value, or the String an optional holds.
-jet_driver_tool_stage_text: fn(value: &&TComptimeValue) -> String? Never! {
+jet_driver_tool_stage_text: fn(value: ^^TComptimeValue) -> String? Never! {
     if value == .Present(_) {
         if value.move() == .Present(inner) -> return jet_driver_tool_stage_text(inner.move())
         return None
@@ -610,7 +610,7 @@ jet_driver_moment_plan: fn(hooks: [JetDriverMomentHook], records: [CompilerEvent
 
 // The `BuildAction` a link stage's program answered, read from the values of
 // its compile; None when it has none or it is malformed.
-jet_driver_link_stage_action: fn(values: &&[SemaComptimeItemValue]) -> JetDriverBuildAction? Never! {
+jet_driver_link_stage_action: fn(values: ^^[SemaComptimeItemValue]) -> JetDriverBuildAction? Never! {
     loop value in values.move() {
         if value.kind != SemaComptimeItemKind.Constant || !symbol_key_names(value.key, JET_DRIVER_LINK_STAGE_VALUE) {
             next

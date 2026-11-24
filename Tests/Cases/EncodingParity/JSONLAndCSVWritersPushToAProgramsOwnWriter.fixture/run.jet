@@ -14,11 +14,11 @@ Tap: struct {
     held: [U8],
 
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) IOError! {
+        write_bytes: fn(^self, bytes: [U8]) IOError! {
             loop byte in bytes -> self.held.push(byte)
         }
 
-        flush: fn(&self) IOError! {
+        flush: fn(^self) IOError! {
             text: String.from_bytes(self.held) ?? "?"
             print("{self.name} flush {text.replace("\r", "\\r").replace("\n", "\\n")}")
             self.held.clear()
@@ -31,11 +31,11 @@ Full: struct {
     flushes: Int,
 
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) IOError! {
+        write_bytes: fn(^self, bytes: [U8]) IOError! {
             Err(IOError.Other(IOContext{operation: .Write, resource: Val(self.device.copy()), os_code: Val(28), cause: Val("no space left")}))
         }
 
-        flush: fn(&self) IOError! { self.flushes += 1 }
+        flush: fn(^self) IOError! { self.flushes += 1 }
     }
 }
 

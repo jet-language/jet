@@ -16,8 +16,8 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 - [LiveLinks](LiveLinks.jet) — Live links (`@T`): shared references with auto-deref reads/writes, value equality (`==`), identity comparison (`.same()`), and recursive optional links (`@Node?`).
 - [LocalCache](LocalCache.jet)
 - [Memoize](Memoize.jet) — Pure function-result memoization has one bounded default and one explicit unbounded spelling.
-- [MethodFootprint](MethodFootprint.jet) — Sema infers the record fields each method reads or changes through `self`; an expert may state them on the receiver with `&self.field` or the member spread…
-- [Ownership](Ownership.jet) — Ownership: unmarked is read by default, `&` to write/change, `^` to move, `x.copy()` to copy.
+- [MethodFootprint](MethodFootprint.jet) — Sema infers the record fields each method reads or changes through `self`; an expert may state them on the receiver with `^self.field` or the member spread…
+- [Ownership](Ownership.jet) — Ownership: unmarked is read by default, `^` to write/change, `^` to move, `x.copy()` to copy.
 - [ParameterModes](ParameterModes.jet)
 - [Pin](Pin.jet) — `Pin<T>` is the address-stability contract.
 - [ReadParamConst](ReadParamConst.jet) — An unmarked parameter is Jet's const: deep, call-long, no-copy read access, even when the caller's binding is mutable.
@@ -27,7 +27,7 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 - [ScopeCloseSafetyNetPanic](ScopeCloseSafetyNetPanic.jet) — A panic still runs the automatic scope-end close for every live `Close` local of the stopping function before the process stops, in reverse declaration order.
 - [ScopeGuard](ScopeGuard.jet) — Scope-exit cleanup via `core.mem.scope.guard`.
 - [StreamStore](StreamStore.jet) — `mem.stream_store(dst, value)` is `dst = value` written without filling the cache.
-- [TakeLastUse](TakeLastUse.jet) — Call-site moves: an unmarked argument to a take (`&&T`) parameter moves when the call is the name's last use, exactly as `name.move()` would.
+- [TakeLastUse](TakeLastUse.jet) — Call-site moves: an unmarked argument to a take (`^^T`) parameter moves when the call is the name's last use, exactly as `name.move()` would.
 
 ## Allocation
 
@@ -65,10 +65,10 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 
 ## Views
 
-- [PlaceWindows](Views/PlaceWindows.jet) — A particle/grid update using bare reads, `&` edits, and `.copy()` copies.
-- [ProjectedWriteWindows](Views/ProjectedWriteWindows.jet) — `&place` is the exclusive write window for any place, a name followed by field or index projections.
+- [PlaceWindows](Views/PlaceWindows.jet) — A particle/grid update using bare reads, `^` edits, and `.copy()` copies.
+- [ProjectedWriteWindows](Views/ProjectedWriteWindows.jet) — `^place` is the exclusive write window for any place, a name followed by field or index projections.
 - [ReturnedViews](Views/ReturnedViews.jet) — Named View boundaries carry inferred owner provenance; `.copy()` materializes a view at an output boundary that requires Display.
-- [StringView](Views/StringView.jet) — Views: `.trim()`/`.after(sep)`/`.before(sep)` bound to a local return a zero-copy view — a genuine `&str` borrow into the receiver's own buffer, not a fresh…
+- [StringView](Views/StringView.jet) — Views: `.trim()`/`.after(sep)`/`.before(sep)` bound to a local return a zero-copy view — a genuine `^str` borrow into the receiver's own buffer, not a fresh…
 - [ViewFromParam](Views/ViewFromParam.jet)
 - [ViewMoveCopy](Views/ViewMoveCopy.jet) — The compiler chooses when a name is unmarked, and a mark gives exact control.
 - [ViewReturnLifetimes](Views/ViewReturnLifetimes.jet) — A returned view borrows the owners sema proved for it, and every tier keeps that relation.

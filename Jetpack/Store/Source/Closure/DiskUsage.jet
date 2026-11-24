@@ -51,7 +51,7 @@ PhysicalNode: struct {
     owners: [String],
 }
 
-store_du: fn(verification: &StoreVerification, roots: HangarRoots) -> DuReport StoreError! {
+store_du: fn(verification: ^StoreVerification, roots: HangarRoots) -> DuReport StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     // Do not migrate here: a damaged metadata path must be compared with the
     // committed journal, not promoted into a new projection.
@@ -194,7 +194,7 @@ store_du_all: fn() -> MachineDuReport StoreError! {
     Ok(MachineDuReport{shared_cas: shared_cas, roots: roots_found, total_bytes: total})
 }
 
-store_measure_machine_tree: fn(path: String, seen: &[FileID:Bool]) -> Int StoreError! {
+store_measure_machine_tree: fn(path: String, seen: ^[FileID:Bool]) -> Int StoreError! {
     metadata: files.stat(path)
     if seen.has_key(metadata.id) -> return Ok(0)
     seen[metadata.id] = true
@@ -240,7 +240,7 @@ store_measure_physical: fn(object_paths: [String:String], object_owners: [String
     Ok(measurement)
 }
 
-store_measure_physical_walk: fn(digest: String, path: String, owners: [String], nodes: &[FileID:PhysicalNode], object_nodes: &[String:[FileID]], expanded: &[FileID:Bool]) StoreError! {
+store_measure_physical_walk: fn(digest: String, path: String, owners: [String], nodes: ^[FileID:PhysicalNode], object_nodes: ^[String:[FileID]], expanded: ^[FileID:Bool]) StoreError! {
     metadata: files.stat(path)
     if !metadata.is_symlink && !metadata.is_dir && !metadata.is_file {
         return Err(StoreError.InvalidData("closure node `{path}` is not a supported filesystem node"))

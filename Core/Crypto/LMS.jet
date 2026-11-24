@@ -101,7 +101,7 @@ lms_code: fn(kind: LMSType) -> Int Never! {
     if kind == { .SHA256M32H10 -> 6 }
 }
 
-push_u32_be: fn(out: &[U8], v: Int) Never! {
+push_u32_be: fn(out: ^[U8], v: Int) Never! {
     out.push(U8{(v >> 24) & 0xFF})
     out.push(U8{(v >> 16) & 0xFF})
     out.push(U8{(v >> 8) & 0xFF})
@@ -118,7 +118,7 @@ u32_bytes: fn(v: Int) -> [U8] Never! {
     out
 }
 
-put_all: fn(out: &[U8], src: [U8]) Never! {
+put_all: fn(out: ^[U8], src: [U8]) Never! {
     loop b in src -> out.push(b)
 }
 
@@ -148,7 +148,7 @@ LMOTSPrivate: struct {
     usable: Bool,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             keys := self.keys.move()
             loop i in 0..<keys.len() -> core.crypto.wipe(keys[i])
         }
@@ -296,7 +296,7 @@ lmots_calculate_public_key: fn(secret: LMOTSPrivate) -> LMOTSPublic LMSError! {
 
 /// Sign msg with a fresh randomizer C from rng, then wipe the private key
 /// so it never signs again (mbedtls_lmots_sign).
-lmots_sign: fn<R: RNG>(ctx: &LMOTSPrivate, rng: &R, msg: [U8]) -> [U8] LMSError! {
+lmots_sign: fn<R: RNG>(ctx: ^LMOTSPrivate, rng: ^R, msg: [U8]) -> [U8] LMSError! {
     if !ctx.usable -> return Err(.BadInput)
     c := cipher.zero_bytes(N_HASH_LEN)
     if !rng.fill(c) -> return Err(.RandomFailed)
@@ -410,7 +410,7 @@ lms_verify: fn(ctx: LMSPublic, msg: [U8], sig: [U8]) LMSError! {
 
 /// A new LMS private key: I from rng and the LM-OTS keys of every leaf from
 /// seed, with their public keys (mbedtls_lms_generate_private_key).
-lms_generate_private_key: fn<R: RNG>(kind: LMSType, ots: LMOTSType, rng: &R, seed: [U8]) -> LMSPrivate LMSError! {
+lms_generate_private_key: fn<R: RNG>(kind: LMSType, ots: LMOTSType, rng: ^R, seed: [U8]) -> LMSPrivate LMSError! {
     key_id := cipher.zero_bytes(KEY_ID_LEN)
     if !rng.fill(key_id) -> return Err(.RandomFailed)
     ots_private := [LMOTSPrivate]{}
@@ -449,7 +449,7 @@ lms_calculate_public_key: fn(secret: LMSPrivate) -> LMSPublic Never! {
 
 /// Sign msg with the next unused leaf: q, its LM-OTS signature, the LMS type
 /// and the leaf's authentication path (mbedtls_lms_sign).
-lms_sign: fn<R: RNG>(ctx: &LMSPrivate, rng: &R, msg: [U8]) -> [U8] LMSError! {
+lms_sign: fn<R: RNG>(ctx: ^LMSPrivate, rng: ^R, msg: [U8]) -> [U8] LMSError! {
     if ctx.next_leaf >= LEAF_COUNT -> return Err(.OutOfPrivateKeys)
     q: ctx.next_leaf
     ctx.next_leaf += 1
@@ -561,7 +561,7 @@ FixedRNG: struct {
     bytes: [U8],
 
     impl RNG {
-        fill: fn(&self, out: &[U8]) -> Bool Never! {
+        fill: fn(^self, out: ^[U8]) -> Bool Never! {
             loop i in 0..<out.len() -> out[i] = self.bytes[i %% self.bytes.len()]
             true
         }

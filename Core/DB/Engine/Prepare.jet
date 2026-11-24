@@ -107,7 +107,7 @@ safety_check_sick_or_ok: fn(db: conn.Conn) -> Bool Never! {
 }
 
 // sqlite3ErrorClear (util.c).
-error_clear: fn(db: &conn.Conn) Never! {
+error_clear: fn(db: ^conn.Conn) Never! {
     db.err_code = base.OK
     db.err_byte_offset = -1
     if db.has_err_msg -> db.err_msg = None
@@ -148,13 +148,13 @@ db_has_property: fn(db: conn.Conn, i_db: Int, prop: Int) -> Bool Never! {
 }
 
 // DbSetProperty.
-db_set_property: fn(db: &conn.Conn, i_db: Int, prop: Int) Never! {
+db_set_property: fn(db: ^conn.Conn, i_db: Int, prop: Int) Never! {
     s: db.dbs[i_db].schema
     if s >= 0 -> db.schemas[s].schema_flags = db.schemas[s].schema_flags | prop
 }
 
 // Move the Parse out of `p`, leaving an empty one, for a builder to own.
-take_parse: fn(p: &cg.Parse) -> cg.Parse Never! {
+take_parse: fn(p: ^cg.Parse) -> cg.Parse Never! {
     out := p
     p = cg.parse_new(conn.conn_new(), EngineGen{unused: 0})
     out
@@ -163,7 +163,7 @@ take_parse: fn(p: &cg.Parse) -> cg.Parse Never! {
 // The end of sqlite3RunParser (tokenize.c): the table a failed CREATE TABLE
 // left in pNewTable is freed, and the statement's parameter list. Triggers
 // are not in this build, so pNewTrigger is never set.
-run_parser_cleanup: fn(p: &cg.Parse, a: &ast.AST) Never! {
+run_parser_cleanup: fn(p: ^cg.Parse, a: ^ast.AST) Never! {
     if p.f.new_table >= 0 && !cg.in_special_parse(a) -> conn.delete_table(p.db, p.f.new_table)
     p.f.new_table = -1
     a.ctx.vlist = [ast.SQLVar]{}
@@ -172,7 +172,7 @@ run_parser_cleanup: fn(p: &cg.Parse, a: &ast.AST) Never! {
 // ---------------------------------------------------------------------------
 // sqlite3FinishCoding (build.c): end the program of a completed statement
 // and make it ready to run.
-finish_coding: fn(p: &cg.Parse, a: &ast.AST) -[DB]> Never! {
+finish_coding: fn(p: ^cg.Parse, a: ^ast.AST) -[DB]> Never! {
     if a.ctx.nested != 0 {
         return
     }
@@ -234,85 +234,85 @@ EngineBuilder: struct {
     p: cg.Parse,
 
     impl parse.SQLBuilder {
-        finish_coding: fn(&self, a: &ast.AST) -[DB]> Never! { finish_coding(self.p, a) }
+        finish_coding: fn(^self, a: ^ast.AST) -[DB]> Never! { finish_coding(self.p, a) }
 
-        begin_transaction: fn(&self, a: &ast.AST, kind: Int) -[DB]> Never! {
+        begin_transaction: fn(^self, a: ^ast.AST, kind: Int) -[DB]> Never! {
             bld.begin_transaction(self.p, a, kind)
         }
 
-        end_transaction: fn(&self, a: &ast.AST, op: Int) -[DB]> Never! {
+        end_transaction: fn(^self, a: ^ast.AST, op: Int) -[DB]> Never! {
             bld.end_transaction(self.p, a, op)
         }
 
-        savepoint: fn(&self, a: &ast.AST, op: Int, name: ast.SQLTok) -[DB]> Never! {
+        savepoint: fn(^self, a: ^ast.AST, op: Int, name: ast.SQLTok) -[DB]> Never! {
             unsupported(a, "SAVEPOINT")
         }
 
-        start_table: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp: Int, is_view: Int, is_virtual: Int, no_err: Int) -[DB]> Never! {
+        start_table: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp: Int, is_view: Int, is_virtual: Int, no_err: Int) -[DB]> Never! {
             bld.start_table(self.p, a, name1, name2, is_temp != 0, is_view != 0, is_virtual != 0, no_err != 0)
         }
 
-        end_table: fn(&self, a: &ast.AST, cons: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) -[DB]> Never! {
+        end_table: fn(^self, a: ^ast.AST, cons: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) -[DB]> Never! {
             bld.end_table(self.p, a, cons, end, tab_opts, select)
         }
 
-        add_column: fn(&self, a: &ast.AST, name: ast.SQLTok, typ: ast.SQLTok) -[DB]> Never! {
+        add_column: fn(^self, a: ^ast.AST, name: ast.SQLTok, typ: ast.SQLTok) -[DB]> Never! {
             bld.add_column(self.p, a, name, typ)
         }
 
-        add_default_value: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) -[DB]> Never! {
+        add_default_value: fn(^self, a: ^ast.AST, e: Int, start: Int, end: Int) -[DB]> Never! {
             bld.add_default_value(self.p, a, e, start, end)
         }
 
-        add_not_null: fn(&self, a: &ast.AST, on_error: Int) -[DB]> Never! {
+        add_not_null: fn(^self, a: ^ast.AST, on_error: Int) -[DB]> Never! {
             bld.add_not_null(self.p, a, on_error)
         }
 
-        add_primary_key: fn(&self, a: &ast.AST, list: Int, on_error: Int, autoinc: Int, sort_order: Int) -[DB]> Never! {
+        add_primary_key: fn(^self, a: ^ast.AST, list: Int, on_error: Int, autoinc: Int, sort_order: Int) -[DB]> Never! {
             bld.add_primary_key(self.p, a, list, on_error, autoinc != 0, sort_order)
         }
 
-        create_index: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Int, idx_type: Int) -[DB]> Never! {
+        create_index: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Int, idx_type: Int) -[DB]> Never! {
             bld.create_index(self.p, a, name1, name2, tbl, list, on_error, start, where_expr, sort_order, if_not_exist != 0, idx_type)
         }
 
-        add_check_constraint: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) -[DB]> Never! {
+        add_check_constraint: fn(^self, a: ^ast.AST, e: Int, start: Int, end: Int) -[DB]> Never! {
             bld.add_check_constraint(self.p, a, e, start, end)
         }
 
-        create_foreign_key: fn(&self, a: &ast.AST, from_cols: Int, to: ast.SQLTok, to_cols: Int, flags: Int) -[DB]> Never! {
+        create_foreign_key: fn(^self, a: ^ast.AST, from_cols: Int, to: ast.SQLTok, to_cols: Int, flags: Int) -[DB]> Never! {
             unsupported(a, "FOREIGN KEY")
         }
 
         // sqlite3DeferForeignKey returns when the table has no foreign key,
         // which is always here (create_foreign_key fails).
-        defer_foreign_key: fn(&self, a: &ast.AST, deferred: Int) -[DB]> Never! {}
+        defer_foreign_key: fn(^self, a: ^ast.AST, deferred: Int) -[DB]> Never! {}
 
-        add_collate_type: fn(&self, a: &ast.AST, name: ast.SQLTok) -[DB]> Never! {
+        add_collate_type: fn(^self, a: ^ast.AST, name: ast.SQLTok) -[DB]> Never! {
             bld.add_collate_type(self.p, a, name)
         }
 
-        add_generated: fn(&self, a: &ast.AST, e: Int, typ: ast.SQLTok) -[DB]> Never! {
+        add_generated: fn(^self, a: ^ast.AST, e: Int, typ: ast.SQLTok) -[DB]> Never! {
             bld.add_generated(self.p, a, e, typ)
         }
 
-        drop_table: fn(&self, a: &ast.AST, name: Int, is_view: Int, no_err: Int) -[DB]> Never! {
+        drop_table: fn(^self, a: ^ast.AST, name: Int, is_view: Int, no_err: Int) -[DB]> Never! {
             bld.drop_table(self.p, a, name, is_view != 0, no_err != 0)
         }
 
-        create_view: fn(&self, a: &ast.AST, begin: ast.SQLTok, name1: ast.SQLTok, name2: ast.SQLTok, cols: Int, select: Int, is_temp: Int, no_err: Int) -[DB]> Never! {
+        create_view: fn(^self, a: ^ast.AST, begin: ast.SQLTok, name1: ast.SQLTok, name2: ast.SQLTok, cols: Int, select: Int, is_temp: Int, no_err: Int) -[DB]> Never! {
             unsupported(a, "CREATE VIEW")
         }
 
         // cmd ::= select: sqlite3Select with an SRT_Output destination.
-        select_output: fn(&self, a: &ast.AST, select: Int) -[DB]> Never! {
+        select_output: fn(^self, a: ^ast.AST, select: Int) -[DB]> Never! {
             dest := ex.select_dest_init(cg.SRT_OUTPUT, 0)
             _: sel.select(self.p, a, select, dest)
         }
 
         // The grammar passes ORDER BY and LIMIT on DELETE only when built with
         // SQLITE_ENABLE_UPDATE_DELETE_LIMIT, which this build is not.
-        delete_from: fn(&self, a: &ast.AST, src: Int, where_expr: Int, order_by: Int, limit: Int) -[DB]> Never! {
+        delete_from: fn(^self, a: ^ast.AST, src: Int, where_expr: Int, order_by: Int, limit: Int) -[DB]> Never! {
             if order_by >= 0 || limit >= 0 {
                 unsupported(a, "ORDER BY or LIMIT on DELETE")
                 ast.src_list_delete(a, src)
@@ -322,103 +322,103 @@ EngineBuilder: struct {
             del.delete_from(self.p, a, src, where_expr)
         }
 
-        add_returning: fn(&self, a: &ast.AST, list: Int) -[DB]> Never! {
+        add_returning: fn(^self, a: ^ast.AST, list: Int) -[DB]> Never! {
             unsupported(a, "RETURNING")
         }
 
-        update: fn(&self, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) -[DB]> Never! {
+        update: fn(^self, a: ^ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) -[DB]> Never! {
             upd.update(self.p, a, src, changes, where_expr, on_error, order_by, limit, upsert)
         }
 
-        insert: fn(&self, a: &ast.AST, src: Int, select: Int, cols: Int, on_error: Int, upsert: Int) -[DB]> Never! {
+        insert: fn(^self, a: ^ast.AST, src: Int, select: Int, cols: Int, on_error: Int, upsert: Int) -[DB]> Never! {
             ins.insert(self.p, a, src, select, cols, on_error, upsert)
         }
 
-        drop_index: fn(&self, a: &ast.AST, name: Int, if_exists: Int) -[DB]> Never! {
+        drop_index: fn(^self, a: ^ast.AST, name: Int, if_exists: Int) -[DB]> Never! {
             unsupported(a, "DROP INDEX")
         }
 
-        vacuum: fn(&self, a: &ast.AST, name: ast.SQLTok, into: Int) -[DB]> Never! {
+        vacuum: fn(^self, a: ^ast.AST, name: ast.SQLTok, into: Int) -[DB]> Never! {
             unsupported(a, "VACUUM")
         }
 
-        pragma: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) -[DB]> Never! {
+        pragma: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) -[DB]> Never! {
             func.pragma(self.p, a, name1, name2, value, minus)
         }
 
-        begin_trigger: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tr_tm: Int, op: Int, columns: Int, table: Int, when: Int, is_temp: Int, no_err: Int) -[DB]> Never! {
+        begin_trigger: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tr_tm: Int, op: Int, columns: Int, table: Int, when: Int, is_temp: Int, no_err: Int) -[DB]> Never! {
             unsupported(a, "CREATE TRIGGER")
         }
 
-        finish_trigger: fn(&self, a: &ast.AST, steps: Int, all: ast.SQLTok) -[DB]> Never! {
+        finish_trigger: fn(^self, a: ^ast.AST, steps: Int, all: ast.SQLTok) -[DB]> Never! {
             unsupported(a, "CREATE TRIGGER")
         }
 
-        drop_trigger: fn(&self, a: &ast.AST, name: Int, no_err: Int) -[DB]> Never! {
+        drop_trigger: fn(^self, a: ^ast.AST, name: Int, no_err: Int) -[DB]> Never! {
             unsupported(a, "DROP TRIGGER")
         }
 
-        attach: fn(&self, a: &ast.AST, filename: Int, dbname: Int, key: Int) -[DB]> Never! {
+        attach: fn(^self, a: ^ast.AST, filename: Int, dbname: Int, key: Int) -[DB]> Never! {
             unsupported(a, "ATTACH")
         }
 
-        detach: fn(&self, a: &ast.AST, dbname: Int) -[DB]> Never! { unsupported(a, "DETACH") }
+        detach: fn(^self, a: ^ast.AST, dbname: Int) -[DB]> Never! { unsupported(a, "DETACH") }
 
-        reindex: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -[DB]> Never! {
+        reindex: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -[DB]> Never! {
             unsupported(a, "REINDEX")
         }
 
-        analyze: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -[DB]> Never! {
+        analyze: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -[DB]> Never! {
             unsupported(a, "ANALYZE")
         }
 
-        alter_rename_table: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) -[DB]> Never! {
+        alter_rename_table: fn(^self, a: ^ast.AST, src: Int, name: ast.SQLTok) -[DB]> Never! {
             alter_table(self.p, a, src)
         }
 
-        alter_begin_add_column: fn(&self, a: &ast.AST, src: Int) -[DB]> Never! {
+        alter_begin_add_column: fn(^self, a: ^ast.AST, src: Int) -[DB]> Never! {
             alter_table(self.p, a, src)
         }
 
-        alter_finish_add_column: fn(&self, a: &ast.AST, col_def: ast.SQLTok) -[DB]> Never! {
+        alter_finish_add_column: fn(^self, a: ^ast.AST, col_def: ast.SQLTok) -[DB]> Never! {
             unsupported(a, "ALTER TABLE")
         }
 
-        alter_drop_column: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) -[DB]> Never! {
+        alter_drop_column: fn(^self, a: ^ast.AST, src: Int, name: ast.SQLTok) -[DB]> Never! {
             alter_table(self.p, a, src)
         }
 
-        alter_rename_column: fn(&self, a: &ast.AST, src: Int, old_name: ast.SQLTok, new_name: ast.SQLTok) -[DB]> Never! {
+        alter_rename_column: fn(^self, a: ^ast.AST, src: Int, old_name: ast.SQLTok, new_name: ast.SQLTok) -[DB]> Never! {
             alter_table(self.p, a, src)
         }
 
-        vtab_begin_parse: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, module_name: ast.SQLTok, if_not_exists: Int) -[DB]> Never! {
+        vtab_begin_parse: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, module_name: ast.SQLTok, if_not_exists: Int) -[DB]> Never! {
             unsupported(a, "CREATE VIRTUAL TABLE")
         }
 
-        vtab_finish_parse: fn(&self, a: &ast.AST, end: ast.SQLTok) -[DB]> Never! {
+        vtab_finish_parse: fn(^self, a: ^ast.AST, end: ast.SQLTok) -[DB]> Never! {
             unsupported(a, "CREATE VIRTUAL TABLE")
         }
 
-        vtab_arg_init: fn(&self, a: &ast.AST) -[DB]> Never! {
+        vtab_arg_init: fn(^self, a: ^ast.AST) -[DB]> Never! {
             unsupported(a, "CREATE VIRTUAL TABLE")
         }
 
-        vtab_arg_extend: fn(&self, a: &ast.AST, t: ast.SQLTok) -[DB]> Never! {
+        vtab_arg_extend: fn(^self, a: ^ast.AST, t: ast.SQLTok) -[DB]> Never! {
             unsupported(a, "CREATE VIRTUAL TABLE")
         }
     }
 }
 
 // The error of a statement this build does not have.
-unsupported: fn(a: &ast.AST, what: String) Never! {
+unsupported: fn(a: ^ast.AST, what: String) Never! {
     if a.ctx.nerr == 0 -> ast.error(a, "{what} is not supported in this build")
 }
 
 // The start of sqlite3AlterRenameTable, sqlite3AlterBeginAddColumn,
 // sqlite3AlterDropColumn and sqlite3AlterRenameColumn (alter.c): the table
 // must exist. The schema rewrite that follows is not in this build.
-alter_table: fn(p: &cg.Parse, a: &ast.AST, src: Int) -[DB]> Never! {
+alter_table: fn(p: ^cg.Parse, a: ^ast.AST, src: Int) -[DB]> Never! {
     if !p.db.malloc_failed {
         si: ast.src_item(a, src, 0)
         t: cat.locate_table_item(p, a, 0, si)
@@ -435,7 +435,7 @@ EngineGen: struct {
 
     impl cg.Gen {
         // sqlite3ReadSchema (prepare.c).
-        read_schema: fn(self, p: &cg.Parse, a: &ast.AST) -[DB]> Int Never! {
+        read_schema: fn(self, p: ^cg.Parse, a: ^ast.AST) -[DB]> Int Never! {
             if p.db.init.busy -> return base.OK
             db := cg.take_conn(p.db)
             h := EngineHost{unused: 0}
@@ -455,7 +455,7 @@ EngineGen: struct {
 
         // This build's one authorizer (on only inside prepare_tables) denies
         // nothing: it records each schema table a statement reads or writes.
-        authorize: fn(self, p: &cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
+        authorize: fn(self, p: ^cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
             if code != conn.AUTH_READ && code != conn.AUTH_INSERT && code != conn.AUTH_UPDATE && code != conn.AUTH_DELETE {
                 return base.OK
             }
@@ -472,7 +472,7 @@ EngineGen: struct {
         // sqlite3NestedParse (build.c), after Build's nested_parse formatted
         // the SQL: run the parser over it on the same Parse, with the
         // PARSE_TAIL fields of the outer statement saved and cleared.
-        nested_parse: fn(self, p: &cg.Parse, a: &ast.AST, sql: [U8]) -[DB]> Never! {
+        nested_parse: fn(self, p: ^cg.Parse, a: ^ast.AST, sql: [U8]) -[DB]> Never! {
             a.ctx.nested += 1
             s_sql: a.ctx.sql
             s_tail: a.ctx.tail
@@ -544,43 +544,43 @@ EngineGen: struct {
             a.ctx.nested -= 1
         }
 
-        select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! {
+        select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest) -[DB]> Int Never! {
             sel.select(p, a, s, dest)
         }
 
-        select_prep: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {
+        select_prep: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {
             sel.select_prep(p, a, s, outer_nc)
         }
 
-        select_expand: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
+        select_expand: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
             sel.select_expand(p, a, s)
         }
 
-        result_set_of_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
+        result_set_of_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
             sel.result_set_of_select(p, a, s, aff)
         }
 
         // sqlite3ViewGetColumnNames: an ordinary table has its columns. Views
         // and virtual tables are not in this build.
-        view_get_column_names: fn(self, p: &cg.Parse, a: &ast.AST, t: Int) -[DB]> Int Never! {
+        view_get_column_names: fn(self, p: ^cg.Parse, a: ^ast.AST, t: Int) -[DB]> Int Never! {
             if p.db.tables[t].tab_type == conn.TABTYP_NORM -> return 0
             ast.error(a, "Views are not supported in this build")
             1
         }
 
         // No module is registered in this build: no eponymous virtual table.
-        eponymous_table: fn(self, p: &cg.Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
+        eponymous_table: fn(self, p: ^cg.Parse, a: ^ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
 
         // A virtual table column never exists here: def is not overloaded.
-        vtab_overload_function: fn(self, p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
+        vtab_overload_function: fn(self, p: ^cg.Parse, a: ^ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
             def.copy()
         }
 
-        vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never! {
+        vtab_best_index: fn(self, p: ^cg.Parse, a: ^ast.AST, t: Int, info: ^conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never! {
             {rc: base.ERROR, err: Val("Virtual tables are not supported in this build".bytes())}
         }
 
-        vtab_find_function: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
+        vtab_find_function: fn(self, p: ^cg.Parse, a: ^ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
             0
         }
     }
@@ -595,88 +595,88 @@ EngineHost: struct {
     impl aux.Host {
         // No virtual table module can be registered in this build, so no
         // statement reaches a VTable.
-        vtab_has: fn(&self, _db: conn.Conn, _vt: Int, _method: Int) -[]> Bool Never! { false }
+        vtab_has: fn(^self, _db: conn.Conn, _vt: Int, _method: Int) -[]> Bool Never! { false }
 
-        vtab_version: fn(&self, _db: conn.Conn, _vt: Int) -[]> Int Never! { 0 }
+        vtab_version: fn(^self, _db: conn.Conn, _vt: Int) -[]> Int Never! { 0 }
 
-        vtab_call: fn(&self, _db: &conn.Conn, _vt: Int, _method: Int, _arg: Int) -[DB]> Int Never! {
+        vtab_call: fn(^self, _db: ^conn.Conn, _vt: Int, _method: Int, _arg: Int) -[DB]> Int Never! {
             base.ERROR
         }
 
-        vtab_close: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: Int) -[DB]> Never! {}
+        vtab_close: fn(^self, _db: ^conn.Conn, _vt: Int, _cursor: Int) -[DB]> Never! {}
 
-        vtab_take_errmsg: fn(&self, _db: conn.Conn, _vt: Int) -[]> [U8]? Never! { None }
+        vtab_take_errmsg: fn(^self, _db: conn.Conn, _vt: Int) -[]> [U8]? Never! { None }
 
-        vtab_open: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: &Int) -[DB]> Int Never! {
+        vtab_open: fn(^self, _db: ^conn.Conn, _vt: Int, _cursor: ^Int) -[DB]> Int Never! {
             base.ERROR
         }
 
-        vtab_filter: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _idx_num: Int, _idx_str: [U8]?, _arg: Int, _argc: Int) -[DB]> Int Never! {
+        vtab_filter: fn(^self, _db: ^conn.Conn, _v: ^conn.Vdbe, _cursor: Int, _idx_num: Int, _idx_str: [U8]?, _arg: Int, _argc: Int) -[DB]> Int Never! {
             base.ERROR
         }
 
-        vtab_eof: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Bool Never! { true }
+        vtab_eof: fn(^self, _db: ^conn.Conn, _cursor: Int) -[DB]> Bool Never! { true }
 
-        vtab_next: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Int Never! { base.ERROR }
+        vtab_next: fn(^self, _db: ^conn.Conn, _cursor: Int) -[DB]> Int Never! { base.ERROR }
 
-        vtab_column: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _col: Int) -[DB]> Int Never! {
+        vtab_column: fn(^self, _db: ^conn.Conn, _v: ^conn.Vdbe, _cursor: Int, _col: Int) -[DB]> Int Never! {
             base.ERROR
         }
 
-        vtab_rowid: fn(&self, _db: &conn.Conn, _cursor: Int, _rowid: &Int) -[DB]> Int Never! {
+        vtab_rowid: fn(^self, _db: ^conn.Conn, _cursor: Int, _rowid: ^Int) -[DB]> Int Never! {
             base.ERROR
         }
 
-        vtab_update: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _vt: Int, _arg: Int, _argc: Int, _rowid: &Int) -[DB]> Int Never! {
+        vtab_update: fn(^self, _db: ^conn.Conn, _v: ^conn.Vdbe, _vt: Int, _arg: Int, _argc: Int, _rowid: ^Int) -[DB]> Int Never! {
             base.ERROR
         }
 
-        vtab_rename: fn(&self, _db: &conn.Conn, _vt: Int, _name: [U8]) -[DB]> Int Never! {
+        vtab_rename: fn(^self, _db: ^conn.Conn, _vt: Int, _name: [U8]) -[DB]> Int Never! {
             base.ERROR
         }
 
-        vtab_integrity: fn(&self, _db: &conn.Conn, _vt: Int, _schema: [U8], _table: [U8], _flags: Int, _msg: &[U8]?) -[DB]> Int Never! {
+        vtab_integrity: fn(^self, _db: ^conn.Conn, _vt: Int, _schema: [U8], _table: [U8], _flags: Int, _msg: ^[U8]?) -[DB]> Int Never! {
             base.OK
         }
 
-        vtab_call_create: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8], _msg: &[U8]?) -[DB]> Int Never! {
+        vtab_call_create: fn(^self, _db: ^conn.Conn, _i_db: Int, _name: [U8], _msg: ^[U8]?) -[DB]> Int Never! {
             base.ERROR
         }
 
-        vtab_call_destroy: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8]) -[DB]> Int Never! {
+        vtab_call_destroy: fn(^self, _db: ^conn.Conn, _i_db: Int, _name: [U8]) -[DB]> Int Never! {
             base.ERROR
         }
 
         // The builtin SQL functions (func.c, json.c, window.c).
-        func_call: fn(&self, db: &conn.Conn, v: &conn.Vdbe, method: Int) -[DB]> Never! {
+        func_call: fn(^self, db: ^conn.Conn, v: ^conn.Vdbe, method: Int) -[DB]> Never! {
             func.builtin_call(db, v, method)
         }
 
         // No commit, rollback or update hook can be set in this build.
-        commit_hook: fn(&self, _db: &conn.Conn) -[DB]> Int Never! { 0 }
+        commit_hook: fn(^self, _db: ^conn.Conn) -[DB]> Int Never! { 0 }
 
-        rollback_hook: fn(&self, _db: &conn.Conn) -[DB]> Never! {}
+        rollback_hook: fn(^self, _db: ^conn.Conn) -[DB]> Never! {}
 
-        has_update_hook: fn(&self, _db: conn.Conn) -[]> Bool Never! { false }
+        has_update_hook: fn(^self, _db: conn.Conn) -[]> Bool Never! { false }
 
-        update_hook: fn(&self, _db: &conn.Conn, _op: Int, _db_name: [U8], _table: [U8], _rowid: Int) -[DB]> Never! {}
+        update_hook: fn(^self, _db: ^conn.Conn, _op: Int, _db_name: [U8], _table: [U8], _rowid: Int) -[DB]> Never! {}
 
         // No progress handler, trace or profile callback can be set either.
-        progress: fn(&self, _db: &conn.Conn) -[DB]> Bool Never! { false }
+        progress: fn(^self, _db: ^conn.Conn) -[DB]> Bool Never! { false }
 
-        trace: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _event: Int, _text: [U8]) -[DB]> Never! {}
+        trace: fn(^self, _db: ^conn.Conn, _v: conn.Vdbe, _event: Int, _text: [U8]) -[DB]> Never! {}
 
-        profile: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _elapsed_ns: Int) -[DB]> Never! {}
+        profile: fn(^self, _db: ^conn.Conn, _v: conn.Vdbe, _elapsed_ns: Int) -[DB]> Never! {}
 
         // A user WAL hook (sqlite3_wal_hook) cannot be set in this build; the
         // default autocheckpoint hook runs in VdbeApi's wal_callbacks.
-        wal_hook: fn(&self, _db: &conn.Conn, _db_name: [U8], _n_frame: Int) -[DB]> Int Never! {
+        wal_hook: fn(^self, _db: ^conn.Conn, _db_name: [U8], _n_frame: Int) -[DB]> Int Never! {
             base.OK
         }
 
         // OP_SqlExec: sqlite3_exec of sql without a callback; `quiet` turns
         // the authorizer and tracing off for it.
-        sql_exec: fn(&self, db: &conn.Conn, sql: [U8], quiet: Bool, err: &[U8]?) -[DB]> Int Never! {
+        sql_exec: fn(^self, db: ^conn.Conn, sql: [U8], quiet: Bool, err: ^[U8]?) -[DB]> Int Never! {
             saved_auth: db.has_auth
             saved_trace: db.m_trace
             if quiet {
@@ -694,7 +694,7 @@ EngineHost: struct {
         }
 
         // OP_ParseSchema without a WHERE clause: sqlite3InitOne.
-        init_one: fn(&self, db: &conn.Conn, i_db: Int, flags: Int, err: &[U8]?) -[DB]> Int Never! {
+        init_one: fn(^self, db: ^conn.Conn, i_db: Int, flags: Int, err: ^[U8]?) -[DB]> Int Never! {
             h := EngineHost{unused: 0}
             a := cg.take_ast(db)
             rc: init_one<EngineHost>(h, db, a, i_db, err, flags)
@@ -704,7 +704,7 @@ EngineHost: struct {
 
         // OP_ParseSchema with a WHERE clause (vdbe.c): the matching schema
         // rows, through sqlite3InitCallback with db->init.busy set.
-        parse_schema: fn(&self, db: &conn.Conn, i_db: Int, where: [U8], err: &[U8]?) -[DB]> Int Never! {
+        parse_schema: fn(^self, db: ^conn.Conn, i_db: Int, where: [U8], err: ^[U8]?) -[DB]> Int Never! {
             h := EngineHost{unused: 0}
             a := cg.take_ast(db)
             data := init_data_new(i_db, 0)
@@ -729,15 +729,15 @@ EngineHost: struct {
         // sqlite3AnalysisLoad: ANALYZE is not in this build, so no
         // sqlite_stat1 rows are read; every index keeps the
         // sqlite3DefaultRowEst estimates sqlite3CreateIndex gave it.
-        load_analysis: fn(&self, _db: &conn.Conn, _i_db: Int) -[DB]> Int Never! { base.OK }
+        load_analysis: fn(^self, _db: ^conn.Conn, _i_db: Int) -[DB]> Int Never! { base.OK }
 
         // VACUUM fails to compile in this build, so OP_Vacuum never runs.
-        run_vacuum: fn(&self, _db: &conn.Conn, _i_db: Int, _into: base.Mem?, msg: &[U8]?) -[DB]> Int Never! {
+        run_vacuum: fn(^self, _db: ^conn.Conn, _i_db: Int, _into: base.Mem?, msg: ^[U8]?) -[DB]> Int Never! {
             msg = Val("VACUUM is not supported in this build".bytes())
             base.ERROR
         }
 
-        reprepare: fn(&self, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+        reprepare: fn(^self, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
             h := EngineHost{unused: 0}
             reprepare<EngineHost>(h, db, v)
         }
@@ -748,7 +748,7 @@ EngineHost: struct {
 // prepare.c: loading the schema.
 
 // corruptSchema.
-corrupt_schema: fn(db: conn.Conn, data: &InitData, obj_type: [U8]?, obj_name: [U8]?, extra: [U8]?) Never! {
+corrupt_schema: fn(db: conn.Conn, data: ^InitData, obj_type: [U8]?, obj_name: [U8]?, extra: [U8]?) Never! {
     if db.malloc_failed -> data.rc = base.NOMEM else if data.err != None {
 
     } else if // An error message has already been generated.
@@ -769,7 +769,7 @@ corrupt_schema: fn(db: conn.Conn, data: &InitData, obj_type: [U8]?, obj_name: [U
 // sqlite3InitCallback: one row of the schema table, argv being its type,
 // name, tbl_name, rootpage and sql (None for a NULL); argv None for the
 // empty-result call SQLITE_NullCallback makes. Nonzero to abort.
-init_callback: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, data: &InitData, argv0: [[U8]?]?) -[DB]> Int Never! {
+init_callback: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, data: ^InitData, argv0: [[U8]?]?) -[DB]> Int Never! {
     i_db: data.i_db
     db.m_db_flags |= conn.DBFLAG_ENCODING_FIXED
     if argv0 == None -> return 0
@@ -826,7 +826,7 @@ init_callback: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, data: &InitDa
 }
 
 // sqlite3InitOne: read the schema of database i_db.
-init_one: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, err: &[U8]?, flags: Int) -[DB]> Int Never! {
+init_one: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, i_db: Int, err: ^[U8]?, flags: Int) -[DB]> Int Never! {
     mask: db.m_db_flags & conn.DBFLAG_ENCODING_FIXED | util.clear_bits(-1, conn.DBFLAG_ENCODING_FIXED)
     db.init.busy = true
     // The schema table itself, by the parser, as row 1 of a schema.
@@ -855,7 +855,7 @@ init_one: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, err: &[
 
 // The part of sqlite3InitOne between opening the read transaction (opened
 // says whether it did) and initone_error_out.
-init_one_read: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, err: &[U8]?, data: &InitData, opened: &Bool) -[DB]> Int Never! {
+init_one_read: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, i_db: Int, err: ^[U8]?, data: ^InitData, opened: ^Bool) -[DB]> Int Never! {
     bt: db.dbs[i_db].bt
     s: db.dbs[i_db].schema
     if btree.btree_txn_state(db.btrees[bt]) == btree.TRANS_NONE {
@@ -932,7 +932,7 @@ init_one_read: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, i_db: Int, er
 
 // sqlite3Init: load the schema of every database, main first and temp
 // last.
-init: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, err: &[U8]?) -[DB]> Int Never! {
+init: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, err: ^[U8]?) -[DB]> Int Never! {
     commit_internal: db.m_db_flags & conn.DBFLAG_SCHEMA_CHANGE == 0
     db.enc = db.schemas[db.dbs[0].schema].enc
     if !db_has_property(db, 0, conn.DB_SCHEMA_LOADED) {
@@ -953,7 +953,7 @@ init: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, err: &[U8]?) -[DB]> In
 
 // schemaIsValid: compare each database's schema cookie with the loaded
 // schema's; SQLITE_SCHEMA in the Parse when one is out of date.
-schema_is_valid: fn(p: &cg.Parse, a: &ast.AST) -[DB]> Never! {
+schema_is_valid: fn(p: ^cg.Parse, a: ^ast.AST) -[DB]> Never! {
     loop i_db in 0..<p.db.dbs.len() {
         bt: p.db.dbs[i_db].bt
         if bt < 0 -> next
@@ -985,7 +985,7 @@ schema_is_valid: fn(p: &cg.Parse, a: &ast.AST) -[DB]> Never! {
 // sqlite3Prepare: compile the first statement of sql. n_bytes is the
 // caller's length (-1 for a NUL-terminated string); rep the statement
 // sqlite3Reprepare recompiles.
-prepare_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql0: [U8], n_bytes: Int, prep_flags: Int, rep: PrepareFrom?) -[DB]> Prepared Never! {
+prepare_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], n_bytes: Int, prep_flags: Int, rep: PrepareFrom?) -[DB]> Prepared Never! {
     out := Prepared{rc: base.OK, stmt: -1, tail: 0}
     // The statement compiled while another is (a schema row's CREATE)
     // shares the arena: keep the outer statement's context.
@@ -1076,7 +1076,7 @@ prepare_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql0: [U8], n_by
 // sqlite3LockAndPrepare: sqlite3Prepare, again after SQLITE_ERROR_RETRY
 // (up to SQLITE_MAX_PREPARE_RETRY times) or once after SQLITE_SCHEMA with
 // the schemas reset.
-lock_and_prepare: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql: [U8], n_bytes: Int, prep_flags: Int, rep: PrepareFrom?) -[DB]> Prepared Never! {
+lock_and_prepare: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql: [U8], n_bytes: Int, prep_flags: Int, rep: PrepareFrom?) -[DB]> Prepared Never! {
     if !safety_check_ok(db) -> return Prepared{rc: base.MISUSE, stmt: -1, tail: 0}
     cnt := 0
     out := Prepared{rc: base.OK, stmt: -1, tail: 0}
@@ -1106,7 +1106,7 @@ lock_and_prepare: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql: [U8],
 // sqlite3Reprepare: recompile statement v after a schema change. The new
 // program takes v's place (sqlite3VdbeSwap), v keeping its slot, SQL,
 // expiry mask, flags and counters, and v's bound values move to it.
-reprepare: fn<H: aux.Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+reprepare: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     a := cg.take_ast(db)
     r: lock_and_prepare<H>(h, db, a, v.sql, -1, v.prep_flags, Val(PrepareFrom{explain: v.explain, vars: v.vars}))
     db.ast = a
@@ -1148,7 +1148,7 @@ reprepare: fn<H: aux.Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Neve
 // (and the empty result of SQLITE_NullCallback) goes to
 // sqlite3InitCallback with data, the only callback the engine passes.
 // err gets the error message, None on success.
-exec_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql0: [U8], cb: Bool, data: &InitData, err: &[U8]?) -[DB]> Int Never! {
+exec_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, a: ^ast.AST, sql0: [U8], cb: Bool, data: ^InitData, err: ^[U8]?) -[DB]> Int Never! {
     if !safety_check_ok(db) -> return base.MISUSE
     sql: c_text(sql0)
     rc := base.OK
@@ -1219,7 +1219,7 @@ exec_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql0: [U8], cb: Boo
 }
 
 // sqlite3VdbeFinalize of statement s (none for -1).
-finalize_stmt_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
+finalize_stmt_in: fn<H: aux.Host>(h: ^H, db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     if s < 0 -> return base.OK
     v := conn.vdbe_take(db, s)
     aux.finalize<H>(h, db, v)
@@ -1267,7 +1267,7 @@ open_v2: fn(path: String, flags_in: Int) -[DB]> {rc: Int, db: conn.Conn} Never! 
 }
 
 // openDatabase from sqlite3BtreeOpen of the main database to the end.
-open_main: fn(db: &conn.Conn, path: String, flags: Int) -[DB]> Int Never! {
+open_main: fn(db: ^conn.Conn, path: String, flags: Int) -[DB]> Int Never! {
     db.dbs = [conn.DBSlot]{
         conn.DBSlot{name: "main".bytes(), bt: -1, safety_level: pgr.DEFAULT_SYNCHRONOUS + 1, b_sync_set: false, schema: -1},
         conn.DBSlot{name: "temp".bytes(), bt: -1, safety_level: pgr.PAGER_SYNCHRONOUS_OFF, b_sync_set: false, schema: -1},
@@ -1297,7 +1297,7 @@ open_main: fn(db: &conn.Conn, path: String, flags: Int) -[DB]> Int Never! {
 
 // sqlite3_close_v2 (sqlite3Close with forceZombie): the connection becomes
 // a zombie and closes once its last statement is finalized.
-close_v2: fn(db: &conn.Conn) -[DB]> Int Never! {
+close_v2: fn(db: ^conn.Conn) -[DB]> Int Never! {
     if !safety_check_sick_or_ok(db) -> return base.MISUSE
     h := EngineHost{unused: 0}
     // disconnectAllVtab and sqlite3VtabRollback: no virtual tables here.
@@ -1309,7 +1309,7 @@ close_v2: fn(db: &conn.Conn) -[DB]> Int Never! {
 
 // sqlite3LeaveMutexAndCloseZombie: free the connection once it is a zombie
 // with no statement left.
-close_zombie: fn<H: aux.Host>(h: &H, db: &conn.Conn) -[DB]> Never! {
+close_zombie: fn<H: aux.Host>(h: ^H, db: ^conn.Conn) -[DB]> Never! {
     if db.open_state != conn.STATE_ZOMBIE || db.vdbe_head >= 0 {
         return
     }
@@ -1346,7 +1346,7 @@ error_offset: fn(db: conn.Conn) -> Int Never! {
 }
 
 // sqlite3_extended_result_codes.
-extended_result_codes: fn(db: &conn.Conn, on: Bool) -> Int Never! {
+extended_result_codes: fn(db: ^conn.Conn, on: Bool) -> Int Never! {
     if !safety_check_ok(db) -> return base.MISUSE
     db.err_mask = if on -> 4294967295 else -> 255
     base.OK
@@ -1355,7 +1355,7 @@ extended_result_codes: fn(db: &conn.Conn, on: Bool) -> Int Never! {
 // sqlite3_busy_timeout: sqliteDefaultBusyCallback sleeps up to ms
 // milliseconds on a lock; 0 or less clears the handler. Each pager holds a
 // copy of the handler state.
-busy_timeout: fn(db: &conn.Conn, ms: Int) -> Int Never! {
+busy_timeout: fn(db: ^conn.Conn, ms: Int) -> Int Never! {
     if !safety_check_ok(db) -> return base.MISUSE
     db.busy_timeout = if ms > 0 -> ms else -> 0
     loop i in 0..<db.dbs.len() {
@@ -1374,7 +1374,7 @@ changes: fn(db: conn.Conn) -> Int Never! { db.n_change }
 // sqlite3_prepare_v3: compile the first statement of sql; stmt is -1 when
 // it holds none (white space or a comment), tail the byte offset of the
 // rest.
-prepare_v3: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int, tail: Int} Never! {
+prepare_v3: fn(db: ^conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int, tail: Int} Never! {
     h := EngineHost{unused: 0}
     a := cg.take_ast(db)
     r: lock_and_prepare<EngineHost>(h, db, a, sql, sql.len(), conn.PREPARE_SAVESQL | flags & conn.PREPARE_MASK, None)
@@ -1386,7 +1386,7 @@ prepare_v3: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int
 // schema tables it reads or writes, each named once as the schema spells it.
 // A subquery's or a CTE's own name is no schema table, so it is not among
 // them.
-prepare_tables: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int, tail: Int, tables: [[U8]]} Never! {
+prepare_tables: fn(db: ^conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int, tail: Int, tables: [[U8]]} Never! {
     db.has_auth = true
     db.auth_tables = [[U8]]{}
     r: prepare_v3(db, sql, flags)
@@ -1397,19 +1397,19 @@ prepare_tables: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt:
 }
 
 // sqlite3_step.
-step: fn(db: &conn.Conn, s: Int) -[DB]> Int Never! {
+step: fn(db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     h := EngineHost{unused: 0}
     api.stmt_step<EngineHost>(h, db, s)
 }
 
 // sqlite3_reset.
-reset_stmt: fn(db: &conn.Conn, s: Int) -[DB]> Int Never! {
+reset_stmt: fn(db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     h := EngineHost{unused: 0}
     api.stmt_reset<EngineHost>(h, db, s)
 }
 
 // sqlite3_finalize: a zombie connection closes with its last statement.
-finalize_stmt: fn(db: &conn.Conn, s: Int) -[DB]> Int Never! {
+finalize_stmt: fn(db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     if s < 0 -> return base.OK
     h := EngineHost{unused: 0}
     rc: api.stmt_finalize<EngineHost>(h, db, s)
@@ -1418,7 +1418,7 @@ finalize_stmt: fn(db: &conn.Conn, s: Int) -[DB]> Int Never! {
 }
 
 // sqlite3_exec without a callback.
-exec_sql: fn(db: &conn.Conn, sql: [U8]) -[DB]> Int Never! {
+exec_sql: fn(db: ^conn.Conn, sql: [U8]) -[DB]> Int Never! {
     h := EngineHost{unused: 0}
     a := cg.take_ast(db)
     data := init_data_new(0, 0)

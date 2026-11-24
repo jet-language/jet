@@ -122,7 +122,7 @@ NixIndexClient: struct {
 
     // A signed client over an explicit transport and clock (the Rust test
     // seam `for_test`).
-    with_transport: fn(root: String, endpoint: String, key_id: String, public_key: [U8], transport: &&NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
+    with_transport: fn(root: String, endpoint: String, key_id: String, public_key: [U8], transport: ^^NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
         parsed: nix_index_parse_endpoint(endpoint)
         key: crypto.VerifyKey.from_bytes(public_key) ?? return Err(NixIndexError.Invalid("test index public key is invalid"))
         Ok(NixIndexClient{endpoint: parsed, root: root, key_id: key_id, public_key: Val(key), local_catalog: false, offline: offline, clock: clock, transport: transport.move()})

@@ -60,7 +60,7 @@ RegexError: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String Never! {
+        debug: fn(^^self) -> String Never! {
             "invalid regex at position {self.offset}: {self.reason}"
         }
     }
@@ -397,12 +397,12 @@ find: fn(pattern: Regex, text: String) -> String? Never! {
 // `text.match(pattern)` compile `pattern` with this engine and run
 // `is_match`/`find`; a pattern that does not compile fails with compile's
 // RegexError.
-__string_matches: fn(text: String, pattern: String) -> Bool RegexError! {
+priv __string_matches: fn(text: String, pattern: String) -> Bool RegexError! {
     compiled: compile_program(pattern, flags(false, false, false), false)
     is_match(compiled, text)
 }
 
-__string_match: fn(text: String, pattern: String) -> String? RegexError! {
+priv __string_match: fn(text: String, pattern: String) -> String? RegexError! {
     compiled: compile_program(pattern, flags(false, false, false), false)
     find(compiled, text)
 }
@@ -410,7 +410,7 @@ __string_match: fn(text: String, pattern: String) -> String? RegexError! {
 // `text.has_line(pattern)`: whether some line of `text` (the `lines()` rule)
 // matches `pattern`, so `^` and `$` anchor at each line. A quoted pattern at
 // the call is a checked `Regex` literal.
-__string_has_line: fn(text: String, pattern: Regex) -> Bool Never! {
+priv __string_has_line: fn(text: String, pattern: Regex) -> Bool Never! {
     loop line in text.lines() {
         if is_match(pattern, line) -> return true
     }
@@ -700,7 +700,7 @@ PatternParser: struct {
 
     /// Arms in priority order. `open` is the position of the group's `(`,
     /// or -1 for the whole pattern, whose stray `)` the caller reports.
-    parse_alt: fn(&self, open: Int) -> Int RegexError! {
+    parse_alt: fn(^self, open: Int) -> Int RegexError! {
         arms := [Int]{}
         first: self.parse_seq()
         arms.push(first)
@@ -717,7 +717,7 @@ PatternParser: struct {
         Ok(self.list(N_ALT, arms))
     }
 
-    parse_seq: fn(&self) -> Int RegexError! {
+    parse_seq: fn(^self) -> Int RegexError! {
         parts := [Int]{}
         loop {
             c: self.peek()
@@ -731,7 +731,7 @@ PatternParser: struct {
         Ok(self.list(N_SEQ, parts))
     }
 
-    parse_atom: fn(&self) -> Int RegexError! {
+    parse_atom: fn(^self) -> Int RegexError! {
         at: self.i
         c: self.bump()
         if c == 46 -> return Ok(self.emit(N_ANY, 0, 0, -1, false))
@@ -750,7 +750,7 @@ PatternParser: struct {
     }
 
     // Capture numbers follow the opening `(`.
-    parse_group: fn(&self, open: Int) -> Int RegexError! {
+    parse_group: fn(^self, open: Int) -> Int RegexError! {
         if self.depth >= MAX_NEST {
             return Err(fail(open, "groups may nest at most {MAX_NEST} deep"))
         }
@@ -808,7 +808,7 @@ PatternParser: struct {
     /// p.look_behind[0] && p.look_neg[0] // => true
     /// refused == want // => true
     /// ```
-    parse_look: fn(&self, open: Int, kind: Int, after: Int) -> Int RegexError! {
+    parse_look: fn(^self, open: Int, kind: Int, after: Int) -> Int RegexError! {
         behind: kind == 60
         test: if behind -> after else -> kind
         self.i = if behind -> self.i + 2 else -> self.i + 1
@@ -826,7 +826,7 @@ PatternParser: struct {
         Ok(self.emit(N_LOOK, look, 0, inner, false))
     }
 
-    parse_group_name: fn(&self, open: Int) -> String RegexError! {
+    parse_group_name: fn(^self, open: Int) -> String RegexError! {
         start: self.i
         raw := [U8]{}
         loop {
@@ -851,7 +851,7 @@ PatternParser: struct {
         Ok(name)
     }
 
-    parse_quant: fn(&self, atom: Int) -> Int RegexError! {
+    parse_quant: fn(^self, atom: Int) -> Int RegexError! {
         at: self.i
         c: self.peek()
         kind := N_STAR
@@ -894,7 +894,7 @@ PatternParser: struct {
 
     /// A repetition count. Counts past MAX_REPEAT saturate, so the caller
     /// reports the cap and never an overflow.
-    parse_count: fn(&self, at: Int) -> Int RegexError! {
+    parse_count: fn(^self, at: Int) -> Int RegexError! {
         n := 0
         got := false
         loop {
@@ -913,7 +913,7 @@ PatternParser: struct {
 
     // `]` first (after an optional `^`) is a member, so `[]a]` and `[^]]`
     // are classes.
-    parse_class: fn(&self, open: Int) -> Int RegexError! {
+    parse_class: fn(^self, open: Int) -> Int RegexError! {
         neg := false
         if self.peek() == 94 {
             self.i += 1
@@ -948,7 +948,7 @@ PatternParser: struct {
 
     /// One class member: a scalar (>= 0), or `-(kind + 1)` for a class
     /// escape such as `\d` or `\P{L}`. `leading` admits a literal `]`.
-    parse_class_item: fn(&self, leading: Bool) -> Int RegexError! {
+    parse_class_item: fn(^self, leading: Bool) -> Int RegexError! {
         at: self.i
         c: self.bump()
         if c == 93 && leading -> return Ok(c)
@@ -957,7 +957,7 @@ PatternParser: struct {
         self.parse_escape(at, true)
     }
 
-    parse_escape_atom: fn(&self, at: Int) -> Int RegexError! {
+    parse_escape_atom: fn(^self, at: Int) -> Int RegexError! {
         c: self.peek()
         kind := -1
         if c == 98 -> kind = A_WORD
@@ -982,7 +982,7 @@ PatternParser: struct {
 
     /// The escape after the `\` at `at`: a scalar (>= 0), or `-(kind + 1)`
     /// for a class escape.
-    parse_escape: fn(&self, at: Int, in_class: Bool) -> Int RegexError! {
+    parse_escape: fn(^self, at: Int, in_class: Bool) -> Int RegexError! {
         c: self.bump()
         if c < 0 -> return Err(fail(at, "a `\\` at the end of the pattern escapes nothing"))
         if c >= 48 && c <= 57 {
@@ -1018,7 +1018,7 @@ PatternParser: struct {
 
     /// `\xHH`, `\uHHHH`, or a braced `\x{…}`/`\u{…}` code point; `letter` is
     /// the `x` or `u`.
-    parse_code_point: fn(&self, at: Int, letter: Int) -> Int RegexError! {
+    parse_code_point: fn(^self, at: Int, letter: Int) -> Int RegexError! {
         escape: "\\{scalar_text(letter)}"
         value := 0
         if self.peek() == 123 {
@@ -1060,7 +1060,7 @@ PatternParser: struct {
     }
 
     /// The class after `\p`/`\P`: a braced name or a one-letter name.
-    parse_unicode_class: fn(&self, at: Int) -> Int RegexError! {
+    parse_unicode_class: fn(^self, at: Int) -> Int RegexError! {
         raw := [U8]{}
         if self.peek() == 123 {
             self.i += 1
@@ -1087,23 +1087,23 @@ PatternParser: struct {
         Err(fail(at, "the Unicode class `{name}` is not supported; use L, Letter, Alphabetic, N, Number or White_Space"))
     }
 
-    item: fn(&self, kind: Int, lo: Int, hi: Int) Never! {
+    item: fn(^self, kind: Int, lo: Int, hi: Int) Never! {
         self.kinds.push(kind)
         self.los.push(lo)
         self.his.push(hi)
     }
 
-    class_node: fn(&self, lo: Int, neg: Bool) -> Int Never! {
+    class_node: fn(^self, lo: Int, neg: Bool) -> Int Never! {
         self.nodes.push(Node{kind: N_CLASS, a: 0, b: 0, left: -1, neg: neg, lo: lo, hi: self.kinds.len()})
         self.nodes.len() - 1
     }
 
-    emit: fn(&self, kind: Int, a: Int, b: Int, left: Int, neg: Bool) -> Int Never! {
+    emit: fn(^self, kind: Int, a: Int, b: Int, left: Int, neg: Bool) -> Int Never! {
         self.nodes.push(Node{kind: kind, a: a, b: b, left: left, neg: neg, lo: 0, hi: 0})
         self.nodes.len() - 1
     }
 
-    list: fn(&self, kind: Int, parts: [Int]) -> Int Never! {
+    list: fn(^self, kind: Int, parts: [Int]) -> Int Never! {
         lo: self.kids.len()
         loop part in parts -> self.kids.push(part)
         self.nodes.push(Node{kind: kind, a: 0, b: 0, left: -1, neg: false, lo: lo, hi: self.kids.len()})
@@ -1120,7 +1120,7 @@ PatternParser: struct {
         self.cps[self.i + offset]
     }
 
-    bump: fn(&self) -> Int Never! {
+    bump: fn(^self) -> Int Never! {
         if self.i >= self.cps.len() -> return -1
         c: self.cps[self.i]
         self.i += 1
@@ -1186,7 +1186,7 @@ priv PatternCompiler: struct {
     // lookaround pass reads backward: its sequences run last part first.
     reverse: Bool,
 
-    push: fn(&self, op: Int, arg: Int, end: Int, neg: Bool) -> Int Never! {
+    push: fn(^self, op: Int, arg: Int, end: Int, neg: Bool) -> Int Never! {
         if self.ops.len() >= MAX_PROGRAM -> self.too_big = true
         self.ops.push(op)
         self.args.push(arg)
@@ -1197,19 +1197,19 @@ priv PatternCompiler: struct {
         self.ops.len() - 1
     }
 
-    single: fn(&self, op: Int, arg: Int, end: Int, neg: Bool) -> Frag Never! {
+    single: fn(^self, op: Int, arg: Int, end: Int, neg: Bool) -> Frag Never! {
         id: self.push(op, arg, end, neg)
         Frag{start: id, outs: [Int]{id}}
     }
 
-    patch: fn(&self, outs: [Int], target: Int) Never! {
+    patch: fn(^self, outs: [Int], target: Int) Never! {
         loop code in outs {
             if code >= 0 -> self.xs[code] = target else -> self.ys[-code - 1] = target
         }
     }
 
     /// `frag` then `after`; a `frag` with no start yet is empty.
-    then: fn(&self, frag: Frag, after: Frag) -> Frag Never! {
+    then: fn(^self, frag: Frag, after: Frag) -> Frag Never! {
         if frag.start < 0 -> return after.copy()
         self.patch(frag.outs, after.start)
         Frag{start: frag.start, outs: after.outs.copy()}
@@ -1217,7 +1217,7 @@ priv PatternCompiler: struct {
 
     /// A Split whose preferred branch enters `body` (the later one when
     /// `lazy`); returns the exit code of the other branch.
-    prefer: fn(&self, split: Int, body: Int, lazy: Bool) -> Int Never! {
+    prefer: fn(^self, split: Int, body: Int, lazy: Bool) -> Int Never! {
         if lazy {
             self.ys[split] = body
             return split
@@ -1226,7 +1226,7 @@ priv PatternCompiler: struct {
         return -split - 1
     }
 
-    star: fn(&self, node: Int, lazy: Bool) -> Frag Never! {
+    star: fn(^self, node: Int, lazy: Bool) -> Frag Never! {
         atom: self.compile(node)
         split: self.push(OP_SPLIT, 0, 0, false)
         exit: self.prefer(split, atom.start, lazy)
@@ -1234,7 +1234,7 @@ priv PatternCompiler: struct {
         Frag{start: split, outs: [Int]{exit}}
     }
 
-    optional: fn(&self, node: Int, lazy: Bool) -> Frag Never! {
+    optional: fn(^self, node: Int, lazy: Bool) -> Frag Never! {
         atom: self.compile(node)
         split: self.push(OP_SPLIT, 0, 0, false)
         exit: self.prefer(split, atom.start, lazy)
@@ -1246,7 +1246,7 @@ priv PatternCompiler: struct {
     // Recursion here follows group and quantifier nesting, never the text
     // or the length of a sequence. Once the program passes MAX_PROGRAM the
     // rest compiles to nothing; the caller reports the error.
-    compile: fn(&self, node: Int) -> Frag Never! {
+    compile: fn(^self, node: Int) -> Frag Never! {
         if self.too_big -> return Frag{start: 0, outs: [Int]{}}
         n: self.nodes[node].copy()
         if n.kind == N_LIT -> return self.single(OP_LIT, n.a, 0, false)
@@ -1522,7 +1522,7 @@ DfaBuilder: struct {
     /// Walks epsilon edges from `stack`, appending consuming pcs to `out`
     /// and the targets of `$` to `ends` (only `at_end`, which walks them
     /// too); returns whether a Match was reached.
-    walk: fn(&self, re: Regex, text_start: Bool, line_start: Bool, at_end: Bool) -> Bool Never! {
+    walk: fn(^self, re: Regex, text_start: Bool, line_start: Bool, at_end: Bool) -> Bool Never! {
         matched := false
         loop {
             p: self.stack.pop() ?? break
@@ -1548,7 +1548,7 @@ DfaBuilder: struct {
     /// The state whose threads start from `seeds` at one position. The
     /// threads that also pass a `$` are walked after the others in the same
     /// epoch: whatever the first walk reached, the end reaches as well.
-    state: fn(&self, re: Regex, text_start: Bool, line_start: Bool, restart: Bool) -> Int Never! {
+    state: fn(^self, re: Regex, text_start: Bool, line_start: Bool, restart: Bool) -> Int Never! {
         if self.work > self.budget {
             self.too_big = true
             return 0
@@ -1751,7 +1751,7 @@ priv ScanDfaBuilder: struct {
     budget: Int,
     too_big: Bool,
 
-    walk_now: fn(&self, re: Regex, text_start: Bool, line_start: Bool) -> Bool Never! {
+    walk_now: fn(^self, re: Regex, text_start: Bool, line_start: Bool) -> Bool Never! {
         self.stack.clear()
         k := self.seeds.len() - 1
         loop k >= 0 {
@@ -1777,7 +1777,7 @@ priv ScanDfaBuilder: struct {
         false
     }
 
-    walk_end: fn(&self, re: Regex, text_start: Bool, line_start: Bool) -> Bool Never! {
+    walk_end: fn(^self, re: Regex, text_start: Bool, line_start: Bool) -> Bool Never! {
         self.epoch += 1
         self.stack.clear()
         k := self.seeds.len() - 1
@@ -1804,7 +1804,7 @@ priv ScanDfaBuilder: struct {
         false
     }
 
-    state: fn(&self, re: Regex, text_start: Bool, line_start: Bool) -> Int Never! {
+    state: fn(^self, re: Regex, text_start: Bool, line_start: Bool) -> Int Never! {
         if self.work > self.budget {
             self.too_big = true
             return 0
@@ -1845,7 +1845,7 @@ priv ScanDfaBuilder: struct {
     }
 }
 
-priv build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget: Int, dfa: &Dfa) Never! {
+priv build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget: Int, dfa: ^Dfa) Never! {
     sb := ScanDfaBuilder{
         buckets: [Int:Int]{},
         chain: [Int]{},
@@ -1943,7 +1943,7 @@ priv build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget
 /// DFA. Appends matches to `out` and returns `text.len() + 1` when finished,
 /// or a byte offset `<= text.len()` where the VM must take over (a non-ASCII
 /// byte or a pattern whose failed starts exceeded the linear work budget).
-priv dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: &[Run]) -> Int Never! {
+priv dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: ^[Run]) -> Int Never! {
     hi: text.len()
     multiline: re.flags.multiline
     start_0: re.dfa.scan_start_0
@@ -2093,20 +2093,20 @@ VM: struct {
     looks: [Bool],
 
     /// Drop every thread and capture record; the scan restarts afresh.
-    reset: fn(&self) Never! {
+    reset: fn(^self) Never! {
         self.nt = 0
         self.epoch += 1
         self.m_pc = -1
         self.drop_captures()
     }
 
-    drop_captures: fn(&self) Never! {
+    drop_captures: fn(^self) Never! {
         self.aslot.clear()
         self.apos.clear()
         self.aprev.clear()
     }
 
-    push_edge: fn(&self, pc: Int, start: Int, caps: Int) Never! {
+    push_edge: fn(^self, pc: Int, start: Int, caps: Int) Never! {
         self.spc[self.sp] = pc
         self.sstart[self.sp] = start
         self.scaps[self.sp] = caps
@@ -2116,7 +2116,7 @@ VM: struct {
     /// Follow every epsilon edge from `pc` with the explicit stack, in
     /// priority order, recording consuming and matching threads once per
     /// pc. The first Match reached is the epoch's preferred match.
-    add: fn(&self, re: Regex, text: [U8], pc: Int, start: Int, caps: Int, pos: Int, capture: Bool) Never! {
+    add: fn(^self, re: Regex, text: [U8], pc: Int, start: Int, caps: Int, pos: Int, capture: Bool) Never! {
         self.push_edge(pc, start, caps)
         loop self.sp > 0 {
             self.sp -= 1
@@ -2168,7 +2168,7 @@ VM: struct {
     /// thread cuts every lower-priority thread after it. The per-step paths
     /// use counted `loop k < n` forms: a range loop allocates its range each
     /// time it is entered.
-    step: fn(&self, re: Regex, text: [U8], cp: Int, next_pos: Int, capture: Bool) Never! {
+    step: fn(^self, re: Regex, text: [U8], cp: Int, next_pos: Int, capture: Bool) Never! {
         n: self.nt
         self.epoch += 1
         self.m_pc = -1
@@ -2321,7 +2321,7 @@ look_tables: fn(re: Regex, text: [U8]) -> [Bool] Never! {
 /// row == want // => true
 /// steps > 0 // => true
 /// ```
-look_pass: fn(re: Regex, text: [U8], look: Int, looks: &[Bool]) -> Int Never! {
+look_pass: fn(re: Regex, text: [U8], look: Int, looks: ^[Bool]) -> Int Never! {
     hi: text.len()
     base: looks.len()
     k := 0
@@ -2620,7 +2620,7 @@ backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool, lo
 /// from_word // => 8
 /// caps[2] == 3 && caps[3] == 8 // => true
 /// ```
-backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool, visited: &[Int], jobs: &[Int], caps: &[Int], looks: [Bool]) -> Int Never! {
+backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool, visited: ^[Int], jobs: ^[Int], caps: ^[Int], looks: [Bool]) -> Int Never! {
     hi: text.len()
     width: hi + 1
     pc := re.start
@@ -2675,7 +2675,7 @@ backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool,
     }
 }
 
-push_pair: fn(jobs: &[Int], a: Int, b: Int) Never! {
+push_pair: fn(jobs: ^[Int], a: Int, b: Int) Never! {
     jobs.push(a)
     jobs.push(b)
 }
@@ -2813,7 +2813,7 @@ CharCursor: struct {
     byte: Int,
     count: Int,
 
-    at: fn(&self, raw: [U8], byte: Int) -> Int Never! {
+    at: fn(^self, raw: [U8], byte: Int) -> Int Never! {
         if byte < self.byte {
             self.byte = 0
             self.count = 0
@@ -2837,7 +2837,7 @@ find_match: fn(pattern: Regex, text: String) -> Match? Never! {
 }
 
 /// The Match for one run; its captures come from the scan itself.
-make_match: fn(re: Regex, raw: [U8], run: Run, chars: &CharCursor) -> Match Never! {
+make_match: fn(re: Regex, raw: [U8], run: Run, chars: ^CharCursor) -> Match Never! {
     caps: run.caps
     first: chars.at(raw, run.start)
     last: chars.at(raw, run.end)

@@ -4,7 +4,7 @@
 // padded zip hands the node the value each side stands in with once it ends.
 use jet_foundation.[Span, SymbolID, TCapture, TCaptureFacts, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, TFieldRef, BodyLambda, BodyLambdaBody, TZipFillMode, TZipMode, Type, TypeTupleField, checked_generated_local]
 
-ir_zip: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type], span: Span) -> Int Never! {
+ir_zip: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type], span: Span) -> Int Never! {
     fill_count: if mode == .Pad && fill_mode != .DefaultNone -> 1 else -> 0
     if flatten || input_count < 2 || fields.len() != input_count || field_types.len() != input_count || args.len() != input_count - 1 + fill_count {
         return ir_fail_slot(b, span, "builtin Zip with inconsistent column facts")
@@ -162,7 +162,7 @@ ir_zip: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, a
 
 // `rows.unzip()`: one List per row field, each row's fields pushed in order;
 // an Iter is drained into a List first.
-ir_unzip: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver: Int, span: Span) -> Int Never! {
+ir_unzip: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, receiver: Int, span: Span) -> Int Never! {
     columns_shape := [TypeTupleField]{}
     if ir_untag(result_ty) == .Tuple(fields) -> columns_shape = fields
     input_ty: ir_ty(m, p, b, receiver)
@@ -230,7 +230,7 @@ ir_zip_tuple_field: fn(ty: Type, name: String) -> Type? Never! {
     None
 }
 
-ir_zip_local: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, ty: Type, span: Span) -> Int Never! {
+ir_zip_local: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, name: String, ty: Type, span: Span) -> Int Never! {
     ir_node(m, p, b, ty, NodeKind.Local{local: checked_generated_local(name, span, ty.copy())}, span)
 }
 
@@ -244,7 +244,7 @@ IRZipAdapter: struct {
 // A capture-free closure over `params` returning `body`, built as its own
 // function like a source lambda (ir_lambda), and its lazy.callback. `role`
 // keeps the callbacks of one zip apart.
-ir_zip_adapter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, params: [Type], names: [String], ret: Type, body: Int, span: Span) -> IRZipAdapter Never! {
+ir_zip_adapter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, role: String, params: [Type], names: [String], ret: Type, body: Int, span: Span) -> IRZipAdapter Never! {
     failed: IRZipAdapter{closure: -1, callback: -1, release: -1}
     closure_ty: Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     row: ir_value_type(m, p, closure_ty) ?? {
@@ -291,7 +291,7 @@ ir_zip_adapter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, para
 // The stop context of a strict zip: policy, file, line, function, source line,
 // column and caret width; line 1, column 1 and an empty line for a function with
 // no checked source.
-ir_zip_strict_context: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) -> [Int] Never! {
+ir_zip_strict_context: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, span: Span) -> [Int] Never! {
     file: b.f.source_file.copy()
     line: ir_source_line_of(p, file, span.start) ?? 1
     column: ir_source_column(p, file, span.start) ?? {

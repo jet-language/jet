@@ -698,11 +698,11 @@ BundleReceipt: struct {
         out
     }
 
-    record_materializer: fn(&self, materializer: BundleMaterializerFact) Never! {
+    record_materializer: fn(^self, materializer: BundleMaterializerFact) Never! {
         self.materializer = Val(materializer)
     }
 
-    record_signing: fn(&self, signing: BundleSigningFact) Never! { self.signing = Val(signing) }
+    record_signing: fn(^self, signing: BundleSigningFact) Never! { self.signing = Val(signing) }
 
     artifact_status: fn(self) -> BundleArtifactStatus Never! {
         if self.materializer == None -> return BundleArtifactStatus.Planned
@@ -1089,12 +1089,12 @@ pkg_bundle_artifact_digest: fn(bundle_files: [BundleFile]) -> String Never! {
 }
 
 // A 64-bit big-endian length, then the value.
-pkg_bundle_frame: fn(out: &[U8], value: [U8]) Never! {
+pkg_bundle_frame: fn(out: ^[U8], value: [U8]) Never! {
     pkg_bundle_push_big_endian(out, value.len(), 8)
     loop byte in value -> out.push(byte)
 }
 
-pkg_bundle_push_big_endian: fn(out: &[U8], value: Int, width: Int) Never! {
+pkg_bundle_push_big_endian: fn(out: ^[U8], value: Int, width: Int) Never! {
     shift := (width - 1) * 8
     loop shift >= 0 {
         out.push(U8{((value >> shift)) & 255})

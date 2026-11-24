@@ -132,7 +132,7 @@ read_chunk: fn(plan: ChunkedArray, index: Int) -> Tensor {
     return compute.from_list(values) ?? panic("chunk")
 }
 
-map_chunk: fn(plan: &ChunkedArray, index: Int, f: fn(Float) -[]> Float) -> Tensor {
+map_chunk: fn(plan: ^ChunkedArray, index: Int, f: fn(Float) -[]> Float) -> Tensor {
     plan.reads += 1
     chunk: read_chunk(plan, index)
     values: compute.to_list(chunk)
@@ -141,7 +141,7 @@ map_chunk: fn(plan: &ChunkedArray, index: Int, f: fn(Float) -[]> Float) -> Tenso
     return compute.from_list(mapped) ?? panic("mapped chunk")
 }
 
-map_all: fn(plan: &ChunkedArray, f: fn(Float) -[]> Float) -> Tensor {
+map_all: fn(plan: ^ChunkedArray, f: fn(Float) -[]> Float) -> Tensor {
     mapped := [Float]{}
     loop index in 0..<chunk_count(plan) {
         chunk: map_chunk(plan, index, f)

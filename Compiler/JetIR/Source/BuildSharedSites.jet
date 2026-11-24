@@ -17,7 +17,7 @@ use jet_foundation.[DeclID, SharedLifetime, Span, TConstantDef, Type, name_colum
 
 IR_SHARED_SITE_BYTES: 8
 
-ir_shared_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, initializer: DeclID, lifetime: SharedLifetime, span: Span) -> Int Never! {
+ir_shared_site: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, initializer: DeclID, lifetime: SharedLifetime, span: Span) -> Int Never! {
     row: ir_decl_row(p, initializer)
     if row < 0 {
         return ir_fail_slot(b, span, "Shared site initializer outside the checked program (declaration row {initializer.row.index()})")
@@ -63,7 +63,7 @@ ir_shared_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, initiali
 // a Process site keyed by the constant: a reader that finds the site empty
 // puts a copy of the payload the build folded into a new cell and publishes
 // it; every read returns an owning clone of the published cell.
-ir_shared_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
+ir_shared_holder_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
     inner: if ir_untag(definition.ty) == .Shared(value) -> value else -> {
         return ir_fail_slot(b, span, "shared holder {definition.name} of {ir_type_name(definition.ty)}")
     }
@@ -99,7 +99,7 @@ ir_shared_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition:
 // is read without a permit. A value no cell keeps (Unit, a value with no
 // clone glue, a pointer Option, or one holding a compiler value, which the
 // call's host holds only for that call) is computed by each read.
-ir_computed_constant_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, item_key: String, item: Int, span: Span) -> Int Never! {
+ir_computed_constant_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, item_key: String, item: Int, span: Span) -> Int Never! {
     inner: p.functions[item].ret ?? return ir_call_row_values(m, p, b, item, [Int]{}, span)
     if ir_unit_type(inner) || ir_never_type(inner) || ir_host_value_held(p, inner) || !ir_lazy_type_can_clone(m, p, inner) {
         return ir_call_row_values(m, p, b, item, [Int]{}, span)
@@ -121,7 +121,7 @@ ir_computed_constant_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, item_ke
 // the constant holds the cell of the carrier its first reader made, and
 // every read borrows that carrier in place, so every reader shares its
 // listeners. The cell lives as long as the program.
-ir_point_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -[]> Int {
+ir_point_holder_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition: TConstantDef, span: Span) -[]> Int {
     row: ir_value_type(m, p, definition.ty) ?? return ir_type_fail(b, span, definition.ty)
     site: ir_shared_site_word(m, b, "point:{definition.key}")
     held: ir_process_cell_open(m, b, site)
@@ -134,7 +134,7 @@ ir_point_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: 
 // the site is empty, which builds the cell's value in the program heap: the
 // value outlives any `#Context(allocator:)` block. Gives the heap mark
 // ir_process_cell_read restores.
-ir_process_cell_open: fn(m: &IRModule, b: &IRBuilder, site: Int) -> Int Never! {
+ir_process_cell_open: fn(m: ^IRModule, b: ^IRBuilder, site: Int) -> Int Never! {
     word_row: ir_word_row(m)
     zero: ir_word_const(m, b, 0)
     current: ir_load_at(m, b, site, 0, word_row)
@@ -148,7 +148,7 @@ ir_process_cell_open: fn(m: &IRModule, b: &IRBuilder, site: Int) -> Int Never! {
 // first reader's cell standing, and borrows the published cell's value in
 // place. The published cell is never edited, so its value is read without
 // a permit.
-ir_process_cell_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, site: Int, held: Int, value: Int, inner: Type, row: Int, span: Span) -> Int Never! {
+ir_process_cell_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, site: Int, held: Int, value: Int, inner: Type, row: Int, span: Span) -> Int Never! {
     candidate: ir_shared_new(m, p, b, [Int]{value}, Type.Shared{inner: inner}, span)
     if ir_failed(b) -> return -1
     _: ir_runtime(m, b, "jet_rt_move_leave", [Int]{held}, -1)
@@ -166,7 +166,7 @@ ir_process_cell_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, site: Int, h
 
 // The slot holding the address of the site word of the initializer keyed
 // `key`.
-ir_shared_site_word: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! {
+ir_shared_site_word: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
     object_key: "shared-site:{key}"
     object := name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
     if object < 0 {

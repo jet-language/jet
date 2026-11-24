@@ -508,7 +508,7 @@ project_removal_refusal: fn(project: String, protected: [String]) -> String? {
     None
 }
 
-append: fn(out: &[U8], text: String) { out.extend(text.bytes()) }
+append: fn(out: ^[U8], text: String) { out.extend(text.bytes()) }
 
 // The source map: schema jet-bootstrap-source-map/v2.
 source_map: fn(config: Config, mapped: [Mapped], embeds: Embeds, claims: [Claim]) -> Dyn {
@@ -791,7 +791,7 @@ head_file: fn(root: String, path: String) -> [U8] Err! {
 
 // The entries of manifest `name` in the selected sections, validated, with
 // their embeds staged.
-read_manifest: fn(config: Config, name: String, embeds: &Embeds) -> [Entry] Err! {
+read_manifest: fn(config: Config, name: String, embeds: ^Embeds) -> [Entry] Err! {
     label: "Jetpack/Bootstrap/{name}"
     working: files.read("{config.root}/{label}") ?? return Err("cannot read {label}: {err}")
     text: merged_manifest(config, working, name) ?? return Err(err.message)
@@ -864,7 +864,7 @@ jetpack_area: fn(path: String) -> String {
 // `embed_file("toolchain:rel")` stays as written: it reads the toolchain tree
 // staged beside the project (stage_toolchain), as computed `toolchain:` names
 // and `find("toolchain:…")` do, and jet refuses a name that leaves it (E0957).
-rebase_embeds: fn(root: String, text: String, source_path: String, place: String, embeds: &Embeds) -> String Err! {
+rebase_embeds: fn(root: String, text: String, source_path: String, place: String, embeds: ^Embeds) -> String Err! {
     raw: text.bytes()
     out := [U8]{}
     at := 0
@@ -989,7 +989,7 @@ claim_name: fn(line: String) -> String? {
 // starts at column zero. Claim names are plain text (no interpolation holes or
 // escapes) so the source map's claim ledger names exactly what `jet test`
 // prints.
-render_tests: fn(text: String, path: String, section: String, claims: &[Claim], seen: &[String:Bool]) Err! {
+render_tests: fn(text: String, path: String, section: String, claims: ^[Claim], seen: ^[String:Bool]) Err! {
     count := 0
     loop (index, line) in text.split("\n").to_list() {
         if claim_name(line) == .Val(name) {
@@ -1248,7 +1248,7 @@ SourceCache: struct {
     root: String,
     texts: [String:String],
 
-    code_of: fn(&self, path: String) -> String {
+    code_of: fn(^self, path: String) -> String {
         if self.texts.get(path) == .Val(known) -> return known.copy()  // copy: the cache keeps it
         text: code(files.read("{self.root}/{path}") ?? "")
         self.texts[path.copy()] = text.copy()  // copy: the caller reads it too
@@ -1561,7 +1561,7 @@ enum_body_from: fn(raw: [U8], at: Int) -> EnumBody {
 }
 
 // The variant names of the enum body `raw[start..<end]` onto `names`.
-variant_names: fn(raw: [U8], start: Int, end: Int, names: &[String]) {
+variant_names: fn(raw: [U8], start: Int, end: Int, names: ^[String]) {
     depth := 0
     entry := true
     at := start
@@ -1697,7 +1697,7 @@ blank: fn(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-blank_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) {
+blank_into: fn(out: ^[U8], raw: [U8], start: Int, end: Int) {
     loop at in start..<end {
         code: Int{raw[at]}
         if {
@@ -1711,7 +1711,7 @@ blank_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) {
     }
 }
 
-copy_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) {
+copy_into: fn(out: ^[U8], raw: [U8], start: Int, end: Int) {
     loop at in start..<end -> out.push(raw[at])
 }
 
@@ -1774,7 +1774,7 @@ core_group: fn(raw: [U8], at: Int) -> CoreGroup? {
 
 // A repeated member of a grouped Core import is blanked, keeping every
 // surviving token at its offset; forms this does not recognize stay as written.
-blank_repeated_members: fn(text: String, seen: &[String:Bool]) -> String {
+blank_repeated_members: fn(text: String, seen: ^[String:Bool]) -> String {
     raw: text.bytes()
     out := [U8]{}
     at := 0
@@ -1794,7 +1794,7 @@ blank_repeated_members: fn(text: String, seen: &[String:Bool]) -> String {
     String.from_bytes(out) ?? ""
 }
 
-member_imports: fn(whole: String, path: String, members: String, seen: &[String:Bool]) -> String {
+member_imports: fn(whole: String, path: String, members: String, seen: ^[String:Bool]) -> String {
     parts: members.split(",").to_list()
     bindings := [String]{}
     loop part in parts {
@@ -1855,7 +1855,7 @@ is_core_import_line: fn(line: String) -> Bool {
 }
 
 // A Core import line repeated from an earlier file (or line) is blanked.
-blank_repeated_imports: fn(text: String, seen: &[String:Bool]) -> String {
+blank_repeated_imports: fn(text: String, seen: ^[String:Bool]) -> String {
     lines := [String]{}
     loop line in text.split("\n") {
         if is_core_import_line(line) {

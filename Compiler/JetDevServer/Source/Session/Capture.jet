@@ -74,11 +74,11 @@ CaptureLocation: struct {
     line: U32,
     column: U32?,
 
-    new: fn(source_id: &&String, line: U32) -> CaptureLocation Never! {
+    new: fn(source_id: ^^String, line: U32) -> CaptureLocation Never! {
         CaptureLocation{source_id: source_id.move(), line, column: None}
     }
 
-    with_column: fn(&&self, column: U32) -> CaptureLocation Never! {
+    with_column: fn(^^self, column: U32) -> CaptureLocation Never! {
         updated := self.move()
         updated.column = Val(column)
         updated.move()
@@ -100,11 +100,11 @@ CaptureSourceFact: struct {
     source: CaptureSource,
     location: CaptureLocation?,
 
-    new: fn(source: CaptureSource, location: &&CaptureLocation?) -> CaptureSourceFact Never! {
+    new: fn(source: CaptureSource, location: ^^CaptureLocation?) -> CaptureSourceFact Never! {
         CaptureSourceFact{source, location: location.move()}
     }
 
-    at: fn(source: CaptureSource, source_id: &&String, line: U32) -> CaptureSourceFact Never! {
+    at: fn(source: CaptureSource, source_id: ^^String, line: U32) -> CaptureSourceFact Never! {
         CaptureSourceFact.new(source, Val(CaptureLocation.new(source_id, line)))
     }
 
@@ -364,7 +364,7 @@ capture_checked_add: fn(left: U64, right: U64) -> U64? Never! {
 
 // One pass of the same stable bottom-up index mergesort. Both caller-owned
 // buffers stay allocated; the caller alternates read/write roles each pass.
-capture_merge_indices: fn<I: RecordIndexRetention>(records: [I], order: [Int], scratch: &[Int], width: Int) Never! {
+capture_merge_indices: fn<I: RecordIndexRetention>(records: [I], order: [Int], scratch: ^[Int], width: Int) Never! {
     start := 0
     loop start < order.len() {
         middle: if start + width < order.len() -> start + width else -> order.len()

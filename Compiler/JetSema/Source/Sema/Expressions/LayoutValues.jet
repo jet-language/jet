@@ -109,7 +109,7 @@ sema_expression_layout_literal: fn(value: TExpr) -> TExpr Never! {
     value.copy()
 }
 
-sema_expression_layout_binary_axis_diagnostic: fn(left: Type, right: Type, span: Span, diagnostics: &[Diagnostic]) {
+sema_expression_layout_binary_axis_diagnostic: fn(left: Type, right: Type, span: Span, diagnostics: ^[Diagnostic]) {
     diagnostics.push(
         sema_error(
             "E2932",
@@ -121,7 +121,7 @@ sema_expression_layout_binary_axis_diagnostic: fn(left: Type, right: Type, span:
     )
 }
 
-sema_expr_check_layout_binary: fn(op: BinOp, left: TExpr, right: TExpr, span: Span, line: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaExpressionLayoutBinaryCheck {
+sema_expr_check_layout_binary: fn(op: BinOp, left: TExpr, right: TExpr, span: Span, line: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaExpressionLayoutBinaryCheck {
     contract: sema_expression_layout_binop_result(op, left.ty, right.ty)
     if contract == None -> return SemaExpressionLayoutBinaryCheck{handled: false, value: None}
     result: contract
@@ -186,17 +186,17 @@ sema_expression_layout_call_facts: fn(result_type: Type) -> SemaCallFacts Never!
     SemaCallFacts{return_type: result_type, failure_carrier: failure_carrier, effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
 }
 
-sema_expression_layout_discard_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_expression_layout_discard_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
     loop argument in args {
         _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     }
 }
 
-sema_expression_layout_argument_mismatch: fn(owner: String, method: String, expected: Type, actual: Type, span: Span, diagnostics: &[Diagnostic]) {
+sema_expression_layout_argument_mismatch: fn(owner: String, method: String, expected: Type, actual: Type, span: Span, diagnostics: ^[Diagnostic]) {
     diagnostics.push(sema_error("E0112", span, "`.{method}()` on `{owner}` expects a `{type_name(expected)}`, got `{type_name(actual)}`", "`{owner}.{method}(…)` operates on a `{type_name(expected)}`", "pass a `{type_name(expected)}` value"))
 }
 
-sema_expression_layout_axis_argument_mismatch: fn(owner: String, method: String, actual: Type, span: Span, diagnostics: &[Diagnostic]) {
+sema_expression_layout_axis_argument_mismatch: fn(owner: String, method: String, actual: Type, span: Span, diagnostics: ^[Diagnostic]) {
     diagnostics.push(sema_error("E0112", span, "`.{method}()` on `{owner}` expects a layout value (`HVar`/`VVar`/`LengthVar`), got `{type_name(actual)}`", "layout variables come from `handle.h(box, anchor)` / `handle.v(box, anchor)`, or a `box.anchor` read inside a `layout {{ … }}` block", "pass a layout variable, not a plain value"))
 }
 
@@ -205,7 +205,7 @@ sema_expression_layout_method_params: fn(types: [Type]) -> [SemaCallParam] Never
     params
 }
 
-sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     owner := if receiver_value.ty == {
         .Named(name) -> if name == "Layout" || name == "Constraint" -> name else -> ""
@@ -264,7 +264,7 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
 // (the parser rewrote its `box.anchor` reads to `name.h` / `name.v` calls)
 // is a Constraint, which registers with the handle as it is built (E2933
 // otherwise).
-sema_stmt_check_layout: fn(name: String, name_span: Span, body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], output: &[TStmt]) -> Bool {
+sema_stmt_check_layout: fn(name: String, name_span: Span, body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic], output: ^[TStmt]) -> Bool {
     layout_ty: Type.Named{name: "Layout"}
     owner: sema_scope_local_owner_key(scopes)
     local_module: sema_scope_environment_module_text(environment, program)
@@ -396,10 +396,19 @@ sema_expression_is_float_measurement: fn(ty: Type, environment: SemaScopeEnviron
     inner == Type.Float
 }
 
-sema_expression_measurement_source_call: fn(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+// The call of the `core.units` helper that fills `role` (MeasurementNew,
+// MeasurementShow, …): the compiler finds it through its jet_builtins role,
+// never its name. E1015 when core.units is loaded and nothing fills `role`.
+sema_expression_measurement_source_call: fn(role: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
+    _ := sema_call_core_module_identity(environment, program, "core.units") ?? return None
+    graph: program.registration_graph ?? return None
+    helper: sema_core_role_function(graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return None
+    }
     // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
-    type_args: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
-    sema_expression_core_source_call("core.units", function, values, result_type, type_args, span, environment, program)
+    type_args: if role == "MeasurementResult" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
+    sema_expression_core_source_call("core.units", helper.name, values, result_type, type_args, span, environment, program)
 }
 
 // The call of Core source module `module_name`'s function `function`, which
@@ -416,7 +425,7 @@ sema_expression_core_source_call: fn(module_name: String, function: String, valu
     None
 }
 
-sema_call_try_measurement_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_measurement_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "value" && method != "uncertainty" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -433,7 +442,8 @@ sema_call_try_measurement_method: fn(receiver: Expr, receiver_value: TExpr, meth
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type := Type.Float
-    value: sema_expression_measurement_source_call("__measurement_{method}", [TExpr]{receiver_value}, result_type, span, environment, program) ?? {
+    role: if method == "value" -> "MeasurementValue" else -> "MeasurementUncertainty"
+    value: sema_expression_measurement_source_call(role, [TExpr]{receiver_value}, result_type, span, environment, program, diagnostics) ?? {
         context.incomplete_reasons.push("checked Measurement accessor has no source declaration")
         return SemaMethodSpecialCheck{handled: true, value: None}
     }

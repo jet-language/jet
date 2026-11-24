@@ -107,23 +107,23 @@ Reader: struct {
     at: Int,
 }
 
-align: fn(r: &Reader, to: Int) { r.at = aligned(r.at, to) }
+align: fn(r: ^Reader, to: Int) { r.at = aligned(r.at, to) }
 
-read_word: fn(r: &Reader) -> Int {
+read_word: fn(r: ^Reader) -> Int {
     align(r, 4)
     n: word(r.bytes, r.at)
     r.at += 4
     n
 }
 
-read_text: fn(r: &Reader) -> String {
+read_text: fn(r: ^Reader) -> String {
     length: read_word(r)
     text: String.from_bytes_lossy(r.bytes[r.at..<(r.at + length)].copy())
     r.at += length + 1
     text
 }
 
-read_signature: fn(r: &Reader) -> String {
+read_signature: fn(r: ^Reader) -> String {
     length: Int{r.bytes[r.at]}
     text: String.from_bytes_lossy(r.bytes[(r.at + 1)..<(r.at + 1 + length)].copy())
     r.at += length + 2
@@ -132,7 +132,7 @@ read_signature: fn(r: &Reader) -> String {
 
 // A `(ia{sv}av)` menu entry: its label, or `-` for a separator, then its
 // keys in brackets; and its submenu.
-entry_of: fn(r: &Reader) -> {head: String, below: String} {
+entry_of: fn(r: ^Reader) -> {head: String, below: String} {
     align(r, 8)
     _: read_word(r)
     label := ""
@@ -177,7 +177,7 @@ shown: fn(entry: {head: String, below: String}) -> String {
 
 // The `av` children of a menu entry, each a `(ia{sv}av)` entry in a
 // variant, separated by ` | `.
-children_of: fn(r: &Reader) -> String {
+children_of: fn(r: ^Reader) -> String {
     length: read_word(r)
     end: r.at + length
     parts := [String]{}
@@ -248,7 +248,7 @@ start: fn(kind: Int, serial: Int) -> [U8] {
 }
 
 // Ends the header fields of `out` and adds `body`.
-finish: fn(out: &[U8], body: [U8]) {
+finish: fn(out: ^[U8], body: [U8]) {
     set_word(out, 12, out.len() - 16)
     pad(out, 8)
     set_word(out, 4, body.len())
@@ -256,19 +256,19 @@ finish: fn(out: &[U8], body: [U8]) {
 }
 
 // A header field `code` holding a string (115) or an object path (111).
-field_text: fn(out: &[U8], code: Int, kind: Int, text: String) {
+field_text: fn(out: ^[U8], code: Int, kind: Int, text: String) {
     field_head(out, code, kind)
     put_text(out, text)
 }
 
 // A header field `code` holding a number.
-field_word: fn(out: &[U8], code: Int, n: Int) {
+field_word: fn(out: ^[U8], code: Int, n: Int) {
     field_head(out, code, 117)
     put_word(out, n)
 }
 
 // A header field `code` holding a signature.
-field_signature: fn(out: &[U8], code: Int, signature: String) {
+field_signature: fn(out: ^[U8], code: Int, signature: String) {
     field_head(out, code, 103)
     out.push(U8{signature.len()})
     loop b in signature.bytes() -> out.push(b)
@@ -277,7 +277,7 @@ field_signature: fn(out: &[U8], code: Int, signature: String) {
 
 // A header field's code and the signature of its value, the one type
 // `kind`, from an 8-byte boundary.
-field_head: fn(out: &[U8], code: Int, kind: Int) {
+field_head: fn(out: ^[U8], code: Int, kind: Int) {
     pad(out, 8)
     out.push(U8{code})
     out.push(U8{1})
@@ -286,7 +286,7 @@ field_head: fn(out: &[U8], code: Int, kind: Int) {
 }
 
 // A string: its length, its bytes and a NUL, from a 4-byte boundary.
-put_text: fn(out: &[U8], text: String) {
+put_text: fn(out: ^[U8], text: String) {
     pad(out, 4)
     put_word(out, text.len())
     loop b in text.bytes() -> out.push(b)
@@ -294,11 +294,11 @@ put_text: fn(out: &[U8], text: String) {
 }
 
 // `n` as a little-endian 32-bit word, two's complement when negative.
-put_word: fn(out: &[U8], n: Int) {
+put_word: fn(out: ^[U8], n: Int) {
     loop b in word_bytes(n) -> out.push(b)
 }
 
-set_word: fn(out: &[U8], at: Int, n: Int) {
+set_word: fn(out: ^[U8], at: Int, n: Int) {
     loop (i, b) in word_bytes(n) -> out[at + i] = b
 }
 
@@ -312,7 +312,7 @@ word_bytes: fn(n: Int) -> [U8] {
     bytes
 }
 
-pad: fn(out: &[U8], to: Int) {
+pad: fn(out: ^[U8], to: Int) {
     loop out.len() % to != 0 -> out.push(U8{0})
 }
 

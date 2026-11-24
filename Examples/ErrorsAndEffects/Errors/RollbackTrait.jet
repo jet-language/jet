@@ -9,7 +9,7 @@ Ledger: struct {
 
         snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-        restore: fn(&self, snap: &&LedgerSnap) { self.balance = snap.balance }
+        restore: fn(^self, snap: ^^LedgerSnap) { self.balance = snap.balance }
     }
 }
 
@@ -22,7 +22,7 @@ TxnErr: enum {
     Overdraft,
 }
 
-transfer: fn(from: &Ledger, to: &Ledger, amount: Int) -> Int TxnErr! {
+transfer: fn(from: ^Ledger, to: ^Ledger, amount: Int) -> Int TxnErr! {
     #Transact {
         from.balance -= amount
         to.balance += amount

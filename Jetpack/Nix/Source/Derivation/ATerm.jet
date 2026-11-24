@@ -208,20 +208,20 @@ NixATermCursor: struct {
         Val(nixeval_slice(self.bytes, self.position, self.position + width))
     }
 
-    bump: fn(&self) -> String? Never! {
+    bump: fn(^self) -> String? Never! {
         scalar: self.peek() ?? return None
         self.position += scalar.bytes().len()
         Val(scalar)
     }
 
-    consume: fn(&self, want: String) NixError! {
+    consume: fn(^self, want: String) NixError! {
         got: self.bump()
         if (got ?? "") != want {
             return Err(NixError.DrvParse("expected {nix_debug_scalar(want)} at {self.position}, got {nix_debug_optional_scalar(got)}"))
         }
     }
 
-    raw_string: fn(&self) -> String NixError! {
+    raw_string: fn(^self) -> String NixError! {
         self.consume("\"")
         start: self.position
         loop self.position < self.bytes.len() {
@@ -235,7 +235,7 @@ NixATermCursor: struct {
         Err(NixError.DrvParse("unterminated raw string"))
     }
 
-    escaped_string: fn(&self) -> String NixError! {
+    escaped_string: fn(^self) -> String NixError! {
         self.consume("\"")
         out := [U8]{}
         loop self.position < self.bytes.len() {
@@ -258,7 +258,7 @@ NixATermCursor: struct {
     }
 
     // Consume `[`; true when list items follow, false after an empty `[]`.
-    list_open: fn(&self) -> Bool NixError! {
+    list_open: fn(^self) -> Bool NixError! {
         self.consume("[")
         if (self.peek() ?? "") == "]" {
             self.position += 1
@@ -268,7 +268,7 @@ NixATermCursor: struct {
     }
 
     // After one item: true on `,` (another item follows), false on `]`.
-    list_next: fn(&self) -> Bool NixError! {
+    list_next: fn(^self) -> Bool NixError! {
         separator: self.peek() ?? ""
         if separator == {
             "]" -> {
@@ -284,7 +284,7 @@ NixATermCursor: struct {
         Err(NixError.DrvParse("expected ',' or ']' in list at {self.position}, got {nix_debug_optional_scalar(self.peek())}"))
     }
 
-    raw_strings: fn(&self) -> [String] NixError! {
+    raw_strings: fn(^self) -> [String] NixError! {
         items := [String]{}
         if self.list_open() {
             loop {
@@ -295,7 +295,7 @@ NixATermCursor: struct {
         Ok(items)
     }
 
-    escaped_strings: fn(&self) -> [String] NixError! {
+    escaped_strings: fn(^self) -> [String] NixError! {
         items := [String]{}
         if self.list_open() {
             loop {

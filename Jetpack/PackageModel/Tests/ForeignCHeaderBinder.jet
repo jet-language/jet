@@ -88,7 +88,7 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     header: "\n    int ok(int x);\n    struct Point {{ int x; int y; }};\n    void *raw_alloc(size_t n);\n    int sum(int *items, int n);\n    void log_msg(const char *fmt, ...);\n"
     r: pkg_test_cbind(header, "lib")
     assert(r.source.contains("ok: fn(x: Int) -> Int = \"ok\"\n"))
-    assert(r.source.contains("sum: fn(items: &[I32], n: Int) -> Int = \"sum\"\n"))
+    assert(r.source.contains("sum: fn(items: ^[I32], n: Int) -> Int = \"sum\"\n"))
     // `void*` return and varargs stay skipped; a pointer paired with a scalar
     // count is a typed Jet slice at the generated boundary.
     skipped := [String]{}
@@ -102,11 +102,11 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     header: "\n    typedef struct Sample {{\n        uint32_t value;\n        double ratio;\n    }} Sample;\n    const Sample *samples(size_t *length);\n    void mutate(Sample *items, size_t count);\n    void open(Sample *out);\n    int inspect(const Sample *value);\n    void write_u8(uint8_t *out);\n"
     result: pkg_test_cbind(header, "arrays")
     assert(result.source.contains("#Layout(c)\nSample: struct {{\n    value: U32,\n    ratio: Float,\n}}"))
-    assert(result.source.contains("samples: fn(length: &U64) -> [Sample] = \"samples\"\n"))
-    assert(result.source.contains("mutate: fn(items: &[Sample], count: Int) = \"mutate\"\n"))
-    assert(result.source.contains("open: fn(out: &Sample) = \"open\"\n"))
+    assert(result.source.contains("samples: fn(length: ^U64) -> [Sample] = \"samples\"\n"))
+    assert(result.source.contains("mutate: fn(items: ^[Sample], count: Int) = \"mutate\"\n"))
+    assert(result.source.contains("open: fn(out: ^Sample) = \"open\"\n"))
     assert(result.source.contains("inspect: fn(value: Sample) -> Int = \"inspect\"\n"))
-    assert(result.source.contains("write_u8: fn(out: &U8) = \"write_u8\"\n"))
+    assert(result.source.contains("write_u8: fn(out: ^U8) = \"write_u8\"\n"))
     assert_eq(result.bound, [String]{"samples", "mutate", "open", "inspect", "write_u8"})
 }
 
@@ -114,7 +114,7 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     header: "\n    #ifdef __cplusplus\n    extern \"C\" {{\n    #endif\n    typedef struct Sample {{\n        uint32_t value;\n    }} Sample;\n    int open(const Sample *input, Sample *out);\n    #ifdef __cplusplus\n    }}\n    #endif\n"
     result: pkg_test_cbind(header, "wrapped")
     assert(result.source.contains("#Layout(c)\nSample: struct {{\n    value: U32,\n}}"))
-    assert(result.source.contains("open: fn(input: Sample, out: &Sample) -> Int = \"open\"\n"))
+    assert(result.source.contains("open: fn(input: Sample, out: ^Sample) -> Int = \"open\"\n"))
     assert_eq(result.bound, [String]{"open"})
 }
 
@@ -143,8 +143,8 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     result: pkg_test_cbind(header, "zlib")
     assert(!result.source.contains("GzFile: struct"))
     assert(result.source.contains("    #Close(gzclose)\n    gzopen: fn(path: String, mode: String) -> GzFile = \"gzopen\"\n"))
-    assert(result.source.contains("    gzread: fn(file: &GzFile, buf: &[I8], len: Int) -> Int = \"gzread\"\n"))
-    assert(result.source.contains("    gzclose: fn(file: &&GzFile) -> Int = \"gzclose\"\n"))
+    assert(result.source.contains("    gzread: fn(file: ^GzFile, buf: ^[I8], len: Int) -> Int = \"gzread\"\n"))
+    assert(result.source.contains("    gzclose: fn(file: ^^GzFile) -> Int = \"gzclose\"\n"))
     assert(pkg_test_cbind_source_parses(result.source))
     assert_eq(result.handles.len(), 1)
     assert_eq(result.handles[0].close, "gzclose")
@@ -164,14 +164,14 @@ PKG_TEST_MANAGED_CALLBACK_HEADER: "typedef void (*source_callback)(void *ctx, in
 #Test("C binder writes managed callback tasks in the current result type syntax") {
     result: pkg_test_cbind(PKG_TEST_MANAGED_CALLBACK_HEADER, "source")
     assert(result.source.contains("    emit_async: fn(value: I64) -> Task<I64 Err!> = \"__jet_ffi_emit_async\"\n"))
-    assert(result.source.contains("    unsubscribe: fn(subscription: &&FfiCallbackRegistration) -> Task<Err!> = \"__jet_ffi_callback_unsubscribe\"\n"))
+    assert(result.source.contains("    unsubscribe: fn(subscription: ^^FfiCallbackRegistration) -> Task<Err!> = \"__jet_ffi_callback_unsubscribe\"\n"))
     assert(pkg_test_cbind_source_parses(result.source))
 }
 
 #Test("C binder binds a managed unsubscribe's void pointer context and its managed row") {
     result: pkg_test_cbind(PKG_TEST_MANAGED_CALLBACK_HEADER, "source")
     assert(result.source.contains("    __jet_native_unsubscribe: fn(ctx: *U8) -> Int = \"unsubscribe\"\n"))
-    assert(result.source.contains("    unsubscribe: fn(subscription: &&FfiCallbackRegistration)"))
+    assert(result.source.contains("    unsubscribe: fn(subscription: ^^FfiCallbackRegistration)"))
     assert_eq(result.bound, [String]{"on_data", "emit_async", "unsubscribe"})
     assert_eq(result.skipped.len(), 0)
 }

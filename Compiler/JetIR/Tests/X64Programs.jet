@@ -70,7 +70,7 @@ XPProgram: struct {
     ir: IRModule,
 }
 
-xp_types: fn(m: &IRModule) -> XPTypes {
+xp_types: fn(m: ^IRModule) -> XPTypes {
     point_tid: ir_module_intern_tid(m, Type.Named{name: "Point"})
     XPTypes{
         int: ir_intern_type(m, "Int", IRType{ty: TYPE_ID_INT, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
@@ -93,101 +93,101 @@ xp_fn: fn(name: String, file: String, line: Int) -> IRFunction {
     ir_function_new(name, "test:{file}.{name}", "", file, line)
 }
 
-xp_param: fn(m: &IRModule, f: &IRFunction, ty: Int, name: String) -> Int {
+xp_param: fn(m: ^IRModule, f: ^IRFunction, ty: Int, name: String) -> Int {
     line: f.line
     ir_slot(f, ty, IRSlotKind.Param, ir_intern_name(m, name), line)
 }
 
-xp_local: fn(m: &IRModule, f: &IRFunction, ty: Int, name: String) -> Int {
+xp_local: fn(m: ^IRModule, f: ^IRFunction, ty: Int, name: String) -> Int {
     line: f.line
     ir_slot(f, ty, IRSlotKind.Local, ir_intern_name(m, name), line)
 }
 
-xp_temp: fn(f: &IRFunction, ty: Int) -> Int { ir_slot(f, ty, IRSlotKind.Temp, -1, 0) }
+xp_temp: fn(f: ^IRFunction, ty: Int) -> Int { ir_slot(f, ty, IRSlotKind.Temp, -1, 0) }
 
-xp_set: fn(f: &IRFunction, slot: Int, value: Int) {
+xp_set: fn(f: ^IRFunction, slot: Int, value: Int) {
     _ := ir_emit(f, IROp.Const, slot, value, -1, -1, 0)
 }
 
-xp_const: fn(f: &IRFunction, ty: Int, value: Int) -> Int {
+xp_const: fn(f: ^IRFunction, ty: Int, value: Int) -> Int {
     slot: xp_temp(f, ty)
     xp_set(f, slot, value)
     slot
 }
 
-xp_op: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int) {
+xp_op: fn(f: ^IRFunction, op: IROp, dst: Int, a: Int, b: Int) {
     _ := ir_emit(f, op, dst, a, b, IR_OVERFLOW_TRAP, 0)
 }
 
 // `op` at source line `line` (a trapping op names it in its stop).
-xp_op_at: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, line: Int) {
+xp_op_at: fn(f: ^IRFunction, op: IROp, dst: Int, a: Int, b: Int, line: Int) {
     _ := ir_emit(f, op, dst, a, b, IR_OVERFLOW_TRAP, line)
 }
 
-xp_new: fn(f: &IRFunction, ty: Int, op: IROp, a: Int, b: Int) -> Int {
+xp_new: fn(f: ^IRFunction, ty: Int, op: IROp, a: Int, b: Int) -> Int {
     slot: xp_temp(f, ty)
     xp_op(f, op, slot, a, b)
     slot
 }
 
-xp_text: fn(m: &IRModule, f: &IRFunction, t: XPTypes, text: String) -> Int {
+xp_text: fn(m: ^IRModule, f: ^IRFunction, t: XPTypes, text: String) -> Int {
     slot: xp_temp(f, t.string)
     _ := ir_emit(f, IROp.ConstText, slot, ir_intern_text(m, text), -1, -1, 0)
     slot
 }
 
-xp_runtime: fn(m: &IRModule, f: &IRFunction, name: String, args: [Int], dst: Int) {
+xp_runtime: fn(m: ^IRModule, f: ^IRFunction, name: String, args: [Int], dst: Int) {
     start: ir_args(f, args)
     _ := ir_emit(f, IROp.CallRuntime, dst, ir_intern_name(m, name), start, args.len(), 0)
 }
 
-xp_call: fn(f: &IRFunction, function: Int, args: [Int], dst: Int) {
+xp_call: fn(f: ^IRFunction, function: Int, args: [Int], dst: Int) {
     start: ir_args(f, args)
     _ := ir_emit(f, IROp.Call, dst, function, start, args.len(), 0)
 }
 
-xp_drop: fn(f: &IRFunction, slot: Int) { _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 0) }
+xp_drop: fn(f: ^IRFunction, slot: Int) { _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 0) }
 
-xp_return: fn(f: &IRFunction, slot: Int) { _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0) }
+xp_return: fn(f: ^IRFunction, slot: Int) { _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0) }
 
-xp_br: fn(f: &IRFunction, depth: Int) { _ := ir_emit(f, IROp.Br, -1, depth, -1, -1, 0) }
+xp_br: fn(f: ^IRFunction, depth: Int) { _ := ir_emit(f, IROp.Br, -1, depth, -1, -1, 0) }
 
-xp_br_if: fn(f: &IRFunction, condition: Int, depth: Int) {
+xp_br_if: fn(f: ^IRFunction, condition: Int, depth: Int) {
     _ := ir_emit(f, IROp.BrIf, -1, condition, depth, -1, 0)
 }
 
 // print(text): jet_term_write_stdout_line(text, flush 1), as the old lowering.
-xp_print: fn(m: &IRModule, f: &IRFunction, t: XPTypes, text: Int) {
+xp_print: fn(m: ^IRModule, f: ^IRFunction, t: XPTypes, text: Int) {
     flush: xp_const(f, t.bool, 1)
     xp_runtime(m, f, "jet_term_write_stdout_line", [Int]{text, flush}, -1)
 }
 
-xp_print_text: fn(m: &IRModule, f: &IRFunction, t: XPTypes, text: String) {
+xp_print_text: fn(m: ^IRModule, f: ^IRFunction, t: XPTypes, text: String) {
     slot: xp_text(m, f, t, text)
     xp_print(m, f, t, slot)
     xp_drop(f, slot)
 }
 
 // print("{value}") through the display routine `symbol`.
-xp_print_value: fn(m: &IRModule, f: &IRFunction, t: XPTypes, symbol: String, value: Int) {
+xp_print_value: fn(m: ^IRModule, f: ^IRFunction, t: XPTypes, symbol: String, value: Int) {
     text: xp_temp(f, t.string)
     xp_runtime(m, f, symbol, [Int]{value}, text)
     xp_print(m, f, t, text)
     xp_drop(f, text)
 }
 
-xp_print_int: fn(m: &IRModule, f: &IRFunction, t: XPTypes, value: Int) {
+xp_print_int: fn(m: ^IRModule, f: ^IRFunction, t: XPTypes, value: Int) {
     xp_print_value(m, f, t, "jet_rt_int_to_string", value)
 }
 
-xp_add: fn(m: &IRModule, f: IRFunction) -> Int {
+xp_add: fn(m: ^IRModule, f: IRFunction) -> Int {
     row: m.functions.len()
     ir_function_bind(m, f.key, row)
     m.functions.push(f.copy())
     row
 }
 
-xp_entry: fn(m: &IRModule, f: IRFunction) { m.entry = xp_add(m, f) }
+xp_entry: fn(m: ^IRModule, f: IRFunction) { m.entry = xp_add(m, f) }
 
 // ---------------------------------------------------------------------------
 // Programs (each mirrors its Jet source in X64ProgramSources.jet).

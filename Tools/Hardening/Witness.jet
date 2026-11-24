@@ -161,7 +161,7 @@ observes_from: fn(tables: ASTTables, body: [StmtNode], start: Int) -> Bool Never
     false
 }
 
-note_call_name: fn(tables: ASTTables, names: &[String], expression: ExprNode) Never! {
+note_call_name: fn(tables: ASTTables, names: ^[String], expression: ExprNode) Never! {
     if ast_expr(tables, expression) == .Call(call, _) -> names.push(call.name.copy())
 }
 
@@ -227,12 +227,12 @@ observed_later: fn(walk: Walk) -> Walk Never! {
     Walk{probe: walk.probe.copy(), later: true, function: walk.function.copy()}
 }
 
-walk_args: fn(tables: ASTTables, args: [CallArg], frame: String, chain: [String], walk: Walk, hits: &[Hit]) Never! {
+walk_args: fn(tables: ASTTables, args: [CallArg], frame: String, chain: [String], walk: Walk, hits: ^[Hit]) Never! {
     inner: with_frame(chain, frame)
     loop argument in args -> walk_expr(tables, argument.expr, inner, walk, hits)
 }
 
-walk_expr: fn(tables: ASTTables, expression: ExprNode, chain: [String], walk: Walk, hits: &[Hit]) Never! {
+walk_expr: fn(tables: ASTTables, expression: ExprNode, chain: [String], walk: Walk, hits: ^[Hit]) Never! {
     view: ast_expr(tables, expression)
     if probe_matches(tables, view, walk.probe) {
         at: hit_at(view)
@@ -405,14 +405,14 @@ walk_expr: fn(tables: ASTTables, expression: ExprNode, chain: [String], walk: Wa
     }
 }
 
-walk_body: fn(tables: ASTTables, body: [StmtNode], chain: [String], walk: Walk, hits: &[Hit]) Never! {
+walk_body: fn(tables: ASTTables, body: [StmtNode], chain: [String], walk: Walk, hits: ^[Hit]) Never! {
     loop index in 0..<body.len() {
         step: if !walk.later && observes_from(tables, body, index + 1) -> observed_later(walk) else -> walk.copy()
         walk_statement(tables, body[index], chain, step, hits)
     }
 }
 
-walk_statement: fn(tables: ASTTables, statement: StmtNode, chain: [String], walk: Walk, hits: &[Hit]) Never! {
+walk_statement: fn(tables: ASTTables, statement: StmtNode, chain: [String], walk: Walk, hits: ^[Hit]) Never! {
     block: with_frame(chain, "block")
     if ast_stmt(tables, statement) == {
         .Expr(value) | .DeferClose(value, _) -> {

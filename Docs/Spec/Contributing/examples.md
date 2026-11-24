@@ -174,7 +174,7 @@ sessions read raw bytes. Without `until` the step's stdout is the next unit
 predicates hold, lines accumulate through the first line that holds, and
 frames before the first matching frame are discarded; `collect` tests the
 newline-joined units gathered so far. Predicates are `$PATH = JSON`,
-`ndjson …` or stdout assertion forms joined by `&&`. Without a deadline the
+`ndjson …` or stdout assertion forms joined by `^^`. Without a deadline the
 run's step timeout applies; `optional` passes with partial output at the
 deadline instead of failing. A later `close` or `wait` reports only the stdout
 no `recv` consumed.

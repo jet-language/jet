@@ -83,7 +83,7 @@ wide: I64{ 9_000_000_000 } // `_` digit separators (S67)
 // fields are the only privacy.
 
 greet: fn(who: String) -> String { "hello, {who}" }
-id: fn<T>(x: &&T) -> T { x }
+id: fn<T>(x: ^^T) -> T { x }
 largest: fn<T: Comparable>(xs: [T]) -> T {
     // ...
 }
@@ -261,7 +261,7 @@ describe: fn(s: Shape) -> String {
     }
 }
 
-// Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
+// Nested patterns + guards via `^^` on freshly-bound names (D-PAT1/D-PAT2).
 nested: fn(r: Shape Err!) -> Bool {
     return if r == {
         .Ok(.Rect(w, h)) && w > h -> true
@@ -461,7 +461,7 @@ closures: fn() {
 }
 
 // Function types: `fn(T1, T2) -> R` (S47). Parameters are read-only: a function
-// type has no `&`/`&&` parameter spelling, so a callback returns updated values.
+// type has no `^`/`^^` parameter spelling, so a callback returns updated values.
 // Named fns coerce to function values.
 apply: fn(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
 fixed_size_list: fn() {
@@ -547,16 +547,16 @@ with_fs: fn() {
 
 use core.mem
 
-// Access sigils ride the type (D-MEM1, D-MOVE-SIGIL1): `&T` write, `&&T`
+// Access sigils ride the type (D-MEM1, D-MOVE-SIGIL1): `^T` write, `^^T`
 // take/move, bare `T` read (the default; no sigil). Calls are plain: the
 // signature decides (D-CALLSITE-MARK2); an early move is `x.move()`.
-damage: fn(p: &Player, amount: Int) {           // &  = exclusive write
+damage: fn(p: ^Player, amount: Int) {           // &  = exclusive write
     p.hp = p.hp - amount
 }
-consume: fn(item: &&Item) { }                    // && = ownership moved/consumed
+consume: fn(item: ^^Item) { }                    // && = ownership moved/consumed
 P: struct {
-    edit: fn(&self) { }                         // receiver sigils
-    destroy: fn(&&self) { }
+    edit: fn(^self) { }                         // receiver sigils
+    destroy: fn(^^self) { }
 }
 call_sites: fn(player: Player, file: File) {
     damage(player, 10)
@@ -651,7 +651,7 @@ File: struct {
         Open
     }
     write_line: fn(self: File.Open, s: String) { }        // valid only when Open
-    open: fn(self: &&File.Closed) -> File.Open { self }   // consume Closed, yield Open
+    open: fn(self: ^^File.Closed) -> File.Open { self }   // consume Closed, yield Open
 }
 
 // Taint tracking (D-TAINT1): `#Input` value-fact spreads; `#Scrub(Input) fn` strips it.

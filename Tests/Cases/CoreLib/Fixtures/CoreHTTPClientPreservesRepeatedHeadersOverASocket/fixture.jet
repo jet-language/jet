@@ -7,11 +7,11 @@ use {
 
 http_crlf: fn() -> String { "\r\n" }
 
-http_read: fn(stream: &net.TCPStream) -> String {
+http_read: fn(stream: ^net.TCPStream) -> String {
     String.from_bytes(stream.read_bytes(4096, deadline: 5s) ?? panic("read request")) ?? panic("request UTF-8")
 }
 
-http_reply: fn(stream: &net.TCPStream, file: String) {
+http_reply: fn(stream: ^net.TCPStream, file: String) {
     bytes: files.read_bytes(file) ?? panic("response bytes")
     net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
     net.tcp_close(stream) ?? panic("drop peer stream")

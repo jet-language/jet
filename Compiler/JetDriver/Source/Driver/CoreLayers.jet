@@ -23,7 +23,7 @@ JetDriverCoreLayerName: struct {
 
 // Each loaded Core unit's names of a higher layer's modules (E1012), under
 // `request.core_layers`; an empty table checks nothing.
-jet_driver_check_core_layers: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) {
+jet_driver_check_core_layers: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], diagnostics: ^[Diagnostic]) {
     if request.core_layers.len() == 0 {
         return
     }
@@ -84,7 +84,7 @@ jet_driver_core_layer_of: fn(layers: [ModuleLayer], module_name: String) -> JetD
 // The Core module names `tokens` write: each `core.a.b` path (the longest),
 // each path of a `core.[a, b.c]` selection, and each private part `owners`
 // maps to its owner, with the names in interpolations.
-jet_driver_core_layer_names: fn(tokens: [Token], tables: TokenTables, owners: [String:String], names: &[JetDriverCoreLayerName]) Never! {
+jet_driver_core_layer_names: fn(tokens: [Token], tables: TokenTables, owners: [String:String], names: ^[JetDriverCoreLayerName]) Never! {
     index := 0
     loop index < tokens.len() {
         token: tokens[index]
@@ -118,7 +118,7 @@ jet_driver_core_layer_names: fn(tokens: [Token], tables: TokenTables, owners: [S
 // The dotted path that starts at the identifier `tokens[start]`, under
 // `prefix` ("" for none), pushed to `names`; the index after its last
 // identifier.
-jet_driver_core_layer_path: fn(tokens: [Token], tables: TokenTables, start: Int, prefix: String, names: &[JetDriverCoreLayerName]) -> Int Never! {
+jet_driver_core_layer_path: fn(tokens: [Token], tables: TokenTables, start: Int, prefix: String, names: ^[JetDriverCoreLayerName]) -> Int Never! {
     head: token_decoded(tables, tokens[start])
     path := if prefix == "" -> head.copy() else -> "{prefix}.{head}"
     last := start
@@ -133,7 +133,7 @@ jet_driver_core_layer_path: fn(tokens: [Token], tables: TokenTables, start: Int,
 // The paths of a `core.[...]` selection whose first item starts at
 // `tokens[start]`: each item at the selection's own depth that isn't an
 // alias (`name:`); the index after its `]`.
-jet_driver_core_layer_selection: fn(tokens: [Token], tables: TokenTables, start: Int, names: &[JetDriverCoreLayerName]) -> Int Never! {
+jet_driver_core_layer_selection: fn(tokens: [Token], tables: TokenTables, start: Int, names: ^[JetDriverCoreLayerName]) -> Int Never! {
     index := start
     depth := 1
     loop index < tokens.len() && depth > 0 {

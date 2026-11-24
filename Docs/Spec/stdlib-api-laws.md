@@ -104,8 +104,8 @@ A read-only function takes bare `T`; an unmarked read access never elevates.
 Return a new allocation by value. Do not write into a caller-supplied buffer
 unless the API is explicitly a low-allocation path.
 
-Make mutation visible: a mutating function takes `&T`, while ownership
-transfer takes `&&T`. Document the invariant enforced by every `#SingleUse`
+Make mutation visible: a mutating function takes `^T`, while ownership
+transfer takes `^^T`. Document the invariant enforced by every `#SingleUse`
 type.
 
 ### Internal Core Shared publication
@@ -550,9 +550,10 @@ other hosts. Neither bridge writes the operating-system environment.
 
 ### Realtime cancellation access
 
-`RealtimeStream.cancel(&self)` forwards its write-borrowed stream to
-`core.rt.__cancel(&self)`. The public method and its provider call both retain
-the `&self` write receiver; cancellation does not consume the stream.
+`RealtimeStream.cancel(^self)` forwards its write-borrowed stream to
+`jet.runtime.rt.cancel(stream: ^RealtimeStream)`. The public method and its
+runtime call both retain the `^` write receiver; cancellation does not consume
+the stream.
 
 ## Testing evidence source policy
 

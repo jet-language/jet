@@ -280,7 +280,7 @@ sema_stream_handle_spec: fn(owner: String, method: String, receiver_type: Type) 
     }
     // Rust `text_cursor_method_return` / `binary_reader_method_return`: the
     // cursor and reader methods record no receiver write, so a read binding
-    // or parameter calls them without a `&` mark.
+    // or parameter calls them without a `^` mark.
     if owner == "Cursor" {
         if method == "take_until" {
             return Val(sema_stream_handle_read_spec(THandleOp.CursorTakeUntil, sema_stream_handle_result(string, Type.String), [SemaCallParam]{sema_stream_handle_param("delimiter", string, AccessConvention.Read)}))
@@ -377,22 +377,22 @@ sema_stream_handle_known_wrong_direction: fn(owner: String, method: String) -> B
 
 // Rust `file_handle_method_return` (E2-M7) types the methods of these handles
 // without recording a receiver convention, so an unmarked `reader.read_bytes(n)`
-// or `writer.write_bytes(bytes)` needs no `&`, and a written mark has no convention
+// or `writer.write_bytes(bytes)` needs no `^`, and a written mark has no convention
 // to be checked against. `text_cursor_method_return` and
 // `binary_reader_method_return` record none either, so `c.skip_ws()` and
-// `r.take(n)` keep their mark. `Stdout`/`Stderr` dispatch to their `&self`
+// `r.take(n)` keep their mark. `Stdout`/`Stderr` dispatch to their `^self`
 // source methods instead.
 sema_stream_handle_reports_no_receiver_convention: fn(owner: String) -> Bool Never! {
     owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "StdinHandle" || owner == "Cursor" || owner == "Reader"
 }
 
-sema_stream_handle_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_stream_handle_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
     loop argument in args {
         _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     }
 }
 
-sema_stream_handle_effect_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_stream_handle_effect_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: ^[Diagnostic]) -> Bool Never! {
     entries := [EffectRowEntry]{}
     if effect_name != "" -> entries.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -431,7 +431,7 @@ sema_stream_handle_argument_mismatch: fn(callee: String, required: Type, offered
     sema_error("E0112", span, "`{callee}` wants {sema_type_show(required)}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
 }
 
-sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], args: [CallArg], receiver_expr: Expr?, receiver_value: TExpr?, receiver_convention: AccessConvention, shift_argument: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
+sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], args: [CallArg], receiver_expr: Expr?, receiver_value: TExpr?, receiver_convention: AccessConvention, shift_argument: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> [TExpr]? {
     checked_args := args
     binding: sema_call_bind_args(callee, params, checked_args, span, diagnostics) ?? {
         sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -480,7 +480,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
             diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span, program))
             return None
         }
-        // A `&` argument keeps its Write borrow of the caller's place, so the
+        // A `^` argument keeps its Write borrow of the caller's place, so the
         // route writes the original, never a copy (#5976).
         if params[slot].convention == AccessConvention.Write {
             borrow_type: checked.ty.copy()
@@ -504,7 +504,7 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
     Val(values)
 }
 
-sema_stream_handle_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+sema_stream_handle_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_stream_handle_effect_fact(environment, program, scopes, context, api, span, result_type, effect_name, diagnostics) {
@@ -513,12 +513,12 @@ sema_stream_handle_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExp
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-sema_stream_handle_method_ref: fn(owner: String, method: String, program: SemaProgramTables, context: &SemaCheckContext) -> TMethodRef Never! {
+sema_stream_handle_method_ref: fn(owner: String, method: String, program: SemaProgramTables, context: ^SemaCheckContext) -> TMethodRef Never! {
     owner_module := sema_stream_handle_owner_module(owner)
     TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
 }
 
-sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     result_type := if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
     method: sema_stream_handle_method_ref(owner, "lines", program, context)
     value := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: [TCallArg]{}}, span)
@@ -533,7 +533,7 @@ sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, e
 }
 
 // Called before ordinary method lookup for canonical Core handle types.
-sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     source_lines: sema_stream_handle_source_lines_owner(receiver_value.ty, method)
     owner := source_lines ?? ""
     if source_lines == None {
@@ -615,7 +615,7 @@ sema_stream_handle_yields_view: fn(result_type: Type) -> Bool Never! {
     }
 }
 
-sema_stream_handle_publish_receiver_view: fn(receiver: Expr, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) Never! {
+sema_stream_handle_publish_receiver_view: fn(receiver: Expr, span: Span, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext) Never! {
     places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
     temporaries := [Span]{}
     if places.len() == 0 -> temporaries.push(expr_span(receiver))
@@ -624,7 +624,7 @@ sema_stream_handle_publish_receiver_view: fn(receiver: Expr, span: Span, scopes:
     context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
 }
 
-sema_stream_handle_static_owner_is_canonical: fn(owner: String, scopes: &SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+sema_stream_handle_static_owner_is_canonical: fn(owner: String, scopes: ^SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     index: sema_scope_resolve_index(scopes, owner) ?? return true
     symbol: scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Type -> return false
@@ -636,7 +636,7 @@ sema_stream_handle_static_owner_is_canonical: fn(owner: String, scopes: &SemaSco
 }
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.
-sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     known := (owner == "Path" && (method == "from" || method == "home")) || (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
     if !known || !sema_stream_handle_static_owner_is_canonical(owner, scopes, environment, program) {
         return SemaMethodSpecialCheck{handled: false, value: None}

@@ -5,7 +5,7 @@ use {
     files: core.files
 }
 
-terminal: fn(writer: &cbor.CBORWriter<files.FileWriter>, reason: String) -> Bool {
+terminal: fn(writer: ^cbor.CBORWriter<files.FileWriter>, reason: String) -> Bool {
     if writer.finish() == {
         .Err(error) -> return error.reason == reason
         .Ok(_) -> return false
@@ -13,7 +13,7 @@ terminal: fn(writer: &cbor.CBORWriter<files.FileWriter>, reason: String) -> Bool
     return false
 }
 
-close_array: fn(writer: &cbor.CBORWriter<files.FileWriter>) {
+close_array: fn(writer: ^cbor.CBORWriter<files.FileWriter>) {
     if writer.write(encoding.DataEvent.ArrayEnd) == {
         .Err(error) -> panic("{error.reason}")
         .Ok(_) -> return

@@ -18,7 +18,7 @@ Holder: struct {
     _lock: FileLock,
 
     // Owns self: its lock closes when this returns.
-    finish: fn(&&self) -[FS]> Int { held() }
+    finish: fn(^^self) -[FS]> Int { held() }
 }
 
 Outer: struct {
@@ -27,9 +27,9 @@ Outer: struct {
     spare: FileLock,
 }
 
-consume_holder: fn(h: &&Holder) -[FS]> Int { held() }
+consume_holder: fn(h: ^^Holder) -[FS]> Int { held() }
 
-consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
+consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 
 Count: struct {
     _n: Int,
@@ -44,10 +44,10 @@ Guard: struct {
     _state: Shared<Count>,
 
     impl Close {
-        close: fn(&&self) {}
+        close: fn(^^self) {}
     }
 
-    finish: fn(&&self) -[FS]> Int { held() }
+    finish: fn(^^self) -[FS]> Int { held() }
 }
 
 Prepared: struct {
@@ -66,7 +66,7 @@ Lease: struct {
     _note: String,
     _live: Guard?,
 
-    release: fn(&&self) -[IO, FS]> {
+    release: fn(^^self) -[IO, FS]> {
         lease := self
         before: held()
         lease._live = None
@@ -106,7 +106,7 @@ branch: fn(moved: Bool) -[IO, FS, Env]> {
     print("branch {moved} {held()}")
 }
 
-adopt: fn(h: &&Holder) -[IO, FS]> {
+adopt: fn(h: ^^Holder) -[IO, FS]> {
     me := h.move()
     inside: consume_holder(me)
     print("adopted {inside} {held()}")

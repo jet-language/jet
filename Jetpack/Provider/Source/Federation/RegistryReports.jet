@@ -308,7 +308,7 @@ provider_registry_package_facts: fn(family: ProviderFamily, package: RegistryPac
 // Record a registry license field: one license is the package license.
 // Several stay a typed list, because registries differ on whether a list
 // means any or all of them. Returns the loss when the field is malformed.
-provider_registry_record_licenses: fn(facts: &MetadataFacts, value: Dyn) -> String? Never! {
+provider_registry_record_licenses: fn(facts: ^MetadataFacts, value: Dyn) -> String? Never! {
     licenses: provider_graph_json_string_list(value) ?? return Val("must be a string or an array of strings")
     if licenses.len() == 1 -> facts.license = licenses[0] else if licenses.len() > 1 {
         facts.typed["provider.{facts.family.label()}.licenses"] = licenses

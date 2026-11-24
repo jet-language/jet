@@ -36,15 +36,15 @@ count_present: fn(snapshots: [Snapshot]) -> Int {
 }
 
 // Every file's bytes read through its opened handle in place, as Jetpack's
-// lease digests its executables: a handle bound by `&x == .Val(y)`, then
+// lease digests its executables: a handle bound by `^x == .Val(y)`, then
 // used through method calls. Each line: whether every byte was read, and
 // the first byte.
-contents: fn(snapshots: &[Snapshot]) -> [String] IOError! {
+contents: fn(snapshots: ^[Snapshot]) -> [String] IOError! {
     out := [String]{}
     loop index in 0..<snapshots.len() {
         relative: snapshots[index].relative
         if snapshots[index].file == None -> panic("`{relative}` lost its handle")
-        if &snapshots[index].file == .Val(input) {
+        if ^snapshots[index].file == .Val(input) {
             input.seek(0)
             bytes := [U8]{}
             loop {

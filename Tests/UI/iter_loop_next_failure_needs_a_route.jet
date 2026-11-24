@@ -11,7 +11,7 @@ Reads: struct {
     impl Iterator {
         Item: Int,
 
-        next: fn(&self) -> Int? ReadError! {
+        next: fn(^self) -> Int? ReadError! {
             if self.left == 0 -> return Err(ReadError.Torn)
             self.left -= 1
             Val(self.left)
@@ -25,7 +25,7 @@ Source: struct {
     impl Iterable {
         Iter: Reads,
 
-        iter: fn(&&self) -> Reads { Reads{left: self.from} }
+        iter: fn(^^self) -> Reads { Reads{left: self.from} }
     }
 }
 

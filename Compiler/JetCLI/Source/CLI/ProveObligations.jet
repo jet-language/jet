@@ -216,7 +216,7 @@ jet_cli_solver_bool_of: fn(interner: Interner, tree: BodyTree, id: Int, scope: J
 }
 
 // `lo <= name <= hi` for each bound given.
-jet_cli_solver_bound_facts: fn(name: String, bounds: JetCLISolverBounds, facts: &[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
+jet_cli_solver_bound_facts: fn(name: String, bounds: JetCLISolverBounds, facts: ^[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
     if bounds.lo == .Val(lo) {
         facts.push(jet_cli_solver_compare(jet_cli_solver_variable(name), ">=", jet_cli_solver_constant(lo)))
     }
@@ -228,7 +228,7 @@ jet_cli_solver_bound_facts: fn(name: String, bounds: JetCLISolverBounds, facts: 
 
 // The function's integer parameters with their type bounds, then its
 // `#Pre` clauses: what every obligation inside it may assume.
-jet_cli_solver_entry: fn(interner: Interner, function: FnBody, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
+jet_cli_solver_entry: fn(interner: Interner, function: FnBody, scope: ^JetCLISolverScope, facts: ^[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
     loop parameter in function.params {
         bounds: jet_cli_solver_type_bounds(parameter.ty)
         if !bounds.integer -> next
@@ -251,7 +251,7 @@ jet_cli_solver_entry: fn(interner: Interner, function: FnBody, scope: &JetCLISol
 // Binds immutable integer `let` `local` to `init` and returns true when it
 // translates. A binding that doesn't stays out of scope, so reading it later
 // is unsupported.
-jet_cli_solver_let: fn(interner: Interner, tree: BodyTree, local: TLocal, init: Int, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
+jet_cli_solver_let: fn(interner: Interner, tree: BodyTree, local: TLocal, init: Int, scope: ^JetCLISolverScope, facts: ^[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
     if scope.names.contains(local.name) -> return Err(jet_cli_solver_unsupported("a shadowed name"))
     bounds: jet_cli_solver_type_bounds(local.ty)
     if local.mutable || !bounds.integer -> return Ok(false)
@@ -280,7 +280,7 @@ jet_cli_solver_text: fn(source: String, span: Span) -> String Never! {
 
 // Each index sema proved in range: the index's bounds `lo..hi` are assumed,
 // the list's `0..len-1` is the claim, over one variable `value`.
-jet_cli_solver_index_obligations: fn(function: FnBody, source: String, out: &[JetCLISolverObligation]) Never! {
+jet_cli_solver_index_obligations: fn(function: FnBody, source: String, out: ^[JetCLISolverObligation]) Never! {
     loop proof in function.index_proofs {
         text: jet_cli_solver_text(source, proof.span)
         row := JetCLISolverObligation{kind: "fixed_index_bounds", function: function.name.copy(), callee: "", span: proof.span, claim: text, formula: None, reason: "", detail: "", pre: false}
@@ -313,7 +313,7 @@ jet_cli_solver_index_formula: fn(proof: TIndexProof) -> JetCLISolverFormula JetC
 // One obligation per `#Post` clause, at the clause: the parameters, `#Pre`
 // and the body's affine immutable `let`s are assumed, `result` is the one
 // value the body returns, and the clause is the claim.
-jet_cli_solver_post_obligations: fn(interner: Interner, function: FnBody, source: String, out: &[JetCLISolverObligation]) Never! {
+jet_cli_solver_post_obligations: fn(interner: Interner, function: FnBody, source: String, out: ^[JetCLISolverObligation]) Never! {
     if function.body.len() != 1 {
         return
     }
@@ -422,7 +422,7 @@ jet_cli_solver_callee: fn(tree: BodyTree, body: [Int], callees: JetCLISolverCall
 // fallible caller returns `Ok(…)` and reaches a fallible call through `?`
 // (Try, TryWithContext): the call runs on every path, so it is scanned; a
 // context note runs only on failure, so it is not.
-jet_cli_solver_scan: fn(tree: BodyTree, id: Int, found: &[Int]) Never! {
+jet_cli_solver_scan: fn(tree: BodyTree, id: Int, found: ^[Int]) Never! {
     node: body_node(tree, id)
     if node.kind == {
         .InlineBlock(body) -> {
@@ -456,7 +456,7 @@ jet_cli_solver_scan: fn(tree: BodyTree, id: Int, found: &[Int]) Never! {
 // function's leading straight-line statements assumes the parameters, `#Pre`,
 // the `let`s before it and the `#Pre` claims of the calls before it (a call
 // whose claim fails stops there). Any other pinned call is unsupported.
-jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: JetCLISolverCallees, out: &[JetCLISolverObligation]) Never! {
+jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: JetCLISolverCallees, out: ^[JetCLISolverObligation]) Never! {
     tree: function.tree
     scope := JetCLISolverScope{names: [String]{}, pins: [JetCLISolverPin]{}}
     facts := [JetCLISolverBool]{}
@@ -495,20 +495,20 @@ jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: J
 }
 
 // Why the function's parameters and `#Pre` can't be assumed, or "".
-jet_cli_solver_entry_blocked: fn(interner: Interner, function: FnBody, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> String Never! {
+jet_cli_solver_entry_blocked: fn(interner: Interner, function: FnBody, scope: ^JetCLISolverScope, facts: ^[JetCLISolverBool]) -> String Never! {
     _ := jet_cli_solver_entry(interner, function, scope, facts) ?? return err.detail
     ""
 }
 
 // Why a `let` leaves later reads ambiguous (it shadows a name), or "".
-jet_cli_solver_let_blocked: fn(interner: Interner, tree: BodyTree, local: TLocal, init: Int, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> String Never! {
+jet_cli_solver_let_blocked: fn(interner: Interner, tree: BodyTree, local: TLocal, init: Int, scope: ^JetCLISolverScope, facts: ^[JetCLISolverBool]) -> String Never! {
     _ := jet_cli_solver_let(interner, tree, local, init, scope, facts) ?? return err.detail
     ""
 }
 
 // The obligations of one pinned call block. `blocked` is why the caller's
 // assumptions can't be read ("" when they can).
-jet_cli_solver_call_block: fn(function: FnBody, block: Int, source: String, callees: JetCLISolverCallees, blocked: String, scope: JetCLISolverScope, facts: &[JetCLISolverBool], out: &[JetCLISolverObligation]) Never! {
+jet_cli_solver_call_block: fn(function: FnBody, block: Int, source: String, callees: JetCLISolverCallees, blocked: String, scope: JetCLISolverScope, facts: ^[JetCLISolverBool], out: ^[JetCLISolverObligation]) Never! {
     tree: function.tree
     body: if body_node(tree, block).kind == .InlineBlock(items) -> items else -> [Int]{}
     callee: jet_cli_solver_callee(tree, body, callees)

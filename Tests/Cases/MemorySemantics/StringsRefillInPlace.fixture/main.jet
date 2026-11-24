@@ -1,6 +1,6 @@
 // A String place that always holds its value (a variable that owns it, or a
 // write parameter's place) is emptied by `s = ""` in place and grown by
-// `s += text` in place. A refill through `&String` therefore reuses the
+// `s += text` in place. A refill through `^String` therefore reuses the
 // buffer the last fill grew: the peak resident set (VmHWM, reset to the
 // current one by `5` to clear_refs) must not grow by half a SIZE-byte string
 // during the second fill. A value another owner still holds, or a static
@@ -29,19 +29,19 @@ status_kb: fn(field: String) -> Int {
     panic("no {field} line")
 }
 
-fill: fn(out: &String, chunk: String) {
+fill: fn(out: ^String, chunk: String) {
     out = ""
     loop _ in 0..<CHUNKS -> out += chunk
 }
 
-render_into: fn(out: &String, seed: Int) {
+render_into: fn(out: ^String, seed: Int) {
     out = ""
     loop i in 0..<(3 + seed % 4) {
         if (seed + i) % 2 == 0 -> out += "ab" else -> out += "xyz"
     }
 }
 
-twice: fn(out: &String) { out += out }
+twice: fn(out: ^String) { out += out }
 
 run: fn() {
     text := ""

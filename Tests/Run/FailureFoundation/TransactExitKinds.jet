@@ -22,7 +22,7 @@ Ledger: struct {
 
         snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-        restore: fn(&self, snap: &&LedgerSnap) {
+        restore: fn(^self, snap: ^^LedgerSnap) {
             print("  {self.name}: balance {self.balance} restored to {snap.balance}")
             self.balance = snap.balance
         }
@@ -42,14 +42,14 @@ refuse: fn() -> Int Refused! { Err(Refused.Closed) }
 
 audit: fn() { panic("the audit log is unavailable") }
 
-commit: fn(ledger: &Ledger) {
+commit: fn(ledger: ^Ledger) {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(fn() { print("  commit: hook (never runs)") })
     }
 }
 
-early_return: fn(ledger: &Ledger) -> Int {
+early_return: fn(ledger: ^Ledger) -> Int {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(fn() { print("  early return: first hook") })
@@ -59,7 +59,7 @@ early_return: fn(ledger: &Ledger) -> Int {
     0
 }
 
-failure: fn(ledger: &Ledger) -> Int Refused! {
+failure: fn(ledger: ^Ledger) -> Int Refused! {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(fn() { print("  failure: first hook") })
@@ -69,7 +69,7 @@ failure: fn(ledger: &Ledger) -> Int Refused! {
     Ok(0)
 }
 
-loop_break: fn(ledger: &Ledger) {
+loop_break: fn(ledger: ^Ledger) {
     loop {
         #Transact(tx) {
             ledger.balance -= 10
@@ -79,7 +79,7 @@ loop_break: fn(ledger: &Ledger) {
     }
 }
 
-failing_hook: fn(ledger: &Ledger) -> Int {
+failing_hook: fn(ledger: ^Ledger) -> Int {
     #Transact(tx) {
         ledger.balance -= 10
         tx.on_rollback(fn() { print("  failing hook: first hook still runs") })

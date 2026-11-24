@@ -363,7 +363,7 @@ TerminalNode: struct {
         None
     }
 
-    flatten: fn(self, out: &[String:TerminalNode]) {
+    flatten: fn(self, out: ^[String:TerminalNode]) {
         out[self.id] = self
         loop child in self.children -> child.flatten(out)
     }
@@ -549,7 +549,7 @@ TerminalHost: struct {
         self.cursor
     }
 
-    append_event: fn(&self, event: &&TerminalHostEvent) TerminalHostError! {
+    append_event: fn(^self, event: ^^TerminalHostEvent) TerminalHostError! {
         event.validate()
         if self.session_id == .Val(session_id) {
             if session_id != event.session_id {
@@ -583,7 +583,7 @@ TerminalHost: struct {
     }
 
     // `panel_ids` maps each event sequence to the panel that owns it.
-    sync_projection: fn(&self, projection: DevtoolsProjection, panel_ids: [Int:JetDevtoolsPanelID]) -> TerminalFrame TerminalHostError! {
+    sync_projection: fn(^self, projection: DevtoolsProjection, panel_ids: [Int:JetDevtoolsPanelID]) -> TerminalFrame TerminalHostError! {
         terminal_validate_projection(projection)
         session_changed := false
         if self.session_id == .Val(id) -> session_changed = id != projection.session_id
@@ -624,7 +624,7 @@ TerminalHost: struct {
         self.render()
     }
 
-    sync_session: fn(&self, session: ResidentDevSession) -> TerminalFrame TerminalHostError! {
+    sync_session: fn(^self, session: ResidentDevSession) -> TerminalFrame TerminalHostError! {
         projection: session.devtools_events_since(self.cursor)
         grants: if self.config.capabilities.access.local_details_enabled() -> JetDevtoolsPanelCapability.all() else -> [JetDevtoolsPanelCapability]{}
         panels: session.devtools_panels(.Terminal, grants) ?? return Err(TerminalHostError{message: "{err}"})
@@ -638,7 +638,7 @@ TerminalHost: struct {
         self.sync_projection(projection, panel_ids)
     }
 
-    apply_selection: fn(&self, selection: DevtoolsSelectionFact?) Never! {
+    apply_selection: fn(^self, selection: DevtoolsSelectionFact?) Never! {
         if selection == .Val(chosen) {
             if terminal_canonical_panel(chosen.panel_id) == .Val(panel_id) {
                 if chosen.item_key == "" -> _: self.focus_panel(panel_id) else {
@@ -650,44 +650,44 @@ TerminalHost: struct {
         self.focus = TerminalFocus.panel(first_panel_id())
     }
 
-    set_viewport: fn(&self, viewport: TerminalViewport) { self.config.viewport = viewport }
+    set_viewport: fn(^self, viewport: TerminalViewport) { self.config.viewport = viewport }
 
-    set_capabilities: fn(&self, capabilities: TerminalHostCapabilities) {
+    set_capabilities: fn(^self, capabilities: TerminalHostCapabilities) {
         self.config.capabilities = capabilities
     }
 
-    set_cursor: fn(&self, cursor: Int?) {
+    set_cursor: fn(^self, cursor: Int?) {
         self.cursor = cursor
         self.time_cursor = cursor
     }
 
-    focus_panel: fn(&self, panel_id: String) -> Bool Never! {
+    focus_panel: fn(^self, panel_id: String) -> Bool Never! {
         canonical: terminal_canonical_panel(panel_id) ?? return false
         self.focus = TerminalFocus.panel(canonical)
         self.keyboard.last_action = Val(TerminalAction.FocusPanel{panel_id: canonical})
         true
     }
 
-    focus_item: fn(&self, panel_id: String, item_key: String) -> Bool Never! {
+    focus_item: fn(^self, panel_id: String, item_key: String) -> Bool Never! {
         if !self.focus_panel(panel_id) -> return false
         self.focus.item_key = Val(item_key)
         self.keyboard.last_action = Val(TerminalAction.Inspect{panel_id: self.focus.panel_id ?? "", item_key: item_key})
         true
     }
 
-    clear_item_focus: fn(&self) {
+    clear_item_focus: fn(^self) {
         self.focus.item_key = None
         self.keyboard.last_action = Val(TerminalAction.ReturnToPanel)
     }
 
-    handle: fn(&self, input: TerminalInput) -> TerminalAction {
+    handle: fn(^self, input: TerminalInput) -> TerminalAction {
         if input == .Key(key) -> return self.handle_key(key)
         if input == .Resize(viewport) -> self.set_viewport(viewport)
         self.keyboard.last_action = Val(TerminalAction.Ignored)
         TerminalAction.Ignored
     }
 
-    handle_key: fn(&self, key: TerminalKey) -> TerminalAction {
+    handle_key: fn(^self, key: TerminalKey) -> TerminalAction {
         self.keyboard.last_key = Val(key)
         action: if key == {
             .Tab | .Down -> self.move_panel(1)
@@ -700,13 +700,13 @@ TerminalHost: struct {
         action
     }
 
-    leave_item: fn(&self) -> TerminalAction {
+    leave_item: fn(^self) -> TerminalAction {
         if self.focus.item_key == None -> return TerminalAction.Ignored
         self.clear_item_focus()
         TerminalAction.ReturnToPanel
     }
 
-    handle_character: fn(&self, text: String) -> TerminalAction {
+    handle_character: fn(^self, text: String) -> TerminalAction {
         actions_enabled: self.config.capabilities.access.actions_enabled()
         if text == "r" && actions_enabled -> return TerminalAction.Rerun
         if text == "R" && actions_enabled -> return TerminalAction.Restart
@@ -771,7 +771,7 @@ TerminalHost: struct {
         }
     }
 
-    move_panel: fn(&self, direction: Int) -> TerminalAction {
+    move_panel: fn(^self, direction: Int) -> TerminalAction {
         panel_ids := [String]{}
         loop descriptor in descriptors() -> panel_ids.push(descriptor.id.as_str())
         if panel_ids.len() == 0 -> return TerminalAction.Ignored
@@ -790,7 +790,7 @@ TerminalHost: struct {
         TerminalAction.FocusPanel{panel_id: panel_ids[target]}
     }
 
-    inspect_focused: fn(&self) -> TerminalAction {
+    inspect_focused: fn(^self) -> TerminalAction {
         panel_id: self.focus.panel_id ?? first_panel_id()
         if self.focus.item_key == .Val(item_key) {
             return TerminalAction.Inspect{panel_id: panel_id, item_key: item_key}
@@ -809,7 +809,7 @@ TerminalHost: struct {
     }
 
     // Steps the time cursor to the next retained sequence, wrapping to the first.
-    move_cursor: fn(&self) -> TerminalAction {
+    move_cursor: fn(^self) -> TerminalAction {
         sequences := [Int]{}
         loop event in terminal_ordered_events(self.events) {
             if sequences.len() == 0 || sequences[sequences.len() - 1] != event.sequence {

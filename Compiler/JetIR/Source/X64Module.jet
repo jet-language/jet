@@ -61,7 +61,7 @@ ir_x64_text_rows_get: fn(table: IRX64TextRows, text: String) -> Int Never! {
 }
 
 // Names `row` for `text` in `table`.
-ir_x64_text_rows_set: fn(table: &IRX64TextRows, text: String, row: Int) Never! {
+ir_x64_text_rows_set: fn(table: ^IRX64TextRows, text: String, row: Int) Never! {
     id: name_index(name_intern(table.names, text))
     loop table.rows.len() <= id -> table.rows.push(-1)
     table.rows[id] = row
@@ -183,7 +183,7 @@ IRX64Result: struct {
     log: [String],
 }
 
-ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
+ir_x64_add_text: fn(tables: ^IRX64Tables, text: String) -> Int Never! {
     if tables.last_text_row >= 0 && text == tables.last_text -> return tables.last_text_row
     found: ir_x64_text_rows_get(tables.texts, text)
     if found >= 0 {
@@ -209,7 +209,7 @@ ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
 // dropped once and a clone adds its own, so no run reaches the count zero
 // that would free it. A decimal the carrier can't hold canonically (one in
 // the inline range, or not plain digits) keeps the runtime parse.
-ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
+ir_x64_static_int: fn(tables: ^IRX64Tables, text: String) Never! {
     if ir_x64_text_rows_get(tables.ints, text) >= 0 || !ir_x64_static_int_fits(text) {
         return
     }
@@ -288,14 +288,14 @@ IRX64DebugRows: struct {
 }
 
 // Appends `ty` to the debug types; returns its row.
-ir_x64_debug_add: fn(tables: &IRX64Tables, ty: &&X64DebugType) -> Int Never! {
+ir_x64_debug_add: fn(tables: ^IRX64Tables, ty: ^^X64DebugType) -> Int Never! {
     row: tables.debug_types.len()
     tables.debug_types.push(ty)
     row
 }
 
 // A pointer to debug row `target`.
-ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
+ir_x64_debug_pointer: fn(tables: ^IRX64Tables, target: Int) -> Int Never! {
     ir_x64_debug_add(tables, X64DebugType{name: "", size: 8, kind: X64DebugTypeKind.Pointer{target: target}})
 }
 
@@ -319,7 +319,7 @@ IR_X64_SHARED_PAYLOAD: 64
 // Receiver or any other runtime handle a typedef, named as Jet spells it, of
 // its runtime state's pointer; an allocation word a typedef of what its
 // block holds (ir_x64_debug_alloc). Any other aggregate stays opaque.
-ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
+ir_x64_debug_types: fn(m: IRModule, tables: ^IRX64Tables) Never! {
     loop _ in 0..<m.types.len() {
         tables.debug_types.push(X64DebugType{name: "", size: 0, kind: X64DebugTypeKind.Opaque})
     }
@@ -335,7 +335,7 @@ ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
 }
 
 // The DWARF description of IR type row `row`.
-ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType Never! {
+ir_x64_debug_type: fn(m: IRModule, tables: ^IRX64Tables, shared: ^IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType Never! {
     if ir_alloc_served(m, row) == .Val(served) -> return ir_x64_debug_alloc(tables, served)
     if ir_x64_debug_variants(m, tables, shared, row, ty) == .Val(described) -> return described
     if ty.kind == {
@@ -424,12 +424,12 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
 // spells the type its block serves, of a pointer to the row its block
 // holds values laid out as (a List's elements, a struct's or tuple's
 // members), else to unknown bytes.
-ir_x64_debug_alloc: fn(tables: &IRX64Tables, served: IRAllocServed) -> X64DebugType Never! {
+ir_x64_debug_alloc: fn(tables: ^IRX64Tables, served: IRAllocServed) -> X64DebugType Never! {
     X64DebugType{name: served.name, size: 8, kind: X64DebugTypeKind.Typedef{target: ir_x64_debug_pointer(tables, served.held)}}
 }
 
 // A pointer to a runtime handle of two words named `first` and `second`.
-ir_x64_debug_handle: fn(tables: &IRX64Tables, name: String, first: String, second: String, first_ty: Int, second_ty: Int) -> Int Never! {
+ir_x64_debug_handle: fn(tables: ^IRX64Tables, name: String, first: String, second: String, first_ty: Int, second_ty: Int) -> Int Never! {
     members: [X64DebugMember]{X64DebugMember{name: first, offset: 0, ty: first_ty}, X64DebugMember{name: second, offset: 8, ty: second_ty}}
     handle: ir_x64_debug_add(tables, X64DebugType{name: name, size: 16, kind: X64DebugTypeKind.Struct{members: members}})
     ir_x64_debug_pointer(tables, handle)
@@ -441,7 +441,7 @@ ir_x64_debug_handle: fn(tables: &IRX64Tables, name: String, first: String, secon
 // variant: the value's own word (an inline Option), its own box pointer (a
 // boxed Option, null when absent), or, through a typedef of the box
 // pointer, the box's selector word at 0 (an enum, union or Result box).
-ir_x64_debug_variants: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType? Never! {
+ir_x64_debug_variants: fn(m: IRModule, tables: ^IRX64Tables, shared: ^IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType? Never! {
     list: m.debug_variants.get(row) ?? return None
     if list < 0 -> return None
     described: m.variant_lists[list]
@@ -476,7 +476,7 @@ ir_x64_debug_variants: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64Debug
 // payload member itself (a present Option's value, behind the box pointer
 // for a Pointer selector; a union's member), else a struct named as Jet
 // spells the variant whose members are its payload at their offsets.
-ir_x64_debug_arm: fn(tables: &IRX64Tables, shared: &IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
+ir_x64_debug_arm: fn(tables: ^IRX64Tables, shared: ^IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
     if variant.name == "" && variant.members.len() == 1 {
         held: variant.members[0]
         target: if held.boxed -> shared.pointer else -> held.ty
@@ -519,7 +519,7 @@ ir_x64_tables_start: fn(m: IRModule) -> IRX64Tables Never! {
     tables
 }
 
-ir_x64_tables_add_file: fn(tables: &IRX64Tables, f: IRFunction) Never! {
+ir_x64_tables_add_file: fn(tables: ^IRX64Tables, f: IRFunction) Never! {
     if f.source_file != "" && f.source_file != tables.last_file {
         tables.last_file = f.source_file
         if ir_x64_text_rows_get(tables.file_rows, tables.last_file) < 0 {
@@ -532,13 +532,13 @@ ir_x64_tables_add_file: fn(tables: &IRX64Tables, f: IRFunction) Never! {
 // Gives the uses of function `f`, the next in function order, their module
 // rows, adding its source file and the rows no function before it named;
 // returns the row of each use, for ir_x64_resolve.
-ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [Int] Never! {
+ir_x64_tables_add: fn(tables: ^IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [Int] Never! {
     rows := [Int]{}
     ir_x64_tables_add_into(tables, f, uses, rows)
     rows
 }
 
-ir_x64_tables_add_into: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses, rows: &[Int]) Never! {
+ir_x64_tables_add_into: fn(tables: ^IRX64Tables, f: IRFunction, uses: IRX64Uses, rows: ^[Int]) Never! {
     ir_x64_tables_add_file(tables, f)
     if rows.len() > 0 -> rows.clear()
     loop (at, kind) in uses.kinds {
@@ -590,7 +590,7 @@ ir_x64_use_rows: fn(tables: IRX64Tables, uses: IRX64Uses) -> [Int] Never! {
 // After every function's uses: a static object's address words (a data
 // row's address, or the String header a ConstText of the target row
 // reads) and the debug types.
-ir_x64_tables_finish: fn(m: IRModule, tables: &IRX64Tables) Never! {
+ir_x64_tables_finish: fn(m: IRModule, tables: ^IRX64Tables) Never! {
     loop row in 0..<m.data.len() {
         relocs: m.data_relocs.get(row) ?? next
         loop reloc in relocs {
@@ -606,7 +606,7 @@ ir_x64_tables_finish: fn(m: IRModule, tables: &IRX64Tables) Never! {
 // uses, resolves), the next in function order: a row only code on its way
 // to a stop reads is cold (X64Data.cold), so the object writer lays it
 // after what running code reads. Any order of the functions marks the same.
-ir_x64_tables_heat: fn(tables: &IRX64Tables, rows: [Int], hot: [Int], cold: [Int]) Never! {
+ir_x64_tables_heat: fn(tables: ^IRX64Tables, rows: [Int], hot: [Int], cold: [Int]) Never! {
     loop wanted in hot {
         row: if wanted >= IR_X64_LOCAL_DATA -> rows[wanted - IR_X64_LOCAL_DATA] else -> wanted
         if row < 0 || row >= tables.data.len() -> next
@@ -625,7 +625,7 @@ ir_x64_tables_heat: fn(tables: &IRX64Tables, rows: [Int], hot: [Int], cold: [Int
 
 // Points each data relocation of `function` at use k (data row
 // IR_X64_LOCAL_DATA + k) at `rows[k]`, the module's row of that use.
-ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
+ir_x64_resolve: fn(function: ^X64CompiledFunction, rows: [Int]) Never! {
     loop at in 0..<function.relocs.len() {
         if function.relocs[at].kind == X64_RELOC_DATA && function.relocs[at].target >= IR_X64_LOCAL_DATA {
             function.relocs[at].target = rows[function.relocs[at].target - IR_X64_LOCAL_DATA]
@@ -635,7 +635,7 @@ ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
 
 // Same as ir_x64_resolve, visiting only the local-data relocation indices
 // precomputed on the selecting worker thread.
-ir_x64_resolve_at: fn(function: &X64CompiledFunction, rows: [Int], local_relocs: [Int]) Never! {
+ir_x64_resolve_at: fn(function: ^X64CompiledFunction, rows: [Int], local_relocs: [Int]) Never! {
     loop at in local_relocs {
         if function.relocs[at].kind == X64_RELOC_DATA && function.relocs[at].target >= IR_X64_LOCAL_DATA {
             function.relocs[at].target = rows[function.relocs[at].target - IR_X64_LOCAL_DATA]
@@ -794,7 +794,7 @@ ir_x64_dying: fn(f: IRFunction) -> [Bool] Never! {
 
 // Adds a use of kind `kind` (naming IR data row `data` or text `text`, as
 // IRX64Uses keeps them), of `length` bytes; returns its local data row.
-ir_x64_add_use: fn(tables: &IRX64FunctionTables, kind: &&IRX64UseKind, data: Int, text: &&String, length: Int) -> Int Never! {
+ir_x64_add_use: fn(tables: ^IRX64FunctionTables, kind: ^^IRX64UseKind, data: Int, text: ^^String, length: Int) -> Int Never! {
     id: IR_X64_LOCAL_DATA + tables.uses.kinds.len()
     tables.uses.kinds.push(kind)
     tables.uses.data.push(data)
@@ -804,7 +804,7 @@ ir_x64_add_use: fn(tables: &IRX64FunctionTables, kind: &&IRX64UseKind, data: Int
 }
 
 // The local data row of selector text `text`, added on first use.
-ir_x64_use_text: fn(tables: &IRX64FunctionTables, text: String) -> Int Never! {
+ir_x64_use_text: fn(tables: ^IRX64FunctionTables, text: String) -> Int Never! {
     found: ir_x64_text_rows_get(tables.texts, text)
     if found >= 0 -> return found
     id: ir_x64_add_use(tables, IRX64UseKind.Text, -1, text.copy(), text.bytes().len())
@@ -820,7 +820,7 @@ ir_x64_use_length: fn(tables: IRX64FunctionTables, id: Int) -> Int Never! {
 // The process-lifetime String header [data, byte length, cap 0] over data
 // row `row`'s bytes, which the runtime recognizes as immortal: clone returns
 // it and drop ignores it. One per row.
-ir_x64_text_header: fn(tables: &IRX64Tables, row: Int) -> Int Never! {
+ir_x64_text_header: fn(tables: ^IRX64Tables, row: Int) -> Int Never! {
     if tables.headers[row] >= 0 -> return tables.headers[row]
     header: tables.data.len()
     bytes := [U8]{}
@@ -876,7 +876,7 @@ ir_x64_admit: fn(threads: CompilerThreads, count: Int, total: Int, ns_per_instru
 // the one-thread loop for any thread count. A thread that stops (an
 // internal panic) costs only the function it was selecting: that function
 // gets an error row and fresh threads select the rest.
-ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX64Result Never! {
+ir_x64_compile_module: fn(program: ^^IRModule, threads: CompilerThreads) -> IRX64Result Never! {
     ir_x64_compile_module_logged(program, threads, [String]{})
 }
 
@@ -884,7 +884,7 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
 // names (ir_x64_log_names) in IRX64Result.log, after the members of the
 // module's structs (IRModule.struct_fields), so a reader of the log names
 // the member an `offset` or `load` reaches.
-ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, names: [String], trace_sink: CompilerTraceSink?{None}) -> IRX64Result Never! {
+ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, names: [String], trace_sink: CompilerTraceSink?{None}) -> IRX64Result Never! {
     m := program.move()
     // A fast O0 module moves its Drops per body (Opt.jet ir_opt_o0_bodies,
     // or ir_x64_select_function_in's drop plan); its tail calls are jumps
@@ -1297,7 +1297,7 @@ ir_x64_fast_module_empty: fn() -> IRX64FastModule Never! {
     }
 }
 
-ir_x64_fast_intern_rt: fn(table: &IRX64TextRows, symbols: &[String], name: String) -> Int Never! {
+ir_x64_fast_intern_rt: fn(table: ^IRX64TextRows, symbols: ^[String], name: String) -> Int Never! {
     existing: ir_x64_text_rows_get(table, name)
     if existing >= 0 -> return existing
     id: symbols.len()
@@ -1573,7 +1573,7 @@ IRX64Selected: struct {
 // or `stops` the panic text of a thread that stopped on it. A stopped
 // thread's finished rows go with it and are selected again (selection is
 // deterministic), so a round that leaves rows behind has stopped on one.
-ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[IRX64FunctionResult?], stops: &[String]) {
+ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: ^[IRX64FunctionResult?], stops: ^[String]) {
     total: outputs.len()
     filled := 0
     loop {
@@ -1612,7 +1612,7 @@ ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[IRX
 }
 
 // The next round claims `rows`.
-ir_x64_reclaim: fn(inputs: Shared<IRX64Inputs>, rows: &&[Int]) {
+ir_x64_reclaim: fn(inputs: Shared<IRX64Inputs>, rows: ^^[Int]) {
     permit := inputs.guard_edit()
     permit.value.order = rows.move()
     permit.value.next.store(0)
@@ -1621,7 +1621,7 @@ ir_x64_reclaim: fn(inputs: Shared<IRX64Inputs>, rows: &&[Int]) {
 // Runs `tasks` claiming threads from seat `seat` on, one task each; returns
 // their selections. A stopped thread's function keeps its panic text in
 // `stops` (ir_x64_stopped).
-ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: &[String]) -> [[IRX64Selected]] {
+ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: ^[String]) -> [[IRX64Selected]] {
     if tasks <= 0 -> return [[IRX64Selected]]{}
     parts := [[IRX64Selected]]{}
     task.group ir_x64_threads {
@@ -1669,7 +1669,7 @@ ir_x64_claimed: fn(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
 }
 
 // A thread at `seat` stopped: the function it was selecting keeps the panic text.
-ir_x64_stopped: fn(inputs: Shared<IRX64Inputs>, seat: Int, failure: TaskFailure, stops: &[String]) -> [IRX64Selected] {
+ir_x64_stopped: fn(inputs: Shared<IRX64Inputs>, seat: Int, failure: TaskFailure, stops: ^[String]) -> [IRX64Selected] {
     reads: inputs.guard_read()
     row: reads.value.seats[seat].row.load()
     if row >= 0 {
@@ -1711,14 +1711,14 @@ IRX64ReachedPair: struct {
     debug: [X64FunctionDebug],
 }
 
-ir_x64_reached_pair: fn(functions_in: &&[X64CompiledFunction], debug_in: &&[X64FunctionDebug], roots: [Int], main: Bool) -> IRX64ReachedPair Never! {
+ir_x64_reached_pair: fn(functions_in: ^^[X64CompiledFunction], debug_in: ^^[X64FunctionDebug], roots: [Int], main: Bool) -> IRX64ReachedPair Never! {
     functions := functions_in.move()
     debug := debug_in.move()
     ir_x64_reached_only(functions, debug, roots, main)
     IRX64ReachedPair{functions: functions.move(), debug: debug.move()}
 }
 
-ir_x64_write_with_release: fn(owned_in: &&IRX64Result, program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool, split: Bool, ways: Int) -> X64ExecutableResult Never! {
+ir_x64_write_with_release: fn(owned_in: ^^IRX64Result, program: ^^X64ObjectModule, functions: ^^[X64CompiledFunction], debug: ^^[X64FunctionDebug], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool, split: Bool, ways: Int) -> X64ExecutableResult Never! {
     owned := owned_in.move()
     if ways <= 1 {
         return x64_object_functions_threads(program, functions, debug, exports, data_exports, threads, debug_info, own_sections, split)
@@ -1736,7 +1736,7 @@ ir_x64_write_with_release: fn(owned_in: &&IRX64Result, program: &&X64ObjectModul
     objects.pop() ?? panic("the object writer lost its object")
 }
 
-ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool, split: Bool{false}) -> X64ExecutableResult Never! {
+ir_x64_object: fn(compiled: ^^IRX64Result, debug_info: Bool, split: Bool{false}) -> X64ExecutableResult Never! {
     owned := compiled.move()
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
@@ -1787,7 +1787,7 @@ IRX64Program: struct {
 
 // The program of `compiled` (moved in, its rows moved on; the rest drops
 // here).
-ir_x64_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
+ir_x64_program: fn(compiled: ^^IRX64Result) -> IRX64Program Never! {
     owned := compiled.move()
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
@@ -1806,7 +1806,7 @@ ir_x64_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
 // beside its data, `main` and the functions it reaches with their debug
 // rows. `jet debug`'s `fix` swaps these into a running image (JetDebug
 // NativeFix.jet); their zone sites join no table, so they stay off.
-ir_x64_debug_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
+ir_x64_debug_program: fn(compiled: ^^IRX64Result) -> IRX64Program Never! {
     owned := compiled.move()
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
@@ -1827,14 +1827,14 @@ ir_x64_debug_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
 // Build.jet ir_build_held_root), has no `main`: its functions are those its
 // kept roots reach. Else why there are none: the compile's errors, or an
 // entry `main` can't run.
-ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) -> [String] Never! {
+ir_x64_main_rows: fn(owned: ^IRX64Result, functions: ^[X64CompiledFunction], debug: ^[X64FunctionDebug]) -> [String] Never! {
     errors := ir_x64_main_rows_collect(owned, functions, debug)
     if errors.len() > 0 -> return errors
     ir_x64_reached_only(functions, debug, owned.program.kept, owned.program.entry >= 0)
     [String]{}
 }
 
-ir_x64_main_rows_collect: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) -> [String] Never! {
+ir_x64_main_rows_collect: fn(owned: ^IRX64Result, functions: ^[X64CompiledFunction], debug: ^[X64FunctionDebug]) -> [String] Never! {
     if owned.errors.len() > 0 -> return compiler_take_rows<String>(owned.errors)
     entry: owned.program.entry
     if entry < 0 && owned.program.kept.len() > 0 {
@@ -1887,7 +1887,7 @@ ir_x64_zone_sites_id: fn(functions: [X64CompiledFunction]) -> X64FunctionID? Nev
 // x64_object_zone_sites), which turns them on when zones are (JetRuntime
 // PerfSamples.jet perf_zones_set). The table names each site by its
 // function, so the sites are where the link put their functions.
-ir_x64_zone_sites: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], id: X64FunctionID, name: String) Never! {
+ir_x64_zone_sites: fn(functions: ^[X64CompiledFunction], debug: ^[X64FunctionDebug], id: X64FunctionID, name: String) Never! {
     sites := [Int]{}
     loop function in functions {
         loop at in function.zones {
@@ -1905,7 +1905,7 @@ ir_x64_zone_sites: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionDeb
 // every body it inlined (ir_optimize_module), so a function whose calls were
 // all inlined has none left; a program object is one `.text`, which the
 // static link keeps whole, so its dead functions go here.
-ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], roots: [Int], main: Bool) Never! {
+ir_x64_reached_only: fn(functions: ^[X64CompiledFunction], debug: ^[X64FunctionDebug], roots: [Int], main: Bool) Never! {
     if functions.len() != debug.len() {
         panic("the object writer has {functions.len()} functions and {debug.len()} debug rows")
     }
@@ -2022,7 +2022,7 @@ ir_x64_release_ways: fn(program: IRModule, threads: CompilerThreads) -> Int Neve
 // Moves `compiled` into `released` in O(1): its IR functions list moves
 // whole, and `ir_x64_release_runs` splits it into `ways` chunks off the main
 // thread so x64_object_functions_threads starts immediately.
-ir_x64_release_fill: fn(released: Shared<IRX64Released>, compiled: &&IRX64Result, ways: Int) Never! {
+ir_x64_release_fill: fn(released: Shared<IRX64Released>, compiled: ^^IRX64Result, ways: Int) Never! {
     owned := compiled.move()
     all := compiler_take_rows<IRFunction>(owned.program.functions)
     permit: released.guard_edit()
@@ -2075,7 +2075,7 @@ ir_x64_release_pop_run: fn(released: Shared<IRX64Released>) -> [IRFunction] Neve
     permit.value.runs.pop() ?? [IRFunction]{}
 }
 
-ir_x64_release_push_runs: fn(released: Shared<IRX64Released>, chunks: &[[IRFunction]]) Never! {
+ir_x64_release_push_runs: fn(released: Shared<IRX64Released>, chunks: ^[[IRFunction]]) Never! {
     permit: released.guard_edit()
     loop chunks.len() > 0 {
         chunk := chunks.pop() ?? break
@@ -2116,7 +2116,7 @@ ir_x64_release_pop_rest: fn(released: Shared<IRX64Released>) -> [IRX64Result] Ne
 // function's instances, renamed together. A stem shared by more functions
 // than missing names (a drop or copy helper's) says nothing of which one
 // the list meant, and its functions stay cold.
-ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
+ir_x64_hot_order: fn(compiled: ^IRX64Result, hot: [String]) -> Int Never! {
     if hot.len() == 0 -> return 0
     ranks := IRX64TextRows{}
     loop (position, name) in hot {
@@ -2221,7 +2221,7 @@ ir_x64_hash_start: fn(symbol: String) -> Int Never! {
 // own, so a link keeps only what it reaches; past the section indices
 // ELF's headers hold (the Core library) the object numbers them through
 // section 0 and `.symtab_shndx`.
-ir_x64_library_globals: fn(program: IRModule, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], exports: [IRLibraryExport]) -> [X64RuntimeExport] Never! {
+ir_x64_library_globals: fn(program: IRModule, functions: ^[X64CompiledFunction], debug: ^[X64FunctionDebug], exports: [IRLibraryExport]) -> [X64RuntimeExport] Never! {
     globals := [X64RuntimeExport]{}
     globals.try_reserve(exports.len() + 1) ?? panic("reserve failed")
     loop row in exports {
@@ -2234,7 +2234,7 @@ ir_x64_library_globals: fn(program: IRModule, functions: &[X64CompiledFunction],
     globals
 }
 
-ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
+ir_x64_library_object: fn(compiled: ^^IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
     if owned.errors.len() > 0 {
         return X64ExecutableResult{bytes: [U8]{}, errors: compiler_take_rows<String>(owned.errors)}
@@ -2251,7 +2251,7 @@ ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], d
 // Same as ir_x64_library_object, borrowing `owned` so `owned.program` stays
 // intact when the caller still needs it for another partition (such as the
 // runtime's web partition after unblocking Core).
-ir_x64_library_object_into: fn(owned: &IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
+ir_x64_library_object_into: fn(owned: ^IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
     if owned.errors.len() > 0 {
         return X64ExecutableResult{bytes: [U8]{}, errors: compiler_take_rows<String>(owned.errors)}
     }
@@ -2273,7 +2273,7 @@ ir_x64_zone_sites_symbol: fn(m: IRModule) -> String Never! {
 // sources (taken) and per IR function its name as its source spells it
 // (ir_x64_member_name), file, line, debug variables (taken) and inline
 // sites.
-ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
+ir_x64_object_module: fn(owned: ^IRX64Result) -> X64ObjectModule Never! {
     // Popped in function order.
     variables := compiler_take_rows<[X64DebugVariable]>(owned.variables)
     variables.reverse()

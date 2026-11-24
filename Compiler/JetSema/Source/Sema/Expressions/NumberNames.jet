@@ -112,7 +112,7 @@ sema_expr_number_constant_refused: fn(name: String, required: Type, environment:
 // literal doesn't fit there either: the caller reads the name as usual and
 // reports the mismatch. `noted` when the caller already read the name at
 // `span` (an operator's left operand, read before its right one is known).
-sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: Type?, noted: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: Type?, noted: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaNumberNameRead {
     unhandled: SemaNumberNameRead{handled: false, value: None}
     wanted: expected ?? return unhandled
     // copy: the scope row keeps its literal for the name's other uses.
@@ -157,7 +157,7 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
 // the reference. Not handled for a constant of another module, one with a
 // written type, a mutable, `#Persist` or comptime one, or one whose value is
 // not a literal.
-sema_expr_number_constant_read: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+sema_expr_number_constant_read: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaNumberNameRead {
     read: sema_expr_number_constant_reread(name, span, index, expected, environment, program, scopes, state, context, diagnostics)
     if read.value != None {
         context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(environment, scopes, index), Val(SymbolKind.Constant)))
@@ -168,7 +168,7 @@ sema_expr_number_constant_read: fn(name: String, span: Span, index: Int, expecte
 // sema_expr_number_constant_read without noting the reference: the caller
 // already read the name at `span` (an operator's left operand, read before
 // its right one is known).
-sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaNumberNameRead {
     unhandled: SemaNumberNameRead{handled: false, value: None}
     wanted: expected ?? return unhandled
     symbol: sema_scope_binding_symbol(environment, scopes, index)
@@ -224,7 +224,7 @@ sema_expr_number_constant_row: fn(name: String, environment: SemaScopeEnvironmen
 // U8): the refusals the literal written at the use gets, reported at the use
 // and pointing at the number. Handled once one is reported; any other
 // refusal is the caller's ordinary mismatch.
-sema_expr_number_unfit: fn(name: String, span: Span, required: Type, literal: Expr, trial: [Diagnostic], diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+sema_expr_number_unfit: fn(name: String, span: Span, required: Type, literal: Expr, trial: [Diagnostic], diagnostics: ^[Diagnostic]) -> SemaNumberNameRead {
     reported := false
     if !sema_expr_is_numeric(required) && sema_expr_precise_name(required) == None {
         return SemaNumberNameRead{handled: false, value: None}
@@ -274,7 +274,7 @@ sema_expr_number_name_operand: fn(expr: Expr, environment: SemaScopeEnvironment,
 // sema_expr_number_constant_read): `price * rate` with `price: Float` and
 // `rate: 0.5` multiplies two Floats, as does `price * RATE` with a module
 // constant `RATE: 0.5`, and `total + price` makes a `:=` name `total` a Float.
-sema_expr_number_operand_read: fn(operand: Expr, other: Type, noted: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+sema_expr_number_operand_read: fn(operand: Expr, other: Type, noted: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaNumberNameRead {
     unhandled: SemaNumberNameRead{handled: false, value: None}
     if operand == .Ident(name, span, _) {
         index: sema_scope_resolve_index(scopes, name) ?? return unhandled
@@ -319,7 +319,7 @@ sema_expr_number_target_value_typed: fn(expr: Expr, environment: SemaScopeEnviro
 // at scope row `index` (sema_expr_number_target_open), whose value has the
 // type `offered` that the name's own type refuses, is a use of that type:
 // when the name's literal takes it, the next pass declares the name at it.
-sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) {
+sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext) {
     if !sema_expr_number_target_open(index, scopes, context) {
         return
     }
@@ -353,7 +353,7 @@ sema_expr_number_retype: fn(binding: Span, known: [SemaNumberRetype]) -> Type? N
 // The refusals found by a check pass become known decisions: the earliest
 // use of each binding not yet decided. Returns whether one was added, which is
 // when another pass is due.
-sema_expr_number_accept_retypes: fn(known: &[SemaNumberRetype], found: [SemaNumberRetype]) -> Bool Never! {
+sema_expr_number_accept_retypes: fn(known: ^[SemaNumberRetype], found: [SemaNumberRetype]) -> Bool Never! {
     known_before: known.len()
     loop retype in found {
         decided := -1
@@ -386,7 +386,7 @@ sema_expr_number_retype_conflict: fn(name: String, decided: SemaNumberRetype, wa
 // decided refuses (`count := 0`, made a U8 by `take8(count)`, then
 // `count = line.len()`): each E0108 reported since `since` at the written
 // value or at the name also points at the use that decided the type.
-sema_expr_number_label_write: fn(name: String, name_span: Span, value: Span, since: Int, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_expr_number_label_write: fn(name: String, name_span: Span, value: Span, since: Int, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
     index: sema_scope_resolve_index(scopes, name) ?? return
     if !scopes.bindings[index].mutable || scopes.bindings[index].number_literal == None {
         return

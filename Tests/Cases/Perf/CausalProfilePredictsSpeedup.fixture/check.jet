@@ -147,7 +147,7 @@ COLUMNS: 13
 // at its kind's LENS_PARTS (by `kinds`, its experiment's kind: 0 a
 // baseline, 1 the narrow line's, 2 the wide line's); false when it is no
 // whole round within one experiment.
-take_round: fn(group: [[Int]], kinds: [Int], parts: &[[Int]]) -> Bool {
+take_round: fn(group: [[Int]], kinds: [Int], parts: ^[[Int]]) -> Bool {
     if group.len() != 4 -> return false
     ordinal: group[0][3]
     loop row in group {
@@ -392,7 +392,7 @@ Comparison: struct {
 // Else a truth that holds the control's gain cannot tell it from the
 // lens: no truth. Else the lens claimed a gain no control can check,
 // which fails.
-file_control: fn(verdict: &Comparison, claims: [LineCheck], what: String, loose: String?) {
+file_control: fn(verdict: ^Comparison, claims: [LineCheck], what: String, loose: String?) {
     claimless := [String]{}
     loop line in claims {
         if line.low <= 0 && line.high >= 0 {

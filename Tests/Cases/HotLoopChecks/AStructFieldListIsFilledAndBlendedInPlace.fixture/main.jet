@@ -1,4 +1,4 @@
-// A canvas whose list fields its loops fill and blend through `&Canvas`:
+// A canvas whose list fields its loops fill and blend through `^Canvas`:
 // each field is made its own once, before its loop, the fills are one
 // reduction each, and a checked conversion `?? fallback` takes the fallback
 // for every value outside the target, on every tier.
@@ -48,15 +48,15 @@ show_words: fn(xs: [U32]) -> String {
     text
 }
 
-fill_bytes: fn(canvas: &Canvas, value: Int) {
+fill_bytes: fn(canvas: ^Canvas, value: Int) {
     loop i in 0..<canvas.bytes.len() -> canvas.bytes[i] = U8{value}
 }
 
-fill_words: fn(canvas: &Canvas, value: U32) {
+fill_words: fn(canvas: ^Canvas, value: U32) {
     loop i in 0..<canvas.words.len() -> canvas.words[i] = value
 }
 
-#Overflow(.Wrapping) blend_words: fn(canvas: &Canvas, source: Int, alpha: Int) {
+#Overflow(.Wrapping) blend_words: fn(canvas: ^Canvas, source: Int, alpha: Int) {
     sw: checked(U64{source}) ?? U64{0}
     a: checked(U64{alpha}) ?? U64{0}
     inv: U64{255} - a

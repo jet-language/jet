@@ -75,12 +75,12 @@ CBindingMetadata: struct {
         CBindingMetadata{handle_facts: [FFIHandleFact]{}, link_closure: FFILinkClosure.empty()}
     }
 
-    add_handle: fn(&self, fact: FFIHandleFact) Never! {
+    add_handle: fn(^self, fact: FFIHandleFact) Never! {
         self.handle_facts.push(fact.copy())
         self.handle_facts = pkg_cffi_sorted_facts(self.handle_facts)
     }
 
-    add_closure: fn(&self, closure: FFILinkClosure) Never! {
+    add_closure: fn(^self, closure: FFILinkClosure) Never! {
         direct := self.link_closure.direct
         loop library in closure.direct -> direct.push(library.copy())
         transitive := self.link_closure.transitive

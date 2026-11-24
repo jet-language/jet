@@ -15,7 +15,7 @@ use jet_foundation.[Type, compiler_threads_single]
 
 // `glue` is ir_opt_glue_table's: per type row, its glue function or -1;
 // `light` ir_opt_glue_light's.
-ir_opt_glue_calls: fn(f: &IRFunction, glue: [Int], light: [Bool]) Never! {
+ir_opt_glue_calls: fn(f: ^IRFunction, glue: [Int], light: [Bool]) Never! {
     in_glue: (f.name == "drop" || f.name == IR_LAST_OWNER) && f.source_file == ""
     // Open Loops around `at` (an End's `a` is its opener).
     loops := 0
@@ -74,7 +74,7 @@ ir_opt_glue_site: fn(m: IRModule, f: IRFunction, key: String, at: Int) -> Bool N
     slot >= 0 && m.types[f.slot_type[slot]].drop == key
 }
 
-ir_opt_glue_drops: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
+ir_opt_glue_drops: fn(f: ^IRFunction, m: IRModule, keys: [String]) Never! {
     loop at in 0..<f.op.len() {
         if f.op[at] != .Call -> next
         callee: f.a[at]

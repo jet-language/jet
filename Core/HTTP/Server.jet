@@ -210,7 +210,7 @@ HTTPHandler: struct {
     }
 }
 
-__handler: fn(call: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
+priv __handler: fn(call: ^^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
     HTTPHandler{__cell: Shared{HTTPHandlerCell{call: call.move()}}}
 }
 
@@ -348,20 +348,20 @@ priv route_add_custom: fn(mux: HTTPMux, method: String, pattern: String, handler
 // `spool` piece by piece as it reads it, never holding it whole: the request
 // the handler gets has an empty body, and `__spooled` names the place the
 // spool opened for it.
-__route_add_admitted: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, admit: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!, spool: &&HTTPSpool, at: SourceLocation) Never! {
+priv __route_add_admitted: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, admit: ^^fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!, spool: ^^HTTPSpool, at: SourceLocation) Never! {
     route_add(mux, method, pattern, handler, "", at)
     guard := mux.__state.guard_edit()
     guard.value.admits.push(HTTPAdmitRow{method: method, pattern: pattern, cell: Shared{HTTPAdmitCell{check: admit.move(), spool: spool.move()}}})
 }
 
 // A middleware layer: the first registered layer is the outermost.
-priv layer_add: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! {
+priv layer_add: fn(mux: HTTPMux, layer: ^^fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! {
     guard := mux.__state.guard_edit()
     guard.value.layers.push(Shared{HTTPLayerCell{wrap: layer.move()}})
 }
 
 // A middleware layer outside every layer added so far.
-priv layer_add_outermost: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! {
+priv layer_add_outermost: fn(mux: HTTPMux, layer: ^^fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! {
     guard := mux.__state.guard_edit()
     guard.value.layers.insert(0, Shared{HTTPLayerCell{wrap: layer.move()}})
 }
@@ -460,7 +460,7 @@ HTTPServer: struct {
                         // The stream reaches its task in a one-item list,
                         // as it reaches the TLS handshake.
                         handoff: Shared{[TCPStream]{stream}}
-                        connection: task &&handoff {
+                        connection: task ^^handoff {
                             serve_admitted(state, handoff, peer, tls, mux, deadline)
                         }
                         connection.detach()
@@ -679,7 +679,7 @@ priv admit_refusing: fn(state: Shared<HTTPServerState>, peer: String) -> Bool Ne
 }
 
 // One connection of `peer` gives its count back.
-priv peer_leave: fn(state: &HTTPServerState, peer: String) Never! {
+priv peer_leave: fn(state: ^HTTPServerState, peer: String) Never! {
     held: state.peers.get(peer) ?? 1
     if held <= 1 -> _: state.peers.remove(peer) else -> state.peers[peer] = held - 1
 }
@@ -693,7 +693,7 @@ priv serve_admitted: fn(state: Shared<HTTPServerState>, handoff: Shared<[TCPStre
 
 // A connection taken once accepting work stopped: within the limits, its own
 // task answers it 503 (or the readiness probe); past them, it is refused now.
-priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) -[Net, FS.Read, Time]> Never! {
+priv take_while_draining: fn(server: HTTPServer, stream: ^^TCPStream) -[Net, FS.Read, Time]> Never! {
     peer: peer_host(stream)
     if admit_refusing(server.__state, peer) {
         state: server.__state
@@ -701,7 +701,7 @@ priv take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) -[Net, FS.
         tls: server.__tls
         deadline: server.__deadline
         handoff: Shared{[TCPStream]{stream}}
-        refusal: task &&handoff { serve_refusing(state, handoff, peer, tls, mux, deadline) }
+        refusal: task ^^handoff { serve_refusing(state, handoff, peer, tls, mux, deadline) }
         refusal.detach()
     } else { refuse(stream, server.__tls) }
 }
@@ -741,7 +741,7 @@ priv settle: fn(state: Shared<HTTPServerState>, peer: String, refusing: Bool, an
 }
 
 // A connection over the limits: a plain one is told 503, then closed.
-priv refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) -[Net, Time]> Never! {
+priv refuse: fn(stream: ^^TCPStream, tls: HTTPServerTLS?) -[Net, Time]> Never! {
     plain := true
     if tls == .Val(_) -> plain = false
     if plain {
@@ -756,7 +756,7 @@ priv refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) -[Net, Time]> Never! {
     }
 }
 
-__live: fn(state: Shared<HTTPServerState>) -> Int Never! {
+priv __live: fn(state: Shared<HTTPServerState>) -> Int Never! {
     guard: state.guard_read()
     guard.value.live
 }
@@ -802,7 +802,7 @@ priv mux_new: fn() -> HTTPMux Never! {
 // Has the first server that serves `mux`, by `serve` or `serve_once`, run
 // `start` as it begins, once: a web app's schedules start so, and a table a
 // server is only bound over starts nothing.
-__on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
+priv __on_serve: fn(mux: HTTPMux, start: ^^fn() -[Time]> Never!) Never! {
     guard := mux.__state.guard_edit()
     guard.value.starts.push(start.move())
 }
@@ -811,7 +811,7 @@ __on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
 // it stops serving, after its drain, with the milliseconds left of the
 // drain budget: a web app's jobs wait so long for the jobs that run. A
 // `serve_once` connection runs none, as nothing drains it.
-__on_stop: fn(mux: HTTPMux, stop: &&fn(Int) -[Time]> Never!) Never! {
+priv __on_stop: fn(mux: HTTPMux, stop: ^^fn(Int) -[Time]> Never!) Never! {
     guard := mux.__state.guard_edit()
     guard.value.stops.push(stop.move())
 }
@@ -820,7 +820,7 @@ __on_stop: fn(mux: HTTPMux, stop: &&fn(Int) -[Time]> Never!) Never! {
 // request it upgraded to a WebSocket returns, so after the connection that
 // handler held is closed: a web app's live hub so learns which bindings no
 // open connection watches any more.
-__on_upgraded: fn(mux: HTTPMux, ended: &&fn() -[Time]> Never!) Never! {
+priv __on_upgraded: fn(mux: HTTPMux, ended: ^^fn() -[Time]> Never!) Never! {
     guard := mux.__state.guard_edit()
     guard.value.upgraded.push(Shared{HTTPUpgradedCell{ended: ended.move()}})
 }
@@ -932,7 +932,7 @@ response: fn(status: Int, body: String) -> HTTPResponse Never! {
 }
 
 // Head policy stays in Jet: an out-of-range status is a 500.
-response_body: fn(status: Int, body: &&Body, headers: &&Headers) -> HTTPResponse Never! {
+response_body: fn(status: Int, body: ^^Body, headers: ^^Headers) -> HTTPResponse Never! {
     if status < 100 || status > 599 {
         return core.http.make_response(500, core.http.body_text(status_text(500)), headers)
     }
@@ -1056,7 +1056,7 @@ access_log_path: fn(path: String) -> String Never! {
     String.from_bytes(raw.slice(0, end)) ?? panic("query separator is not a UTF-8 boundary")
 }
 
-cors_join: fn(values: [String], fallback: &&String) -> String Never! {
+cors_join: fn(values: [String], fallback: ^^String) -> String Never! {
     if values.len() == 0 -> return fallback
     result := ""
     loop i in 0..<values.len() {
@@ -1153,7 +1153,7 @@ priv dispatch_shielded: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> 
     reply
 }
 
-__dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+priv __dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     tagged: with_request_id(mux, request)
     layers: mux_layers(mux)
     current := __handler(fn(routed: HTTPRequest) { select(mux, routed) })
@@ -1721,7 +1721,7 @@ priv HTTPSecure: struct {
 // The accepted stream, which the connection now owns, after the server
 // handshake within the connection budget when the server has a TLS identity;
 // None drops a failed handshake.
-priv accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> HTTPConn? Never! {
+priv accept_conn: fn(stream: ^^TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> HTTPConn? Never! {
     peer: peer_host(stream)
     if tls == .Val(identity) {
         budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
@@ -1859,7 +1859,7 @@ priv server_answer: fn(server: Shared<HTTPServerState>?, mux: HTTPMux, request: 
     None
 }
 
-__send: fn(stream: HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
+priv __send: fn(stream: HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
     remaining: end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return false
     if stream.tls == .Val(secure) -> return secure.write_all(bytes, Duration{ns: remaining})
@@ -1874,7 +1874,7 @@ __send: fn(stream: HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool N
 
 // Append what the peer sends next; false at end of stream. Both streams
 // append with read_into, so a connection's reads reuse their buffers.
-priv wire_fill: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> Bool HTTPFault! {
+priv wire_fill: fn(stream: HTTPConn, wire: ^HTTPWire) -[Net, Time.Wait]> Bool HTTPFault! {
     remaining: wire.end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return Err(.Reply(408))
     if stream.tls == .Val(secure) {
@@ -1899,7 +1899,7 @@ priv wire_fill: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> Bool HT
 }
 
 // Fill until `need` bytes are buffered; a short stream is a bad request.
-priv wire_need: fn(stream: HTTPConn, wire: &HTTPWire, need: Int) -[Net, Time.Wait]> HTTPFault! {
+priv wire_need: fn(stream: HTTPConn, wire: ^HTTPWire, need: Int) -[Net, Time.Wait]> HTTPFault! {
     loop wire.buffer.len() < need {
         more: wire_fill(stream, wire) ?? return Err(err)
         if !more -> return Err(.Reply(400))
@@ -1908,7 +1908,7 @@ priv wire_need: fn(stream: HTTPConn, wire: &HTTPWire, need: Int) -[Net, Time.Wai
 }
 
 // The index of the CRLF ending the line at `from`, filling as needed.
-priv wire_line: fn(stream: HTTPConn, wire: &HTTPWire, from: Int) -[Net, Time.Wait]> Int HTTPFault! {
+priv wire_line: fn(stream: HTTPConn, wire: ^HTTPWire, from: Int) -[Net, Time.Wait]> Int HTTPFault! {
     at := crlf_at(wire.buffer, from)
     loop at < 0 {
         if wire.buffer.len() - from > C_MAX_LINE_BYTES -> return Err(.Reply(400))
@@ -1949,7 +1949,7 @@ priv field_line: fn(raw: [U8]) -> Header? Never! {
 
 // One request off the wire. When a route of `mux` admits requests by their
 // head (`mux_admit`), the head is checked before the body is read.
-priv read_request: fn(stream: HTTPConn, wire: &HTTPWire, mux: HTTPMux) -[Net, FS.Read, Time]> HTTPRequest HTTPFault! {
+priv read_request: fn(stream: HTTPConn, wire: ^HTTPWire, mux: HTTPMux) -[Net, FS.Read, Time]> HTTPRequest HTTPFault! {
     split := http.find_double_crlf(wire.buffer)
     loop split < 0 {
         if wire.buffer.len() > C_MAX_HEAD_BYTES -> return Err(.Reply(431))
@@ -2071,7 +2071,7 @@ priv read_request: fn(stream: HTTPConn, wire: &HTTPWire, mux: HTTPMux) -[Net, FS
 // A spooled body (`spool_pass`) after the head that ends at `start`: its
 // `length` bytes, or its chunks when `chunked`; the trailers of a chunked
 // one.
-priv spool_read: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, length: Int, chunked: Bool, declared: [String], limit: Int, to: HTTPSpoolTo) -[Net, FS.Read, Time.Wait]> Headers? HTTPFault! {
+priv spool_read: fn(stream: HTTPConn, wire: ^HTTPWire, start: Int, length: Int, chunked: Bool, declared: [String], limit: Int, to: HTTPSpoolTo) -[Net, FS.Read, Time.Wait]> Headers? HTTPFault! {
     if chunked {
         decoded: read_chunked(stream, wire, start, declared, limit, Val(to)) ?? return Err(err)
         return Ok(Val(decoded.trailers))
@@ -2133,7 +2133,7 @@ priv chunk_size: fn(line: [U8]) -> Int? Never! {
 // chunks would pass `limit`, before the chunk that would is read. Without
 // `spool` the body is held; with it each chunk goes to the spool as it
 // arrives (`spool_pass`) and the body given is empty.
-priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [String], limit: Int, spool: HTTPSpoolTo?) -[Net, FS.Read, Time.Wait]> HTTPChunked HTTPFault! {
+priv read_chunked: fn(stream: HTTPConn, wire: ^HTTPWire, start: Int, declared: [String], limit: Int, spool: HTTPSpoolTo?) -[Net, FS.Read, Time.Wait]> HTTPChunked HTTPFault! {
     at := start
     body := [U8]{}
     total := 0
@@ -2170,7 +2170,7 @@ priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [
 // the spool as they arrive, so the buffer never holds more than one read of
 // them, then keeps only what follows them in the buffer. Gives where that
 // starts: 0. A spool that can't take a piece is a 500.
-priv spool_pass: fn(stream: HTTPConn, wire: &HTTPWire, at: Int, count: Int, to: HTTPSpoolTo) -[Net, FS.Read, Time.Wait]> Int HTTPFault! {
+priv spool_pass: fn(stream: HTTPConn, wire: ^HTTPWire, at: Int, count: Int, to: HTTPSpoolTo) -[Net, FS.Read, Time.Wait]> Int HTTPFault! {
     from := at
     left := count
     loop left > 0 {
@@ -2219,7 +2219,7 @@ priv error_wire: fn(status: Int) -[Time]> [U8] Never! {
     "HTTP/1.1 {status} {http.reason_phrase(status)}\r\nDate: {imf_now()}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".bytes()
 }
 
-priv push_text: fn(out: &[U8], text: String) Never! {
+priv push_text: fn(out: ^[U8], text: String) Never! {
     loop b in text.bytes() -> out.push(b)
 }
 
@@ -2522,7 +2522,7 @@ priv range_unsatisfiable: fn(total: Int, fields: Headers) -> HTTPResponse Never!
 // ---------------------------------------------------------------------------
 // Text helpers and the IMF-fixdate clock
 
-__hex: fn(value: Int) -> String Never! {
+priv __hex: fn(value: Int) -> String Never! {
     if value <= 0 -> return "0"
     digits := [U8]{}
     n := value

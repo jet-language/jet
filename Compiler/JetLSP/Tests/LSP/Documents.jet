@@ -11,7 +11,7 @@ use jet_lsp.[
     lsp_update_document,
 ]
 
-lsp_test_change: fn(state: &LSPDiagnosticState, uri: String, version: Int, changes: String) -> String? Never! {
+lsp_test_change: fn(state: ^LSPDiagnosticState, uri: String, version: Int, changes: String) -> String? Never! {
     params: lsp_test_json("{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":{version}}},\"contentChanges\":{changes}}}")
     lsp_update_document(state, Val(params), is_open: false)
 }
@@ -149,4 +149,35 @@ LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
     params: lsp_test_field(clear, "params")
     assert_eq(lsp_test_rows(lsp_test_field(params, "diagnostics")).len(), 0)
     assert(lsp_member(params, "version") == None, "a clear of a closed document has no version")
+}
+
+#Test("a pulled report carries the document's diagnostics, and an unchanged one only its id") {
+    server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"diagnostic\":{{}}}}}}}}")
+    assert(server.pull_diagnostics, "a client that pulls diagnostics is not pushed them")
+    uri: "file:///w/broken.jet"
+    lsp_test_open(server, uri, LSP_TEST_BROKEN)
+    full: lsp_test_result(server, "textDocument/diagnostic", "{{{lsp_test_text_document(uri)}}}")
+    assert_eq(lsp_test_text(full, "kind"), "full")
+    assert(lsp_test_rows(lsp_test_field(full, "items")).len() > 0, "the broken fixture's diagnostics are reported")
+    result_id: lsp_test_text(full, "resultId")
+    same: lsp_test_result(server, "textDocument/diagnostic", "{{{lsp_test_text_document(uri)},\"previousResultId\":\"{result_id}\"}}")
+    assert_eq(lsp_test_text(same, "kind"), "unchanged")
+    assert_eq(lsp_test_text(same, "resultId"), result_id)
+    assert(lsp_member(same, "items") == None, "an unchanged report repeats no items")
+    // Once fixed, the report is full again, empty, under a new id.
+    assert_eq(lsp_test_change(server.diagnostic_state, uri, 2, "[{{\"text\":\"run: fn() {{}}\\n\"}}]"), Val(uri))
+    fixed: lsp_test_result(server, "textDocument/diagnostic", "{{{lsp_test_text_document(uri)},\"previousResultId\":\"{result_id}\"}}")
+    assert_eq(lsp_test_text(fixed, "kind"), "full")
+    assert_eq(lsp_test_rows(lsp_test_field(fixed, "items")).len(), 0)
+    fixed_id: lsp_test_text(fixed, "resultId")
+    assert(fixed_id != result_id, "a different report has a different id")
+    // The workspace report names each open document with its version.
+    lsp_test_open(server, "file:///w/other.jet", LSP_TEST_BROKEN)
+    previous: "{{\"previousResultIds\":[{{\"uri\":\"{uri}\",\"value\":\"{fixed_id}\"}}]}}"
+    reports := [String]{}
+    loop report in lsp_test_rows(lsp_test_field(lsp_test_result(server, "workspace/diagnostic", previous), "items")) {
+        reports.push("{lsp_test_text(report, "uri")} v{lsp_test_int(report, "version")} {lsp_test_text(report, "kind")}")
+    }
+    assert_eq(reports, [String]{"file:///w/broken.jet v2 unchanged", "file:///w/other.jet v1 full"})
 }

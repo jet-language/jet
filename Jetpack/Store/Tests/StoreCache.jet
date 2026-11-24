@@ -346,7 +346,7 @@ use {
 
 // Run `argv` in a child that `lease` is passed to, rendering each argument
 // and the optional PATH for exactly that child.
-store_test_run_leased: fn(lease: &CacheLease, argv: [LeaseText], path: LeaseText?) -[FS, Env, Exec]> ProcessReceipt {
+store_test_run_leased: fn(lease: ^CacheLease, argv: [LeaseText], path: LeaseText?) -[FS, Env, Exec]> ProcessReceipt {
     planned := LeaseBinding.empty()
     lease.plan_binding(planned)
     rendered := [String]{}
@@ -416,7 +416,7 @@ store_test_run_leased: fn(lease: &CacheLease, argv: [LeaseText], path: LeaseText
 // process handoff), and let it go. It is never waited on, because a wait
 // kills the child's whole process group. Its spec holds the passed locks
 // open until it is dropped, which happens here.
-store_test_spawn_leased_detached: fn(lease: &CacheLease, argv: [String]) -[FS, Env, Exec]> {
+store_test_spawn_leased_detached: fn(lease: ^CacheLease, argv: [String]) -[FS, Env, Exec]> {
     bound := LeaseBinding.empty()
     spec: lease.keep_open_for(process.cmd(argv), bound) ?? panic("pass lease: {err.message()}")
     if spec.detached().spawn() == {
@@ -428,7 +428,7 @@ store_test_spawn_leased_detached: fn(lease: &CacheLease, argv: [String]) -[FS, E
 // The verified hit's lease alone, with the hit dropped here: a hit still in
 // scope keeps its own reference to a lease consumed out of it, and with it
 // the live lock, until that scope ends.
-store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> CacheLease Never! {
+store_test_verified_lease: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -> CacheLease Never! {
     hit := (if store_find_verified_by_reference(verification, roots, entry.reference, store_test_expectation(entry.out)) == {
         .Ok(found) -> found
         .Err(error) -> panic("lookup")

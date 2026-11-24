@@ -33,13 +33,13 @@ ImportPlan: struct {
         }
     }
 
-    retain_provider_facts: fn(&self, facts: ProviderFacts) Never! {
+    retain_provider_facts: fn(^self, facts: ProviderFacts) Never! {
         self.retain_provider_facts_with_source(facts, "")
     }
 
     // Keep `facts` under its reference, merging into an existing record, and
     // surface every loss and conflict as a finding at `source_path`.
-    retain_provider_facts_with_source: fn(&self, facts: ProviderFacts, source_path: String) Never! {
+    retain_provider_facts_with_source: fn(^self, facts: ProviderFacts, source_path: String) Never! {
         self.record_fact_findings(facts, source_path)
         reference: facts.reference
         existing := self.provider_facts.get(reference) ?? {
@@ -75,7 +75,7 @@ ImportPlan: struct {
     }
 
     // One finding per loss and conflict of `facts`.
-    record_fact_findings: fn(&self, facts: ProviderFacts, source_path: String) Never! {
+    record_fact_findings: fn(^self, facts: ProviderFacts, source_path: String) Never! {
         loop loss in facts.losses {
             self.record_provider_finding(cli_import_source_path_for_finding(loss.source, source_path), "provider fact `{loss.key}` is lossy: {loss.reason}; migration remains unresolved")
         }
@@ -85,7 +85,7 @@ ImportPlan: struct {
     }
 
     // A data-only finding, recorded once.
-    record_provider_finding: fn(&self, source_path: String, message: String) Never! {
+    record_provider_finding: fn(^self, source_path: String, message: String) Never! {
         todo: ImportTodo{source_path: source_path, message: message, suggested_surface: None}
         if !self.todos.contains(todo) -> self.todos.push(todo)
     }

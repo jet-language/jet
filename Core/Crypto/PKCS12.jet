@@ -62,7 +62,7 @@ fill_block: fn(filler: [U8], v: Int) -> [U8] Never! {
 }
 
 /// block += addend, as `v`-byte big-endian numbers modulo 2^(8v).
-add_block: fn(block: &[U8], addend: [U8], v: Int) Never! {
+add_block: fn(block: ^[U8], addend: [U8], v: Int) Never! {
     carry := 0
     loop k in 0..<v {
         i: v - 1 - k
@@ -147,7 +147,7 @@ parse_pbe_params: fn(data: [U8], params: asn1.ASN1Buf) -> PBEParams pkcs5.PBEErr
 }
 
 /// Wipe `secret` and pass `e` on.
-refuse: fn(secret: &[U8], e: pkcs5.PBEError) -> [U8] pkcs5.PBEError! {
+refuse: fn(secret: ^[U8], e: pkcs5.PBEError) -> [U8] pkcs5.PBEError! {
     core.crypto.wipe(secret)
     Err(e)
 }

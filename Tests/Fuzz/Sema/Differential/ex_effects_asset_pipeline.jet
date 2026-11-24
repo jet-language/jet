@@ -7,21 +7,21 @@ Image: struct {
 }
 
 // normalize: edit in place — caller keeps ownership
-normalize: fn(img: &Image) {
+normalize: fn(img: ^Image) {
     img.gamma = 2.2
     img.format = "sRGB"
     print("normalized: {img.format} gamma={img.gamma}")
 }
 
 // resize: edit width/height in place
-resize: fn(img: &Image, w: Int, h: Int) {
+resize: fn(img: ^Image, w: Int, h: Int) {
     img.width = w
     img.height = h
     print("resized to {img.width}x{img.height}")
 }
 
 // encode: consumes the image, returns a compressed label
-encode: fn(img: &&Image) -> String { "encoded({img.format} {img.width}x{img.height})" }
+encode: fn(img: ^^Image) -> String { "encoded({img.format} {img.width}x{img.height})" }
 
 run: fn() {
     img := Image{width: 3840, height: 2160, format: "raw", gamma: 1.0}

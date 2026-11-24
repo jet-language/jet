@@ -99,12 +99,12 @@ CanvasDebugHost: trait {
     building: fn(self, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never!,
     // Give `live`, the image of `entry`, the evaluator of its program at the
     // level the image was built at.
-    evaluate: fn(self, live: &NativeSession, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never!,
+    evaluate: fn(self, live: ^NativeSession, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never!,
     // Make `live`, the image `image` of `entry`, replay the recording
     // `recording` names, as `jet debug --replay` does, with `scratch` its
     // scratch directory, putting the program arguments it was made with in
     // `args`; the refusal of one that can't be replayed, as rendered.
-    replay: fn(self, live: &NativeSession, image: String, recording: String, entry: String, scratch: String, args: &[String]) -[FS, Env, Time.Wait]> CanvasDebugError!,
+    replay: fn(self, live: ^NativeSession, image: String, recording: String, entry: String, scratch: String, args: ^[String]) -[FS, Env, Time.Wait]> CanvasDebugError!,
 }
 
 // One live session: the source id and revision it is bound to, the scratch
@@ -222,7 +222,7 @@ CanvasDebugSessions: struct {
     // the debugger (SIGKILL, which nothing it runs can catch) ends it
     // disconnected; one that fails otherwise ends it and answers its
     // transcript.
-    run: fn(&self, host: CanvasDebugHost, file: String, source_id: String, revision: String, requested: String?, tier: CanvasDebugTier, commands: [String], breakpoints: [Int], folded: [String], reads: [CanvasDebugRead]) -> CanvasDebugRun CanvasDebugError! {
+    run: fn(^self, host: CanvasDebugHost, file: String, source_id: String, revision: String, requested: String?, tier: CanvasDebugTier, commands: [String], breakpoints: [Int], folded: [String], reads: [CanvasDebugRead]) -> CanvasDebugRun CanvasDebugError! {
         if requested == None -> self.evict()
         id: if requested == {
             .Val(wanted) -> wanted
@@ -310,7 +310,7 @@ CanvasDebugSessions: struct {
     // bound to another source or revision is stale and ends; one on another
     // tier than `tier` names, or whose command history would overflow,
     // stays.
-    resume: fn(&self, id: String, source_id: String, revision: String, tier: CanvasDebugTier, count: Int) -> CanvasDebugSession CanvasDebugError! {
+    resume: fn(^self, id: String, source_id: String, revision: String, tier: CanvasDebugTier, count: Int) -> CanvasDebugSession CanvasDebugError! {
         session := self.sessions.remove(id) ?? return Err(canvas_debug_error("session", "debug session is no longer live; start a new session"))
         if session.source_id != source_id || session.revision != revision {
             canvas_debug_close(session)
@@ -330,7 +330,7 @@ CanvasDebugSessions: struct {
     }
 
     // Make room for one more session: the oldest ends when all are taken.
-    evict: fn(&self) {
+    evict: fn(^self) {
         if self.sessions.len() < CANVAS_DEBUG_MAX_SESSIONS {
             return
         }
@@ -350,7 +350,7 @@ CanvasDebugSessions: struct {
     // or naming another tier than the session's, is refused and the session
     // kept; a session older than the source ends, and the stop says it was
     // stale.
-    stop: fn(&self, id: String, revision: String, current_revision: String, tier: CanvasDebugTier) -> String CanvasDebugError! {
+    stop: fn(^self, id: String, revision: String, current_revision: String, tier: CanvasDebugTier) -> String CanvasDebugError! {
         session: self.sessions.get(id) ?? return Err(canvas_debug_error("session", "debug session is no longer live; nothing to stop"))
         if revision != current_revision && session.revision != revision {
             return Err(canvas_debug_error("conflict", "debug stop request is stale; the live session was kept"))
@@ -368,13 +368,13 @@ CanvasDebugSessions: struct {
     }
 
     // End session `id`, if it is live.
-    release: fn(&self, id: String) {
+    release: fn(^self, id: String) {
         session := self.sessions.remove(id) ?? return
         canvas_debug_close(session)
     }
 
     // End every session: the host has stopped.
-    release_all: fn(&self) {
+    release_all: fn(^self) {
         ids := [String]{}
         loop entry in self.sessions -> ids.push(entry.key)
         loop id in ids -> self.release(id)
@@ -524,7 +524,7 @@ canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, na
 // session's transcript, and answer the move it made the program take
 // (NativeDebugStep.moved). A session whose program has ended runs nothing;
 // a dump's reads what it holds, as `jet debug <dump>` does, and never moves.
-canvas_debug_step: fn(session: &CanvasDebugSession, input: String) -> String NativeDebugError! {
+canvas_debug_step: fn(session: ^CanvasDebugSession, input: String) -> String NativeDebugError! {
     if session.stop.kind != NativeStopKind.Paused -> return Ok("")
     if canvas_debug_tier_name(session) == CANVAS_DEBUG_DUMP {
         answer: native_dump_command(session.live, input, session.events, session.jet_file, session.jet_lines) ?? return Err(err)
@@ -541,7 +541,7 @@ canvas_debug_step: fn(session: &CanvasDebugSession, input: String) -> String Nat
 // the run's path: a `step` or `next` that stays in its frame adds the line
 // it reached to the session's trail, any other move starts the trail again
 // at its stop, and a command that runs nothing keeps it.
-canvas_debug_follow: fn(session: &CanvasDebugSession, input: String) NativeDebugError! {
+canvas_debug_follow: fn(session: ^CanvasDebugSession, input: String) NativeDebugError! {
     left: session.stop.frame
     moved: canvas_debug_step(session, input) ?? return Err(err)
     if moved == "" -> return Ok()
@@ -568,7 +568,7 @@ canvas_debug_follow: fn(session: &CanvasDebugSession, input: String) NativeDebug
 }
 
 // End a session's program, and delete its image (a dump's has none).
-canvas_debug_close: fn(session: &CanvasDebugSession) {
+canvas_debug_close: fn(session: ^CanvasDebugSession) {
     session.live.close()
     if session.dir != "" -> canvas_debug_remove(session.dir)
 }
@@ -583,7 +583,7 @@ canvas_debug_remove: fn(dir: String) {
 // Answer one debug request the listener handed the host's request loop,
 // with `host` for a session it opens. A refused request is a 409 carrying
 // its jet.canvas.debug error.
-canvas_debug_answer: fn(debugs: &CanvasDebugSessions, host: CanvasDebugHost, state: Shared<CanvasHostState>, file: String, source_id: String, taken: CanvasHostEdit) {
+canvas_debug_answer: fn(debugs: ^CanvasDebugSessions, host: CanvasDebugHost, state: Shared<CanvasHostState>, file: String, source_id: String, taken: CanvasHostEdit) {
     if canvas_debug_payload(debugs, host, state, file, source_id, taken.body) == {
         .Ok(answer) -> {
             taken.reply.send(CanvasHostReply{status: 200, body: canvas_machine_output("canvas.debug", true, answer.document)})
@@ -597,7 +597,7 @@ canvas_debug_answer: fn(debugs: &CanvasDebugSessions, host: CanvasDebugHost, sta
 // The answer to `body`, a request about the entry `file` (whose source id
 // is `entry_source`), placed on the graph `state` holds, with `host` for a
 // session it opens.
-canvas_debug_payload: fn(debugs: &CanvasDebugSessions, host: CanvasDebugHost, state: Shared<CanvasHostState>, file: String, entry_source: String, body: String) -> CanvasDebugAnswer CanvasDebugError! {
+canvas_debug_payload: fn(debugs: ^CanvasDebugSessions, host: CanvasDebugHost, state: Shared<CanvasHostState>, file: String, entry_source: String, body: String) -> CanvasDebugAnswer CanvasDebugError! {
     parsed: foundation_json_parse(body) ?? return Err(canvas_debug_error("bad_request", "Canvas debug request is not JSON: {err.message}"))
     request: canvas_debug_request(parsed.move())
     revision: request.revision ?? return Err(canvas_debug_error("bad_request", "missing `revision`"))
@@ -813,7 +813,7 @@ CanvasDebugRequest: struct {
 
 // The request `value` is, taken out of it; anything but an object reads as
 // one with no members.
-canvas_debug_request: fn(value: &&Dyn) -> CanvasDebugRequest Never! {
+canvas_debug_request: fn(value: ^^Dyn) -> CanvasDebugRequest Never! {
     request := CanvasDebugRequest{schema_version: -1, revision: None, source_id: None, tier: None, session_id: None, recording: None, dump: None, stop: false, commands: [String]{}, breakpoints: [Int]{}, anchors: [String]{}, watches: [String]{}, folded: [String]{}, reads: [CanvasDebugRead]{}}
     if value.move() == .Object(members) {
         fields := members
@@ -844,13 +844,13 @@ canvas_debug_request: fn(value: &&Dyn) -> CanvasDebugRequest Never! {
     request
 }
 
-canvas_debug_text: fn(value: &&Dyn) -> String? Never! {
+canvas_debug_text: fn(value: ^^Dyn) -> String? Never! {
     if value.move() == .Text(text) -> return Val(text)
     None
 }
 
 // The strings of an array, in order, taken out of it.
-canvas_debug_texts: fn(value: &&Dyn) -> [String] Never! {
+canvas_debug_texts: fn(value: ^^Dyn) -> [String] Never! {
     items := if value.move() == {
         .Array(list) -> list
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [Dyn]{}
@@ -866,7 +866,7 @@ canvas_debug_texts: fn(value: &&Dyn) -> [String] Never! {
 
 // The reads of a request's `reads` array, in order; an item that is not an
 // object reads as one with no members, which names no kind.
-canvas_debug_reads: fn(value: &&Dyn) -> [CanvasDebugRead] Never! {
+canvas_debug_reads: fn(value: ^^Dyn) -> [CanvasDebugRead] Never! {
     items := if value.move() == {
         .Array(list) -> list
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [Dyn]{}
@@ -1188,7 +1188,7 @@ canvas_debug_newest: fn(lines: [String]) -> CanvasDebugList Never! {
 
 // The machine panels of `session`'s stop (CanvasDebugPanels): the ones
 // `folded` leaves open, and the answer to each of `reads`, in order.
-canvas_debug_panels: fn(session: &CanvasDebugSession, folded: [String], reads: [CanvasDebugRead]) -> CanvasDebugPanels NativeDebugError! {
+canvas_debug_panels: fn(session: ^CanvasDebugSession, folded: [String], reads: [CanvasDebugRead]) -> CanvasDebugPanels NativeDebugError! {
     at := NativePanelFrame?{None}
     if native_panel_frame(session.live) == {
         .Ok(found) -> { at = found }
@@ -1223,7 +1223,7 @@ canvas_debug_panels: fn(session: &CanvasDebugSession, folded: [String], reads: [
 // the same frame at the previous stop and its value then differed. A
 // frame is keyed by its canonical frame address and inlined run, which
 // another task's frames and the task's other frames don't share.
-canvas_debug_registers: fn(session: &CanvasDebugSession, at: NativePanelFrame?) -> String Never! {
+canvas_debug_registers: fn(session: ^CanvasDebugSession, at: NativePanelFrame?) -> String Never! {
     frame: at ?? {
         session.seen_frame = ""
         return ""
@@ -1269,7 +1269,7 @@ canvas_debug_listed_json: fn(row: NativeListedRow, pc: Int) -> String Never! {
 // `d` the debugger's own), the offsets of the words that point into mapped
 // memory, the locals each row of CANVAS_DEBUG_MEMORY_ROW bytes starts,
 // the values `as` a number type, and where it stopped short.
-canvas_debug_read_json: fn(session: &CanvasDebugSession, read: CanvasDebugRead, pc: Int) -> String NativeDebugError! {
+canvas_debug_read_json: fn(session: ^CanvasDebugSession, read: CanvasDebugRead, pc: Int) -> String NativeDebugError! {
     if read.kind == "disassembly" {
         rows := [String]{}
         loop row in native_listing_window(session.live, native_memory_address(read.from) ?? 0, read.skip, read.count) {

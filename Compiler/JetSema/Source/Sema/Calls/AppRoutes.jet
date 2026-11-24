@@ -166,7 +166,7 @@ sema_app_no_screen: fn(state: String, span: Span) -> Diagnostic {
 // query, signed_in, open)`, where `open` is the screen's opener
 // (`sema_app_screen_opener`), checked with no effect bound
 // (`sema_app_screen_callback`).
-sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
     positional := [CallArg]{}
@@ -304,7 +304,7 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
 // mounted method's answer is (`sema_app_mount_callback`): a view may use
 // whatever its package's authority allows, its reads and its Remotes' calls
 // among them, and the framework runs it on a request worker.
-sema_app_screen_callback: fn(opener: Expr, callback_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+sema_app_screen_callback: fn(opener: Expr, callback_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TCallArg? {
     argument := sema_http_mount_arg(opener, span)
     unbounded: if {
         callback_type == .Fn(params, ret, _, contract, metadata, provenance) -> Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
@@ -328,7 +328,7 @@ sema_app_reply_key: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: 
 
 // `graph.cache<V>(policy)` on an `app.App`: lowers the call to
 // `graph.__cache<V>(key, policy)`, `key` naming `V` (`sema_app_reply_key`).
-sema_call_app_cache: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_app_cache: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if type_args.len() != 1 {
@@ -359,7 +359,7 @@ SEMA_APP_ADDRESS_TEXT: "__address_text"
 // state's fields' address text in field order, so the sitemap takes each
 // listed state's address as `url_of` does. The sitemap lists only states
 // whose screen opens for a caller who is not signed in (app.sitemap).
-sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_app_sitemap: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 1 {
@@ -430,7 +430,7 @@ SEMA_APP_HEAD: "__head"
 // (`sema_app_state_made`), as `current<V>()` makes it; the registration's
 // parameter checks that `head` gives an `app.Head`. A page asks the
 // function for the state at its address, so `V` derives `Decode`.
-sema_call_app_head: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_app_head: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 1 {
@@ -563,7 +563,7 @@ sema_app_lambda: fn(params: [LambdaParam], value: Expr, span: Span) -> Expr Neve
 // `graph.api<S>(path, max_upload:)` on an `app.App`: lowers to
 // `graph.__api<S>(path, key, max_upload)`, where `key` names `S`, the key
 // `App.__remote<S>` finds the service by.
-sema_call_app_api: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_app_api: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
     shape: "`.api<S>(path, max_upload:)` declares the service `S` its clients reach at `path`"
@@ -610,7 +610,7 @@ sema_call_app_api: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], 
 
 // A method of the app graph the compiler lowers: `.screen`, `.api`,
 // `.mount` of a service, `.cache<V>`, `.sitemap` and `.head`.
-sema_call_app_graph_method: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_app_graph_method: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if method == {
         "screen" -> sema_call_app_screen(receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "api" -> sema_call_app_api(receiver, receiver_value, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -631,7 +631,7 @@ sema_call_app_graph_method: fn(receiver: Expr, receiver_value: TExpr, method: St
 // and `notify` to `alias.App.__notify(to, title, body, address)`, or to
 // `alias.App.__notify_here(title, body, address)` without `to:`, and `go`
 // opens it: `alias.App.__go<V>(key, fields, texts)`.
-sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     rejected: SemaDirectSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return rejected
     if type_args.len() != 0 {
@@ -765,7 +765,7 @@ sema_app_notify_here: fn(args: [CallArg]) -> Bool Never! {
 // open now when it is a `V`, `alias.App.__current<V>(key, fn(graph, fields)
 // { made })`, where `made` is the state made from the address's field texts
 // (`sema_app_state_made`).
-sema_call_app_current: fn(alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_app_current: fn(alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     rejected: SemaDirectSpecialCheck{handled: true, value: None}
     graph: program.registration_graph ?? return rejected
     if args.len() != 0 {

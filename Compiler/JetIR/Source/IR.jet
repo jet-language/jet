@@ -778,7 +778,7 @@ ir_interner_live: fn(table: Interner) -> Bool Never! {
 // Interns `ty` directly into a standalone IRModule's interner (used by IR
 // unit tests and post-merge helpers that have no IRProgram), giving the
 // module the compilation's rows first.
-ir_module_intern_tid: fn(m: &IRModule, ty: Type) -> TypeID Never! {
+ir_module_intern_tid: fn(m: ^IRModule, ty: Type) -> TypeID Never! {
     if m.interner.len() == 0 -> m.interner.push(interner())
     type_intern_syntax(m.interner[0], ty)
 }
@@ -823,7 +823,7 @@ ir_module_row_identity: fn(m: IRModule, row: Int) -> String Never! {
 // Finalizes a single-module IR build: the program's interner `base` becomes
 // the module's, with `m.type_delta` merged into it and `m.types` remapped.
 // A standalone program's empty interner leaves the module its own.
-ir_module_finalize_interner: fn(m: &IRModule, base: &&Interner) Never! {
+ir_module_finalize_interner: fn(m: ^IRModule, base: ^^Interner) Never! {
     if !ir_interner_live(base) -> return
     m.interner = [Interner]{base.move()}
     if m.type_delta.len() > 0 {
@@ -842,7 +842,7 @@ ir_module_finalize_interner: fn(m: &IRModule, base: &&Interner) Never! {
 // Frees every per-part build memo that ir_merge never reads (everything
 // except functions, types, names, data, debug metadata, host_literals, and
 // function_rows for drop-glue lookup).
-ir_module_drop_build_memos: fn(m: &IRModule) Never! {
+ir_module_drop_build_memos: fn(m: ^IRModule) Never! {
     m.type_rows_keys = name_column_table()
     m.type_rows = name_column()
     m.key_rows_keys = name_column_table()
@@ -899,7 +899,7 @@ ir_kind_name: fn(kind: IRTypeKind) -> String Never! {
 }
 
 // The row of `row`'s type, interned by its kind, layout and display key.
-ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
+ir_intern_type: fn(m: ^IRModule, key: String, row: IRType) -> Int Never! {
     hash: name_text_hash(key)
     listed: name_column_get_hashed(m.key_rows_keys, m.key_rows, key, hash) ?? -1
     if listed >= 0 {
@@ -951,7 +951,7 @@ ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: S
     made
 }
 
-ir_intern_name: fn(m: &IRModule, text: String) -> Int Never! {
+ir_intern_name: fn(m: ^IRModule, text: String) -> Int Never! {
     hash: name_text_hash(text)
     found: name_column_get_hashed(m.name_rows_keys, m.name_rows, text, hash) ?? -1
     if found >= 0 -> return found
@@ -962,7 +962,7 @@ ir_intern_name: fn(m: &IRModule, text: String) -> Int Never! {
 }
 
 // A read-only data row holding `text`'s bytes (shared by equal texts).
-ir_intern_text: fn(m: &IRModule, text: String) -> Int Never! {
+ir_intern_text: fn(m: ^IRModule, text: String) -> Int Never! {
     hash: name_text_hash(text)
     found: name_column_get_hashed(m.data_rows_keys, m.data_rows, text, hash) ?? -1
     if found >= 0 -> return found
@@ -974,7 +974,7 @@ ir_intern_text: fn(m: &IRModule, text: String) -> Int Never! {
 
 // A read-only data row holding `bytes` (shared by equal byte strings: keyed
 // by length and digest, linear in the bytes however large the table).
-ir_intern_bytes: fn(m: &IRModule, bytes: [U8]) -> Int Never! {
+ir_intern_bytes: fn(m: ^IRModule, bytes: [U8]) -> Int Never! {
     key: "bytes:{bytes.len()}:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
     hash: name_text_hash(key)
     found: name_column_get_hashed(m.data_rows_keys, m.data_rows, key, hash) ?? -1
@@ -987,7 +987,7 @@ ir_intern_bytes: fn(m: &IRModule, bytes: [U8]) -> Int Never! {
 
 // Records `message` as the failure of helper `key`, which every later use
 // of the helper reports again (ir_helper_error).
-ir_helper_failed: fn(m: &IRModule, key: String, message: String) Never! {
+ir_helper_failed: fn(m: ^IRModule, key: String, message: String) Never! {
     name_column_set(m.helper_errors_keys, m.helper_errors, key, m.helper_messages.len())
     m.helper_messages.push(message.copy())
 }
@@ -1011,7 +1011,7 @@ ir_keyed_function: fn(m: IRModule, key: String) -> Int? Never! {
 }
 
 // Binds function `key` to `id` in `m`, replacing any earlier id.
-ir_function_bind: fn(m: &IRModule, key: String, id: Int) Never! {
+ir_function_bind: fn(m: ^IRModule, key: String, id: Int) Never! {
     name_column_set(m.function_rows_keys, m.function_rows, key, id)
 }
 
@@ -1048,7 +1048,7 @@ ir_function_new: fn(name: String, key: String, symbol: String, source_file: Stri
 }
 
 // A new slot of type row `ty`; parameters must be added first, in order.
-ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> Int Never! {
+ir_slot: fn(f: ^IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> Int Never! {
     id: f.slot_type.len()
     f.slot_type.push(ty)
     f.slot_kind.push(kind.copy())
@@ -1061,7 +1061,7 @@ ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> 
     id
 }
 
-ir_emit: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
+ir_emit: fn(f: ^IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
     at: f.op.len()
     f.op.push(op.copy())
     f.dst.push(dst)
@@ -1117,32 +1117,32 @@ ir_code_line_at: fn(line: Int, site: Int) -> Int Never! {
 }
 
 // Appends an operand list to the args pool; returns its start.
-ir_args: fn(f: &IRFunction, values: [Int]) -> Int Never! {
+ir_args: fn(f: ^IRFunction, values: [Int]) -> Int Never! {
     start: f.args.len()
     loop value in values -> f.args.push(value)
     start
 }
 
 // Opens a Block or Loop; ir_end closes the innermost open construct.
-ir_open: fn(f: &IRFunction, op: IROp, line: Int) -> Int Never! {
+ir_open: fn(f: ^IRFunction, op: IROp, line: Int) -> Int Never! {
     at: ir_emit(f, op, -1, -1, -1, -1, line)
     f.open.push(at)
     at
 }
 
-ir_open_if: fn(f: &IRFunction, condition: Int, line: Int) -> Int Never! {
+ir_open_if: fn(f: ^IRFunction, condition: Int, line: Int) -> Int Never! {
     at: ir_emit(f, IROp.If, -1, condition, -1, -1, line)
     f.open.push(at)
     at
 }
 
 // The Else of the innermost open If.
-ir_else: fn(f: &IRFunction, line: Int) Never! {
+ir_else: fn(f: ^IRFunction, line: Int) Never! {
     opener: f.open[f.open.len() - 1]
     f.b[opener] = ir_emit(f, IROp.Else, -1, -1, -1, -1, line)
 }
 
-ir_end: fn(f: &IRFunction, line: Int) Never! {
+ir_end: fn(f: ^IRFunction, line: Int) Never! {
     opener: f.open.pop() ?? panic("ir_end without an open construct")
     end: ir_emit(f, IROp.End, -1, opener, -1, -1, line)
     if f.op[opener] == .If {

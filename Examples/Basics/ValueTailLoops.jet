@@ -33,7 +33,7 @@ above: fn(values: [Int], limit: Int) -> [Int] {
     loop value in values if value > floor -> value
 }
 
-log_all: fn(log: &[String], names: [String]) {
+log_all: fn(log: ^[String], names: [String]) {
     loop name in names -> log.push(name.copy())
 }
 
@@ -98,9 +98,9 @@ Writer: struct {
     bytes: [Int],
 }
 
-put: fn(writer: &Writer, value: Int) { writer.bytes.push(value) }
+put: fn(writer: ^Writer, value: Int) { writer.bytes.push(value) }
 
-write_shape: fn(writer: &Writer, value: Shape) {
+write_shape: fn(writer: ^Writer, value: Shape) {
     if value == {
         .Many(items) -> {
             put(writer, 1)
@@ -117,7 +117,7 @@ write_shape: fn(writer: &Writer, value: Shape) {
     }
 }
 
-write_checked: fn(writer: &Writer, value: Shape) Never! {
+write_checked: fn(writer: ^Writer, value: Shape) Never! {
     if value == {
         .Many(items) -> {
             loop item in items -> put(writer, item)

@@ -117,7 +117,7 @@ jet_cli_storage_choices: fn(functions: [FnBody]) -> [JetCLIChoice] Never! {
 // The inlining choices: one per inlined call site, at the call's line. A
 // caller with no source file is Core's or generated, and the report lists
 // the program's own code, as the copies and placement choices do.
-jet_cli_inline_choices: fn(rows: [IROptInlined], out: &[JetCLIChoice]) Never! {
+jet_cli_inline_choices: fn(rows: [IROptInlined], out: ^[JetCLIChoice]) Never! {
     loop row in rows {
         if row.file == "" -> next
         choice: JetCLIChoice{kind: "inlining", file: row.file.copy(), line: row.line, function: row.caller.copy(), choice: "{row.callee} inlined: {row.reason}"}
@@ -129,7 +129,7 @@ jet_cli_inline_choices: fn(rows: [IROptInlined], out: &[JetCLIChoice]) Never! {
 // binding sema moves into a scoped collector (FunctionMemory.jet), with the
 // policy scope that allows it and why, and each binding that takes a
 // collected value its call returns.
-jet_cli_collection_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+jet_cli_collection_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
     loop function in functions {
         if function.synthetic -> next
         loop statement in function.tree.stmts {
@@ -152,7 +152,7 @@ jet_cli_collection_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never!
 // The copies choices of `functions`, at the function's line: each share
 // and each materialized copy sema records in the program's own code, naming
 // the local it copies.
-jet_cli_copy_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+jet_cli_copy_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
     loop function in functions {
         if function.synthetic || module_is_core(function.module_identity) -> next
         loop node in function.tree.nodes {
@@ -176,7 +176,7 @@ jet_cli_copy_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
 // The placement choices of the program's own `functions`, at the function's
 // line: the web bucket each is in and why, when the program opts in to the
 // web partition (sema stamps `web_reason` only then).
-jet_cli_placement_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+jet_cli_placement_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
     loop function in functions {
         if function.synthetic || function.web_reason == "" || module_is_core(function.module_identity) {
             next
@@ -194,7 +194,7 @@ jet_cli_placement_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! 
 
 // The exposure choices of the program's own `functions`, at the function's
 // line: each method a route marker makes an endpoint, with the marker.
-jet_cli_exposure_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+jet_cli_exposure_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
     loop function in functions {
         if function.synthetic || function.endpoint == "" || module_is_core(function.module_identity) {
             next
@@ -207,7 +207,7 @@ jet_cli_exposure_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
 // The rights choices of the program's own `functions`, at the function's
 // line: each method a server-only app marker runs as the system, with the
 // marker.
-jet_cli_rights_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+jet_cli_rights_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
     loop function in functions {
         if function.synthetic || function.system_run == "" || module_is_core(function.module_identity) {
             next
@@ -222,7 +222,7 @@ jet_cli_rights_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
 // reads them. `context.scratch` names where values are made, as an
 // allocator guard does, so it is no read (as in JetSema
 // sema_effect_record_context).
-jet_cli_context_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+jet_cli_context_choices: fn(functions: [FnBody], out: ^[JetCLIChoice]) Never! {
     loop function in functions {
         if function.synthetic || module_is_core(function.module_identity) -> next
         read := [String]{}
@@ -250,7 +250,7 @@ jet_cli_context_key_name: fn(key: String) -> String Never! { "`{symbol_key_leaf(
 // line: each filter, with the SQL condition its table reads by, or why it
 // reads the whole table. A filter is a call of Core's source
 // `__query_filter`, whose declaration `decls` names by its function key.
-jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, out: &[JetCLIChoice]) Never! {
+jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, out: ^[JetCLIChoice]) Never! {
     filters := [String]{}
     loop function in functions {
         if function.name == "__query_filter" && module_is_core(function.module_identity) {
@@ -319,7 +319,7 @@ jet_cli_policy_choice_text: fn(policy_name: String, join_spec: String) -> String
 // line: each `Table.guard(policy)` call lowered to `Table.__guard_plan`,
 // naming whether its read path compiles into queries as a SQL join or runs
 // per row, memoized per key in the transaction.
-jet_cli_policy_choices: fn(functions: [FnBody], _decls: DeclTable, _symbols: SymbolTable, out: &[JetCLIChoice]) Never! {
+jet_cli_policy_choices: fn(functions: [FnBody], _decls: DeclTable, _symbols: SymbolTable, out: ^[JetCLIChoice]) Never! {
     loop function in functions {
         if function.synthetic || module_is_core(function.module_identity) -> next
         loop node in function.tree.nodes {

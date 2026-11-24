@@ -1,0 +1,79 @@
+// Every mark position in the older spelling: `&self`, `&&buf` and `fn(&T)`
+// in a comment's code spans; a bare & in prose stays.
+#Policy(writes: .Explicit)
+
+Counter: struct {
+    hits: Int,
+    log: [String],
+
+    bump: fn(&self.hits) { self.hits += 1 }
+
+    record: fn(&self.[log, hits], msg: &&String) {
+        &self.bump()
+        self.log.push(msg)
+    }
+
+    finish: fn(&&self) -> [String] { self.log }
+}
+
+Step: struct {
+    edit: fn(&[Int]) -> Int,
+    keep: fn(&&[Int]) -> Int,
+}
+
+Shape: enum {
+    Dot(Int),
+    Line(Int),
+}
+
+grow: fn(items: &[Int]) { &items.push(4) }
+
+stretch: fn(shape: &Shape) {
+    if &shape == {
+        .Dot(size) -> size += 1
+        .Line(size) -> size += 2
+    }
+}
+
+total: fn(values: &&[Int]) -> Int {
+    sum := 0
+    loop value in values -> sum += value
+    sum
+}
+
+bits: fn(a: Int, b: Int, ok: Bool, done: Bool) -> Int {
+    mask := a & b
+    mask &= b
+    mask &~= 1
+    if ok && done -> return mask & 3
+    if ok &&done -> return a&b
+    mask
+}
+
+run: fn() {
+    xs := [Int]{1, 2, 3}
+    grow(&xs)
+    &xs.push(5)
+    window: &xs[0..<2]
+    first: &window[0]
+    first = 9
+    title: "draft"
+    keep: fn(words: &&[Int]) -> Int { words.len() }
+    print(keep(&&[Int]{7}))
+    owned: [3, 4]
+    task.group adding {
+        added: task &&owned { total(owned) }
+        print(added.join() ?? panic("adding failed"))
+    }
+    source: `edit: fn(xs: &[Int]) { &xs.push(1) }`
+    quoted: "take: fn(buf: &&Buffer) -> Int"
+    hint: "write `&self` here, or `{title}` && more"
+    html: "&amp; &lt;b&gt; R&D a & b"
+    rust: "Rust's &mut T"
+    c: "static void f(int *p) {{ g(&p); }}"
+    lines: "job: Job{{id: 7}}\ntask &&job {{ job.run() }}\n&xs.push(1)"
+    // A written `&` parameter and a taken `&&` one.
+    // The operators `&&` and `||` stay.
+    label: "the write-access marker `&`"
+    print("{source} {quoted} {hint} {html} {rust} {c} {lines} {label}")
+}

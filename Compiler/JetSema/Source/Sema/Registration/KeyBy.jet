@@ -32,7 +32,7 @@ use jet_foundation.[
 
 // E0502 when `key` declares an error or an effect. False when one was
 // reported, so the contract check doesn't report the same result again.
-sema_key_by_pure: fn(owner_name: String, methods: [Func], diagnostics: &[Diagnostic]) -> Bool {
+sema_key_by_pure: fn(owner_name: String, methods: [Func], diagnostics: ^[Diagnostic]) -> Bool {
     pure := true
     loop method in methods {
         if method.name != "key" -> next
@@ -61,7 +61,7 @@ sema_key_by_unstable: fn(what: String, span: Span) -> Diagnostic {
 // on the KeyBy type `owner_name` of this module, labeled at its KeyBy
 // implementation; E0502 when the type holds a value that changes in place,
 // or when its key comes back to it.
-sema_key_by_alone: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, key_span: Span, diagnostics: &[Diagnostic]) {
+sema_key_by_alone: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, key_span: Span, diagnostics: ^[Diagnostic]) {
     caller: sema_type_module_row(graph, module_row.module_identity)
     owner: sema_type_resolve_nominal_row_at(graph, Type.Named{name: owner_name}, caller)
     key_fields: if owner == .Val(found) -> sema_key_by_key_fields(graph, found, module_row.program.items, owner_name) else -> None
@@ -93,7 +93,7 @@ sema_key_by_alone: fn(graph: SemaRegistrationGraph, module_row: SemaRegistration
 
 // Whether the key type `ty`, followed through the keys of the KeyBy types it
 // holds, reaches the nominal `owner`.
-sema_key_by_reaches: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRowRef, ty: Type, caller: Int, visited: &[String:Bool]) -> Bool {
+sema_key_by_reaches: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRowRef, ty: Type, caller: Int, visited: ^[String:Bool]) -> Bool {
     if ty == .List(inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
     if ty == .Option(inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
     if ty == .Tagged(_, inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
@@ -115,7 +115,7 @@ sema_key_by_reaches: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRow
     false
 }
 
-sema_key_by_declaration: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, item: Item, markers: [Marker], owner_name: String, key_span: Span, owner: SemaRegistrationRowRef?, key_fields: [Int]?, diagnostics: &[Diagnostic]) {
+sema_key_by_declaration: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, item: Item, markers: [Marker], owner_name: String, key_span: Span, owner: SemaRegistrationRowRef?, key_fields: [Int]?, diagnostics: ^[Diagnostic]) {
     loop block in sema_registration_item_trait_blocks(item) {
         if block.compiler_generated || block.trait_name == "KeyBy" || !owned_trait_implies("KeyBy", block.trait_name) {
             next
@@ -291,7 +291,7 @@ sema_key_by_rule_migration: fn(graph: SemaRegistrationGraph, written: SemaWritte
 // Pushes the declared type and the `self` read of each stored field of the
 // struct `nominal` onto `types` and `reads`; false for an enum, a struct
 // with no stored field, or one with a field named `equal_by_rule`.
-sema_key_by_all_fields: fn(source: String, nominal: SemaRegistrationNominal, types: &[String], reads: &[String]) -> Bool {
+sema_key_by_all_fields: fn(source: String, nominal: SemaRegistrationNominal, types: ^[String], reads: ^[String]) -> Bool {
     if nominal.source == .SourceAST(item) {
         if item == .Struct(definition) {
             loop field in definition.fields {
@@ -357,7 +357,7 @@ sema_key_by_dedent: fn(text: String) -> String Never! { text.replace("\n    ", "
 // in the file it is written in. A call sema can't rewrite, such as a direct
 // call of the method or one in generated source, drops the whole fix, so no
 // call keeps an answer the fix would change.
-sema_complete_call_rewrites: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) {
+sema_complete_call_rewrites: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: ^[Diagnostic]) {
     loop index in 0..<diagnostics.len() {
         rewrite: diagnostics[index].fix_calls ?? next
         edits := [TextEdit]{}
@@ -370,7 +370,7 @@ sema_complete_call_rewrites: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
 
 // Pushes onto `edits` each `==` and `!=` site of `modules` that `rewrite`
 // changes; false when one of them can't be rewritten.
-sema_call_rewrite_edits: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rewrite: DiagnosticCallRewrite, edits: &[TextEdit]) -> Bool {
+sema_call_rewrite_edits: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rewrite: DiagnosticCallRewrite, edits: ^[TextEdit]) -> Bool {
     loop module_result in modules {
         loop fact in module_result.call_facts {
             callee: fact.callee ?? next
@@ -419,7 +419,7 @@ SemaKeyByPath: struct {
 // walked from the struct at `row` (sema_key_by_path_fields): `equal`
 // returning `self.p == rhs.p`, or `compare` returning
 // `self.p.compare(rhs.p)`, where `rhs` is its other parameter.
-sema_key_by_written_path: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, methods: [Func], fields: &[Int]) -> SemaKeyByPath? {
+sema_key_by_written_path: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, methods: [Func], fields: ^[Int]) -> SemaKeyByPath? {
     if methods.len() != 1 || methods[0].body.len() != 1 || methods[0].params.len() == 0 {
         return None
     }
@@ -439,7 +439,7 @@ sema_key_by_written_path: fn(graph: SemaRegistrationGraph, row: SemaRegistration
 // The written path `path` and the last field it reads. A field is spanned
 // at its member, so the path's text runs from its `self`
 // (expr_source_span).
-sema_key_by_path_at: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, path: Expr, fields: &[Int]) -> SemaKeyByPath? {
+sema_key_by_path_at: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, path: Expr, fields: ^[Int]) -> SemaKeyByPath? {
     last: sema_key_by_path_fields(graph, row, path, fields) ?? return None
     Val(SemaKeyByPath{span: expr_source_span(path), last: last})
 }
@@ -461,7 +461,7 @@ sema_key_by_same_path: fn(left: Expr, right: Expr, other: String) -> Bool {
 // index of each stored field it reads onto `fields`, outermost first, and
 // gives the last one. None when `path` is no such path, or when a struct on
 // the way is declared in another module than `row`'s.
-sema_key_by_path_fields: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, path: Expr, fields: &[Int]) -> SemaKeyByField? {
+sema_key_by_path_fields: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, path: Expr, fields: ^[Int]) -> SemaKeyByField? {
     if path == .Field(base, member, _, _) {
         holder := row
         if base == .Ident(root, _, _) {
@@ -532,7 +532,7 @@ sema_key_by_code_end: fn(source: String, offset: Int) -> Int {
 
 // The first Shared, Cell, Atomic, weak or runtime-handle type `ty` holds at
 // any depth, through the fields of the declared types it names.
-sema_key_by_changing: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, visited: &[String:Bool]) -> String? {
+sema_key_by_changing: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, visited: ^[String:Bool]) -> String? {
     if ty == {
         .Shared(_) -> Val(type_name(ty))
         .Named(name) -> {
@@ -588,7 +588,7 @@ sema_key_by_changing: fn(graph: SemaRegistrationGraph, module_identity: ModuleID
     }
 }
 
-sema_key_by_changing_item: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, visited: &[String:Bool]) -> String? {
+sema_key_by_changing_item: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, visited: ^[String:Bool]) -> String? {
     if item == .Struct(definition) {
         loop field in definition.fields {
             if field.computed != None -> next

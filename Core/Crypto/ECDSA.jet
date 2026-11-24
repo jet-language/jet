@@ -84,7 +84,7 @@ usable_group: fn(grp: ecp.EcpGroup) -> Bool Never! { ecdsa_can_do(grp.id) && grp
 /// multiplication, and the inverse by the constant-time inverse. As in
 /// mbedtls, s = t (e + r d) / (k t) mod N, so neither the inverse nor a
 /// product ever sees k or e + r d unblinded.
-sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R, blind: &B, shared_rng: Bool{false}) -> ECDSASignature ecp.EcpError! {
+sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: ^R, blind: ^B, shared_rng: Bool{false}) -> ECDSASignature ecp.EcpError! {
     if !usable_group(grp) -> return Err(.BadInput)
     if !ecp.privkey_valid(grp, d) -> return Err(.InvalidKey)
     nl: grp.n.p.len()
@@ -143,34 +143,34 @@ sign_core: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R,
 }
 
 /// k G, its randomization drawn from rng, or from blind unless `shared_rng`.
-nonce_point: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, k: bn.Mpi, rng: &R, blind: &B, shared_rng: Bool) -> ecp.Point ecp.EcpError! {
+nonce_point: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, k: bn.Mpi, rng: ^R, blind: ^B, shared_rng: Bool) -> ecp.Point ecp.EcpError! {
     if shared_rng -> return ecp.ecp_mul(grp, k, grp.g, rng)
     ecp.ecp_mul(grp, k, grp.g, blind)
 }
 
 /// The draw t that blinds the inverse: from rng, or from blind unless
 /// `shared_rng`.
-blinding_draw: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, rng: &R, blind: &B, shared_rng: Bool) -> bn.Mpi ecp.EcpError! {
+blinding_draw: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, rng: ^R, blind: ^B, shared_rng: Bool) -> bn.Mpi ecp.EcpError! {
     if shared_rng -> return ecp.gen_privkey(grp, rng)
     ecp.gen_privkey(grp, blind)
 }
 
 /// `err`, once the signing loop's private key limbs and Montgomery scratch
 /// are wiped: every return of sign_core leaves neither behind.
-sign_failed: fn(dl: &[U64], work: &[U64], err: &&ecp.EcpError) -> ecp.EcpError Never! {
+sign_failed: fn(dl: ^[U64], work: ^[U64], err: ^^ecp.EcpError) -> ecp.EcpError Never! {
     cipher.wipe_words(dl)
     cipher.wipe_words(work)
     err
 }
 
 /// `err`, once `w` is wiped.
-wiped: fn(w: &[U64], err: &&ecp.EcpError) -> ecp.EcpError Never! {
+wiped: fn(w: ^[U64], err: ^^ecp.EcpError) -> ecp.EcpError Never! {
     cipher.wipe_words(w)
     err
 }
 
 /// Wipes a signing attempt's nonce, blinding and their product.
-wipe_attempt: fn(k: &bn.Mpi, kl: &[U64], t: &bn.Mpi, tl: &[U64], kt: &bn.Mpi) Never! {
+wipe_attempt: fn(k: ^bn.Mpi, kl: ^[U64], t: ^bn.Mpi, tl: ^[U64], kt: ^bn.Mpi) Never! {
     cipher.wipe_words(k.p)
     cipher.wipe_words(kl)
     cipher.wipe_words(t.p)
@@ -179,14 +179,14 @@ wipe_attempt: fn(k: &bn.Mpi, kl: &[U64], t: &bn.Mpi, tl: &[U64], kt: &bn.Mpi) Ne
 }
 
 /// `err`, once a signing attempt's secrets are wiped (wipe_attempt).
-attempt_failed: fn(k: &bn.Mpi, kl: &[U64], t: &bn.Mpi, tl: &[U64], kt: &bn.Mpi, err: &&ecp.EcpError) -> ecp.EcpError Never! {
+attempt_failed: fn(k: ^bn.Mpi, kl: ^[U64], t: ^bn.Mpi, tl: ^[U64], kt: ^bn.Mpi, err: ^^ecp.EcpError) -> ecp.EcpError Never! {
     wipe_attempt(k, kl, t, tl, kt)
     err
 }
 
 /// Sign hash with private key d, drawing the nonce and the blinding from
 /// rng (mbedtls_ecdsa_sign).
-ecdsa_sign: fn<R: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R) -> ECDSASignature ecp.EcpError! {
+ecdsa_sign: fn<R: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: ^R) -> ECDSASignature ecp.EcpError! {
     unused := ecp.NoRNG{}
     sig: sign_core(grp, d, hash, rng, unused, shared_rng: true)
     Ok(sig)
@@ -194,14 +194,14 @@ ecdsa_sign: fn<R: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R) -> ECD
 
 /// Sign hash with the nonce from rng and the blinding from blind
 /// (mbedtls_ecdsa_sign_restartable with no restart context).
-ecdsa_sign_blinded: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: &R, blind: &B) -> ECDSASignature ecp.EcpError! {
+ecdsa_sign_blinded: fn<R: RNG, B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], rng: ^R, blind: ^B) -> ECDSASignature ecp.EcpError! {
     sig: sign_core(grp, d, hash, rng, blind)
     Ok(sig)
 }
 
 /// Sign hash with the deterministic nonce of RFC 6979 over md, the blinding
 /// from blind (mbedtls_ecdsa_sign_det_ext).
-ecdsa_sign_det: fn<B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], md: hashes.Md, blind: &B) -> ECDSASignature ecp.EcpError! {
+ecdsa_sign_det: fn<B: RNG>(grp: ecp.EcpGroup, d: bn.Mpi, hash: [U8], md: hashes.Md, blind: ^B) -> ECDSASignature ecp.EcpError! {
     grp_len: (grp.nbits + 7) /% 8
     // HMAC_DRBG seeded with the private key and the reduced hash, built at
     // its final size so no growth leaves a copy of the key behind.
@@ -264,7 +264,7 @@ der_signature: fn(sig: ECDSASignature) -> [U8] asn1.ASN1Error! {
 /// Sign hash with key's private part and the RFC 6979 nonce over md, the
 /// blinding from rng, and encode the signature
 /// (mbedtls_ecdsa_write_signature).
-ecdsa_write_signature: fn<R: RNG>(key: ecp.Keypair, md: hashes.Md, hash: [U8], sig_size: Int, rng: &R) -> [U8] ECDSAError! {
+ecdsa_write_signature: fn<R: RNG>(key: ecp.Keypair, md: hashes.Md, hash: [U8], sig_size: Int, rng: ^R) -> [U8] ECDSAError! {
     sig: ecdsa_sign_det(key.grp, key.d, hash, md, rng)
     out: ecdsa_signature_to_asn1(sig, sig_size)
     Ok(out)
@@ -350,7 +350,7 @@ FailingAfter: struct {
     inner: drbg.HMACDrbg,
 
     impl RNG {
-        fill: fn(&self, out: &[U8]) -> Bool Never! {
+        fill: fn(^self, out: ^[U8]) -> Bool Never! {
             if self.left == 0 -> return false
             self.left -= 1
             self.inner.fill(out)

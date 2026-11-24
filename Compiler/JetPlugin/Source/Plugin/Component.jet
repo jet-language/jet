@@ -190,7 +190,7 @@ plug_flatten: fn(c: WasmComponent) -> PlugFlat WasmError! {
     Ok(flat)
 }
 
-plug_instantiate: fn(flat: &PlugFlat, index: Int) WasmError! {
+plug_instantiate: fn(flat: ^PlugFlat, index: Int) WasmError! {
     ci: flat.c.core_instances[index]
     inst := PlugInstance{
         source: ci.source,
@@ -288,7 +288,7 @@ plug_const_value: fn(flat: PlugFlat, inst: PlugInstance, expr: WasmConstExpr) ->
 // Export `name` of kind `kind` (a WASM_EXTERN_* / core sort) of core
 // instance `instance`, as a flat index. `expected` is the type a function
 // import expects (a lowered function's stub takes it).
-plug_instance_export: fn(flat: &PlugFlat, instance: Int, name: String, kind: Int, expected: WasmFuncType?) -> Int WasmError! {
+plug_instance_export: fn(flat: ^PlugFlat, instance: Int, name: String, kind: Int, expected: WasmFuncType?) -> Int WasmError! {
     if instance < 0 || instance >= flat.instances.len() {
         return Err(plug_fail("unknown core instance {instance}"))
     }
@@ -319,7 +319,7 @@ plug_instance_export: fn(flat: &PlugFlat, instance: Int, name: String, kind: Int
 }
 
 // The Component's core item `index` of sort `kind`, as a flat index.
-plug_core_item: fn(flat: &PlugFlat, kind: Int, index: Int, expected: WasmFuncType?) -> Int WasmError! {
+plug_core_item: fn(flat: ^PlugFlat, kind: Int, index: Int, expected: WasmFuncType?) -> Int WasmError! {
     item: plug_item(flat.c, kind, index) ?? return Err(plug_fail("unknown core item {index}"))
     if item.origin == WASM_ORIGIN_ALIAS {
         return plug_instance_export(flat, item.instance, item.name, kind, expected)
@@ -343,7 +343,7 @@ plug_item: fn(c: WasmComponent, kind: Int, index: Int) -> WasmCoreItem? {
 
 // The stub of lowered core function `index` (made once, typed by the first
 // import it satisfies).
-plug_lower: fn(flat: &PlugFlat, index: Int, item: WasmCoreItem, expected: WasmFuncType?) -> Int WasmError! {
+plug_lower: fn(flat: ^PlugFlat, index: Int, item: WasmCoreItem, expected: WasmFuncType?) -> Int WasmError! {
     if flat.lowered.get(index) == .Val(known) -> return Ok(known)
     ty: expected ?? return Err(plug_fail("a lowered function is used outside a function import"))
     // The canonical ABI lowers a host function to one core result at most.
@@ -412,7 +412,7 @@ plug_flat_types: fn(code: Int) -> [Int] Never! {
 }
 
 // Lifted export `name` (Component function `index`).
-plug_lift: fn(flat: &PlugFlat, name: String, index: Int) WasmError! {
+plug_lift: fn(flat: ^PlugFlat, name: String, index: Int) WasmError! {
     export := PlugExport{name: name, fid: -1, params: [Int]{}, result: PLUG_VALUE_NONE, fields: [Int]{}, memory: -1, realloc: -1, post: -1, unsupported: true}
     item: flat.c.funcs[index]
     if item.origin == WASM_ORIGIN_LIFT {

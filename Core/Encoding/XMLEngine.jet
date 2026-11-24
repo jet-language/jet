@@ -132,7 +132,7 @@ NamespaceScope: struct {
         }
     }
 
-    insert: fn(self: &NamespaceScope, prefix: String?, uri: &&String) Never! {
+    insert: fn(self: ^NamespaceScope, prefix: String?, uri: ^^String) Never! {
         if prefix == {
             .None -> { self.default_uri = Val(uri) }
             .Val(key) -> self.named[key.copy()] = uri.move()
@@ -163,7 +163,7 @@ NamespaceSet: struct {
         }
     }
 
-    insert: fn(self: &NamespaceSet, prefix: String?) -> Bool Never! {
+    insert: fn(self: ^NamespaceSet, prefix: String?) -> Bool Never! {
         prior: self.contains(prefix)
         if prefix == {
             .None -> { self.default_present = true }
@@ -181,7 +181,7 @@ ExpandedNames: struct {
         ExpandedNames{no_namespace: [String:Bool]{}, namespaced: [String:[String:Bool]]{}}
     }
 
-    insert: fn(self: &ExpandedNames, namespace_uri: String?, local: String) -> Bool Never! {
+    insert: fn(self: ^ExpandedNames, namespace_uri: String?, local: String) -> Bool Never! {
         if namespace_uri == {
             .None -> {
                 prior: self.no_namespace.get(local) != .None
@@ -343,7 +343,7 @@ optional_text: fn(value: String?) -> Dyn Never! {
     }
 }
 
-object: fn(entries: &&[{key: String, value: Dyn}]) -> Dyn Never! {
+object: fn(entries: ^^[{key: String, value: Dyn}]) -> Dyn Never! {
     stream.object_from_entries(entries)
 }
 
@@ -360,7 +360,7 @@ name_value: fn(name: Name) -> Dyn Never! {
     object([{key: "raw", value: text(name.raw)}, {key: "prefix", value: optional_text(name.prefix)}, {key: "local", value: text(name.local)}, {key: "namespace_uri", value: optional_text(name.namespace_uri)}])
 }
 
-lexical: fn(raw: String, semantic: &&Dyn) -> Dyn Never! {
+lexical: fn(raw: String, semantic: ^^Dyn) -> Dyn Never! {
     object([{key: "raw_text", value: text(raw)}, {key: "raw_bytes", value: Dyn.Null}, {key: "semantic", value: semantic}])
 }
 
@@ -690,7 +690,7 @@ clean: fn(value: Dyn) -> Dyn Never! {
     }
 }
 
-leaf: fn(kind: String, fields: &&[{key: String, value: Dyn}], raw: String) -> Dyn Never! {
+leaf: fn(kind: String, fields: ^^[{key: String, value: Dyn}], raw: String) -> Dyn Never! {
     semantic_fields := [{key: String, value: Dyn}]{{key: "$xml", value: text(kind)}}
     loop entry in fields -> semantic_fields.push(entry.copy())
     semantic: strip_lexical(object(semantic_fields))
@@ -726,13 +726,13 @@ wire_bytes: fn(text: String, encoding: WireEncoding) -> [U8] Never! {
     encode_text(text, target)
 }
 
-byte_lexical: fn(raw: &&[U8], semantic: &&Dyn) -> Dyn Never! {
+byte_lexical: fn(raw: ^^[U8], semantic: ^^Dyn) -> Dyn Never! {
     bytes := [Dyn]{}
     loop byte in raw -> bytes.push(Dyn.Int(Int{byte}))
     object([{key: "raw_text", value: Dyn.Null}, {key: "raw_bytes", value: Dyn.Array(bytes)}, {key: "semantic", value: semantic}])
 }
 
-lexical_value_to_wire: fn(value: &&Dyn, encoding: WireEncoding) -> Dyn Never! {
+lexical_value_to_wire: fn(value: ^^Dyn, encoding: WireEncoding) -> Dyn Never! {
     if value == .Object(_) {
 
     } else { return value.move() }
@@ -812,7 +812,7 @@ stream_event_value: fn(item: StreamEvent) -> Dyn Never! {
     }
 }
 
-leaf_event: fn(kind: String, fields: &&[{key: String, value: Dyn}], raw: &&[U8]) -> Dyn Never! {
+leaf_event: fn(kind: String, fields: ^^[{key: String, value: Dyn}], raw: ^^[U8]) -> Dyn Never! {
     semantic: strip_lexical(object(fields.copy()))
     out := [{key: String, value: Dyn}]{{key: "$xml_event", value: text(kind)}}
     loop entry in fields -> out.push(entry)
@@ -837,7 +837,7 @@ ByteElementFrame: struct {
     open_lexical: Dyn,
 }
 
-finish_element: fn(frame: &&ElementFrame, close_raw: String?) -> Dyn Never! {
+finish_element: fn(frame: ^^ElementFrame, close_raw: String?) -> Dyn Never! {
     empty: close_raw == None
     name: name_value(frame.name)
     style: text(if empty -> "empty" else -> "explicit")
@@ -849,7 +849,7 @@ finish_element: fn(frame: &&ElementFrame, close_raw: String?) -> Dyn Never! {
     object([{key: "$xml", value: text("element")}, {key: "name", value: name}, {key: "namespaces", value: Dyn.Array(frame.namespaces.move())}, {key: "attributes", value: Dyn.Array(frame.attributes.move())}, {key: "children", value: Dyn.Array(frame.children.move())}, {key: "empty_style", value: style}, {key: "open_lexical", value: lexical(frame.open_raw, semantic)}, {key: "close_lexical", value: close}])
 }
 
-finish_byte_element: fn(frame: &&ByteElementFrame, close_lexical: &&Dyn) -> Dyn Never! {
+finish_byte_element: fn(frame: ^^ByteElementFrame, close_lexical: ^^Dyn) -> Dyn Never! {
     object([{key: "$xml", value: text("element")}, {key: "name", value: frame.name.move()}, {key: "namespaces", value: frame.namespaces.move()}, {key: "attributes", value: frame.attributes.move()}, {key: "children", value: Dyn.Array(frame.children.move())}, {key: "empty_style", value: frame.empty_style.move()}, {key: "open_lexical", value: frame.open_lexical.move()}, {key: "close_lexical", value: close_lexical}])
 }
 
@@ -1059,7 +1059,7 @@ event_from_node: fn(value: Dyn) -> Dyn XMLFault! {
     object(entries)
 }
 
-push_node: fn(value: Dyn, output: &[Dyn]) XMLFault! {
+push_node: fn(value: Dyn, output: ^[Dyn]) XMLFault! {
     kind: required_text(value, "$xml") ?? return Err(err)
     if kind == "element" {
         exact_keys(value, ["$xml", "name", "namespaces", "attributes", "children", "empty_style", "open_lexical", "close_lexical"]) ?? return Err(err)
@@ -1249,7 +1249,7 @@ deterministic_leaf: fn(value: Dyn, kind: String) -> String XMLFault! {
     }
 }
 
-render_element_open: fn(value: Dyn, output: &String) XMLFault! {
+render_element_open: fn(value: Dyn, output: ^String) XMLFault! {
     name: field(value, "name") ?? return Err(XMLFault.shape("XML element lacks name"))
     raw_name: required_text(name, "raw") ?? return Err(err)
     output += "<{raw_name}"
@@ -1298,7 +1298,7 @@ render_element_open: fn(value: Dyn, output: &String) XMLFault! {
     if style == "empty" -> output += "/>" else -> output += ">"
 }
 
-render_node: fn(value: Dyn, output: &String) XMLFault! {
+render_node: fn(value: Dyn, output: ^String) XMLFault! {
     kind: required_text(value, "$xml") ?? return Err(err)
     if kind == "document" {
         children: array_value(field(value, "children")) ?? return Err(XMLFault.shape("XML document children must be an array"))
@@ -1379,7 +1379,7 @@ StreamWriter: struct {
 
     is_finished: fn(self: StreamWriter) -> Bool Never! { self.ended }
 
-    write: fn(self: &StreamWriter, event: Dyn) -> [U8] XMLFault! {
+    write: fn(self: ^StreamWriter, event: Dyn) -> [U8] XMLFault! {
         if self.ended {
             return Err(XMLFault.state("XML writer received an event after document_end"))
         }
@@ -1389,7 +1389,7 @@ StreamWriter: struct {
         bytes
     }
 
-    write_inner: fn(self: &StreamWriter, event: Dyn) -> [U8] XMLFault! {
+    write_inner: fn(self: ^StreamWriter, event: Dyn) -> [U8] XMLFault! {
         kind: required_text(event, "$xml_event") ?? return Err(err)
         deterministic := ""
         if kind == "document_start" {
@@ -1622,7 +1622,7 @@ parse_name: fn(value: Dyn) -> Name XMLFault! {
     Name{raw: raw, prefix: prefix, local: local, namespace_uri: namespace_uri}
 }
 
-validate_start: fn(event: Dyn, name: Name, inherited: &&NamespaceScope) -> NamespaceScope XMLFault! {
+validate_start: fn(event: Dyn, name: Name, inherited: ^^NamespaceScope) -> NamespaceScope XMLFault! {
     context := inherited.move()
     namespaces: array_value(field(event, "namespaces")) ?? return Err(XMLFault.shape("element namespaces must be an Array"))
     declared := NamespaceSet.new()
@@ -1780,7 +1780,7 @@ encode_text: fn(value: String, target: RenderEncoding) -> [U8] Never! {
     output.move()
 }
 
-utf16_word: fn(output: &[U8], word: Int, little: Bool) Never! {
+utf16_word: fn(output: ^[U8], word: Int, little: Bool) Never! {
     if little {
         output.push(U8{word % 256})
         output.push(U8{word /% 256})
@@ -1852,7 +1852,7 @@ canonical_document: fn(value: Dyn, options: CanonicalOptions) -> String XMLFault
     output
 }
 
-canonical_node: fn(value: Dyn, options: CanonicalOptions, parent_scope: NamespaceScope, parent_rendered: NamespaceScope, output: &String) XMLFault! {
+canonical_node: fn(value: Dyn, options: CanonicalOptions, parent_scope: NamespaceScope, parent_rendered: NamespaceScope, output: ^String) XMLFault! {
     kind: required_text(value, "$xml") ?? return Err(err)
     if kind != "element" -> return canonical_leaf(value, kind, output)
     name: parse_name(field(value, "name") ?? return Err(XMLFault.shape("element lacks name"))) ?? return Err(err)
@@ -1957,7 +1957,7 @@ canonical_attribute_value: fn(attribute: Dyn) -> String XMLFault! {
     output
 }
 
-canonical_leaf: fn(value: Dyn, kind: String, output: &String) XMLFault! {
+canonical_leaf: fn(value: Dyn, kind: String, output: ^String) XMLFault! {
     if kind == {
         "text" | "cdata" -> {
             content: required_text(value, "value") ?? return Err(err)
@@ -2279,7 +2279,7 @@ XMLFault: struct {
         XMLFault{kind: Reason.Limit, offset: 0, line: None, column: None, path: "", reason: reason.copy()}
     }
 
-    located: fn(self: &&XMLFault, source: View<U8>, path: &&String) -> XMLFault Never! {
+    located: fn(self: ^^XMLFault, source: View<U8>, path: ^^String) -> XMLFault Never! {
         offset: min(self.offset, source.len())
         line := 1
         column := 1
@@ -2417,13 +2417,13 @@ ByteLexer: struct {
 
     bom: fn(self: ByteLexer) -> View<U8> Never! from self { self.bom[0..<self.bom.len()] }
 
-    fail: fn(self: &ByteLexer, kind: Reason, reason: String) -> XMLFault Never! {
+    fail: fn(self: ^ByteLexer, kind: Reason, reason: String) -> XMLFault Never! {
         error: XMLFault.at_kind(self.wire_offset, kind, reason)
         self.terminal = Val(error.copy())
         error.move()
     }
 
-    choose_encoding: fn(self: &ByteLexer, final_input: Bool) XMLFault! {
+    choose_encoding: fn(self: ^ByteLexer, final_input: Bool) XMLFault! {
         if self.encoding != None {
             return
         }
@@ -2454,7 +2454,7 @@ ByteLexer: struct {
         }
     }
 
-    push: fn(self: &ByteLexer, bytes: View<U8>) XMLFault! {
+    push: fn(self: ^ByteLexer, bytes: View<U8>) XMLFault! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         if self.eof {
             return Err(self.fail(Reason.Malformed, "XML bytes arrived after end of input"))
@@ -2468,14 +2468,14 @@ ByteLexer: struct {
         self.decode_pending(false)
     }
 
-    finish_input: fn(self: &ByteLexer) XMLFault! {
+    finish_input: fn(self: ^ByteLexer) XMLFault! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         self.eof = true
         self.choose_encoding(true) ?? return Err(err)
         self.decode_pending(true)
     }
 
-    retain: fn(self: &ByteLexer, scalar: Int, raw: &&[U8]) XMLFault! {
+    retain: fn(self: ^ByteLexer, scalar: Int, raw: ^^[U8]) XMLFault! {
         if self.retained_bytes + raw.len() > self.max_item_bytes {
             return Err(self.fail(Reason.Limit, "XML token exceeds max_item_bytes ({self.max_item_bytes})"))
         }
@@ -2484,7 +2484,7 @@ ByteLexer: struct {
         self.units.push(DecodedUnit{scalar: scalar, raw: raw.move()})
     }
 
-    decode_pending: fn(self: &ByteLexer, final_input: Bool) XMLFault! {
+    decode_pending: fn(self: ^ByteLexer, final_input: Bool) XMLFault! {
         encoding: self.encoding ?? return
         loop {
             if self.boundary() != None -> break
@@ -2580,7 +2580,7 @@ ByteLexer: struct {
         None
     }
 
-    next_token: fn(self: &ByteLexer) -> ByteToken? XMLFault! {
+    next_token: fn(self: ^ByteLexer) -> ByteToken? XMLFault! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         self.decode_pending(self.eof) ?? return Err(err)
         boundary: self.boundary() ?? {
@@ -2607,13 +2607,13 @@ ByteLexer: struct {
     }
 }
 
-drop_prefix: fn<T>(values: &[T], count: Int) Never! {
+drop_prefix: fn<T>(values: ^[T], count: Int) Never! {
     remaining: values.len() - count
     loop index in 0..<remaining -> values.__swap(index, index + count)
     loop values.len() > remaining -> _: values.pop()
 }
 
-take_bytes: fn(values: &[U8], count: Int) -> [U8] Never! {
+take_bytes: fn(values: ^[U8], count: Int) -> [U8] Never! {
     out := [U8]{}
     loop index in 0..<count -> out.push(values[index])
     drop_prefix(values, count)
@@ -2664,7 +2664,7 @@ StreamScanner: struct {
         StreamScanner{lexer: ByteLexer.new(max_item_bytes), options: options.copy(), started: false, ended: false, root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false, declared_entities: [String:DeclaredEntityKind]{}, stack: [], nodes: 0, text_bytes: 0, entity_replacement_bytes: 0, wire_consumed: 0, line: 1, column: 1, terminal: None}
     }
 
-    push: fn(self: &StreamScanner, bytes: View<U8>) XMLFault! {
+    push: fn(self: ^StreamScanner, bytes: View<U8>) XMLFault! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         self.lexer.push(bytes) ?? {
             self.terminal = Val(err.copy())
@@ -2672,7 +2672,7 @@ StreamScanner: struct {
         }
     }
 
-    finish_input: fn(self: &StreamScanner) XMLFault! {
+    finish_input: fn(self: ^StreamScanner) XMLFault! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         self.lexer.finish_input() ?? {
             self.terminal = Val(err.copy())
@@ -2680,7 +2680,7 @@ StreamScanner: struct {
         }
     }
 
-    fail: fn(self: &StreamScanner, fault: &&XMLFault) -> XMLFault Never! {
+    fail: fn(self: ^StreamScanner, fault: ^^XMLFault) -> XMLFault Never! {
         error := fault.move()
         if error.line == None {
             error.line = Val(self.line)
@@ -2690,7 +2690,7 @@ StreamScanner: struct {
         error.move()
     }
 
-    next: fn(self: &StreamScanner) -> StreamEvent? XMLFault! {
+    next: fn(self: ^StreamScanner) -> StreamEvent? XMLFault! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         encoding: self.lexer.encoding() ?? return None
         if !self.started {
@@ -2817,7 +2817,7 @@ Scanner: struct {
         path.move()
     }
 
-    classify: fn(error: &XMLFault) Never! {
+    classify: fn(error: ^XMLFault) Never! {
         if error.kind != Reason.Malformed {
             return
         }
@@ -2845,14 +2845,14 @@ Scanner: struct {
         }
     }
 
-    charge_text: fn(self: &Scanner, bytes: Int, label: String) XMLFault! {
+    charge_text: fn(self: ^Scanner, bytes: Int, label: String) XMLFault! {
         if bytes > self.options.limits.max_text_bytes || self.text_bytes + bytes > self.options.limits.max_text_bytes {
             return Err(self.limit("XML {label} exceeds max_text_bytes ({self.options.limits.max_text_bytes})"))
         }
         self.text_bytes += bytes
     }
 
-    resolve_entity: fn(self: &Scanner, name: String) -> String? XMLFault! {
+    resolve_entity: fn(self: ^Scanner, name: String) -> String? XMLFault! {
         if predefined(name) == .Val(value) -> return Val(value)
         if name.starts_with("#") -> return Err(self.fail("invalid numeric character reference"))
         kind: self.declared_entities.get(name) ?? return Err(self.fail("undeclared entity reference `&{name};`"))
@@ -2898,7 +2898,7 @@ Scanner: struct {
         byte_prefix_text(self.source[0..<self.source.len()], self.offset, value)
     }
 
-    take_until: fn(self: &Scanner, end: String, reason: String) -> TakenText XMLFault! {
+    take_until: fn(self: ^Scanner, end: String, reason: String) -> TakenText XMLFault! {
         start: self.offset
         rel: byte_find_text(self.source[0..<self.source.len()], self.offset, end) ?? return Err(self.fail(reason))
         token_end: self.offset + rel + end.count_bytes()
@@ -2942,7 +2942,7 @@ Scanner: struct {
         Name{raw: raw, prefix: prefix, local: name, namespace_uri: uri.move()}
     }
 
-    reference: fn(self: &Scanner) -> Reference XMLFault! {
+    reference: fn(self: ^Scanner) -> Reference XMLFault! {
         start: self.offset
         end: byte_find_text(self.source[0..<self.source.len()], start, ";") ?? return Err(self.fail("unterminated entity reference"))
         name: byte_text(self.source[0..<self.source.len()], start + 1, start + end)
@@ -2959,7 +2959,7 @@ Scanner: struct {
         Reference{raw: byte_text(self.source[0..<self.source.len()], start, self.offset), name: name, resolved: resolved.move()}
     }
 
-    parse_parts: fn(self: &Scanner, raw: String, source_base: Int) -> ParsedParts XMLFault! {
+    parse_parts: fn(self: ^Scanner, raw: String, source_base: Int) -> ParsedParts XMLFault! {
         bytes: raw.bytes()
         parts := [Part]{}
         normalized := ""
@@ -3005,7 +3005,7 @@ Scanner: struct {
         ParsedParts{parts: parts.move(), normalized: if all -> Val(normalized) else -> None}
     }
 
-    open: fn(self: &Scanner) -> ScanEvent XMLFault! {
+    open: fn(self: ^Scanner) -> ScanEvent XMLFault! {
         start: self.offset
         end := start + 1
         quote := U8?{None}
@@ -3116,14 +3116,14 @@ Scanner: struct {
         ScanEvent.ElementStart{name: name.move(), namespaces: namespaces, attributes: attributes, empty: empty, raw: raw.move()}
     }
 
-    charge_nodes: fn(self: &Scanner, amount: Int) XMLFault! {
+    charge_nodes: fn(self: ^Scanner, amount: Int) XMLFault! {
         if self.nodes + amount > self.options.limits.max_nodes {
             return Err(self.limit("XML document exceeds max_nodes ({self.options.limits.max_nodes})"))
         }
         self.nodes += amount
     }
 
-    charge_event: fn(self: &Scanner, event: ScanEvent) XMLFault! {
+    charge_event: fn(self: ^Scanner, event: ScanEvent) XMLFault! {
         if event == {
             .DocumentStart -> self.charge_nodes(1) ?? return Err(err)
             .DocumentEnd | .ElementEnd(_, _) -> {}
@@ -3203,7 +3203,7 @@ Scanner: struct {
         }
     }
 
-    next_inner: fn(self: &Scanner) -> ScanEvent? XMLFault! {
+    next_inner: fn(self: ^Scanner) -> ScanEvent? XMLFault! {
         if self.ended -> return None
         if !self.started {
             self.started = true
@@ -3360,7 +3360,7 @@ Scanner: struct {
         }
     }
 
-    next: fn(self: &Scanner) -> ScanEvent? XMLFault! {
+    next: fn(self: ^Scanner) -> ScanEvent? XMLFault! {
         value: if self.next_inner() == {
             .Val(event) -> event.move()
             .None -> {
@@ -3482,7 +3482,7 @@ scalar_space: fn(code: Int) -> Bool Never! {
     (code >= 9 && code <= 13) || code == 32 || code == 0x85 || code == 0xa0 || code == 0x1680 || (code >= 0x2000 && code <= 0x200a) || code == 0x2028 || code == 0x2029 || code == 0x202f || code == 0x205f || code == 0x3000
 }
 
-skip_ascii_space: fn(bytes: View<U8>, cursor: &Int) Never! {
+skip_ascii_space: fn(bytes: View<U8>, cursor: ^Int) Never! {
     loop cursor < bytes.len() && ascii_space(bytes[cursor]) -> cursor += 1
 }
 
@@ -3496,7 +3496,7 @@ whitespace_offset: fn(bytes: View<U8>, start: Int) -> Int Never! {
     cursor
 }
 
-skip_scalar_space: fn(bytes: View<U8>, cursor: &Int) Never! {
+skip_scalar_space: fn(bytes: View<U8>, cursor: ^Int) Never! {
     loop cursor < bytes.len() {
         scalar: utf8_scalar(bytes, cursor)
         if !scalar_space(scalar.value) -> break
@@ -3529,7 +3529,7 @@ scalar_hex: fn(character: Int) -> String Never! {
     result.move()
 }
 
-take_doctype_literal: fn(source: View<U8>, cursor: &Int) -> String XMLFault! {
+take_doctype_literal: fn(source: View<U8>, cursor: ^Int) -> String XMLFault! {
     skip_ascii_space(source, cursor)
     if cursor >= source.len() {
         return Err(XMLFault.at(cursor, "DOCTYPE external identifier lacks quoted value"))
@@ -3603,7 +3603,7 @@ DeclaredEntityKind: enum {
     External,
 }
 
-take_entity_literal: fn(source: View<U8>, cursor: &Int) -> String XMLFault! {
+take_entity_literal: fn(source: View<U8>, cursor: ^Int) -> String XMLFault! {
     skip_ascii_space(source, cursor)
     if cursor >= source.len() {
         return Err(XMLFault.at(cursor, "ENTITY declaration lacks quoted value"))
@@ -3667,7 +3667,7 @@ Color: enum {
     Black,
 }
 
-visit: fn(node: String, edges: &[String:[String]], color: &[String:Color]) -> Bool Never! {
+visit: fn(node: String, edges: ^[String:[String]], color: ^[String:Color]) -> Bool Never! {
     color[node.copy()] = Color.Gray
     if edges.get(node) == .Val(targets) {
         loop target in targets {
@@ -3685,7 +3685,7 @@ visit: fn(node: String, edges: &[String:[String]], color: &[String:Color]) -> Bo
     false
 }
 
-entity_reference_graph_has_cycle: fn(edges: &[String:[String]]) -> Bool Never! {
+entity_reference_graph_has_cycle: fn(edges: ^[String:[String]]) -> Bool Never! {
     color := [String:Color]{}
     names := edges.keys().collect()
     names.sort()

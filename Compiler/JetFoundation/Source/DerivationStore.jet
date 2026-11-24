@@ -46,7 +46,7 @@ derivation_store_new: fn() -> DerivationStore Never! {
 }
 
 // Interns `record`: its reference, shared with an equal record already held.
-derivation_store_add: fn(store: &DerivationStore, record: &&DerivationRecord) -> DerivationRef DerivationStoreError! {
+derivation_store_add: fn(store: ^DerivationStore, record: ^^DerivationRecord) -> DerivationRef DerivationStoreError! {
     if !derivation_record_validate(record) -> return Err(DerivationStoreError{message: "derivation {record.id} has a non-canonical identity"})
     reference: derivation_record_reference(record)
     if name_column_get(store.keys, store.slots, record.id) == .Val(slot) {
@@ -59,7 +59,7 @@ derivation_store_add: fn(store: &DerivationStore, record: &&DerivationRecord) ->
 }
 
 // Binds the record at `slot` under its id and its subject.
-derivation_store_index: fn(store: &DerivationStore, slot: Int, record: DerivationRecord) Never! {
+derivation_store_index: fn(store: ^DerivationStore, slot: Int, record: DerivationRecord) Never! {
     name_column_set(store.keys, store.slots, record.id, slot)
     if name_column_get(store.keys, store.subjects, record.subject) == .Val(row) {
         store.subject_rows[row].push(slot)
@@ -73,7 +73,7 @@ derivation_store_index: fn(store: &DerivationStore, slot: Int, record: Derivatio
 // order, so it is the same as a store that added the sorted records one by
 // one, and two stores holding the same records are equal whatever order
 // their producers added them in.
-derivation_store_sort: fn(store: &DerivationStore) Never! {
+derivation_store_sort: fn(store: ^DerivationStore) Never! {
     sorted := true
     loop index in 1..<store.records.len() {
         if store.records[index - 1].id > store.records[index].id {
@@ -116,7 +116,7 @@ derivation_store_chain: fn(store: DerivationStore, subject: String) -> [Derivati
     steps
 }
 
-derivation_store_chain_from: fn(store: DerivationStore, slot: Int, depth: Int, shown: &[Bool], steps: &[DerivationChainStep]) Never! {
+derivation_store_chain_from: fn(store: DerivationStore, slot: Int, depth: Int, shown: ^[Bool], steps: ^[DerivationChainStep]) Never! {
     if shown[slot] -> return
     shown[slot] = true
     steps.push(DerivationChainStep{depth: depth, record: store.records[slot]})

@@ -161,10 +161,31 @@ orphan_named: fn(word: String, base: String) -> String? {
     }
     if name.split_once("{{") == .Val(cut) {
         if !cut.before.contains("/") -> return None
-        name = path_case_parent(cut.before)
+        name = orphan_parent(cut.before)
     }
     if name == "" -> return None
-    Val(if rooted -> path_case_normal(name) else -> path_case_normal("{base}/{name}"))
+    Val(if rooted -> orphan_normal(name) else -> orphan_normal("{base}/{name}"))
+}
+
+// The folder holding `path` ("" at the root).
+orphan_parent: fn(path: String) -> String {
+    segments := path.split("/").to_list()
+    _ := segments.pop()
+    segments.join("/")
+}
+
+// `path` with `.` and `..` segments resolved.
+orphan_normal: fn(path: String) -> String {
+    out := [String]{}
+    loop segment in path.split("/") {
+        if segment == "" || segment == "." -> next
+        if segment == ".." && out.len() > 0 && out[out.len() - 1] != ".." {
+            _ := out.pop()
+            next
+        }
+        out.push(segment.copy())
+    }
+    out.join("/")
 }
 
 // The tracked file, or folder below a top tree of Tests/, that `word` names
@@ -190,7 +211,7 @@ orphan_tool: fn(word: String, facts: OrphanFacts) -> String? {
     None
 }
 
-orphan_cover_words: fn(words: [String], bases: [String], facts: OrphanFacts, covered: &[String:Bool]) {
+orphan_cover_words: fn(words: [String], bases: [String], facts: OrphanFacts, covered: ^[String:Bool]) {
     loop word in words {
         if orphan_resolve(word, bases, facts) == .Val(path) -> covered[path] = true
     }
@@ -218,7 +239,7 @@ orphan_is_covered: fn(path: String, covered: [String:Bool]) -> Bool {
     loop current != "" {
         if covered.get(current) != None -> return true
         if !current.contains("/") -> return false
-        current = path_case_parent(current)
+        current = orphan_parent(current)
     }
     false
 }
@@ -268,7 +289,7 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
             next
         }
         if path.starts_with("Tests/Cases/") -> covered[path.copy()] = true
-        bases: [String]{path_case_parent(path), ""}
+        bases: [String]{orphan_parent(path), ""}
         loop line in orphan_text(tree, path).split("\n") {
             if line.trim().starts_with("#") -> next
             words: orphan_words(line)
@@ -281,7 +302,7 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
         }
     }
     loop path in runners {
-        orphan_cover_words(orphan_source_words(path, orphan_text(tree, path)), [String]{"", path_case_parent(path)}, facts, covered)
+        orphan_cover_words(orphan_source_words(path, orphan_text(tree, path)), [String]{"", orphan_parent(path)}, facts, covered)
     }
     // A data file a reader names by file is a reader in turn.
     read := [String:Bool]{}
@@ -292,7 +313,7 @@ orphan_findings: fn(tree: OrphanTree) -> [String] {
             if read.get(path) != None || covered.get(path) == None || !orphan_data(path) -> next
             read[path.copy()] = true
             changed = true
-            orphan_cover_words(orphan_words(orphan_text(tree, path)), [String]{path_case_parent(path), ""}, facts, covered)
+            orphan_cover_words(orphan_words(orphan_text(tree, path)), [String]{orphan_parent(path), ""}, facts, covered)
         }
     }
     findings := [String]{}

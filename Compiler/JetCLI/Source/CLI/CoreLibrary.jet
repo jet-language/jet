@@ -172,7 +172,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     inputs.interner = interner_empty()
     inputs.sources = IRSourceTexts{}
     checked_rest: inputs.move()
-    released: task &&checked_rest { checked_rest.modules.len() }
+    released: task ^^checked_rest { checked_rest.modules.len() }
     released.detach()
     if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
@@ -198,7 +198,7 @@ JetCLICoreBodiesFile: struct {
 // A compile reads only the header of the bodies file and the records it
 // looks up, so the build reads it whole: a file a compile would misread is
 // the build's error (sema_core_bodies_problem).
-jet_cli_core_bodies_file: fn(captures: &&SemaCoreCaptures, trace_sink: JetCLITraceSink?) -> JetCLICoreBodiesFile {
+jet_cli_core_bodies_file: fn(captures: ^^SemaCoreCaptures, trace_sink: JetCLITraceSink?) -> JetCLICoreBodiesFile {
     if trace_sink == .Val(sink) -> sink.begin("runtime.core.bodies", "", -1, -1)
     held := captures.move()
     bytes: sema_core_bodies_bytes(held.bodies.move(), held.context)
@@ -231,7 +231,7 @@ jet_cli_core_library_built: fn(native: Shared<JetEvalNativeSession>, prefix: Str
 // `built`, as the `runtime.core.object` span, at `prefix`, once the
 // runtime's thread receipt `runtime_threads` is known (Request.jet
 // jet_cli_runtime_with_core). A Core check that stopped is the problem.
-jet_cli_core_library_made: fn(built: &&JetCLICoreLibraryIR, prefix: String, runtime_threads: [String], trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
+jet_cli_core_library_made: fn(built: ^^JetCLICoreLibraryIR, prefix: String, runtime_threads: [String], trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
     owned := built.move()
     if owned.stopped == .Val(problem) -> return JetCLICoreLibrary{bytes: [U8]{}, problem: problem}
     library := owned.library.pop() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core library IR was lost"}
@@ -245,7 +245,7 @@ jet_cli_core_library_made: fn(built: &&JetCLICoreLibraryIR, prefix: String, runt
 // `found` its build and lint left, the Core check's `seal` lines and its
 // Core bodies file `bodies`, once the runtime's thread receipt
 // `runtime_threads` is known.
-jet_cli_core_library: fn(prefix: String, library: &&IRCoreLibrary, found: &&[String], seal: String, bodies_in: &&[U8], runtime_threads: [String], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
+jet_cli_core_library: fn(prefix: String, library: ^^IRCoreLibrary, found: ^^[String], seal: String, bodies_in: ^^[U8], runtime_threads: [String], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
     bodies := bodies_in.move()
     issues := found.move()
     if issues.len() == 0 {
@@ -267,9 +267,9 @@ jet_cli_core_library: fn(prefix: String, library: &&IRCoreLibrary, found: &&[Str
             skipped_rows := library.skipped.move()
             drop_exports := library.exports.move()
             drop_data := library.data.move()
-            rel_exports: task &&drop_exports { drop_exports.len() }
+            rel_exports: task ^^drop_exports { drop_exports.len() }
             rel_exports.detach()
-            rel_data: task &&drop_data { drop_data.len() }
+            rel_data: task ^^drop_data { drop_data.len() }
             rel_data.detach()
             skipped: loop failure in skipped_rows -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
             p_obj: "{prefix}.o"
@@ -302,13 +302,13 @@ jet_cli_core_library: fn(prefix: String, library: &&IRCoreLibrary, found: &&[Str
                     if msg != "" && write_err == "" -> write_err = msg
                 }
             }
-            rel_rows: task &&rows { rows.len() }
+            rel_rows: task ^^rows { rows.len() }
             rel_rows.detach()
-            rel_facts: task &&facts { facts.len() }
+            rel_facts: task ^^facts { facts.len() }
             rel_facts.detach()
-            rel_skipped: task &&skipped_rows { skipped_rows.len() }
+            rel_skipped: task ^^skipped_rows { skipped_rows.len() }
             rel_skipped.detach()
-            rel_bodies: task &&bodies { bodies.len() }
+            rel_bodies: task ^^bodies { bodies.len() }
             rel_bodies.detach()
             if write_err != "" -> return JetCLICoreLibrary{bytes: [U8]{}, problem: write_err}
             return JetCLICoreLibrary{bytes: o_bytes.move(), problem: ""}

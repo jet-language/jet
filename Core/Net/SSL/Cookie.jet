@@ -47,10 +47,10 @@ ssl_cookie_init: fn() -> SSLCookieContext Never! {
 }
 
 /// Set the seconds a cookie lives (mbedtls_ssl_cookie_set_timeout).
-ssl_cookie_set_timeout: fn(ctx: &SSLCookieContext, delay: Int) Never! { ctx.timeout = delay }
+ssl_cookie_set_timeout: fn(ctx: ^SSLCookieContext, delay: Int) Never! { ctx.timeout = delay }
 
 /// Draw the HMAC key from `rng` (mbedtls_ssl_cookie_setup).
-ssl_cookie_setup: fn<R: RNG>(ctx: &SSLCookieContext, rng: &R) ssldefs.SSLError! {
+ssl_cookie_setup: fn<R: RNG>(ctx: ^SSLCookieContext, rng: ^R) ssldefs.SSLError! {
     key := ssldefs.ssl_zeros(SSL_COOKIE_MD_OUTLEN)
     if !rng.fill(key) -> return Err(.RandomFailed)
     ctx.hmac_key = Val(hashes.hmac_key(.SHA256, key))
@@ -58,7 +58,7 @@ ssl_cookie_setup: fn<R: RNG>(ctx: &SSLCookieContext, rng: &R) ssldefs.SSLError! 
 }
 
 /// Drop the key (mbedtls_ssl_cookie_free).
-ssl_cookie_free: fn(ctx: &SSLCookieContext) Never! {
+ssl_cookie_free: fn(ctx: ^SSLCookieContext) Never! {
     ctx.hmac_key = None
     ctx.timeout = 0
 }

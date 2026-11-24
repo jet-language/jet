@@ -73,7 +73,7 @@ env_battery_source_key: fn(package: BatteryPackage) -> String Never! {
     pkg_sha256_hex(identity)
 }
 
-env_battery_append_bytes: fn(target: &[U8], bytes: [U8]) Never! {
+env_battery_append_bytes: fn(target: ^[U8], bytes: [U8]) Never! {
     provider_push_be(target, bytes.len(), 8)
     loop byte in bytes -> target.push(byte)
 }
@@ -126,7 +126,7 @@ env_battery_verify_package_tree: fn(root: String, package: BatteryPackage) -[FS,
     }
 }
 
-env_battery_verify_directory: fn(directory: String, relative: String, package: BatteryPackage, seen: &[String]) -[FS, Env]> ProviderReason! {
+env_battery_verify_directory: fn(directory: String, relative: String, package: BatteryPackage, seen: ^[String]) -[FS, Env]> ProviderReason! {
     entries: files.list_dir(directory) ?? return Err(ProviderReason{message: "could not read embedded battery cache {directory}: {err}"})
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err(ProviderReason{message: "could not inspect embedded battery cache entry {entry.path}: {err}"})

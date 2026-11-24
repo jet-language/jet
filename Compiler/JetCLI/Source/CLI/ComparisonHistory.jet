@@ -87,7 +87,7 @@ jet_cli_comparison_index_entry: fn(index: JetCLIRecordIndex, identity: JetCLIRec
 // Rust `persist_evidence_report_for_inputs_with_retention`: the encoded `bytes`
 // of `report` under the project root selected from cwd
 // (jet_cli_evidence_persist_at).
-jet_cli_evidence_persist: fn(cache: &WorkspaceDeclarationCache, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) -[FS, Env, Time]> JetCLIReadError! {
+jet_cli_evidence_persist: fn(cache: ^WorkspaceDeclarationCache, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) -[FS, Env, Time]> JetCLIReadError! {
     cwd: cli_sys.current_dir() ?? return Err(jet_cli_read_error("could not read the current directory: {jet_cli_io_error_text(err)}"))
     root: jet_cli_selected_project_root(cache, cwd) ?? return Err(jet_cli_read_error("could not resolve evidence project root: {err.diagnostic}"))
     jet_cli_evidence_persist_at(root, report, bytes, name, target_inputs_sha256, protected)

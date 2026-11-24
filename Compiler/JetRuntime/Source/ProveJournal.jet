@@ -18,9 +18,10 @@
 // kind, the result's bytes. Kinds: `R` Rand bytes (result = request), `r` a
 // Rand read the OS refused (result 0), `I` a stdin read of up to `request`
 // bytes that delivered `result` (0 at end of input), `i` one that failed
-// (result = errno), `N` one HTTP hop (request 0) with the `result` bytes Core
-// encoded (Core/HTTP/Client.jet `__client_net_tape`; on replay, the parent's
-// shorter replay form).
+// (result = errno; ETIMEDOUT is a timed read whose wait ran out before
+// stdin had a byte, rt_prove_stdin_wait), `N` one HTTP hop (request 0) with
+// the `result` bytes Core encoded (Core/HTTP/Client.jet `__client_net_tape`;
+// on replay, the parent's shorter replay form).
 // Root48: lock0, mode8 (1 capture, 2 replay, 3 diverged), path16 (owned
 // journal or trace path), records24, length32, at40.
 PROVE_JOURNAL_HEAD: I64{17}
@@ -32,6 +33,9 @@ PROVE_JOURNAL_STDIN: I64{73}
 PROVE_JOURNAL_NET: I64{78}
 
 PROVE_JOURNAL_REQUEST: I64{81}
+
+// The errno a timed stdin read whose wait ran out records, ETIMEDOUT.
+PROVE_JOURNAL_TIMED_OUT: I64{110}
 
 prove_journal_root := I64{0}
 
@@ -163,6 +167,41 @@ rt_prove_stdin_read: fn(into: I64, capacity: I64) -> I64 {
     got
 }
 
+// Whether stdin has a byte for a timed read of up to `capacity` bytes within
+// `wait` nanoseconds: 1, after which the read says what came (end of input
+// included), or 0 when the wait ran out. A wait that fails reads as ready, so
+// the read reports the failure. Capture journals a wait that ran out as that
+// read failing with ETIMEDOUT, which is also its artifact form, and a ready
+// one not at all: the read that follows is its record. Replay answers 0 for
+// such a record at the cursor and takes it, else 1, leaving the next record
+// to the read.
+rt_prove_stdin_wait: fn(capacity: I64, wait: I64) -> I64 {
+    root: prove_journal_root
+    if (root == I64{0}) { return rt_prove_stdin_os_wait(wait) }
+    sync_mutex_lock(root)
+    ready := I64{1}
+    mode: trap_word(wrapping(root + I64{8}))
+    if (mode == I64{1}) {
+        ready = rt_prove_stdin_os_wait(wait)
+        if (ready == I64{0}) {
+            rt_prove_journal_record(root, PROVE_JOURNAL_STDIN + I64{32}, capacity, PROVE_JOURNAL_TIMED_OUT, I64{0})
+        }
+    } else if (mode == I64{2} && rt_prove_journal_timed_out(root, capacity)) {
+        if (rt_prove_journal_take(root, PROVE_JOURNAL_STDIN, capacity) >= I64{0}) { ready = I64{0} }
+    }
+    sync_mutex_unlock(root)
+    ready
+}
+
+// Whether the record at a replay's cursor is a timed read of up to
+// `capacity` stdin bytes whose wait ran out. The caller holds the lock.
+rt_prove_journal_timed_out: fn(root: I64, capacity: I64) -> Bool {
+    at: trap_word(wrapping(root + I64{40}))
+    if (at + PROVE_JOURNAL_HEAD > trap_word(wrapping(root + I64{32}))) { return false }
+    records: trap_word(wrapping(root + I64{24}))
+    rt_text_byte(wrapping(records + at)) == PROVE_JOURNAL_STDIN + I64{32} && rt_prove_le(wrapping(records + at + I64{1})) == capacity && rt_prove_le(wrapping(records + at + I64{9})) == PROVE_JOURNAL_TIMED_OUT
+}
+
 // A replay (RecordReplay.jet) answers stdin from the recording, without a
 // terminal read that would wait for typing.
 rt_prove_stdin_os_read: fn(into: I64, capacity: I64) -> I64 {
@@ -172,6 +211,15 @@ rt_prove_stdin_os_read: fn(into: I64, capacity: I64) -> I64 {
         got = host_syscall(I64{0}, I64{0}, into, capacity, I64{0}, I64{0}, I64{0})
     }
     replay_read(into, capacity, got)
+}
+
+// Whether stdin has a byte within `wait` nanoseconds: 1 ready (or the wait
+// failed, which the read then reports), 0 when it ran out. A recording logs
+// the answer; a replay serves it without waiting.
+rt_prove_stdin_os_wait: fn(wait: I64) -> I64 {
+    if replay_replaying() -> return replay_word(REPLAY_INPUT_WAIT, I64{1})
+    ready: if (host_descriptor_wait(I64{0}, I64{1}, wait) == I64{0}) -> I64{0} else -> I64{1}
+    replay_word(REPLAY_INPUT_WAIT, ready)
 }
 
 // A capture's harness runs in its own process group (HostSpawn.jet), so a
@@ -211,7 +259,7 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
     got
 }
 
-// Core/Net/TLS.jet's `__host_prove_mode` row, which Core/HTTP/Client.jet
+// jet.runtime.net's `tls_prove_mode` leaf, which Core/HTTP/Client.jet
 // `__client_once` reads: 0 outside `jet prove`, 1 capture, 2 replay
 // (diverged included).
 #Export(c) jet_prove_net_mode: fn() -> I64 {
@@ -238,7 +286,7 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
 // A replay traces the hop's request (`Q`, u64 LE length, the `length` bytes
 // `data` lends) and serves the next `N` record: 1 with a copy of its bytes
 // stored in the `out` and `out_length` words, which the caller's [u8] owns
-// (the `__host_prove_take` row's Option<[u8]>), 0 once the run diverged.
+// (the `tls_prove_take` leaf's [U8]?), 0 once the run diverged.
 #Export(c) jet_prove_net_take: fn(data: I64, length: I64, out: I64, out_length: I64) -> I64 {
     root: prove_journal_root
     if (root == I64{0} || length < I64{0}) { return I64{0} }

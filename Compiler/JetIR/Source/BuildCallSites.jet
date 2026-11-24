@@ -14,7 +14,7 @@ use jet_foundation.[Span, StmtKind]
 // of the source node at `span` (ir_call_site_row). Nodes nest, so the
 // innermost node's mark comes first and an outer one marks only what its
 // own lowering added.
-ir_call_sites_mark: fn(p: IRProgram, b: &IRBuilder, first: Int, span: Span) Never! {
+ir_call_sites_mark: fn(p: IRProgram, b: ^IRBuilder, first: Int, span: Span) Never! {
     if span.end <= span.start {
         return
     }
@@ -35,7 +35,7 @@ ir_call_sites_mark: fn(p: IRProgram, b: &IRBuilder, first: Int, span: Span) Neve
 // The row (from 1) of `f.call_sites` for the node at `span`: the last row
 // when it names the same place, else a new one; 0 when the node has no
 // source line or the code line has no room for another row.
-ir_call_site_row: fn(p: IRProgram, f: &IRFunction, span: Span) -> Int Never! {
+ir_call_site_row: fn(p: IRProgram, f: ^IRFunction, span: Span) -> Int Never! {
     line: ir_source_line_of(p, f.source_file, span.start) ?? return 0
     column: ir_source_column(p, f.source_file, span.start) ?? return 0
     if line <= 0 || line >= IR_CODE_LINE_CALL -> return 0

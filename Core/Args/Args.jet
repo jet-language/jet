@@ -143,7 +143,7 @@ object_get: fn(entries: [{key: String, value: Dyn}], key: String) -> Dyn? {
 }
 
 // Bind `key` to `value`: an existing key keeps its place, a new key goes last.
-object_set: fn(entries: &[{key: String, value: Dyn}], key: String, value: Dyn) {
+object_set: fn(entries: ^[{key: String, value: Dyn}], key: String, value: Dyn) {
     loop i in 0..<entries.len() {
         if entries[i].key == key {
             entries[i] = {key: key, value: value}
@@ -153,7 +153,7 @@ object_set: fn(entries: &[{key: String, value: Dyn}], key: String, value: Dyn) {
     entries.push({key: key, value: value})
 }
 
-add_flag_entry: fn(entries: &[{key: String, value: Dyn}], key: String, old: Dyn, value: Dyn) {
+add_flag_entry: fn(entries: ^[{key: String, value: Dyn}], key: String, old: Dyn, value: Dyn) {
     if old == {
         .Bool(previous) -> {
             if previous -> object_set(entries, key, Dyn.Int(2)) else {
@@ -171,7 +171,7 @@ add_flag_entry: fn(entries: &[{key: String, value: Dyn}], key: String, old: Dyn,
     }
 }
 
-put_entry: fn(entries: &[{key: String, value: Dyn}], key: String, value: Dyn) {
+put_entry: fn(entries: ^[{key: String, value: Dyn}], key: String, value: Dyn) {
     old: object_get(entries, key)
     if old == .None {
         entries.push({key: key, value: value})
@@ -555,7 +555,7 @@ CLITableCursor: struct {
 }
 
 // The table field at the cursor: its decimal byte length, `:`, its bytes.
-cli_take: fn(cursor: &CLITableCursor) -> String Never! {
+cli_take: fn(cursor: ^CLITableCursor) -> String Never! {
     length := 0
     loop cursor.raw[cursor.at] != (U8{58}) {
         length = length * 10 + Int{cursor.raw[cursor.at]} - 48
@@ -575,7 +575,7 @@ cli_take: fn(cursor: &CLITableCursor) -> String Never! {
 // one and, for a choice, the number of choices and each choice. Each text
 // field is its decimal byte length, `:` and the bytes. `envs` holds the
 // environment value of each input that names a variable, in table order.
-__cli_spec: fn(table: String, help: String, version: String, has_version: Bool, envs: [String?]) -> CLISpec Never! {
+priv __cli_spec: fn(table: String, help: String, version: String, has_version: Bool, envs: [String?]) -> CLISpec Never! {
     spec := CLISpec{help: help.copy(), version: if has_version -> Val(version.copy()) else -> None, inputs: [CLIInput]{}, commands: [CLICommand]{}}
     cursor := CLITableCursor{table: table.copy(), raw: table.bytes(), at: 0}
     env_index := 0
@@ -687,7 +687,7 @@ cli_lookup: fn(values: CLIValues, name: String) -> String? Never! {
     Val(values.values[slot].copy())
 }
 
-cli_store: fn(values: &CLIValues, name: String, value: String) Never! {
+cli_store: fn(values: ^CLIValues, name: String, value: String) Never! {
     slot: cli_slot(values.names, name)
     if slot >= 0 {
         values.values[slot] = value.copy()
@@ -703,7 +703,7 @@ cli_get_flag: fn(parsed: CLIParsed, name: String) -> Bool? Never! {
     Val(parsed.flags[slot])
 }
 
-cli_set_flag: fn(parsed: &CLIParsed, name: String, value: Bool) Never! {
+cli_set_flag: fn(parsed: ^CLIParsed, name: String, value: Bool) Never! {
     slot: cli_slot(parsed.flag_names, name)
     if slot >= 0 {
         parsed.flags[slot] = value
@@ -713,7 +713,7 @@ cli_set_flag: fn(parsed: &CLIParsed, name: String, value: Bool) Never! {
     parsed.flags.push(value)
 }
 
-cli_mark: fn(parsed: &CLIParsed, name: String) Never! {
+cli_mark: fn(parsed: ^CLIParsed, name: String) Never! {
     if !parsed.explicit.contains(name) -> parsed.explicit.push(name.copy())
 }
 
@@ -742,18 +742,18 @@ cli_ascii_lower: fn(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-__cli_is_int: fn(text: String) -> Bool Never! {
+priv __cli_is_int: fn(text: String) -> Bool Never! {
     _ := Int.parse(text) ?? return false
     true
 }
 
-__cli_is_float: fn(text: String) -> Bool Never! {
+priv __cli_is_float: fn(text: String) -> Bool Never! {
     _ := Float.parse(text) ?? return false
     true
 }
 
 // Whether `text` reads as a Bool value: `true` or `false` in any case.
-__cli_is_bool: fn(text: String) -> Bool Never! {
+priv __cli_is_bool: fn(text: String) -> Bool Never! {
     lower: cli_ascii_lower(text)
     lower == "true" || lower == "false"
 }
@@ -798,7 +798,7 @@ cli_unknown: fn(name: String, inputs: [CLIInput], help: String) -> String Never!
 
 // The refusal of the unknown option `--name`, with the first of `names`
 // within two edits as a suggestion.
-__cli_unknown: fn(name: String, names: [String]) -> String Never! {
+priv __cli_unknown: fn(name: String, names: [String]) -> String Never! {
     loop known in names {
         if cli_edit_distance(known, name) <= 2 {
             return "unknown option `--{name}`\ndid you mean `--{known}`?"
@@ -1040,114 +1040,114 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
     parsed
 }
 
-__cli_parse: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
+priv __cli_parse: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
     cli_parse(spec, argv, fn(text: String) { false })
 }
 
 // The parse of a spec with a Float input.
-__cli_parse_float: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
+priv __cli_parse_float: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
     cli_parse(spec, argv, fn(text: String) { __cli_is_float(text) })
 }
 
-__cli_status: fn(parsed: CLIParsed) -> Int Never! { parsed.status }
+priv __cli_status: fn(parsed: CLIParsed) -> Int Never! { parsed.status }
 
-__cli_message: fn(parsed: CLIParsed) -> String Never! { parsed.message.copy() }
+priv __cli_message: fn(parsed: CLIParsed) -> String Never! { parsed.message.copy() }
 
-__cli_command_name: fn(parsed: CLIParsed) -> String Never! { parsed.command.copy() }
+priv __cli_command_name: fn(parsed: CLIParsed) -> String Never! { parsed.command.copy() }
 
-__cli_flag: fn(parsed: CLIParsed, name: String) -> Bool Never! {
+priv __cli_flag: fn(parsed: CLIParsed, name: String) -> Bool Never! {
     cli_get_flag(parsed, name) ?? false
 }
 
-__cli_explicit: fn(parsed: CLIParsed, name: String) -> Bool Never! {
+priv __cli_explicit: fn(parsed: CLIParsed, name: String) -> Bool Never! {
     parsed.explicit.contains(name)
 }
 
-__cli_value: fn(parsed: CLIParsed, name: String) -> String? Never! {
+priv __cli_value: fn(parsed: CLIParsed, name: String) -> String? Never! {
     cli_lookup(parsed.options, name)
 }
 
 // The decoded value of an input from its text, `value` (None when absent).
-__cli_text_of: fn(value: String?) -> String Never! { value.copy() ?? "" }
+priv __cli_text_of: fn(value: String?) -> String Never! { value.copy() ?? "" }
 
-__cli_int_of: fn(value: String?) -> Int Never! { Int.parse(__cli_text_of(value)) ?? 0 }
+priv __cli_int_of: fn(value: String?) -> Int Never! { Int.parse(__cli_text_of(value)) ?? 0 }
 
-__cli_float_of: fn(value: String?) -> Float Never! { Float.parse(__cli_text_of(value)) ?? 0.0 }
+priv __cli_float_of: fn(value: String?) -> Float Never! { Float.parse(__cli_text_of(value)) ?? 0.0 }
 
-__cli_bool_of: fn(value: String?) -> Bool Never! { cli_ascii_lower(__cli_text_of(value)) == "true" }
+priv __cli_bool_of: fn(value: String?) -> Bool Never! { cli_ascii_lower(__cli_text_of(value)) == "true" }
 
-__cli_text_opt_of: fn(value: String?) -> String? Never! { value.copy() }
+priv __cli_text_opt_of: fn(value: String?) -> String? Never! { value.copy() }
 
-__cli_int_opt_of: fn(value: String?) -> Int? Never! {
+priv __cli_int_opt_of: fn(value: String?) -> Int? Never! {
     if value == None -> return None
     Val(__cli_int_of(value))
 }
 
-__cli_float_opt_of: fn(value: String?) -> Float? Never! {
+priv __cli_float_opt_of: fn(value: String?) -> Float? Never! {
     if value == None -> return None
     Val(__cli_float_of(value))
 }
 
-__cli_bool_opt_of: fn(value: String?) -> Bool? Never! {
+priv __cli_bool_opt_of: fn(value: String?) -> Bool? Never! {
     if value == None -> return None
     Val(__cli_bool_of(value))
 }
 
 // The start vector the compiler's generated entry parses: the program name,
 // then the program's words. User code reads `process.args()` instead.
-__cli_argv: fn() -[Exec.Args]> [String] Never! { rt.argv() }
+priv __cli_argv: fn() -[Exec.Args]> [String] Never! { rt.argv() }
 
 // The pieces of the parser the compiler writes for a `#CLI` struct without
 // commands. `help` is the root help text after the program name.
-__cli_usage: fn(argv: [String], help: String) -> String Never! {
+priv __cli_usage: fn(argv: [String], help: String) -> String Never! {
     "Usage: {cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")}{help}"
 }
 
-__cli_with_usage: fn(message: String, argv: [String], help: String) -> String Never! {
+priv __cli_with_usage: fn(message: String, argv: [String], help: String) -> String Never! {
     "{message}\n\n{__cli_usage(argv, help)}"
 }
 
-__cli_long: fn(arg: String) -> Bool Never! { starts(arg, "--") }
+priv __cli_long: fn(arg: String) -> Bool Never! { starts(arg, "--") }
 
-__cli_short: fn(arg: String) -> Bool Never! { starts(arg, "-") && arg.bytes().len() > 1 }
+priv __cli_short: fn(arg: String) -> Bool Never! { starts(arg, "-") && arg.bytes().len() > 1 }
 
-__cli_rest: fn(text: String, start: Int) -> String Never! {
+priv __cli_rest: fn(text: String, start: Int) -> String Never! {
     slice_str(text, start, text.bytes().len())
 }
 
-__cli_slice: fn(text: String, start: Int, end: Int) -> String Never! { slice_str(text, start, end) }
+priv __cli_slice: fn(text: String, start: Int, end: Int) -> String Never! { slice_str(text, start, end) }
 
-__cli_eq: fn(text: String) -> Int Never! {
+priv __cli_eq: fn(text: String) -> Int Never! {
     loop (at, byte) in text.bytes() {
         if byte == (U8{61}) -> return at
     }
     -1
 }
 
-__cli_int_refusal: fn(name: String, value: String) -> String Never! {
+priv __cli_int_refusal: fn(name: String, value: String) -> String Never! {
     "`--{name}` expects an Int, got `{value}`\n\nfix: pass a whole number to `--{name}`"
 }
 
-__cli_float_refusal: fn(name: String, value: String) -> String Never! {
+priv __cli_float_refusal: fn(name: String, value: String) -> String Never! {
     "`--{name}` expects a Float, got `{value}`\n\nfix: pass a number to `--{name}`"
 }
 
-__cli_choice_refusal: fn(name: String, value: String, choices: String) -> String Never! {
+priv __cli_choice_refusal: fn(name: String, value: String, choices: String) -> String Never! {
     "`--{name}` expects one of: {choices}; got `{value}`"
 }
 
-__cli_flag_value: fn(name: String, value: String) -> String Never! {
+priv __cli_flag_value: fn(name: String, value: String) -> String Never! {
     "--{name} is a flag; it takes no value (got `={value}`)"
 }
 
-__cli_surplus: fn(positionals: [String], start: Int) -> String Never! {
+priv __cli_surplus: fn(positionals: [String], start: Int) -> String Never! {
     surplus := [String]{}
     loop index in start..<positionals.len() -> surplus.push("`{positionals[index]}`")
     plural: if surplus.len() == 1 -> "" else -> "s"
     "unexpected argument{plural}: {surplus.join(", ")}"
 }
 
-__cli_missing: fn(names: [String]) -> String Never! {
+priv __cli_missing: fn(names: [String]) -> String Never! {
     plural: if names.len() == 1 -> "" else -> "s"
     "missing required argument{plural}: {names.join(", ")}"
 }
@@ -1197,52 +1197,52 @@ ArgsLevel: struct {
 ArgsSpec: struct {
     levels: [ArgsLevel],
 
-    description: fn(&&self, description: String) -> ArgsSpec Never! {
+    description: fn(^^self, description: String) -> ArgsSpec Never! {
         out := self.move()
         out.levels[0].description = Val(description.copy())
         out
     }
 
-    version: fn(&&self, version: String) -> ArgsSpec Never! {
+    version: fn(^^self, version: String) -> ArgsSpec Never! {
         out := self.move()
         out.levels[0].version = Val(version.copy())
         out
     }
 
-    flag: fn(&&self, name: String, help: String) -> ArgsSpec Never! {
+    flag: fn(^^self, name: String, help: String) -> ArgsSpec Never! {
         args_with(self, args_entry(ARG_FLAG, name, None, help, "", None, None, false, false, CLI_TEXT))
     }
 
-    flag_short: fn(&&self, name: String, short: String, help: String) -> ArgsSpec Never! {
+    flag_short: fn(^^self, name: String, short: String, help: String) -> ArgsSpec Never! {
         args_with(self, args_entry(ARG_FLAG, name, Val(short.copy()), help, "", None, None, false, false, CLI_TEXT))
     }
 
-    option: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    option: fn(^^self, name: String, help: String, meta: String) -> ArgsSpec Never! {
         args_with(self, args_option_entry(name, help, meta, CLI_TEXT))
     }
 
-    option_short: fn(&&self, name: String, short: String, help: String, meta: String) -> ArgsSpec Never! {
+    option_short: fn(^^self, name: String, short: String, help: String, meta: String) -> ArgsSpec Never! {
         args_with(self, args_entry(ARG_OPTION, name, Val(short.copy()), help, meta, None, None, false, false, CLI_TEXT))
     }
 
-    option_default: fn(&&self, name: String, help: String, meta: String, default: String) -> ArgsSpec Never! {
+    option_default: fn(^^self, name: String, help: String, meta: String, default: String) -> ArgsSpec Never! {
         args_with(self, args_entry(ARG_OPTION, name, None, help, meta, Val(default.copy()), None, false, false, CLI_TEXT))
     }
 
-    option_env: fn(&&self, name: String, help: String, meta: String, env: String) -> ArgsSpec Never! {
+    option_env: fn(^^self, name: String, help: String, meta: String, env: String) -> ArgsSpec Never! {
         args_with(self, args_entry(ARG_OPTION, name, None, help, meta, None, Val(env.copy()), false, false, CLI_TEXT))
     }
 
-    option_int: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    option_int: fn(^^self, name: String, help: String, meta: String) -> ArgsSpec Never! {
         args_with(self, args_option_entry(name, help, meta, CLI_INT))
     }
 
-    option_float: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    option_float: fn(^^self, name: String, help: String, meta: String) -> ArgsSpec Never! {
         args_with(self, args_option_entry(name, help, meta, CLI_FLOAT))
     }
 
     // `choices` is a comma list; each choice is trimmed and an empty one dropped.
-    option_choice: fn(&&self, name: String, help: String, meta: String, choices: String) -> ArgsSpec Never! {
+    option_choice: fn(^^self, name: String, help: String, meta: String, choices: String) -> ArgsSpec Never! {
         entry := args_option_entry(name, help, meta, CLI_CHOICE)
         loop part in choices.split(",") {
             choice: part.trim()
@@ -1251,22 +1251,22 @@ ArgsSpec: struct {
         args_with(self, entry)
     }
 
-    repeat: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    repeat: fn(^^self, name: String, help: String, meta: String) -> ArgsSpec Never! {
         args_with(self, args_entry(ARG_OPTION, name, None, help, meta, None, None, false, true, CLI_TEXT))
     }
 
-    required_option: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    required_option: fn(^^self, name: String, help: String, meta: String) -> ArgsSpec Never! {
         args_with(self, args_entry(ARG_OPTION, name, None, help, meta, None, None, true, false, CLI_TEXT))
     }
 
-    positional: fn(&&self, name: String, help: String) -> ArgsSpec Never! {
+    positional: fn(^^self, name: String, help: String) -> ArgsSpec Never! {
         args_with(self, args_entry(ARG_POSITIONAL, name, None, help, "", None, None, false, false, CLI_TEXT))
     }
 
     // The command inherits every parent input; its
     // own input of the same name gives way to the inherited one. Its levels move
     // after the parent's, so each nested level index shifts by the parent count.
-    subcommand: fn(&&self, name: String, help: String, command: &&ArgsSpec) -> ArgsSpec Never! {
+    subcommand: fn(^^self, name: String, help: String, command: ^^ArgsSpec) -> ArgsSpec Never! {
         out := self.move()
         nested := command.move()
         inherited := out.levels[0].inherited.copy()
@@ -1401,7 +1401,7 @@ args_option_entry: fn(name: String, help: String, meta: String, value: Int) -> A
     args_entry(ARG_OPTION, name, None, help, meta, None, None, false, false, value)
 }
 
-args_with: fn(spec: &&ArgsSpec, entry: &&ArgEntry) -> ArgsSpec Never! {
+args_with: fn(spec: ^^ArgsSpec, entry: ^^ArgEntry) -> ArgsSpec Never! {
     out := spec.move()
     out.levels[0].entries.push(entry)
     out
@@ -1487,7 +1487,7 @@ args_find_short: fn(all: [ArgEntry], short: String) -> Int Never! {
 
 // "" after storing `value`, else the refusal.
 // A repeatable option keeps every value; another keeps the last.
-args_store: fn(options: &[String:[String]], entry: ArgEntry, value: String) -> String Never! {
+args_store: fn(options: ^[String:[String]], entry: ArgEntry, value: String) -> String Never! {
     if entry.value == CLI_INT && !__cli_is_int(value) -> return __cli_int_refusal(entry.name, value)
     if entry.value == CLI_FLOAT && !__cli_is_float(value) {
         return __cli_float_refusal(entry.name, value)
@@ -1520,7 +1520,7 @@ args_parsed: fn() -> ParsedArgs Never! {
 // Level `at`'s parse over argv[start..] into `out`:
 // "" after a parse, else the refusal. Options, flags, short clusters, one
 // command word and the positional fill, with explicit > env > default.
-args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &ParsedArgs) -[Env, Exec.Args]> String Never! {
+args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: ^ParsedArgs) -[Env, Exec.Args]> String Never! {
     all: args_all(spec.levels[at])
     has_commands := false
     loop entry in spec.levels[at].entries {

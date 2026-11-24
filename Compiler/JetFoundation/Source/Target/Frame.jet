@@ -35,7 +35,7 @@ JetFrameTypes: struct {
     fixed_storage: [Int],
 }
 
-jet_frame_types: fn(defs: &&[TTypeDef]) -> JetFrameTypes Never! {
+jet_frame_types: fn(defs: ^^[TTypeDef]) -> JetFrameTypes Never! {
     owned := defs.move()
     keys := name_column_table(owned.len() * 2)
     rows := name_column(owned.len() * 2)
@@ -62,7 +62,7 @@ jet_frame_types: fn(defs: &&[TTypeDef]) -> JetFrameTypes Never! {
     types
 }
 
-jet_frame_precompute_row: fn(types: &JetFrameTypes, row: Int, laying: &[Int]) -> Int Never! {
+jet_frame_precompute_row: fn(types: ^JetFrameTypes, row: Int, laying: ^[Int]) -> Int Never! {
     cached: types.fixed_storage[row]
     if cached != -3 -> return cached
     loop active in laying {
@@ -104,7 +104,7 @@ jet_frame_precompute_row: fn(types: &JetFrameTypes, row: Int, laying: &[Int]) ->
     result
 }
 
-jet_frame_precompute_type: fn(types: &JetFrameTypes, ty: Type, laying: &[Int]) -> Int Never! {
+jet_frame_precompute_type: fn(types: ^JetFrameTypes, ty: Type, laying: ^[Int]) -> Int Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Case(_, _) | .Measure(_) -> 0
         .List(_) | .Map(_, _, _) -> 24

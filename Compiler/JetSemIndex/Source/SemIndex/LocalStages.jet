@@ -37,13 +37,13 @@ SEMINDEX_LOCAL_STAGE_VALUE_LIMIT: 120
 
 // The stage of every immutable local of `doc_module`'s checked bodies, keyed
 // as semindex_local_types keys its type. `summaries` holds the solved effect
-// rows of the indexed functions (semindex_summaries); `interner` names the
-// TypeIDs of the bodies.
-semindex_local_stages: fn(doc_module: JetDriverDocModule, summaries: [SemSummary], interner: Interner) -> [String:SemLocalStage] Never! {
-    by_raw_key := [String:Int]{}
-    loop (row, summary) in summaries {
-        if by_raw_key.get(summary.raw_key) == None -> _ := by_raw_key.add(summary.raw_key, row)
-    }
+// rows of the indexed functions (semindex_summaries), `by_raw_key` their
+// rows by raw key (semindex_local_stage_rows); `interner` names the TypeIDs
+// of the bodies.
+semindex_local_stages: fn(doc_module: JetDriverDocModule, summaries: [SemSummary], by_raw_key: [String:Int], interner: Interner) -> [String:SemLocalStage] Never! {
+    // The module's call facts by caller key.
+    callers := semindex_groups()
+    loop (row, fact) in doc_module.call_facts -> semindex_group_add(callers, fact.caller_key, row)
     stages := [String:SemLocalStage]{}
     loop function in doc_module.functions {
         if function.synthetic -> next
@@ -69,12 +69,21 @@ semindex_local_stages: fn(doc_module: JetDriverDocModule, summaries: [SemSummary
                 key: semindex_local_type_key(local.name, local.span)
                 // A generic body's instances share spans and keep the first.
                 if stages.get(key) != None -> next
-                stage: semindex_local_stage(function, local, init, stages, summaries, by_raw_key, doc_module, interner) ?? next
+                stage: semindex_local_stage(function, local, init, stages, summaries, by_raw_key, callers, doc_module, interner) ?? next
                 stages[key] = stage
             }
         }
     }
     stages
+}
+
+// Each summary's first row by raw key.
+semindex_local_stage_rows: fn(summaries: [SemSummary]) -> [String:Int] Never! {
+    by_raw_key := [String:Int]{}
+    loop (row, summary) in summaries {
+        if by_raw_key.get(summary.raw_key) == None -> _ := by_raw_key.add(summary.raw_key, row)
+    }
+    by_raw_key
 }
 
 // The stage as hover prose.
@@ -90,7 +99,7 @@ semindex_local_stage_start: fn(tree: BodyTree, row: Int) -> Int Never! {
     0
 }
 
-semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [String:SemLocalStage], summaries: [SemSummary], by_raw_key: [String:Int], doc_module: JetDriverDocModule, interner: Interner) -> SemLocalStage? Never! {
+semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [String:SemLocalStage], summaries: [SemSummary], by_raw_key: [String:Int], callers: SemGroups, doc_module: JetDriverDocModule, interner: Interner) -> SemLocalStage? Never! {
     folded := TComptimeValue?{None}
     if doc_module.name_ledger == .Val(storage) {
         permit: storage.guard_read()
@@ -138,7 +147,7 @@ semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [St
         return Val(SemLocalStage.Run{reason: "it reads `{name}`, which only the running program knows"})
     }
     if printed -> return Val(SemLocalStage.Run{reason: "it prints text"})
-    if semindex_local_stage_effect(function, span, summaries, by_raw_key, doc_module) == .Val(reason) {
+    if semindex_local_stage_effect(function, span, summaries, by_raw_key, callers, doc_module) == .Val(reason) {
         return Val(SemLocalStage.Run{reason: reason})
     }
     if semindex_local_stage_unstorable(local.ty) {
@@ -153,14 +162,17 @@ semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [St
 // The first call inside `span` whose callee reaches the outside world: a
 // solved effect of an indexed callee, or the written row of a callee outside
 // the indexed modules, that is not deny-only (a stop, memory, or waiting on
-// the program's own work).
-semindex_local_stage_effect: fn(function: FnBody, span: Span, summaries: [SemSummary], by_raw_key: [String:Int], doc_module: JetDriverDocModule) -> String? Never! {
+// the program's own work). `callers` groups the module's call facts by caller.
+semindex_local_stage_effect: fn(function: FnBody, span: Span, summaries: [SemSummary], by_raw_key: [String:Int], callers: SemGroups, doc_module: JetDriverDocModule) -> String? Never! {
+    group: semindex_group(callers, function.key)
+    if group < 0 -> return None
     found := String?{None}
     found_at := 0
     storage: doc_module.name_ledger ?? return None
     permit: storage.guard_read()
-    loop fact in doc_module.call_facts {
-        if fact.caller_key != function.key || !semindex_local_stage_within(fact.span, span) -> next
+    loop fact_row in callers.groups[group] {
+        fact: doc_module.call_facts[fact_row]
+        if !semindex_local_stage_within(fact.span, span) -> next
         if found != None && fact.span.start >= found_at -> next
         callee_id: fact.callee ?? next
         // The fact's caller is `function`, so a local callee is one of its own.

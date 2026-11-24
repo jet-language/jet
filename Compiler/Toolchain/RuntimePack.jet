@@ -179,7 +179,7 @@ c_string: fn(b: [U8], at: Int, end: Int) -> String {
 // Appends every name in the symbol tables (SHT_SYMTAB and SHT_DYNSYM) of the
 // 64-bit little-endian ELF object at b[base..<end] to `names`; what is wrong
 // with it, else "".
-elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: &[String]) -> String {
+elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: ^[String]) -> String {
     size: end - base
     if size < 64 || le(b, base, 4) != 1179403647 || le(b, base + 4, 2) != 258 {
         return "{what} is not a 64-bit little-endian ELF object"
@@ -226,7 +226,7 @@ elf_symbol_names: fn(b: [U8], base: Int, end: Int, what: String, names: &[String
 
 // Appends every symbol name of the ELF object `b` (the file `what`) to
 // `names`; the problem, else "".
-symbol_names: fn(b: [U8], what: String, names: &[String]) -> String {
+symbol_names: fn(b: [U8], what: String, names: ^[String]) -> String {
     elf_symbol_names(b, 0, b.len(), what, names)
 }
 
@@ -343,7 +343,7 @@ digests: fn(objects: [String], others: [String]) -> [FileDigest] {
 }
 
 // The sha256 `found` holds, moved out; the step fails with its problem.
-digest_of: fn(found: &&FileDigest) -> String {
+digest_of: fn(found: ^^FileDigest) -> String {
     if found.problem != "" -> fail(found.problem)
     found.sha256.move()
 }
@@ -834,7 +834,7 @@ core_import: fn(spec: String) -> Bool {
 // (JetSema's unit map reads a raw operation's source line that way). Each
 // Core import (a `use` line, or a row of a top-level `use { … }` block) not
 // yet in `uses` is added to it.
-unit_body: fn(text: String, uses: &[String]) -> String {
+unit_body: fn(text: String, uses: ^[String]) -> String {
     kept := [String]{}
     block := false
     depth := 0
@@ -1110,7 +1110,7 @@ run: fn() {
 }
 
 // Test input: `value` as `width` little-endian bytes at `at` of `b`.
-put: fn(b: &[U8], at: Int, width: Int, value: Int) {
+put: fn(b: ^[U8], at: Int, width: Int, value: Int) {
     rest := value
     loop k in 0..<width {
         b[at + k] = checked(U8{rest % 256}) ?? U8{0}

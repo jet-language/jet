@@ -31,8 +31,7 @@
 //   shares            the trait whose impl on the same type binds the
 //                     associated types these methods use
 //   declared_in       the Core module whose declaration of the trait gives
-//                     its methods; the facts stay here. Until that module
-//                     declares the trait, the methods written here stand in
+//                     its methods; the facts stay here
 //
 // A `#Builtin.Role(.Add)` line right above a trait gives it a role, a case
 // of jet_builtins' RoleKind: `a + b` calls the trait that fills `Add`,
@@ -149,7 +148,7 @@ KeyBy: trait {
     key: fn(self) -> Key Never!,
 }
 
-// The value as its dynamic encoding tree.
+// The value as its dynamic encoding tree, declared in Core/Encoding/Encoding.jet.
 Encode: trait {
     local: Bool{true},
     bare_bound: Bool{true},
@@ -158,10 +157,10 @@ Encode: trait {
     auto_derive_family: String{"Codable"},
     through_elements: Bool{true},
     declared_in: String{"core.encoding"},
-    encode: fn(self) -> Dyn Never!,
 }
 
-// A value read back from its dynamic encoding tree.
+// A value read back from its dynamic encoding tree, declared in
+// Core/Encoding/Encoding.jet.
 Decode: trait {
     local: Bool{true},
     bare_bound: Bool{true},
@@ -170,7 +169,6 @@ Decode: trait {
     auto_derive_family: String{"Codable"},
     through_elements: Bool{true},
     declared_in: String{"core.encoding"},
-    decode: fn(tree: Dyn) -> Self [FieldError]!,
 }
 
 // `Target{value}` and `Target.from(value)`: a `Target` made from a `Source`.
@@ -253,7 +251,7 @@ Debug: trait {
 Close: trait {
     local: Bool{true},
     bare_bound: Bool{true},
-    close: fn(&&self) Never!,
+    close: fn(^^self) Never!,
 }
 
 // Arithmetic with a zero and a one; a `#Numeric` distinct type has it.
@@ -283,8 +281,8 @@ Driver: trait {
 // bytes to `buffer` and answers how many, 0 at the end of the input.
 Reader: trait {
     bare_bound: Bool{true},
-    read_bytes: fn(&self, limit: Int) -> [U8] IOError!,
-    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,
+    read_bytes: fn(^self, limit: Int) -> [U8] IOError!,
+    read_into: fn(^self, buffer: ^[U8], limit: Int) -> Int IOError!,
 }
 
 // A byte sink: core.files's FileWriter, the screen, and any type the
@@ -294,12 +292,12 @@ Reader: trait {
 // `write_bytes`.
 Writer: trait {
     bare_bound: Bool{true},
-    write_bytes: fn(&self, bytes: [U8]) IOError!,
-    flush: fn(&self) IOError!,
-    write: fn(&self, text: String) IOError! {
+    write_bytes: fn(^self, bytes: [U8]) IOError!,
+    flush: fn(^self) IOError!,
+    write: fn(^self, text: String) IOError! {
         self.write_bytes(text.bytes())
     }
-    write_line: fn(&self, text: String) IOError! {
+    write_line: fn(^self, text: String) IOError! {
         self.write_bytes("{text}\n".bytes())
     }
 }
@@ -308,7 +306,7 @@ Writer: trait {
 Rollback: trait {
     Snapshot: type,
     snapshot: fn(self) -> Snapshot Never!,
-    restore: fn(&self, snap: Snapshot) Never!,
+    restore: fn(^self, snap: Snapshot) Never!,
 }
 
 // A cursor: `loop x in cursor`. `next` answers the next item, `None` once
@@ -318,14 +316,14 @@ Rollback: trait {
 Iterator: trait {
     Item: type,
     Error: type,
-    next: fn(&self) -> Item? Error!,
+    next: fn(^self) -> Item? Error!,
 }
 
 // Zero-copy `loop x in value`.
 Iterable: trait {
     raw_return: Bool{true},
     Iter: type,
-    iter: fn(&&self) -> Iter Never!,
+    iter: fn(^^self) -> Iter Never!,
 }
 
 // `value[key]`.
@@ -340,5 +338,5 @@ Index: trait {
 #Builtin.Role(.IndexMut)
 IndexMut: trait {
     shares: String{"Index"},
-    set: fn(&self, k: Key, v: Value) Never!,
+    set: fn(^self, k: Key, v: Value) Never!,
 }

@@ -133,7 +133,7 @@ jet_driver_schema_pending_breaks: fn(modules: [[Item]], snapshots: [String:Schem
     names
 }
 
-jet_driver_check_schema_migrations: fn(request: JetDriverCompileRequest, registration: &&SemaRegistrationGraph, checked: SemaGraphResult, retain_inputs: Bool) -[Env, FS]> JetDriverSchemaCheckResult {
+jet_driver_check_schema_migrations: fn(request: JetDriverCompileRequest, registration: ^^SemaRegistrationGraph, checked: SemaGraphResult, retain_inputs: Bool) -[Env, FS]> JetDriverSchemaCheckResult {
     if request.schema_snapshots == .Val(snapshots) {
         ingress: if retain_inputs -> Val(JetDriverSchemaIngress.Supplied{snapshots: snapshots}) else -> None
         checked_schema := sema_check_schema_migration_graph(registration, checked, snapshots)

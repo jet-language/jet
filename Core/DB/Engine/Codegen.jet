@@ -9,7 +9,7 @@
 // The connection is part of the Parse: a statement is prepared with the
 // Conn moved into its Parse (take_conn) and moved back after, so that the
 // code generator reaches the connection, the statement under construction
-// and its own state through one `&Parse`. The parse trees are the
+// and its own state through one `^Parse`. The parse trees are the
 // connection's arena, `ast.AST`, which travels beside the Parse.
 //
 // The files above this one call each other in cycles (expr.c codes
@@ -428,54 +428,54 @@ Parse: struct {
 // part implements them by calling the routine each one names.
 Gen: trait {
     // sqlite3ReadSchema (prepare.c).
-    read_schema: fn(self, p: &Parse, a: &ast.AST) -[DB]> Int Never!,
+    read_schema: fn(self, p: ^Parse, a: ^ast.AST) -[DB]> Int Never!,
     // The authorizer callback, db->xAuth, with the Parse's
     // p.f.auth_context as its fourth string: SQLITE_OK, AUTH_DENY or
     // AUTH_IGNORE, or another value for a malfunction.
-    authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never!,
+    authorize: fn(self, p: ^Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never!,
     // sqlite3NestedParse (build.c).
-    nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) -[DB]> Never!,
+    nested_parse: fn(self, p: ^Parse, a: ^ast.AST, sql: [U8]) -[DB]> Never!,
     // sqlite3Select (select.c).
-    select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never!,
+    select: fn(self, p: ^Parse, a: ^ast.AST, s: Int, dest: ^SelectDest) -[DB]> Int Never!,
     // sqlite3SelectPrep (select.c).
-    select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never!,
+    select_prep: fn(self, p: ^Parse, a: ^ast.AST, s: Int, outer_nc: Int) -[DB]> Never!,
     // sqlite3SelectExpand (select.c).
-    select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Never!,
+    select_expand: fn(self, p: ^Parse, a: ^ast.AST, s: Int) -[DB]> Never!,
     // sqlite3ResultSetOfSelect (select.c): a Table, in p.db.tables, of the
     // result columns of SELECT `s` with affinity `aff`; -1 on error.
-    result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never!,
+    result_set_of_select: fn(self, p: ^Parse, a: ^ast.AST, s: Int, aff: Int) -[DB]> Int Never!,
     // sqlite3ViewGetColumnNames (build.c): table t's columns computed,
     // when t is a view or virtual table; nonzero on error.
-    view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never!,
+    view_get_column_names: fn(self, p: ^Parse, a: ^ast.AST, t: Int) -[DB]> Int Never!,
     // The eponymous virtual table `name` names (sqlite3LocateTable's
     // module lookup, sqlite3PragmaVtabRegister for a pragma_ name, and
     // sqlite3VtabEponymousTableInit): its table, or -1.
-    eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never!,
+    eponymous_table: fn(self, p: ^Parse, a: ^ast.AST, name: [U8]) -[DB]> Int Never!,
     // sqlite3VtabOverloadFunction (vtab.c) for argument `e`, a column of
     // a virtual table: the function its module's xFindFunction overloads
     // def with, or def.
-    vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never!,
+    vtab_overload_function: fn(self, p: ^Parse, a: ^ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never!,
     // vtabBestIndex's xBestIndex call (where.c) for virtual table t:
     // info's outputs filled in, with the result code and the module's
     // error message (zErrMsg), if any.
-    vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never!,
+    vtab_best_index: fn(self, p: ^Parse, a: ^ast.AST, t: Int, info: ^conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never!,
     // xFindFunction of virtual table t's module for function `name` of
     // n_arg arguments (isAuxiliaryVtabOperator): its result, 0 when the
     // module has none.
-    vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never!,
+    vtab_find_function: fn(self, p: ^Parse, a: ^ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never!,
 }
 
 // A walker's callbacks (struct Walker's xExprCallback, xSelectCallback,
 // xSelectCallback2): each walker is a type that implements them, reading
 // and writing its state in the Parse's innermost WalkState.
 WalkCb: trait {
-    on_expr: fn(self, p: &Parse, a: &ast.AST, e: Int) -[DB]> Int Never!,
+    on_expr: fn(self, p: ^Parse, a: ^ast.AST, e: Int) -[DB]> Int Never!,
     // Whether xSelectCallback is set; sqlite3WalkSelect does nothing for
     // a walker without one.
     has_select: fn(self) -[]> Bool Never!,
-    on_select: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never!,
+    on_select: fn(self, p: ^Parse, a: ^ast.AST, s: Int) -[DB]> Int Never!,
     has_select2: fn(self) -[]> Bool Never!,
-    on_select2: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Never!,
+    on_select2: fn(self, p: ^Parse, a: ^ast.AST, s: Int) -[DB]> Never!,
     // Whether sqlite3WalkSelectExpr also walks the WINDOW definitions:
     // xSelectCallback2 is sqlite3WalkWinDefnDummyCallback or
     // sqlite3SelectPopWith, or the Parse is renaming.
@@ -534,7 +534,7 @@ frame_new: fn() -> ParseFrame Never! {
 }
 
 // sqlite3ParseObjectInit: a Parse over `db`, which it now holds.
-parse_new: fn(db: &&conn.Conn, up: &&Gen) -> Parse Never! {
+parse_new: fn(db: ^^conn.Conn, up: ^^Gen) -> Parse Never! {
     Parse{
         db: db,
         up: up,
@@ -554,7 +554,7 @@ parse_new: fn(db: &&conn.Conn, up: &&Gen) -> Parse Never! {
 }
 
 // Move the connection out of `db` for a Parse, leaving an empty Conn.
-take_conn: fn(db: &conn.Conn) -> conn.Conn Never! {
+take_conn: fn(db: ^conn.Conn) -> conn.Conn Never! {
     out := db
     db = conn.conn_new()
     out
@@ -562,7 +562,7 @@ take_conn: fn(db: &conn.Conn) -> conn.Conn Never! {
 
 // Move the parse-tree arena out of the connection, for a Parse to work on
 // beside it.
-take_ast: fn(db: &conn.Conn) -> ast.AST Never! {
+take_ast: fn(db: ^conn.Conn) -> ast.AST Never! {
     out := db.ast
     db.ast = ast.new_ast()
     out
@@ -573,7 +573,7 @@ take_ast: fn(db: &conn.Conn) -> ast.AST Never! {
 
 is_toplevel: fn(p: Parse) -> Bool Never! { p.outer.len() == 0 }
 
-top_set_write_mask: fn(p: &Parse, i_db: Int) Never! {
+top_set_write_mask: fn(p: ^Parse, i_db: Int) Never! {
     bit: 1 << i_db
     if p.outer.len() > 0 -> p.outer[0].write_mask = p.outer[0].write_mask | bit else {
         p.f.write_mask |= bit
@@ -585,11 +585,11 @@ top_cookie_mask: fn(p: Parse) -> Int Never! {
     p.f.cookie_mask
 }
 
-top_set_cookie_mask: fn(p: &Parse, mask: Int) Never! {
+top_set_cookie_mask: fn(p: ^Parse, mask: Int) Never! {
     if p.outer.len() > 0 -> p.outer[0].cookie_mask = mask else -> p.f.cookie_mask = mask
 }
 
-top_set_multi_write: fn(p: &Parse, on: Bool) Never! {
+top_set_multi_write: fn(p: ^Parse, on: Bool) Never! {
     if !on {
         return
     }
@@ -601,12 +601,12 @@ top_ainc: fn(p: Parse) -> Int Never! {
     p.f.ainc
 }
 
-top_set_ainc: fn(p: &Parse, x: Int) Never! {
+top_set_ainc: fn(p: ^Parse, x: Int) Never! {
     if p.outer.len() > 0 -> p.outer[0].ainc = x else -> p.f.ainc = x
 }
 
 // ++pToplevel->nMem.
-top_alloc_mem: fn(p: &Parse) -> Int Never! {
+top_alloc_mem: fn(p: ^Parse) -> Int Never! {
     if p.outer.len() > 0 {
         p.outer[0].n_mem += 1
         return p.outer[0].n_mem
@@ -620,11 +620,11 @@ top_trigger_prg: fn(p: Parse) -> Int Never! {
     p.f.trigger_prg
 }
 
-top_set_trigger_prg: fn(p: &Parse, x: Int) Never! {
+top_set_trigger_prg: fn(p: ^Parse, x: Int) Never! {
     if p.outer.len() > 0 -> p.outer[0].trigger_prg = x else -> p.f.trigger_prg = x
 }
 
-top_raise_max_arg: fn(p: &Parse, n: Int) Never! {
+top_raise_max_arg: fn(p: ^Parse, n: Int) Never! {
     if p.outer.len() > 0 {
         if n > p.outer[0].n_max_arg -> p.outer[0].n_max_arg = n
     } else if n > p.f.n_max_arg { p.f.n_max_arg = n }
@@ -635,19 +635,19 @@ top_vtab_lock: fn(p: Parse) -> [Int] Never! {
     p.f.vtab_lock
 }
 
-top_add_vtab_lock: fn(p: &Parse, tab: Int) Never! {
+top_add_vtab_lock: fn(p: ^Parse, tab: Int) Never! {
     if p.outer.len() > 0 -> p.outer[0].vtab_lock.push(tab) else -> p.f.vtab_lock.push(tab)
 }
 
 // Begin coding a trigger sub-program (codeRowTrigger's sSubParse): the
 // current frame moves to `outer`.
-frame_push: fn(p: &Parse) Never! {
+frame_push: fn(p: ^Parse) Never! {
     p.outer.push(p.f)
     p.f = frame_new()
 }
 
 // End a sub-program: its frame comes back.
-frame_pop: fn(p: &Parse) -> ParseFrame Never! {
+frame_pop: fn(p: ^Parse) -> ParseFrame Never! {
     sub := p.f
     p.f = p.outer.pop() ?? frame_new()
     sub
@@ -678,7 +678,7 @@ opt_disabled: fn(p: Parse, mask: Int) -> Bool Never! { p.db.db_opt_flags & mask 
 // The statement under construction: the sqlite3Vdbe* calls on pParse->pVdbe.
 
 // sqlite3GetVdbe (select.c): make sure the Parse has its Vdbe.
-get_vdbe: fn(p: &Parse) Never! {
+get_vdbe: fn(p: ^Parse) Never! {
     if p.f.has_vdbe {
         return
     }
@@ -687,80 +687,80 @@ get_vdbe: fn(p: &Parse) Never! {
     p.f.has_vdbe = true
 }
 
-op0: fn(p: &Parse, opcode: Int) -> Int Never! { aux.add_op0(p.db, p.f.v, opcode) }
+op0: fn(p: ^Parse, opcode: Int) -> Int Never! { aux.add_op0(p.db, p.f.v, opcode) }
 
-op1: fn(p: &Parse, opcode: Int, p1: Int) -> Int Never! { aux.add_op1(p.db, p.f.v, opcode, p1) }
+op1: fn(p: ^Parse, opcode: Int, p1: Int) -> Int Never! { aux.add_op1(p.db, p.f.v, opcode, p1) }
 
-op2: fn(p: &Parse, opcode: Int, p1: Int, p2: Int) -> Int Never! {
+op2: fn(p: ^Parse, opcode: Int, p1: Int, p2: Int) -> Int Never! {
     aux.add_op2(p.db, p.f.v, opcode, p1, p2)
 }
 
-op3: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int) -> Int Never! {
+op3: fn(p: ^Parse, opcode: Int, p1: Int, p2: Int, p3: Int) -> Int Never! {
     aux.add_op3(p.db, p.f.v, opcode, p1, p2, p3)
 }
 
-op4: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: conn.P4) -> Int Never! {
+op4: fn(p: ^Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: conn.P4) -> Int Never! {
     aux.add_op4(p.db, p.f.v, opcode, p1, p2, p3, p4)
 }
 
-op4_int: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: Int) -> Int Never! {
+op4_int: fn(p: ^Parse, opcode: Int, p1: Int, p2: Int, p3: Int, p4: Int) -> Int Never! {
     aux.add_op4_int(p.db, p.f.v, opcode, p1, p2, p3, p4)
 }
 
 // sqlite3VdbeAddOp4 with P4_DYNAMIC/P4_STATIC text.
-op4_text: fn(p: &Parse, opcode: Int, p1: Int, p2: Int, p3: Int, text: [U8]) -> Int Never! {
+op4_text: fn(p: ^Parse, opcode: Int, p1: Int, p2: Int, p3: Int, text: [U8]) -> Int Never! {
     aux.add_op4(p.db, p.f.v, opcode, p1, p2, p3, .Text(text))
 }
 
-goto: fn(p: &Parse, dest: Int) -> Int Never! { aux.add_goto(p.db, p.f.v, dest) }
+goto: fn(p: ^Parse, dest: Int) -> Int Never! { aux.add_goto(p.db, p.f.v, dest) }
 
-v_op_list: fn(p: &Parse, list: [aux.VdbeOpList]) -> Int Never! {
+v_op_list: fn(p: ^Parse, list: [aux.VdbeOpList]) -> Int Never! {
     aux.add_op_list(p.db, p.f.v, list)
 }
 
-v_multi_load: fn(p: &Parse, dest: Int, vals: [base.Mem], result_row: Bool) Never! {
+v_multi_load: fn(p: ^Parse, dest: Int, vals: [base.Mem], result_row: Bool) Never! {
     aux.multi_load(p.db, p.f.v, dest, vals, result_row)
 }
 
-v_make_label: fn(p: &Parse) -> Int Never! { aux.make_label(p.f.v) }
+v_make_label: fn(p: ^Parse) -> Int Never! { aux.make_label(p.f.v) }
 
-v_resolve_label: fn(p: &Parse, x: Int) Never! { _: aux.resolve_label(p.f.v, x) }
+v_resolve_label: fn(p: ^Parse, x: Int) Never! { _: aux.resolve_label(p.f.v, x) }
 
 v_current_addr: fn(p: Parse) -> Int Never! { aux.current_addr(p.f.v) }
 
-v_jump_here: fn(p: &Parse, addr: Int) Never! { aux.jump_here(p.db, p.f.v, addr) }
+v_jump_here: fn(p: ^Parse, addr: Int) Never! { aux.jump_here(p.db, p.f.v, addr) }
 
-v_jump_here_or_pop_inst: fn(p: &Parse, addr: Int) Never! {
+v_jump_here_or_pop_inst: fn(p: ^Parse, addr: Int) Never! {
     aux.jump_here_or_pop_inst(p.db, p.f.v, addr)
 }
 
 // sqlite3VdbeEndCoroutine: the OP_EndCoroutine of the coroutine whose
 // return address is reg_yield; the coroutine's temporary registers are
 // its own.
-v_end_coroutine: fn(p: &Parse, reg_yield: Int) Never! {
+v_end_coroutine: fn(p: ^Parse, reg_yield: Int) Never! {
     _: op1(p, opc.OP_END_COROUTINE, reg_yield)
     clear_temp_reg_cache(p)
 }
 
-v_change_p1: fn(p: &Parse, addr: Int, val: Int) Never! { aux.change_p1(p.db, p.f.v, addr, val) }
+v_change_p1: fn(p: ^Parse, addr: Int, val: Int) Never! { aux.change_p1(p.db, p.f.v, addr, val) }
 
-v_change_p2: fn(p: &Parse, addr: Int, val: Int) Never! { aux.change_p2(p.db, p.f.v, addr, val) }
+v_change_p2: fn(p: ^Parse, addr: Int, val: Int) Never! { aux.change_p2(p.db, p.f.v, addr, val) }
 
-v_change_p3: fn(p: &Parse, addr: Int, val: Int) Never! { aux.change_p3(p.db, p.f.v, addr, val) }
+v_change_p3: fn(p: ^Parse, addr: Int, val: Int) Never! { aux.change_p3(p.db, p.f.v, addr, val) }
 
-v_change_p4: fn(p: &Parse, addr: Int, p4: conn.P4) Never! { aux.change_p4(p.db, p.f.v, addr, p4) }
+v_change_p4: fn(p: ^Parse, addr: Int, p4: conn.P4) Never! { aux.change_p4(p.db, p.f.v, addr, p4) }
 
-v_change_p5: fn(p: &Parse, p5: Int) Never! { aux.change_p5(p.f.v, p5) }
+v_change_p5: fn(p: ^Parse, p5: Int) Never! { aux.change_p5(p.f.v, p5) }
 
-v_append_p4: fn(p: &Parse, p4: conn.P4) Never! { aux.append_p4(p.db, p.f.v, p4) }
+v_append_p4: fn(p: ^Parse, p4: conn.P4) Never! { aux.append_p4(p.db, p.f.v, p4) }
 
-v_change_opcode: fn(p: &Parse, addr: Int, opcode: Int) Never! {
+v_change_opcode: fn(p: ^Parse, addr: Int, opcode: Int) Never! {
     aux.change_opcode(p.db, p.f.v, addr, opcode)
 }
 
-v_change_to_noop: fn(p: &Parse, addr: Int) -> Bool Never! { aux.change_to_noop(p.db, p.f.v, addr) }
+v_change_to_noop: fn(p: ^Parse, addr: Int) -> Bool Never! { aux.change_to_noop(p.db, p.f.v, addr) }
 
-v_delete_prior_opcode: fn(p: &Parse, opcode: Int) -> Bool Never! {
+v_delete_prior_opcode: fn(p: ^Parse, opcode: Int) -> Bool Never! {
     aux.delete_prior_opcode(p.db, p.f.v, opcode)
 }
 
@@ -770,29 +770,29 @@ v_op_at: fn(p: Parse, addr: Int) -> conn.VdbeOp Never! { aux.op_at(p.db, p.f.v, 
 v_last_addr: fn(p: Parse) -> Int Never! { aux.current_addr(p.f.v) - 1 }
 
 // sqlite3VdbeLoadString.
-v_load_string: fn(p: &Parse, dest: Int, z: [U8]) -> Int Never! {
+v_load_string: fn(p: ^Parse, dest: Int, z: [U8]) -> Int Never! {
     aux.load_string(p.db, p.f.v, dest, z)
 }
 
 // sqlite3VdbeSetNumCols / sqlite3VdbeSetColName.
-v_set_num_cols: fn(p: &Parse, n: Int) Never! { aux.set_num_cols(p.f.v, n) }
+v_set_num_cols: fn(p: ^Parse, n: Int) Never! { aux.set_num_cols(p.f.v, n) }
 
-v_set_col_name: fn(p: &Parse, idx: Int, var: Int, name: [U8]) Never! {
+v_set_col_name: fn(p: ^Parse, idx: Int, var: Int, name: [U8]) Never! {
     _: aux.set_col_name(p.db, p.f.v, idx, var, name)
 }
 
 // sqlite3VdbeUsesBtree, sqlite3VdbeRunOnlyOnce, sqlite3VdbeCountChanges.
-v_uses_btree: fn(p: &Parse, i: Int) Never! { aux.uses_btree(p.f.v, i) }
+v_uses_btree: fn(p: ^Parse, i: Int) Never! { aux.uses_btree(p.f.v, i) }
 
-v_run_only_once: fn(p: &Parse) Never! { aux.run_only_once(p.db, p.f.v) }
+v_run_only_once: fn(p: ^Parse) Never! { aux.run_only_once(p.db, p.f.v) }
 
-v_count_changes: fn(p: &Parse) Never! { aux.count_changes(p.f.v) }
+v_count_changes: fn(p: ^Parse) Never! { aux.count_changes(p.f.v) }
 
 // ---------------------------------------------------------------------------
 // Registers (expr.c).
 
 // sqlite3GetTempReg.
-get_temp_reg: fn(p: &Parse) -> Int Never! {
+get_temp_reg: fn(p: ^Parse) -> Int Never! {
     if p.f.temp_regs.len() == 0 {
         p.f.n_mem += 1
         return p.f.n_mem
@@ -801,12 +801,12 @@ get_temp_reg: fn(p: &Parse) -> Int Never! {
 }
 
 // sqlite3ReleaseTempReg.
-release_temp_reg: fn(p: &Parse, i_reg: Int) Never! {
+release_temp_reg: fn(p: ^Parse, i_reg: Int) Never! {
     if i_reg != 0 && p.f.temp_regs.len() < N_TEMP_REG -> p.f.temp_regs.push(i_reg)
 }
 
 // sqlite3GetTempRange.
-get_temp_range: fn(p: &Parse, n_reg: Int) -> Int Never! {
+get_temp_range: fn(p: ^Parse, n_reg: Int) -> Int Never! {
     if n_reg == 1 -> return get_temp_reg(p)
     i := p.f.i_range_reg
     if n_reg <= p.f.n_range_reg {
@@ -820,7 +820,7 @@ get_temp_range: fn(p: &Parse, n_reg: Int) -> Int Never! {
 }
 
 // sqlite3ReleaseTempRange.
-release_temp_range: fn(p: &Parse, i_reg: Int, n_reg: Int) Never! {
+release_temp_range: fn(p: ^Parse, i_reg: Int, n_reg: Int) Never! {
     if n_reg == 1 {
         release_temp_reg(p, i_reg)
         return
@@ -832,19 +832,19 @@ release_temp_range: fn(p: &Parse, i_reg: Int, n_reg: Int) Never! {
 }
 
 // sqlite3ClearTempRegCache.
-clear_temp_reg_cache: fn(p: &Parse) Never! {
+clear_temp_reg_cache: fn(p: ^Parse) Never! {
     p.f.temp_regs = [Int]{}
     p.f.n_range_reg = 0
 }
 
 // sqlite3TouchRegister.
-touch_register: fn(p: &Parse, i_reg: Int) Never! {
+touch_register: fn(p: ^Parse, i_reg: Int) Never! {
     if p.f.n_mem < i_reg -> p.f.n_mem = i_reg
 }
 
 // sqlite3FirstAvailableRegister: the first register at or past i_min that
 // no factored constant uses; the temporary register caches empty.
-first_available_register: fn(p: &Parse, a: ast.AST, i_min: Int) -> Int Never! {
+first_available_register: fn(p: ^Parse, a: ast.AST, i_min: Int) -> Int Never! {
     m := i_min
     l: p.f.const_expr
     if l >= 0 {
@@ -867,7 +867,7 @@ explain_parent: fn(p: Parse) -> Int Never! {
 
 // sqlite3VdbeExplain: an OP_Explain with the text `msg`, coded only for
 // EXPLAIN QUERY PLAN; with `push` it becomes the parent of the next ones.
-explain: fn(p: &Parse, a: ast.AST, push: Bool, msg: String) -> Int Never! {
+explain: fn(p: ^Parse, a: ast.AST, push: Bool, msg: String) -> Int Never! {
     if a.ctx.explain != 2 -> return 0
     i_this: v_current_addr(p)
     addr: op4_text(p, opc.OP_EXPLAIN, i_this, p.f.addr_explain, 0, msg.bytes())
@@ -876,14 +876,14 @@ explain: fn(p: &Parse, a: ast.AST, push: Bool, msg: String) -> Int Never! {
 }
 
 // sqlite3VdbeExplainPop.
-explain_pop: fn(p: &Parse) Never! { p.f.addr_explain = explain_parent(p) }
+explain_pop: fn(p: ^Parse) Never! { p.f.addr_explain = explain_parent(p) }
 
 // ---------------------------------------------------------------------------
 // Transactions and constraints (build.c).
 
 // sqlite3OpenTempDatabase: open the TEMP database's btree if it is not
 // open; true on failure, with the error left in the Parse.
-open_temp_database: fn(p: &Parse, a: &ast.AST) -[DB]> Bool Never! {
+open_temp_database: fn(p: ^Parse, a: ^ast.AST) -[DB]> Bool Never! {
     if p.db.dbs[1].bt >= 0 || a.ctx.explain != 0 -> return false
     slot: conn.btree_slot_new(p.db)
     owner: conn.bt_db_of(p.db)
@@ -905,7 +905,7 @@ open_temp_database: fn(p: &Parse, a: &ast.AST) -[DB]> Bool Never! {
 
 // sqlite3CodeVerifySchema: the statement checks database i_db's schema
 // cookie (its OP_Transaction, which sqlite3FinishCoding codes).
-code_verify_schema: fn(p: &Parse, a: &ast.AST, i_db: Int) -[DB]> Never! {
+code_verify_schema: fn(p: ^Parse, a: ^ast.AST, i_db: Int) -[DB]> Never! {
     mask: top_cookie_mask(p)
     bit: 1 << i_db
     if mask & bit != 0 {
@@ -919,7 +919,7 @@ code_verify_schema: fn(p: &Parse, a: &ast.AST, i_db: Int) -[DB]> Never! {
 
 // sqlite3CodeVerifyNamedSchema: every attached database named `name` (all
 // of them for None).
-code_verify_named_schema: fn(p: &Parse, a: &ast.AST, name: [U8]?) -[DB]> Never! {
+code_verify_named_schema: fn(p: ^Parse, a: ^ast.AST, name: [U8]?) -[DB]> Never! {
     loop i in 0..<p.db.dbs.len() {
         if p.db.dbs[i].bt < 0 -> next
         if name == .Val(z) && util.str_icmp(z, p.db.dbs[i].name) != 0 -> next
@@ -928,22 +928,22 @@ code_verify_named_schema: fn(p: &Parse, a: &ast.AST, name: [U8]?) -[DB]> Never! 
 }
 
 // sqlite3BeginWriteOperation.
-begin_write_operation: fn(p: &Parse, a: &ast.AST, set_statement: Bool, i_db: Int) -[DB]> Never! {
+begin_write_operation: fn(p: ^Parse, a: ^ast.AST, set_statement: Bool, i_db: Int) -[DB]> Never! {
     code_verify_schema(p, a, i_db)
     top_set_write_mask(p, i_db)
     top_set_multi_write(p, set_statement)
 }
 
 // sqlite3MultiWrite.
-multi_write: fn(p: &Parse) Never! { top_set_multi_write(p, true) }
+multi_write: fn(p: ^Parse) Never! { top_set_multi_write(p, true) }
 
 // sqlite3MayAbort.
-may_abort: fn(p: &Parse) Never! {
+may_abort: fn(p: ^Parse) Never! {
     if p.outer.len() > 0 -> p.outer[0].may_abort = true else -> p.f.may_abort = true
 }
 
 // sqlite3HaltConstraint.
-halt_constraint: fn(p: &Parse, err_code: Int, on_error: Int, msg: [U8]?, p5: Int) Never! {
+halt_constraint: fn(p: ^Parse, err_code: Int, on_error: Int, msg: [U8]?, p5: Int) Never! {
     get_vdbe(p)
     if on_error == ast.OE_ABORT -> may_abort(p)
     p4: if msg == .Val(z) -> conn.P4.Text(z) else -> conn.P4.NotUsed
@@ -952,7 +952,7 @@ halt_constraint: fn(p: &Parse, err_code: Int, on_error: Int, msg: [U8]?, p5: Int
 }
 
 // sqlite3UniqueConstraint.
-unique_constraint: fn(p: &Parse, on_error: Int, idx: Int) Never! {
+unique_constraint: fn(p: ^Parse, on_error: Int, idx: Int) Never! {
     ix: p.db.indexes[idx]
     tab: p.db.tables[ix.table]
     msg := [U8]{}
@@ -969,7 +969,7 @@ unique_constraint: fn(p: &Parse, on_error: Int, idx: Int) Never! {
 }
 
 // sqlite3RowidConstraint.
-rowid_constraint: fn(p: &Parse, on_error: Int, t: Int) Never! {
+rowid_constraint: fn(p: ^Parse, on_error: Int, t: Int) Never! {
     tab: p.db.tables[t]
     msg := tab.name.copy()
     rc := base.CONSTRAINT_ROWID
@@ -988,13 +988,13 @@ rowid_constraint: fn(p: &Parse, on_error: Int, t: Int) Never! {
 in_special_parse: fn(a: ast.AST) -> Bool Never! { a.ctx.parse_mode != ast.PARSE_MODE_NORMAL }
 
 // sqliteAuthBadReturnCode.
-auth_bad_return_code: fn(a: &ast.AST) Never! {
+auth_bad_return_code: fn(a: ^ast.AST) Never! {
     ast.error(a, "authorizer malfunction")
     a.ctx.rc = base.ERROR
 }
 
 // sqlite3AuthCheck.
-auth_check: fn(p: &Parse, a: &ast.AST, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
+auth_check: fn(p: ^Parse, a: ^ast.AST, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
     if !p.db.has_auth || p.db.init.busy || in_special_parse(a) -> return base.OK
     g := p.up
     rc := g.authorize(p, code, arg1, arg2, arg3)
@@ -1009,7 +1009,7 @@ auth_check: fn(p: &Parse, a: &ast.AST, code: Int, arg1: [U8]?, arg2: [U8]?, arg3
 }
 
 // sqlite3AuthReadCol.
-auth_read_col: fn(p: &Parse, a: &ast.AST, tab: [U8], col: [U8], i_db: Int) -[DB]> Int Never! {
+auth_read_col: fn(p: ^Parse, a: ^ast.AST, tab: [U8], col: [U8], i_db: Int) -[DB]> Int Never! {
     if p.db.init.busy -> return base.OK
     z_db: p.db.dbs[i_db].name
     g := p.up
@@ -1025,7 +1025,7 @@ auth_read_col: fn(p: &Parse, a: &ast.AST, tab: [U8], col: [U8], i_db: Int) -[DB]
 
 // sqlite3AuthRead: check a TK_COLUMN or TK_TRIGGER read of `e` from the
 // tables of FROM list `src`; an ignored read becomes NULL.
-auth_read: fn(p: &Parse, a: &ast.AST, e: Int, schema: Int, src: Int) -[DB]> Never! {
+auth_read: fn(p: ^Parse, a: ^ast.AST, e: Int, schema: Int, src: Int) -[DB]> Never! {
     i_db: conn.schema_to_index(p.db, schema)
     if i_db < 0 {
         return
@@ -1049,19 +1049,19 @@ auth_read: fn(p: &Parse, a: &ast.AST, e: Int, schema: Int, src: Int) -[DB]> Neve
 }
 
 // sqlite3AuthContextPush: the previous context, for auth_context_pop.
-auth_context_push: fn(p: &Parse, context: [U8]?) -> [U8]? Never! {
+auth_context_push: fn(p: ^Parse, context: [U8]?) -> [U8]? Never! {
     saved: p.f.auth_context
     p.f.auth_context = context
     saved
 }
 
 // sqlite3AuthContextPop.
-auth_context_pop: fn(p: &Parse, saved: [U8]?) Never! { p.f.auth_context = saved }
+auth_context_pop: fn(p: ^Parse, saved: [U8]?) Never! { p.f.auth_context = saved }
 
 // sqlite3RenameTokenRemap (alter.c): the token mapped to element `from` of
 // kind `from_kind` now names element `to` of kind `to_kind` (`to` -1 for
 // C's NULL, which unmaps it).
-rename_token_remap: fn(p: &Parse, to_kind: Int, to: Int, from_kind: Int, from: Int) Never! {
+rename_token_remap: fn(p: ^Parse, to_kind: Int, to: Int, from_kind: Int, from: Int) Never! {
     loop i in 0..<p.renames.len() {
         if p.renames[i].kind == from_kind && p.renames[i].p == from {
             p.renames[i].kind = to_kind
@@ -1077,11 +1077,11 @@ rename_token_remap: fn(p: &Parse, to_kind: Int, to: Int, from_kind: Int, from: I
 // walkers of Ast). A walk pushes its WalkState, walks, and pops it: the
 // callbacks of nested walks see their own state on top.
 
-walk_push: fn(p: &Parse, cb: &&WalkCb, u: Int) Never! {
+walk_push: fn(p: ^Parse, cb: ^^WalkCb, u: Int) Never! {
     p.walks.push(WalkState{cb: cb, depth: 0, e_code: 0, mw_flags: 0, u: u, u2: 0, ints: [Int]{}})
 }
 
-walk_pop: fn(p: &Parse) -> WalkState Never! {
+walk_pop: fn(p: ^Parse) -> WalkState Never! {
     p.walks.pop() ?? panic("walk_pop: no walk in progress")
 }
 
@@ -1089,7 +1089,7 @@ walk_pop: fn(p: &Parse) -> WalkState Never! {
 walk_top: fn(p: Parse) -> Int Never! { p.walks.len() - 1 }
 
 // sqlite3WalkExpr: the expression callback on each node, parents first.
-pwalk_expr: fn(p: &Parse, a: &ast.AST, e0: Int) -[DB]> Int Never! {
+pwalk_expr: fn(p: ^Parse, a: ^ast.AST, e0: Int) -[DB]> Int Never! {
     if e0 < 0 -> return ast.WRC_CONTINUE
     e := e0
     loop {
@@ -1120,7 +1120,7 @@ pwalk_expr: fn(p: &Parse, a: &ast.AST, e0: Int) -[DB]> Int Never! {
 }
 
 // walkWindowList.
-pwalk_window_list: fn(p: &Parse, a: &ast.AST, list: Int, one_only: Bool) -[DB]> Int Never! {
+pwalk_window_list: fn(p: ^Parse, a: ^ast.AST, list: Int, one_only: Bool) -[DB]> Int Never! {
     win := list
     loop win >= 0 {
         if pwalk_expr_list(p, a, a.windows[win].order_by) != 0 -> return ast.WRC_ABORT
@@ -1135,7 +1135,7 @@ pwalk_window_list: fn(p: &Parse, a: &ast.AST, list: Int, one_only: Bool) -[DB]> 
 }
 
 // sqlite3WalkExprList.
-pwalk_expr_list: fn(p: &Parse, a: &ast.AST, list: Int) -[DB]> Int Never! {
+pwalk_expr_list: fn(p: ^Parse, a: ^ast.AST, list: Int) -[DB]> Int Never! {
     loop i in 0..<ast.list_len(a, list) {
         e: ast.list_expr(a, list, i)
         if pwalk_expr(p, a, e) != 0 -> return ast.WRC_ABORT
@@ -1144,7 +1144,7 @@ pwalk_expr_list: fn(p: &Parse, a: &ast.AST, list: Int) -[DB]> Int Never! {
 }
 
 // sqlite3WalkSelectExpr.
-pwalk_select_expr: fn(p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+pwalk_select_expr: fn(p: ^Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     if pwalk_expr_list(p, a, a.selects[s].elist) != 0 -> return ast.WRC_ABORT
     if pwalk_expr(p, a, a.selects[s].where_expr) != 0 -> return ast.WRC_ABORT
     if pwalk_expr_list(p, a, a.selects[s].group_by) != 0 -> return ast.WRC_ABORT
@@ -1161,7 +1161,7 @@ pwalk_select_expr: fn(p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
 }
 
 // sqlite3WalkSelectFrom.
-pwalk_select_from: fn(p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+pwalk_select_from: fn(p: ^Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     src: a.selects[s].src
     if src < 0 -> return ast.WRC_CONTINUE
     loop i in 0..<a.srclists[src].items.len() {
@@ -1177,7 +1177,7 @@ pwalk_select_from: fn(p: &Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
 }
 
 // sqlite3WalkSelect: a SELECT and the compound chain before it.
-pwalk_select: fn(p: &Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
+pwalk_select: fn(p: ^Parse, a: ^ast.AST, s0: Int) -[DB]> Int Never! {
     if s0 < 0 -> return ast.WRC_CONTINUE
     cb: p.walks[walk_top(p)].cb
     if !cb.has_select() -> return ast.WRC_CONTINUE
@@ -1196,49 +1196,49 @@ pwalk_select: fn(p: &Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
 
 // sqlite3WalkerDepthIncrease / sqlite3WalkerDepthDecrease, the SELECT
 // callbacks that count nesting.
-walker_depth_increase: fn(p: &Parse) -> Int Never! {
+walker_depth_increase: fn(p: ^Parse) -> Int Never! {
     p.walks[walk_top(p)].depth += 1
     ast.WRC_CONTINUE
 }
 
-walker_depth_decrease: fn(p: &Parse) Never! { p.walks[walk_top(p)].depth -= 1 }
+walker_depth_decrease: fn(p: ^Parse) Never! { p.walks[walk_top(p)].depth -= 1 }
 
 // A Gen for tests that reach nothing above this part.
 CodegenTestGen: struct {
     calls: Int,
 
     impl Gen {
-        read_schema: fn(self, p: &Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
+        read_schema: fn(self, p: ^Parse, a: ^ast.AST) -[DB]> Int Never! { base.OK }
 
-        authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
+        authorize: fn(self, p: ^Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
             if code == conn.AUTH_READ -> conn.AUTH_IGNORE else -> conn.AUTH_DENY
         }
 
-        nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) -[DB]> Never! {}
+        nested_parse: fn(self, p: ^Parse, a: ^ast.AST, sql: [U8]) -[DB]> Never! {}
 
-        select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never! { 0 }
+        select: fn(self, p: ^Parse, a: ^ast.AST, s: Int, dest: ^SelectDest) -[DB]> Int Never! { 0 }
 
-        select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {}
+        select_prep: fn(self, p: ^Parse, a: ^ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {}
 
-        select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        select_expand: fn(self, p: ^Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
-        result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
+        result_set_of_select: fn(self, p: ^Parse, a: ^ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
             -1
         }
 
-        view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
+        view_get_column_names: fn(self, p: ^Parse, a: ^ast.AST, t: Int) -[DB]> Int Never! { 0 }
 
-        eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
+        eponymous_table: fn(self, p: ^Parse, a: ^ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
 
-        vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
+        vtab_overload_function: fn(self, p: ^Parse, a: ^ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
             def.copy()
         }
 
-        vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never! {
+        vtab_best_index: fn(self, p: ^Parse, a: ^ast.AST, t: Int, info: ^conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never! {
             {rc: base.ERROR, err: None}
         }
 
-        vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
+        vtab_find_function: fn(self, p: ^Parse, a: ^ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
             0
         }
     }

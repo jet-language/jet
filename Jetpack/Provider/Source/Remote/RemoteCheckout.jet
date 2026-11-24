@@ -429,7 +429,7 @@ provider_same_file_identity: fn(left: Stat, right: Stat) -> Bool Never! {
 }
 
 // Read a whole opened file in bounded chunks.
-provider_read_all: fn(reader: &FileReader) -[FS]> [U8] IOError! {
+provider_read_all: fn(reader: ^FileReader) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
         chunk: reader.read_bytes(PROVIDER_READ_CHUNK_BYTES)
@@ -464,7 +464,7 @@ provider_tree_fingerprint_held: fn(root: Directory) -[FS]> String ProviderReason
     Ok(pkg_sha256_hex(input))
 }
 
-provider_collect_fingerprint_files: fn(directory: Directory, relative: String, out: &[{relative: String, bytes: [U8], mode: Int}]) -[FS]> IOError! {
+provider_collect_fingerprint_files: fn(directory: Directory, relative: String, out: ^[{relative: String, bytes: [U8], mode: Int}]) -[FS]> IOError! {
     entries: directory.list()
     loop entry in entries {
         child_relative: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
@@ -566,7 +566,7 @@ provider_create_temp_file_name: fn(destination: Directory, mode: Int) -[FS, Rand
     Err(provider_io_error_exists(destination.path, "could not allocate an exclusive temporary file"))
 }
 
-provider_fill_temp_file: fn(reader: &FileReader, before: Stat, destination: Directory, temporary: String, writer: &FileWriter, mode: Int, destination_name: String) -[FS]> IOError! {
+provider_fill_temp_file: fn(reader: ^FileReader, before: Stat, destination: Directory, temporary: String, writer: ^FileWriter, mode: Int, destination_name: String) -[FS]> IOError! {
     loop {
         chunk: reader.read_bytes(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break

@@ -5,15 +5,15 @@ use {
     jet_foundation.[ConstDef, Expr, Span, Type, ast_const]
 }
 
-parser_output_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool Never! {
+parser_output_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
     parser_kind_at(state, offset) == TOKEN_IDENT && parser_kind_at(state, offset + 1) == TOKEN_COLON && parser_kind_at(state, offset + 2) == TOKEN_IDENT && parser_value_at(state, offset + 2) == "Output" && parser_kind_at(state, offset + 3) == TOKEN_DOT
 }
 
-parser_output_defaults_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool Never! {
+parser_output_defaults_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
     parser_kind_at(state, offset) == TOKEN_IDENT && parser_value_at(state, offset) == "defaults" && parser_kind_at(state, offset + 1) == TOKEN_COLON
 }
 
-parser_parse_output: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> ConstDef {
+parser_parse_output: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -> ConstDef {
     name: parser_expect_name(state, "for the Output name")
     parser_expect(state, TOKEN_COLON, "after the Output name")
     owner: parser_expect_name(state, "for the Output constructor")
@@ -34,7 +34,7 @@ parser_parse_output: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
     result
 }
 
-parser_parse_output_defaults: fn(state: &JetParserState) -> ConstDef {
+parser_parse_output_defaults: fn(state: ^JetParserState) -> ConstDef {
     name: parser_expect_name(state, "for Output defaults")
     parser_expect(state, TOKEN_COLON, "after `defaults`")
     value: parser_parse_expression(state, 1, 0)

@@ -37,14 +37,14 @@ pkg_entry_test_write: fn(root: String, relative: String, text: String) -[FS]> Ne
     files.write(path, text) ?? panic("write carrier fixture")
 }
 
-pkg_entry_test_facts: fn(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> PackageFacts Never! {
+pkg_entry_test_facts: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[FS, Env]> PackageFacts Never! {
     if pkg_package_facts_for_entry(cache, entry) == {
         .Ok(found) -> found ?? panic("entry has a package")
         .Err(_) -> panic("entry facts load")
     }
 }
 
-pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> Diagnostic Never! {
+pkg_entry_test_failure: fn(cache: ^WorkspaceDeclarationCache, entry: String) -[FS, Env]> Diagnostic Never! {
     if pkg_package_facts_for_entry(cache, entry) == {
         .Err(error) -> error.diagnostic
         .Ok(_) -> panic("carrier must fail closed")

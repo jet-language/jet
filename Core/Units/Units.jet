@@ -11,66 +11,63 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     math: core.math
 }
 
 // C: the observations are private. Display, operators and the
 // observation methods route through the `__measurement_*` helpers below,
-// which this module also calls directly on its own values.
+// which this module also calls directly on its own values. The compiler
+// reaches each helper it calls through its jet_builtins role, never its name.
 Measurement: struct<T> {
     priv value: T,
     priv uncertainty: T,
 }
 
-__measurement_new: fn(value: Float, uncertainty: Float) -> Measurement<Float> Never! {
+#Builtin.Role(.MeasurementNew) priv __measurement_new: fn(value: Float, uncertainty: Float) -> Measurement<Float> Never! {
     Measurement<Float>{value: value, uncertainty: math.abs_float(uncertainty)}
 }
 
-__measurement_from_relative: fn(value: Float, relative: Float) -> Measurement<Float> Never! {
+priv __measurement_from_relative: fn(value: Float, relative: Float) -> Measurement<Float> Never! {
     __measurement_new(value, math.abs_float(value) * math.abs_float(relative))
 }
 
-__measurement_value: fn(value: Measurement<Float>) -> Float Never! { value.value }
+#Builtin.Role(.MeasurementValue) priv __measurement_value: fn(value: Measurement<Float>) -> Float Never! { value.value }
 
-__measurement_uncertainty: fn(value: Measurement<Float>) -> Float Never! { value.uncertainty }
+#Builtin.Role(.MeasurementUncertainty) priv __measurement_uncertainty: fn(value: Measurement<Float>) -> Float Never! { value.uncertainty }
 
-__measurement_add: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+#Builtin.Role(.MeasurementAdd) priv __measurement_add: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     __measurement_new(left.value + right.value, math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
 }
 
-__measurement_sub: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+#Builtin.Role(.MeasurementSub) priv __measurement_sub: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     __measurement_new(left.value - right.value, math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
 }
 
-__measurement_mul: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+#Builtin.Role(.MeasurementMul) priv __measurement_mul: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     first: right.value * left.uncertainty
     second: left.value * right.uncertainty
     __measurement_new(left.value * right.value, math.sqrt(first * first + second * second))
 }
 
-__measurement_div: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
+#Builtin.Role(.MeasurementDiv) priv __measurement_div: fn(left: Measurement<Float>, right: Measurement<Float>) -> Measurement<Float> Never! {
     first: left.uncertainty / right.value
     second: left.value * right.uncertainty / (right.value * right.value)
     __measurement_new(left.value / right.value, math.sqrt(first * first + second * second))
 }
 
-__measurement_sqrt: fn(value: Measurement<Float>) -> Measurement<Float> Never! {
+#Builtin.Role(.MeasurementSqrt) priv __measurement_sqrt: fn(value: Measurement<Float>) -> Measurement<Float> Never! {
     root: math.sqrt(value.value)
     uncertainty: if root == 0.0 && value.uncertainty == 0.0 -> Float{0.0} else -> value.uncertainty / (Float{2.0} * root)
     __measurement_new(root, uncertainty)
 }
 
-__measurement_show: fn(value: Measurement<Float>) -> String Never! {
+#Builtin.Role(.MeasurementShow) priv __measurement_show: fn(value: Measurement<Float>) -> String Never! {
     "{value.value:Debug} ± {value.uncertainty:Debug}"
 }
 
 // Preserve the scalar conversion's checked failure before adding uncertainty.
-__measurement_optional: fn(value: Float?, relative: Float) -> Measurement<Float>? Never! {
-    scalar: value ?? return None
-    Val(__measurement_from_relative(scalar, relative))
-}
-
-__measurement_result: fn<E>(value: Float E!, relative: Float) -> Measurement<Float> E! {
+#Builtin.Role(.MeasurementResult) priv __measurement_result: fn<E>(value: Float E!, relative: Float) -> Measurement<Float> E! {
     if value == {
         .Ok(scalar) -> Ok(__measurement_from_relative(scalar, relative))
         .Err(error) -> Err(error)

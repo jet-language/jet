@@ -750,7 +750,7 @@ leads_to_block_or_function: fn(source: [U8], start: Int) -> Bool {
 }
 
 // Line and scalar column of `index`; calls must not move backwards.
-locate: fn(source: [U8], cursor: &LineCursor, index: Int) -> {line: Int, column: Int} {
+locate: fn(source: [U8], cursor: ^LineCursor, index: Int) -> {line: Int, column: Int} {
     loop cursor.offset < index {
         if (Int{source[cursor.offset]}) == NEWLINE {
             cursor.line += 1
@@ -805,7 +805,7 @@ unsafe_markers: fn(source: [U8]) -> [RegionMarker] {
     markers
 }
 
-scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
+scan_source: fn(source: [U8], file: String, owner: String, regions: ^[Region]) {
     cursor := LineCursor{offset: 0, line: 1, line_start: 0}
     loop marker in unsafe_markers(source) {
         at: locate(source, cursor, marker.start)
@@ -848,7 +848,7 @@ region_end: fn(code: [U8], start: Int) -> Int {
 
 // The regions of `source` whose code (comments and quoted text aside)
 // registers a signal handler, pushed onto `out`.
-signal_registrations: fn(source: [U8], file: String, owner: String, out: &[Region]) {
+signal_registrations: fn(source: [U8], file: String, owner: String, out: ^[Region]) {
     text: String.from_bytes_lossy(source)
     if !text.contains("Unsafe") {
         return
@@ -904,7 +904,7 @@ memory_actions: fn(source: [U8], code: [U8], start: Int, end: Int) -> [Bool] {
 }
 
 // One inventory row per region of `source`, pushed onto `out`.
-memory_regions: fn(source: [U8], file: String, area: Int, out: &[MemoryRow]) {
+memory_regions: fn(source: [U8], file: String, area: Int, out: ^[MemoryRow]) {
     markers: unsafe_markers(source)
     if markers.len() == 0 {
         return
@@ -977,7 +977,7 @@ kernel_scope_problems: fn(packages: [KernelPackage]) -> [String] {
 
 // Set each row's kernel flag from its package's `policy.memory`; the
 // packages that hold rows, sorted by directory.
-mark_kernels: fn(root: String, rows: &[MemoryRow]) -[FS]> [KernelPackage] RatchetError! {
+mark_kernels: fn(root: String, rows: ^[MemoryRow]) -[FS]> [KernelPackage] RatchetError! {
     packages := [KernelPackage]{}
     file := ""
     kernel := true
@@ -1020,7 +1020,7 @@ memory_outside_count: fn(rows: [MemoryRow]) -> Int {
 }
 
 // Add `row` to `counts`: regions, outside the kernel, one per action, other.
-memory_count: fn(row: MemoryRow, counts: &[Int]) {
+memory_count: fn(row: MemoryRow, counts: ^[Int]) {
     counts[0] = counts[0] + 1
     if memory_outside(row) -> counts[1] = counts[1] + 1
     other := true
@@ -1144,7 +1144,7 @@ with_memory_baseline: fn(text: String, count: Int) -> String {
 // memory action against the baseline: a rise fails, a fall fails `--check`
 // and lowers the baseline on any other run, and `--update` records any count.
 // False when the check failed.
-memory_ratchet: fn(options: Options, rows: &[MemoryRow]) -[FS, IO]> Bool RatchetError! {
+memory_ratchet: fn(options: Options, rows: ^[MemoryRow]) -[FS, IO]> Bool RatchetError! {
     if rows.len() == 0 -> return Ok(true)
     packages: mark_kernels(options.root, rows) ?? return Err(err)
     problems: kernel_scope_problems(packages)
@@ -1189,7 +1189,7 @@ print_memory_inventory: fn(options: Options) -[FS, IO]> RatchetError! {
 // Tree walk
 
 // User-written `.jet` files under `base`, as sorted paths relative to it.
-jet_files: fn(base: String, relative: String, out: &[String]) -[FS]> RatchetError! {
+jet_files: fn(base: String, relative: String, out: ^[String]) -[FS]> RatchetError! {
     directory: if relative == "" -> base else -> files.join(base, relative)
     entries: files.list_dir(directory) ?? return Err(ratchet_fail("cannot list {directory}: {err}"))
     names := [String]{}
@@ -1255,7 +1255,7 @@ compare_regions: fn(left: Region, right: Region) -> Ordering {
 // The census of `root`; the regions that register a signal handler outside
 // the vetted runtime boundary go to `signals`, and the memory inventory's
 // regions to `memory`.
-scan: fn(root: String, signals: &[Region], memory: &[MemoryRow]) -[FS]> Census RatchetError! {
+scan: fn(root: String, signals: ^[Region], memory: ^[MemoryRow]) -[FS]> Census RatchetError! {
     paths := [String]{}
     jet_files(root, "", paths) ?? return Err(err)
     regions := [Region]{}
@@ -1337,7 +1337,7 @@ raw_hits: fn(code: [U8]) -> [RawHit] {
     hits
 }
 
-scan_corelib_source: fn(source: [U8], file: String, result: &CoreLibScan) {
+scan_corelib_source: fn(source: [U8], file: String, result: ^CoreLibScan) {
     code: blank_literals(source)
     hits: raw_hits(code)
     cursor := LineCursor{offset: 0, line: 1, line_start: 0}
@@ -1746,7 +1746,7 @@ tally: fn(regions: [Region], exact: Bool) -> [String:Int] {
 }
 
 // Current rows with no counterpart left in `remaining`, which they consume.
-unmatched: fn(current: [Region], remaining: &[String:Int], exact: Bool) -> [Region] {
+unmatched: fn(current: [Region], remaining: ^[String:Int], exact: Bool) -> [Region] {
     added := [Region]{}
     loop region in current {
         key: if exact -> exact_key(region) else -> semantic_key(region)
@@ -1842,7 +1842,7 @@ write_text: fn(path: String, text: String) -[FS]> RatchetError! {
 }
 
 // Compare the scan with the baseline; false when the check failed.
-ratchet: fn(options: Options, signals: &[Region], memory: &[MemoryRow]) -[FS, IO]> Bool RatchetError! {
+ratchet: fn(options: Options, signals: ^[Region], memory: ^[MemoryRow]) -[FS, IO]> Bool RatchetError! {
     current: scan(options.root, signals, memory) ?? return Err(err)
     baseline: read_baseline(options.baseline) ?? {
         if !options.update -> return Err(err)

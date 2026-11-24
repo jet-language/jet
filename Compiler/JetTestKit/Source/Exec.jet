@@ -537,7 +537,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
 
 // The collector holds each output whole, so reading one to its end before the
 // other cannot stall the child.
-kit_exec_read_stdout: fn(stream: ProcessStdoutStream, bytes: &[U8]) -> String {
+kit_exec_read_stdout: fn(stream: ProcessStdoutStream, bytes: ^[U8]) -> String {
     loop {
         chunk: stream.read_bytes(1048576) ?? return "read stdout: {err}"
         if chunk.len() == 0 -> return ""
@@ -546,7 +546,7 @@ kit_exec_read_stdout: fn(stream: ProcessStdoutStream, bytes: &[U8]) -> String {
     ""
 }
 
-kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: &[U8]) -> String {
+kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: ^[U8]) -> String {
     loop {
         chunk: stream.read_bytes(1048576) ?? return "read stderr: {err}"
         if chunk.len() == 0 -> return ""
@@ -590,7 +590,7 @@ kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
 // memory and its tree's CPU time meanwhile. A watcher task of its own would
 // need a second scheduler worker beside this waiting one: a pool whose
 // workers all wait on watchers that never get a worker stops.
-kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, spent: &KitCPU, started: time.Instant, until: Int) {
+kit_exec_wait: fn(child: ProcessChild, watched: ^KitResident, spent: ^KitCPU, started: time.Instant, until: Int) {
     pause := 1
     loop {
         at: started.elapsed().ns
@@ -613,7 +613,7 @@ kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, spent: &KitCPU, st
 // same memory and CPU watch, until `deadline` ns after spawn. "" once sent;
 // else why not, the step child stopped (with its tree) when the deadline
 // passed, so the wait that follows ends.
-kit_exec_signal_child: fn(child: ProcessChild, watched: &KitResident, spent: &KitCPU, started: time.Instant, signal: Int, deadline: Int) -> String {
+kit_exec_signal_child: fn(child: ProcessChild, watched: ^KitResident, spent: ^KitCPU, started: time.Instant, signal: Int, deadline: Int) -> String {
     pid: child.id()
     pause := 1
     loop {
@@ -691,7 +691,7 @@ KitCPU: struct {
 // stops the child and its live descendants once it passes the limit. CPU
 // time is what the step's own work costs: a host busy with other work slows
 // the step's wall time, not this.
-kit_exec_watch_cpu: fn(spent: &KitCPU, at: Int) Never! {
+kit_exec_watch_cpu: fn(spent: ^KitCPU, at: Int) Never! {
     if spent.pid <= 0 || spent.killed || at < spent.due {
         return
     }
@@ -749,7 +749,7 @@ KitResident: struct {
 // scratch stops at its guard instead of exhausting the host. Under `tree` (a
 // case's `limit: resident=`) it sums the child and its live descendants and
 // kills them all. A case's `limit: memory=` keeps Core memory_limit.
-kit_exec_watch_resident: fn(watched: &KitResident, at: Int) Never! {
+kit_exec_watch_resident: fn(watched: ^KitResident, at: Int) Never! {
     if watched.pid <= 0 || watched.killed || at < watched.due {
         return
     }
@@ -808,7 +808,7 @@ kit_exec_memory_backed: fn(path: String) -> Bool {
 // The resident bytes of `pid`, plus under `tree` those of its live descendants
 // (`/proc/<pid>/task/<tid>/children`); `pids` lists every process counted,
 // none when `pid` itself is gone.
-kit_exec_tree_resident: fn(pid: Int, tree: Bool, pids: &[Int]) -> Int Never! {
+kit_exec_tree_resident: fn(pid: Int, tree: Bool, pids: ^[Int]) -> Int Never! {
     used := 0
     queue := [Int]{pid}
     at := 0

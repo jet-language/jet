@@ -24,7 +24,7 @@ sema_call_value_root_name: fn(callee: Expr) -> String? {
     }
 }
 
-sema_call_local_value_defaults: fn(callee: Expr, binding: SemaCallBinding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [SemaCallDefaultValue]? {
+sema_call_local_value_defaults: fn(callee: Expr, binding: SemaCallBinding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> [SemaCallDefaultValue]? {
     if binding.default_refs.len() == 0 -> return Val([SemaCallDefaultValue]{})
     name: sema_call_value_root_name(callee) ?? return None
     symbol: sema_scope_resolve(scopes, name) ?? return None
@@ -55,7 +55,7 @@ sema_call_local_value_defaults: fn(callee: Expr, binding: SemaCallBinding, envir
     Val(defaults)
 }
 
-sema_call_value_checked_from_type: fn(state: &SemaOwnershipState, callee: Expr, callee_value: TExpr, signature: Type, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+sema_call_value_checked_from_type: fn(state: ^SemaOwnershipState, callee: Expr, callee_value: TExpr, signature: Type, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     resolved_signature: sema_call_resolved_type(signature, environment, program)
     // A callee that names a function declaration (directly, parenthesized or
     // as every branch of an `if`) binds like a direct call of that function:
@@ -222,7 +222,7 @@ sema_call_value_is_declaration: fn(callee: Expr, scopes: SemaScopeTable) -> Bool
     }
 }
 
-sema_call_value_inline_loop: fn(lambda: Lambda, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+sema_call_value_inline_loop: fn(lambda: Lambda, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     // With no expected value (an unannotated binding), the loop's own result
     // type stands; a written expectation becomes the callable's result.
     // copy: `result` is a payload of read parameter `expected`, which keeps the original; the Val carrier owns this one
@@ -277,7 +277,7 @@ sema_call_value_lambda: fn(callee: Expr) -> Lambda? Never! {
     }
 }
 
-sema_call_check_value_owned: fn(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+sema_call_check_value_owned: fn(state: ^SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     if sema_call_value_is_inline_loop(callee, args) {
         if callee == .Lambda(lambda, _) {
             return sema_call_value_inline_loop(lambda, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

@@ -66,7 +66,7 @@ SSLTLS13HandshakeSecrets: struct {
 }
 
 /// Wipe a key set's keys and IVs.
-ssl_tls13_key_set_wipe: fn(keys: &SSLKeySet) Never! {
+ssl_tls13_key_set_wipe: fn(keys: ^SSLKeySet) Never! {
     ssldefs.ssl_wipe(keys.client_write_key)
     ssldefs.ssl_wipe(keys.server_write_key)
     ssldefs.ssl_wipe(keys.client_write_iv)
@@ -255,7 +255,7 @@ ssl_tls13_derive_handshake_secrets: fn(md: hashes.Md, handshake_secret: [U8], tr
 /// "c ap traffic", "s ap traffic" and "exp master" over the
 /// ClientHello...server Finished transcript hash into `derived`
 /// (mbedtls_ssl_tls13_derive_application_secrets).
-ssl_tls13_derive_application_secrets: fn(md: hashes.Md, application_secret: [U8], transcript: [U8], derived: &ssldefs.SSLTLS13AppSecrets) ssldefs.SSLError! {
+ssl_tls13_derive_application_secrets: fn(md: hashes.Md, application_secret: [U8], transcript: [U8], derived: ^ssldefs.SSLTLS13AppSecrets) ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
     derived.client_application_traffic_secret_n = ssl_tls13_derive_secret(md, application_secret, "c ap traffic".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len) ?? return Err(err)
     derived.server_application_traffic_secret_n = ssl_tls13_derive_secret(md, application_secret, "s ap traffic".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len) ?? return Err(err)
@@ -264,7 +264,7 @@ ssl_tls13_derive_application_secrets: fn(md: hashes.Md, application_secret: [U8]
 
 /// "res master" over the transcript hash up to the client Finished into
 /// `derived` (mbedtls_ssl_tls13_derive_resumption_master_secret).
-ssl_tls13_derive_resumption_master_secret: fn(md: hashes.Md, application_secret: [U8], transcript: [U8], derived: &ssldefs.SSLTLS13AppSecrets) ssldefs.SSLError! {
+ssl_tls13_derive_resumption_master_secret: fn(md: hashes.Md, application_secret: [U8], transcript: [U8], derived: ^ssldefs.SSLTLS13AppSecrets) ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
     derived.resumption_master_secret = ssl_tls13_derive_secret(md, application_secret, "res master".bytes(), transcript, SSL_TLS1_3_CONTEXT_HASHED, hash_len) ?? return Err(err)
 }
@@ -285,7 +285,7 @@ ssl_tls13_calc_finished_core: fn(md: hashes.Md, base_key: [#Secret U8], transcri
 /// The verify_data of the Finished message `from` sends, at most dst_len
 /// bytes (mbedtls_ssl_tls13_calculate_verify_data). That side's handshake
 /// traffic secret is wiped: nothing needs it after its Finished.
-ssl_tls13_calculate_verify_data: fn(ssl: &ssldefs.SSLContext, dst_len: Int, from: Int) -> [U8] ssldefs.SSLError! {
+ssl_tls13_calculate_verify_data: fn(ssl: ^ssldefs.SSLContext, dst_len: Int, from: Int) -> [U8] ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     md: cs.mac
     hash_len: hashes.md_size(md)
@@ -354,7 +354,7 @@ ssl_tls13_create_psk_binder: fn(md: hashes.Md, psk: [U8], psk_type: Int, transcr
 
 /// Fill transform `tix` for `endpoint` from the traffic keys of a TLS 1.3
 /// ciphersuite (mbedtls_ssl_tls13_populate_transform).
-ssl_tls13_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, endpoint: Int, ciphersuite: Int, traffic_keys: SSLKeySet) ssldefs.SSLError! {
+ssl_tls13_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, endpoint: Int, ciphersuite: Int, traffic_keys: SSLKeySet) ssldefs.SSLError! {
     cs: suites.ssl_ciphersuite_from_id(ciphersuite) ?? return Err(.BadInputData)
     info: suites.ssl_ciphersuite_cipher_info(cs) ?? return Err(.BadInputData)
     enc := layer.cipher_setup(info)
@@ -404,7 +404,7 @@ ssl_tls13_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, endpoint: I
 }
 
 // Key one cipher context for `op`; the failure, None for none.
-ssl_tls13_key_cipher: fn(ctx: &layer.CipherContext, key: [U8], op: layer.CipherOperation) -> layer.CipherLayerError? Never! {
+ssl_tls13_key_cipher: fn(ctx: ^layer.CipherContext, key: [U8], op: layer.CipherOperation) -> layer.CipherLayerError? Never! {
     if layer.cipher_setkey(ctx, key, op) == {
         .Err(e) -> return Val(e)
         .Ok(_) -> {}
@@ -453,7 +453,7 @@ ssl_tls13_export_handshake_psk: fn(ssl: ssldefs.SSLContext) -> [U8] ssldefs.SSLE
 
 /// Enter the Early stage: the early secret from the PSK, zeros without
 /// one (mbedtls_ssl_tls13_key_schedule_stage_early).
-ssl_tls13_key_schedule_stage_early: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_tls13_key_schedule_stage_early: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     psk := [U8]{}
     if ssltls.ssl_tls13_key_exchange_mode_with_psk(ssl) {
@@ -470,11 +470,11 @@ ssl_tls13_key_schedule_stage_early: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLErro
 /// The (EC)DHE shared secret of our key share and the peer's
 /// (psa_raw_key_agreement over the key ssl_tls13_generic.c generated).
 /// Our private key is dropped once it has served, as C destroys it.
-ssl_tls13_xxdh_agree: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) -> [U8] ssldefs.SSLError! {
+ssl_tls13_xxdh_agree: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) -> [U8] ssldefs.SSLError! {
     group: ssl.handshake.offered_group_id
     peer := ssl.handshake.xxdh_peerkey.copy()
     if ssltls.ssl_tls13_named_group_is_ecdhe(group) {
-        shared := if &ssl.handshake.ecdh_ctx == {
+        shared := if ^ssl.handshake.ecdh_ctx == {
             .Val(ctx) -> ssl_tls13_ecdh_agree(ctx, peer, rng) ?? return Err(err)
             None -> {
                 return Err(.GenericError)
@@ -484,7 +484,7 @@ ssl_tls13_xxdh_agree: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) -> [U8] ssld
         return Ok(shared)
     }
     if ssltls.ssl_tls13_named_group_is_ffdh(group) {
-        shared := if &ssl.handshake.dhm_ctx == {
+        shared := if ^ssl.handshake.dhm_ctx == {
             .Val(ctx) -> ssl_tls13_ffdh_agree(ctx, peer) ?? return Err(err)
             None -> {
                 return Err(.GenericError)
@@ -498,7 +498,7 @@ ssl_tls13_xxdh_agree: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) -> [U8] ssld
 
 // The ECDH shared secret of our key in `ctx` and the peer's public key, as
 // psa_raw_key_agreement checks and computes it.
-ssl_tls13_ecdh_agree: fn<R: RNG>(ctx: &ecdh.ECDHContext, peer: [U8], rng: &R) -> [U8] ssldefs.SSLError! {
+ssl_tls13_ecdh_agree: fn<R: RNG>(ctx: ^ecdh.ECDHContext, peer: [U8], rng: ^R) -> [U8] ssldefs.SSLError! {
     plen: (ctx.grp.pbits + 7) /% 8
     // PSA's public key forms: 0x04 || X || Y on short Weierstrass curves,
     // X alone on Montgomery ones.
@@ -517,7 +517,7 @@ ssl_tls13_ecdh_agree: fn<R: RNG>(ctx: &ecdh.ECDHContext, peer: [U8], rng: &R) ->
 // The FFDH shared secret K = gy^x mod p of our key in `ctx` and the peer's
 // public value, padded to the prime's length, as psa_raw_key_agreement
 // checks and computes it.
-ssl_tls13_ffdh_agree: fn(ctx: &dhm.DHMContext, peer: [U8]) -> [U8] ssldefs.SSLError! {
+ssl_tls13_ffdh_agree: fn(ctx: ^dhm.DHMContext, peer: [U8]) -> [U8] ssldefs.SSLError! {
     plen: bn.size(ctx.p)
     if peer.len() != plen -> return Err(.BadInputData)
     gy: bn.read_binary(peer) ?? return Err(ssl_tls13_psa_mpi_error(err))
@@ -533,7 +533,7 @@ ssl_tls13_ffdh_agree: fn(ctx: &dhm.DHMContext, peer: [U8]) -> [U8] ssldefs.SSLEr
 
 /// Enter the Handshake stage: the handshake secret from the early secret
 /// and the (EC)DHE shared secret (ssl_tls13_key_schedule_stage_handshake).
-ssl_tls13_key_schedule_stage_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_key_schedule_stage_handshake: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     shared_secret := [U8]{}
     if ssltls.ssl_tls13_key_exchange_mode_with_ephemeral(ssl) {
@@ -553,7 +553,7 @@ ssl_tls13_key_schedule_stage_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng
 
 /// The handshake traffic secrets, exported, and the keys they give
 /// (ssl_tls13_generate_handshake_keys).
-ssl_tls13_generate_handshake_keys: fn(ssl: &ssldefs.SSLContext) -> SSLKeySet ssldefs.SSLError! {
+ssl_tls13_generate_handshake_keys: fn(ssl: ^ssldefs.SSLContext) -> SSLKeySet ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     lens: ssl_tls13_get_cipher_key_info(cs)
     md: cs.mac
@@ -569,7 +569,7 @@ ssl_tls13_generate_handshake_keys: fn(ssl: &ssldefs.SSLContext) -> SSLKeySet ssl
 
 /// Enter the Application stage: the master secret from the handshake
 /// secret (ssl_tls13_key_schedule_stage_application).
-ssl_tls13_key_schedule_stage_application: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_tls13_key_schedule_stage_application: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     app: ssl_tls13_evolve_secret(cs.mac, Val(ssl.handshake.tls13_handshake_secret), [U8]{})
     ssl.handshake.tls13_app_secret = app
@@ -578,7 +578,7 @@ ssl_tls13_key_schedule_stage_application: fn(ssl: &ssldefs.SSLContext) ssldefs.S
 /// The application traffic secrets of the negotiated session, exported,
 /// and the first keys they give (ssl_tls13_generate_application_keys).
 /// The randoms are wiped whatever the outcome: nothing needs them after.
-ssl_tls13_generate_application_keys: fn(ssl: &ssldefs.SSLContext) -> SSLKeySet ssldefs.SSLError! {
+ssl_tls13_generate_application_keys: fn(ssl: ^ssldefs.SSLContext) -> SSLKeySet ssldefs.SSLError! {
     if ssl_tls13_application_keys_of(ssl) == {
         .Ok(keys) -> {
             ssldefs.ssl_wipe(ssl.handshake.randbytes)
@@ -592,7 +592,7 @@ ssl_tls13_generate_application_keys: fn(ssl: &ssldefs.SSLContext) -> SSLKeySet s
 }
 
 // ssl_tls13_generate_application_keys's body, before its clean-up.
-ssl_tls13_application_keys_of: fn(ssl: &ssldefs.SSLContext) -> SSLKeySet ssldefs.SSLError! {
+ssl_tls13_application_keys_of: fn(ssl: ^ssldefs.SSLContext) -> SSLKeySet ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     lens: ssl_tls13_get_cipher_key_info(cs)
     md: cs.mac
@@ -613,7 +613,7 @@ ssl_tls13_application_keys_of: fn(ssl: &ssldefs.SSLContext) -> SSLKeySet ssldefs
 
 /// The handshake secret, the handshake traffic keys and the handshake
 /// transform they key (mbedtls_ssl_tls13_compute_handshake_transform).
-ssl_tls13_compute_handshake_transform: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls13_compute_handshake_transform: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl_tls13_key_schedule_stage_handshake(ssl, rng) ?? return Err(err)
     traffic_keys := ssl_tls13_generate_handshake_keys(ssl) ?? return Err(err)
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
@@ -631,7 +631,7 @@ ssl_tls13_compute_handshake_transform: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng:
 
 /// The resumption master secret of the negotiated session; the master
 /// secrets are wiped after it (mbedtls_ssl_tls13_compute_resumption_master_secret).
-ssl_tls13_compute_resumption_master_secret: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_tls13_compute_resumption_master_secret: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     md: cs.mac
     transcript := ssltls.ssl_get_handshake_transcript(ssl, md) ?? return Err(err)
@@ -650,7 +650,7 @@ ssl_tls13_compute_resumption_master_secret: fn(ssl: &ssldefs.SSLContext) ssldefs
 
 /// The master secret, the application traffic keys and the application
 /// transform they key (mbedtls_ssl_tls13_compute_application_transform).
-ssl_tls13_compute_application_transform: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_tls13_compute_application_transform: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     ssl_tls13_key_schedule_stage_application(ssl) ?? return Err(err)
     traffic_keys := ssl_tls13_generate_application_keys(ssl) ?? return Err(err)
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)

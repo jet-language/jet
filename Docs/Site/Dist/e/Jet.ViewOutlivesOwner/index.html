@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Each declared view slot keeps a bounded set of possible receiver, parameter, or static sources through every return path, call, generic instantiation, aggregate projection, function value, lambda, and trait implementation. Every possible owner must stay live; a consumed (`&amp;&amp;`) parameter or receiver is freed when the function returns, so it never owns a returned view.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive (take a returned view&#39;s source as a read or `&amp;` parameter, not `&amp;&amp;`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended.</p>
+<p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive (take a returned view&#39;s source as a read or `^` parameter, not `^^`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.ViewOutlivesOwner</code>: <code>Tests/UI/mapped_window_outlives_its_map.stderr</code>.</p>
 <pre class="diag">Error: Jet.ViewOutlivesOwner: This view points into `mapped`, which this function owns

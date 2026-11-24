@@ -4,7 +4,7 @@
 // Only runtime measurement, never an expected snapshot; assertions remain in the .case.
 use files: core.files
 
-s1_criterion_measured_bytes: fn(path: String, seen: &[files.FileID]) -> Int {
+s1_criterion_measured_bytes: fn(path: String, seen: ^[files.FileID]) -> Int {
     metadata: files.stat(path) ?? panic("metadata {path}")
     loop id in seen {
         if id.device == metadata.id.device && id.inode == metadata.id.inode -> return 0

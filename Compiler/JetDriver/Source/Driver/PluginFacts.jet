@@ -37,7 +37,7 @@ jet_driver_plugin_facts: fn(request: JetDriverCompileRequest, inputs: [SemaRegis
 }
 
 // The literal artifacts of every `.load("…")` call in the file, once each.
-jet_driver_plugin_artifacts: fn(artifacts: &[String], program: Program) {
+jet_driver_plugin_artifacts: fn(artifacts: ^[String], program: Program) {
     loop item in program.items {
         if item == .Func(function) {
             ast_visit_body(program.tables, function.body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
@@ -64,7 +64,7 @@ jet_driver_plugin_artifacts: fn(artifacts: &[String], program: Program) {
     ast_visit_body(program.tables, program.script_body, fn(expression: ExprNode) { jet_driver_note_plugin_artifact(program.tables, artifacts, expression) }, false)
 }
 
-jet_driver_note_plugin_artifact: fn(tables: ASTTables, artifacts: &[String], expression: ExprNode) {
+jet_driver_note_plugin_artifact: fn(tables: ASTTables, artifacts: ^[String], expression: ExprNode) {
     if ast_expr(tables, expression) == .MethodCall(_, method, _, _, _, args, _) {
         if method != "load" || args.len() == 0 {
             return

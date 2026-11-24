@@ -54,7 +54,7 @@ LuaRocksProvider: struct {
     }
 
     // The exact identity a cached LuaRocks output must carry, from the lock.
-    cache_expectation: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+    cache_expectation: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
         project: ctx.project_dir ?? return None
         locked: pkg_lock_luarocks_realization(project, spec.raw) ?? return None
         authority: provider_luarocks_cache_authority(ctx) ?? return None
@@ -65,7 +65,7 @@ LuaRocksProvider: struct {
 
     // Rock metadata carries no trusted sizes: every ref is a new item of
     // unknown size.
-    plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+    plan_downloads: fn(self, verification: ^StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs {
             plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
@@ -73,7 +73,7 @@ LuaRocksProvider: struct {
         Ok(plan)
     }
 
-    realize: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    realize: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if ctx.offline {
             return Err(ProviderError.Offline("`{spec.raw}` is not in the verified hangar and --offline forbids LuaRocks metadata or source fetches"))
         }
@@ -243,7 +243,7 @@ LuaRocksResolver: struct {
     specs: [String:LuaRockspec],
     active: [String],
 
-    resolve: fn(&self, name: String, version: String) -[FS, Net, Time.Wait, Env]> RegistryError! {
+    resolve: fn(^self, name: String, version: String) -[FS, Net, Time.Wait, Env]> RegistryError! {
         if self.specs.get(name) == {
             .Val(existing) -> {
                 if existing.version != version {
@@ -379,7 +379,7 @@ LuaRocksOrderWalk: struct {
     done: [String],
     out: [String],
 
-    visit: fn(&self, name: String) RegistryError! {
+    visit: fn(^self, name: String) RegistryError! {
         if self.done.contains(name) {
             return
         }

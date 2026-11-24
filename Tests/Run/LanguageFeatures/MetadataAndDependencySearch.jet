@@ -17,19 +17,19 @@ HookContext: struct {
     queries: Int,
 }
 
-record_query: fn(ctx: &HookContext, type_id: Int, key: String, span: HookSpan) -> Bool Never! {
+record_query: fn(ctx: ^HookContext, type_id: Int, key: String, span: HookSpan) -> Bool Never! {
     ctx.queries += 1
     type_id == 7 && key == "Clock" && span.start == 3 && span.end == 8
 }
 
-check_hook: fn(ctx: &HookContext) -> Bool Never! {
+check_hook: fn(ctx: ^HookContext) -> Bool Never! {
     hook_type_id: ctx.rows[0].id.copy()
     hook_key: ctx.rows[0].key.copy()
     hook_span: ctx.rows[0].span.copy()
     record_query(ctx, hook_type_id, hook_key, hook_span)
 }
 
-bind_matches: fn(roots: [String], entry: String, files: [String], file: String, refs: [String], admitted: [String], diagnostics: &[String], matches: &[String]) Never! {
+bind_matches: fn(roots: [String], entry: String, files: [String], file: String, refs: [String], admitted: [String], diagnostics: ^[String], matches: ^[String]) Never! {
     entry_index := -1
     loop (root_index, root_name) in roots {
         if root_name == entry {

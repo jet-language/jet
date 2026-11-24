@@ -373,7 +373,7 @@ compiler_data_empty: fn(counts: CompilerDataCounts) -> Bool {
 }
 
 // Every `.jet` file under `path` with a nonzero count.
-compiler_data_scan: fn(path: String, found: &[String:CompilerDataCounts]) -[FS]> CompilerDataError! {
+compiler_data_scan: fn(path: String, found: ^[String:CompilerDataCounts]) -[FS]> CompilerDataError! {
     kind: files.stat(path) ?? return Err(CompilerDataError{message: "cannot stat {path}: {err}"})
     if kind.is_symlink -> return Ok()
     if kind.is_dir {
@@ -391,7 +391,7 @@ compiler_data_scan: fn(path: String, found: &[String:CompilerDataCounts]) -[FS]>
 }
 
 // The ledger's rows; a malformed, repeated or zero row is a problem.
-compiler_data_rows: fn(ledger: String, problems: &[String]) -> [String:CompilerDataCounts] {
+compiler_data_rows: fn(ledger: String, problems: ^[String]) -> [String:CompilerDataCounts] {
     rows := [String:CompilerDataCounts]{}
     loop line in ledger.lines() {
         if line == "" || line.starts_with("#") -> next
@@ -419,7 +419,7 @@ compiler_data_rows: fn(ledger: String, problems: &[String]) -> [String:CompilerD
 }
 
 // One count's comparison with its row: a rise is in `rises`, a drop in `drops`.
-compiler_data_compare_one: fn(path: String, what: String, found: Int, row: Int, rises: &[String], drops: &[String]) {
+compiler_data_compare_one: fn(path: String, what: String, found: Int, row: Int, rises: ^[String], drops: ^[String]) {
     if found > row {
         rises.push("{path}: {found} {what}, over its row's {row}; key the data by an id (Docs/Spec/compiler-data.md)")
     }

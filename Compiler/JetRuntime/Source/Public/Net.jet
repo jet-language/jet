@@ -51,19 +51,19 @@ net: module {
     #Import(c) priv listener_local_socket_addr: fn(listener: TCPListener) -[Net]> SocketAddr NetError! = "jet_net_listener_local_socket_addr"
 
     // A TCP stream's timeouts, Nagle switch and hop limit.
-    #Import(c) priv set_timeout: fn(stream: &TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_timeout"
+    #Import(c) priv set_timeout: fn(stream: ^TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_timeout"
 
-    #Import(c) priv set_read_timeout: fn(stream: &TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_read_timeout"
+    #Import(c) priv set_read_timeout: fn(stream: ^TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_read_timeout"
 
-    #Import(c) priv set_write_timeout: fn(stream: &TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_write_timeout"
+    #Import(c) priv set_write_timeout: fn(stream: ^TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_write_timeout"
 
     #Import(c) priv nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! = "jet_net_nodelay"
 
-    #Import(c) priv set_nodelay: fn(stream: &TCPStream, enabled: Bool) -[Net]> NetError! = "jet_net_set_nodelay"
+    #Import(c) priv set_nodelay: fn(stream: ^TCPStream, enabled: Bool) -[Net]> NetError! = "jet_net_set_nodelay"
 
     #Import(c) priv ttl: fn(stream: TCPStream) -[Net]> Int NetError! = "jet_net_ttl"
 
-    #Import(c) priv set_ttl: fn(stream: &TCPStream, ttl: Int) -[Net]> NetError! = "jet_net_set_ttl"
+    #Import(c) priv set_ttl: fn(stream: ^TCPStream, ttl: Int) -[Net]> NetError! = "jet_net_set_ttl"
 
     // The TCPListener and TCPStream methods' leaves (Core/Net/Net.jet): an
     // accept, the stream's reads and writes (a `_deadline` form waits at most
@@ -81,9 +81,9 @@ net: module {
 
     #Import(c) priv tcp_read_bytes_deadline: fn(stream: TCPStream, limit: Int, deadline_ns: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_tcp_read_bytes_deadline"
 
-    #Import(c) priv tcp_read_into: fn(stream: TCPStream, buffer: &[U8], limit: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_tcp_read_into"
+    #Import(c) priv tcp_read_into: fn(stream: TCPStream, buffer: ^[U8], limit: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_tcp_read_into"
 
-    #Import(c) priv tcp_read_into_deadline: fn(stream: TCPStream, buffer: &[U8], limit: Int, deadline_ns: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_tcp_read_into_deadline"
+    #Import(c) priv tcp_read_into_deadline: fn(stream: TCPStream, buffer: ^[U8], limit: Int, deadline_ns: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_tcp_read_into_deadline"
 
     #Import(c) priv tcp_write_text: fn(stream: TCPStream, text: String) -[Net, Time.Wait]> NetError! = "jet_net_tcp_write_text"
 
@@ -144,23 +144,23 @@ net: module {
 
     #Import(c) priv unix_connect_host: fn(path: String) -[Net, Time.Wait]> UnixStream NetError! = "jet_net_unix_connect"
 
-    #Import(c) priv unix_connect_deadline_host: fn(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! = "jet_net_unix_connect_deadline"
+    #Import(c) priv unix_connect_deadline_host: fn(path: String, deadline_ns: Int) -[Net, Time.Wait]> UnixStream NetError! = "jet_net_unix_connect_deadline"
 
-    #Import(c) priv unix_read: fn(stream: &UnixStream) -[Net, Time.Wait]> String NetError! = "jet_net_unix_read"
+    #Import(c) priv unix_read: fn(stream: ^UnixStream) -[Net, Time.Wait]> String NetError! = "jet_net_unix_read"
 
-    #Import(c) priv unix_write: fn(stream: &UnixStream, text: String) -[Net, Time.Wait]> NetError! = "jet_net_unix_write"
+    #Import(c) priv unix_write: fn(stream: ^UnixStream, text: String) -[Net, Time.Wait]> NetError! = "jet_net_unix_write"
 
-    #Import(c) priv unix_read_bytes: fn(stream: &UnixStream, limit: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_unix_read_bytes"
+    #Import(c) priv unix_read_bytes: fn(stream: ^UnixStream, limit: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_unix_read_bytes"
 
-    #Import(c) priv unix_write_all_bytes: fn(stream: &UnixStream, data: [U8]) -[Net, Time.Wait]> NetError! = "jet_net_unix_write_all_bytes"
+    #Import(c) priv unix_write_all_bytes: fn(stream: ^UnixStream, data: [U8]) -[Net, Time.Wait]> NetError! = "jet_net_unix_write_all_bytes"
 
-    #Import(c) priv unix_send_fds_raw: fn(stream: &UnixStream, data: [U8], tokens: [Int]) -[Net, Time.Wait]> NetError! = "jet_net_unix_send_fds_raw"
+    #Import(c) priv unix_send_fds_raw: fn(stream: ^UnixStream, data: [U8], tokens: [Int]) -[Net, Time.Wait]> NetError! = "jet_net_unix_send_fds_raw"
 
-    #Import(c) priv unix_receive_fds_raw: fn(stream: &UnixStream, max: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_unix_receive_fds_raw"
+    #Import(c) priv unix_receive_fds_raw: fn(stream: ^UnixStream, max: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_unix_receive_fds_raw"
 
-    #Import(c) priv unix_wait_raw: fn(stream: &UnixStream, ns: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_unix_wait_raw"
+    #Import(c) priv unix_wait_raw: fn(stream: ^UnixStream, ns: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_unix_wait_raw"
 
-    #Import(c) priv unix_shutdown: fn(stream: &UnixStream, how: NetShutdown) -[Net]> NetError! = "jet_net_unix_shutdown"
+    #Import(c) priv unix_shutdown: fn(stream: ^UnixStream, how: NetShutdown) -[Net]> NetError! = "jet_net_unix_shutdown"
 
     #Import(c) priv unix_close: fn(stream: UnixStream) -[Net]> NetError! = "jet_net_unix_close"
 
@@ -171,7 +171,7 @@ net: module {
 
     #Import(c) priv unix_read_bytes_deadline: fn(stream: UnixStream, limit: Int, deadline_ns: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_unix_read_bytes_deadline"
 
-    #Import(c) priv unix_read_into_deadline: fn(stream: UnixStream, buffer: &[U8], limit: Int, deadline_ns: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_unix_read_into_deadline"
+    #Import(c) priv unix_read_into_deadline: fn(stream: UnixStream, buffer: ^[U8], limit: Int, deadline_ns: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_unix_read_into_deadline"
 
     #Import(c) priv unix_write_all_bytes_deadline: fn(stream: UnixStream, data: [U8], deadline_ns: Int) -[Net, Time.Wait]> NetError! = "jet_net_unix_write_all_bytes_deadline"
 
@@ -269,4 +269,10 @@ net: module {
     #Import(c) priv tls_prove_record: fn(tape: [U8]) -[Net]> = "jet_prove_net_record"
 
     #Import(c) priv tls_prove_take: fn(request: [U8]) -[Net]> [U8]? = "jet_prove_net_take"
+
+    // `unix_wait_raw`'s wait, which the descriptor of the token `wake` (a
+    // negative token for none) also ends once it is readable. Bit 1 of the
+    // answer says the stream is readable and bit 2 the wake descriptor; 0
+    // says the time ran out.
+    #Import(c) priv unix_wait_wake_raw: fn(stream: ^UnixStream, wake: Int, timeout: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_unix_wait_wake_raw"
 }

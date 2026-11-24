@@ -91,7 +91,7 @@ s6_retirement_reviewed_contains_word: fn(text: String, word: String) -> Bool {
 
 // String literal facts live in the lexer's token tables: an interpolation's
 // tokens are part of its literal row, with spans in source coordinates.
-s6_retirement_reviewed_collect: fn(tables: TokenTables, tokens: [Token], out: &[Token]) {
+s6_retirement_reviewed_collect: fn(tables: TokenTables, tokens: [Token], out: ^[Token]) {
     loop token in tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF {
             next
@@ -585,7 +585,7 @@ s6_retirement_reviewed_allowlisted: fn(path: String) -> Bool {
     path == "Docs/Spec/syntax-decisions.md" || path == "Docs/Spec/Contributing/agent-engineering.md" || path == "Docs/Spec/Reference/prior-art.md" || path.starts_with("Docs/Audits/") || path.starts_with("Docs/Proposals/") || path.starts_with("Docs/Research/") || path.starts_with("Tools/AgentEval/DomainFoundations/") || path.starts_with("Tests/UI/") || path.starts_with("Tests/Fuzz/") || path == "Tests/Guards/syntax_reconciliation.jet" || path == "Tools/NotebookTest/Acceptance.jet" || path == "Compiler/Prelude/Diagnostics.jet" || path.starts_with("Tests/Cases/Fmt/")
 }
 
-s6_retirement_reviewed_scan_file: fn(path: String, offenders: &[String]) {
+s6_retirement_reviewed_scan_file: fn(path: String, offenders: ^[String]) {
     if s6_retirement_reviewed_allowlisted(path) {
         return
     }
@@ -599,7 +599,7 @@ s6_retirement_reviewed_scan_file: fn(path: String, offenders: &[String]) {
     }
 }
 
-s6_retirement_reviewed_walk: fn(path: String, offenders: &[String]) {
+s6_retirement_reviewed_walk: fn(path: String, offenders: ^[String]) {
     entries: s6_retirement_reviewed_files.list_dir(path) ?? return
     extensions: [String]{"jet", "md", "rs", "js", "json", "scm", "toml", "txt", "yaml", "yml"}
     loop entry in entries {

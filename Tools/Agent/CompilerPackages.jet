@@ -226,7 +226,7 @@ package_tree: fn(repo: String, directory: String) -[FS]> [String] PackagesError!
     found
 }
 
-walk_tree: fn(repo: String, directory: String, found: &[String]) -[FS]> PackagesError! {
+walk_tree: fn(repo: String, directory: String, found: ^[String]) -[FS]> PackagesError! {
     listed: files.list_dir(files.join(repo, directory)) ?? return Err(PackagesError{message: "`{directory}` cannot be listed: {err}"})
     names := [String]{}
     loop entry in listed -> names.push(entry.name)
@@ -347,7 +347,7 @@ compiler_packages: fn(repo: String, entry: String) -[FS]> [Package] PackagesErro
     packages
 }
 
-visit_package: fn(repo: String, directory: String, packages: &[Package], visiting: &[String]) -[FS]> PackagesError! {
+visit_package: fn(repo: String, directory: String, packages: ^[Package], visiting: ^[String]) -[FS]> PackagesError! {
     manifest: files.read(files.join(repo, "{directory}/package.jet")) ?? return Err(PackagesError{message: "{directory}/package.jet cannot be read: {err}"})
     name: quoted_line(manifest, "name")
     if name == "" -> return Err(PackagesError{message: "{directory}/package.jet names no package"})
@@ -440,7 +440,7 @@ is_compiler_input: fn(repo: String, path: String, roots: [String]) -[FS]> Bool N
     false
 }
 
-push_u64: fn(out: &[U8], value: Int) {
+push_u64: fn(out: ^[U8], value: Int) {
     digits := [U8]{}
     rest := value
     loop _ in 0..<8 {
@@ -623,7 +623,7 @@ blank: fn(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-blank_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
+blank_into: fn(out: ^[U8], raw: [U8], start: Int, end: Int) Never! {
     loop at in start..<end {
         code: Int{raw[at]}
         if {
@@ -637,7 +637,7 @@ blank_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
     }
 }
 
-copy_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
+copy_into: fn(out: ^[U8], raw: [U8], start: Int, end: Int) Never! {
     loop at in start..<end -> out.push(raw[at])
 }
 
@@ -700,7 +700,7 @@ core_group: fn(raw: [U8], at: Int) -> CoreGroup? Never! {
 
 // A repeated member of a grouped Core import is blanked, keeping every
 // surviving token at its offset; forms this does not recognize stay as written.
-blank_repeated_members: fn(text: String, seen: &[String:Bool]) -> String Never! {
+blank_repeated_members: fn(text: String, seen: ^[String:Bool]) -> String Never! {
     raw: text.bytes()
     out := [U8]{}
     at := 0
@@ -720,7 +720,7 @@ blank_repeated_members: fn(text: String, seen: &[String:Bool]) -> String Never! 
     String.from_bytes(out) ?? ""
 }
 
-member_imports: fn(whole: String, path: String, members: String, seen: &[String:Bool]) -> String Never! {
+member_imports: fn(whole: String, path: String, members: String, seen: ^[String:Bool]) -> String Never! {
     parts: members.split(",").to_list()
     bindings := [String]{}
     loop part in parts {
@@ -783,7 +783,7 @@ is_core_use: fn(line: String) -> Bool Never! {
 }
 
 // A Core import line repeated from an earlier file (or line) is blanked.
-blank_repeated_imports: fn(text: String, seen: &[String:Bool]) -> String Never! {
+blank_repeated_imports: fn(text: String, seen: ^[String:Bool]) -> String Never! {
     lines := [String]{}
     loop line in text.split("\n") {
         if is_core_import_line(line) {

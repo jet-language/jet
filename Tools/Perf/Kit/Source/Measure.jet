@@ -612,7 +612,7 @@ Counter: struct {
 
 // `walk(value, key)`: a number adds to its counter, an object walks its
 // members (in Object.entries order), anything else is refused.
-walk_counters: fn(value: Dyn, key: String, counters: &[Counter]) MeasureError! {
+walk_counters: fn(value: Dyn, key: String, counters: ^[Counter]) MeasureError! {
     if value == {
         .Int(_) | .Float(_) | .Number(_) -> {
             number: as_number(Val(value)) ?? math.NAN

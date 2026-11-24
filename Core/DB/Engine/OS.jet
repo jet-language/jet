@@ -415,7 +415,7 @@ os_bytes_text: fn(bytes: [U8], n: Int) -> String Never! {
 
 // sqlite3OsClose: unixClose (unlock, then closeUnixFile) or nolockClose. A
 // file that is not open is left alone.
-os_close: fn(file: &DBFile) -[DB]> Never! {
+os_close: fn(file: ^DBFile) -[DB]> Never! {
     if file.fd < 0 {
         return
     }
@@ -427,7 +427,7 @@ os_close: fn(file: &DBFile) -[DB]> Never! {
 
 // sqlite3OsRead: unixRead (seekAndRead) of `amt` bytes at `offset` into
 // buf[0..<amt]. A short read zero-fills the rest and is IOERR_SHORT_READ.
-os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) -[DB]> SQLError! {
+os_read: fn(file: ^DBFile, buf: ^[U8], amt: Int, offset: Int) -[DB]> SQLError! {
     got: rt.vfs_read(file.fd, offset, buf, 0, amt)
     if got == amt -> return Ok()
     if got < 0 {
@@ -444,7 +444,7 @@ os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) -[DB]> SQLError! {
 
 // sqlite3OsWrite: unixWrite of data[0..<amt] at `offset`. A short write
 // or ENOSPC is SQLITE_FULL.
-os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) -[DB]> SQLError! {
+os_write: fn(file: ^DBFile, data: [U8], amt: Int, offset: Int) -[DB]> SQLError! {
     wrote: rt.vfs_write(file.fd, offset, data, 0, amt)
     if wrote >= amt -> return Ok()
     if wrote < 0 && 0 - wrote != OS_ENOSPC {
@@ -456,7 +456,7 @@ os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) -[DB]> SQLError! 
 }
 
 // sqlite3OsTruncate: unixTruncate, rounded up to a whole chunk.
-os_truncate: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
+os_truncate: fn(file: ^DBFile, size: Int) -[DB]> SQLError! {
     n := size
     if file.chunk > 0 -> n = ((n + file.chunk - 1) /% file.chunk) * file.chunk
     got: rt.vfs_truncate(file.fd, n)
@@ -471,7 +471,7 @@ os_truncate: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
 // (full_fsync; fdatasync is fsync), then once fsync its directory when
 // UNIXFILE_DIRSYNC is set, ignoring a directory that cannot be opened or
 // synced.
-os_sync: fn(file: &DBFile, flags: Int) -[DB]> SQLError! {
+os_sync: fn(file: ^DBFile, flags: Int) -[DB]> SQLError! {
     if flags == 0 -> return Ok()
     got: rt.vfs_sync(file.fd)
     if got < 0 {
@@ -508,7 +508,7 @@ os_open_directory: fn(path: String) -[DB]> Int Never! {
 
 // sqlite3OsFileSize: unixFileSize. A size of 1 reads as 0 (findInodeInfo's
 // msdos workaround, ticket #3260).
-os_file_size: fn(file: &DBFile) -[DB]> Int SQLError! {
+os_file_size: fn(file: ^DBFile) -[DB]> Int SQLError! {
     size: rt.vfs_size(file.fd)
     if size < 0 {
         file.last_errno = 0 - size
@@ -525,7 +525,7 @@ os_file_size: fn(file: &DBFile) -[DB]> Int SQLError! {
 // write-locks the RESERVED byte. EXCLUSIVE from RESERVED write-locks the
 // PENDING byte (the file is then PENDING) and then the SHARED range; if
 // that fails the file stays PENDING.
-os_lock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
+os_lock: fn(file: ^DBFile, level: Int) -[DB]> SQLError! {
     if file.ctrl & UNIXFILE_NOLOCK != 0 -> return Ok()
     if file.lock >= level -> return Ok()
     if level == LOCK_SHARED || (level == LOCK_EXCLUSIVE && file.lock == LOCK_RESERVED) {
@@ -574,7 +574,7 @@ os_lock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
 // a file without locking (nolockUnlock). Going to SHARED read-locks the
 // SHARED range again and unlocks the PENDING and RESERVED bytes; going to
 // NONE unlocks the whole file.
-os_unlock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
+os_unlock: fn(file: ^DBFile, level: Int) -[DB]> SQLError! {
     if file.ctrl & UNIXFILE_NOLOCK != 0 -> return Ok()
     if file.lock <= level -> return Ok()
     if file.lock > LOCK_SHARED {
@@ -608,7 +608,7 @@ os_unlock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
 // sqlite3OsCheckReservedLock: unixCheckReservedLock. True when this file
 // holds more than SHARED, or another descriptor holds the RESERVED byte;
 // false on a file without locking (nolockCheckReservedLock).
-os_check_reserved_lock: fn(file: &DBFile) -[DB]> Bool SQLError! {
+os_check_reserved_lock: fn(file: ^DBFile) -[DB]> Bool SQLError! {
     if file.ctrl & UNIXFILE_NOLOCK != 0 -> return Ok(false)
     if file.lock > LOCK_SHARED -> return Ok(true)
     got: rt.vfs_lock(file.fd, OS_F_OFD_GETLK, OS_F_WRLCK, RESERVED_BYTE, 1)
@@ -626,12 +626,12 @@ os_lock_state: fn(file: DBFile) -> Int Never! { file.lock }
 os_last_errno: fn(file: DBFile) -> Int Never! { file.last_errno }
 
 // SQLITE_FCNTL_CHUNK_SIZE.
-os_set_chunk_size: fn(file: &DBFile, size: Int) Never! { file.chunk = size }
+os_set_chunk_size: fn(file: ^DBFile, size: Int) Never! { file.chunk = size }
 
 // SQLITE_FCNTL_SIZE_HINT: fcntlSizeHint. With a chunk size set, grow the
 // file to `size` rounded up to a whole chunk by writing one byte at the end
 // of each new block and at the last byte.
-os_size_hint: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
+os_size_hint: fn(file: ^DBFile, size: Int) -[DB]> SQLError! {
     if file.chunk <= 0 -> return Ok()
     current: rt.vfs_size(file.fd)
     if current < 0 -> return Err(base.fail(base.IOERR_FSTAT))
@@ -650,7 +650,7 @@ os_size_hint: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
 
 // unixModeBit: `arg` < 0 asks whether `mask` is set (1 or 0); 0 clears it
 // and any other value sets it. The answer, or `arg`.
-os_mode_bit: fn(file: &DBFile, mask: Int, arg: Int) -> Int Never! {
+os_mode_bit: fn(file: ^DBFile, mask: Int, arg: Int) -> Int Never! {
     if arg < 0 {
         if file.ctrl & mask != 0 -> return 1
         return 0
@@ -660,12 +660,12 @@ os_mode_bit: fn(file: &DBFile, mask: Int, arg: Int) -> Int Never! {
 }
 
 // SQLITE_FCNTL_PERSIST_WAL.
-os_persist_wal: fn(file: &DBFile, arg: Int) -> Int Never! {
+os_persist_wal: fn(file: ^DBFile, arg: Int) -> Int Never! {
     os_mode_bit(file, UNIXFILE_PERSIST_WAL, arg)
 }
 
 // SQLITE_FCNTL_POWERSAFE_OVERWRITE.
-os_powersafe_overwrite: fn(file: &DBFile, arg: Int) -> Int Never! {
+os_powersafe_overwrite: fn(file: ^DBFile, arg: Int) -> Int Never! {
     os_mode_bit(file, UNIXFILE_PSOW, arg)
 }
 
@@ -685,7 +685,7 @@ os_has_moved: fn(file: DBFile) -[DB]> Bool Never! {
 
 // SQLITE_FCNTL_MMAP_SIZE: set the mmap limit to `limit` (capped at
 // SQLITE_MAX_MMAP_SIZE; a negative limit only asks) and answer the old one.
-os_mmap_size: fn(file: &DBFile, limit: Int) -> Int Never! {
+os_mmap_size: fn(file: ^DBFile, limit: Int) -> Int Never! {
     new_limit := limit
     if new_limit > MAX_MMAP_SIZE -> new_limit = MAX_MMAP_SIZE
     old: file.mmap_size_max
@@ -696,7 +696,7 @@ os_mmap_size: fn(file: &DBFile, limit: Int) -> Int Never! {
 // setDeviceCharacteristics: on first use the sector size is
 // SQLITE_DEFAULT_SECTOR_SIZE and the device is power-safe-overwrite when
 // UNIXFILE_PSOW was set.
-os_device_setup: fn(file: &DBFile) Never! {
+os_device_setup: fn(file: ^DBFile) Never! {
     if file.sector_size != 0 {
         return
     }
@@ -705,13 +705,13 @@ os_device_setup: fn(file: &DBFile) Never! {
 }
 
 // sqlite3OsSectorSize: unixSectorSize.
-os_sector_size: fn(file: &DBFile) -> Int Never! {
+os_sector_size: fn(file: ^DBFile) -> Int Never! {
     os_device_setup(file)
     file.sector_size
 }
 
 // sqlite3OsDeviceCharacteristics: unixDeviceCharacteristics.
-os_device_characteristics: fn(file: &DBFile) -> Int Never! {
+os_device_characteristics: fn(file: ^DBFile) -> Int Never! {
     os_device_setup(file)
     file.device
 }
@@ -755,7 +755,7 @@ DBPath: struct {
 
 // appendOnePathElement: append name (not "." and not empty) to the path,
 // with ".." removing the last element, and follow it when it is a link.
-os_path_append_one: fn(p: &DBPath, name: [U8]) -[DB]> Never! {
+os_path_append_one: fn(p: ^DBPath, name: [U8]) -[DB]> Never! {
     n: name.len()
     if name[0] == OS_DOT {
         if n == 1 {
@@ -808,7 +808,7 @@ os_path_append_one: fn(p: &DBPath, name: [U8]) -[DB]> Never! {
 }
 
 // appendAllPathElements: append each '/'-separated element of path.
-os_path_append_all: fn(p: &DBPath, path: [U8]) -[DB]> Never! {
+os_path_append_all: fn(p: ^DBPath, path: [U8]) -[DB]> Never! {
     i := 0
     j := 0
     loop {
@@ -895,7 +895,7 @@ os_shm_closed: fn() -> DBShm Never! {
 
 // unixShmSystemLock: one record lock (F_UNLCK, F_RDLCK or F_WRLCK) on
 // bytes [ofst, ofst+n) of the -shm file; BUSY when it cannot be taken.
-os_shm_system_lock: fn(file: &DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int Never! {
+os_shm_system_lock: fn(file: ^DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int Never! {
     if file.shm.fd < 0 -> return base.OK
     if os_file_lock(file.shm.fd, kind, ofst, n) < 0 -> return base.BUSY
     base.OK
@@ -906,7 +906,7 @@ os_shm_system_lock: fn(file: &DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int N
 // write-locks the DMS byte and truncates the file to 3 bytes first, and a
 // read-only one is left unlocked and answers READONLY_CANTINIT. A DMS
 // write lock held elsewhere (another connection initializing) is BUSY.
-os_shm_lock_dms: fn(file: &DBFile) -[DB]> Int Never! {
+os_shm_lock_dms: fn(file: ^DBFile) -[DB]> Int Never! {
     got: rt.vfs_lock(file.shm.fd, OS_F_OFD_GETLK, OS_F_WRLCK, SHM_DMS, 1)
     rc := base.OK
     if got < 0 -> rc = base.IOERR_LOCK else if got == OS_F_UNLCK {
@@ -928,7 +928,7 @@ os_shm_lock_dms: fn(file: &DBFile) -[DB]> Int Never! {
 // permissions (read-write unless the readonly_shm URI parameter is set,
 // falling back to read-only) and take the DMS lock. READONLY_CANTINIT
 // leaves the shared memory open but unlocked.
-os_shm_open: fn(file: &DBFile) -[DB]> Int Never! {
+os_shm_open: fn(file: ^DBFile) -[DB]> Int Never! {
     mode: rt.vfs_mode(file.path)
     if mode < 0 -> return base.IOERR_FSTAT
     name: "{file.path}-shm"
@@ -959,7 +959,7 @@ os_shm_open: fn(file: &DBFile) -[DB]> Int Never! {
 // `mapped` reports whether the region lies inside the -shm file; with
 // `extend` the file grows to hold it, one byte at the end of each 4096-byte
 // page. A read-only -shm file answers READONLY.
-os_shm_map: fn(file: &DBFile, region: Int, sz_region: Int, extend: Bool, mapped: &Bool) -[DB]> Int Never! {
+os_shm_map: fn(file: ^DBFile, region: Int, sz_region: Int, extend: Bool, mapped: ^Bool) -[DB]> Int Never! {
     mapped = false
     if !file.shm.open {
         rc: os_shm_open(file)
@@ -998,7 +998,7 @@ os_shm_map: fn(file: &DBFile, region: Int, sz_region: Int, extend: Bool, mapped:
 
 // Read `n` bytes of the shared memory at byte `offset` into buf[at..].
 // What lies past the end of the file reads as zero.
-os_shm_read: fn(file: &DBFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> Int Never! {
+os_shm_read: fn(file: ^DBFile, offset: Int, buf: ^[U8], at: Int, n: Int) -[DB]> Int Never! {
     got: rt.vfs_read(file.shm.fd, offset, buf, at, n)
     if got < 0 -> return base.IOERR_SHMMAP
     loop i in got..<n -> buf[at + i] = U8{0}
@@ -1006,7 +1006,7 @@ os_shm_read: fn(file: &DBFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> 
 }
 
 // Write data[at..<at+n] to the shared memory at byte `offset`.
-os_shm_write: fn(file: &DBFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Int Never! {
+os_shm_write: fn(file: ^DBFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Int Never! {
     if rt.vfs_write(file.shm.fd, offset, data, at, n) != n -> return base.IOERR_SHMMAP
     base.OK
 }
@@ -1015,7 +1015,7 @@ os_shm_write: fn(file: &DBFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]>
 // of LOCK|SHARED, LOCK|EXCLUSIVE, UNLOCK|SHARED and UNLOCK|EXCLUSIVE. A
 // shared lock already held is kept; an exclusive lock is BUSY while this
 // connection holds one of the slots shared (the aLock check).
-os_shm_lock: fn(file: &DBFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! {
+os_shm_lock: fn(file: ^DBFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! {
     if !file.shm.open -> return base.IOERR_SHMLOCK
     mask: (1 << (ofst + n)) - (1 << ofst)
     held: file.shm.excl_mask | file.shm.shared_mask
@@ -1044,7 +1044,7 @@ os_shm_lock: fn(file: &DBFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! 
 
 // sqlite3OsShmUnmap: unixShmUnmap. Close this connection's shared memory,
 // which drops its locks, and with `delete` unlink the -shm file.
-os_shm_unmap: fn(file: &DBFile, delete: Bool) -[DB]> Never! {
+os_shm_unmap: fn(file: ^DBFile, delete: Bool) -[DB]> Never! {
     if !file.shm.open {
         return
     }
@@ -1232,7 +1232,7 @@ chacha_block: fn(input: [Int]) -> [U8] Never! {
 }
 
 // random.c QR(a, b, c, d): one ChaCha quarter round on 32-bit words.
-chacha_qr: fn(x: &[Int], a: Int, b: Int, c: Int, d: Int) Never! {
+chacha_qr: fn(x: ^[Int], a: Int, b: Int, c: Int, d: Int) Never! {
     x[a] = (x[a] + x[b]) & U32_MASK
     x[d] = chacha_rotl(x[d] ~ x[a], 16)
     x[c] = (x[c] + x[d]) & U32_MASK

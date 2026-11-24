@@ -19,6 +19,7 @@ use {
     service_actor: core.actor
     service_tasks: core.tasks
     service_time: core.time
+    service_files_rt: jet.runtime.files
     core.prelude.[TaskFailure]
 }
 
@@ -121,7 +122,7 @@ TaskOutcome: enum {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String {
+        debug: fn(^^self) -> String {
             if self == {
                 .Failed(.Panicked(reason)) -> "Panicked({reason:Debug})"
                 .Finished | .Failed(.Canceled) | .Failed(.DeadlineBlown) -> task_outcome_show(self)
@@ -150,7 +151,7 @@ task_outcome_show: fn(outcome: TaskOutcome) -> String Never! {
 
 // Byte-exact current token-derived key. This intentionally does not introduce
 // a signing-key registry or strengthen the existing authority proof.
-__authority_signing_key: fn(authority: String) -> [U8] ServiceError! {
+priv __authority_signing_key: fn(authority: String) -> [U8] ServiceError! {
     raw: authority.bytes()
     if raw.len() != 67 || raw[0] != (U8{115}) || raw[1] != (U8{97}) || raw[2] != (U8{45}) {
         return Err(ServiceError.Revoked("service authority proof is malformed"))
@@ -354,26 +355,26 @@ priv endpoint_show: fn(endpoint: ServiceEndpoint) -> String Never! {
     "Endpoint({endpoint.tree}/{endpoint.worker}@g{endpoint.generation})"
 }
 
-priv set_delivery: fn(tree: &ServiceTree, delivery: ServiceDelivery) ServiceError! {
+priv set_delivery: fn(tree: ^ServiceTree, delivery: ServiceDelivery) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot change delivery after start"))
     tree.delivery = delivery
 }
 
 // The root policy is written first, then every declared group's policy.
-priv set_restart: fn(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
+priv set_restart: fn(tree: ^ServiceTree, restart: ServiceRestart) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot change restart policy after start"))
     tree.restart = restart
     loop index in 0..<tree.groups.len() -> tree.groups[index].restart = restart
 }
 
-priv drain_dead_letters: fn(tree: &ServiceTree) -> Int ServiceError! {
+priv drain_dead_letters: fn(tree: ^ServiceTree) -> Int ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     count: tree.dead_letters.len()
     tree.dead_letters.clear()
     Ok(count)
 }
 
-priv set_state_empty: fn(tree: &ServiceTree) ServiceError! {
+priv set_state_empty: fn(tree: ^ServiceTree) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot change state adapter after start"))
     if tree.snapshot != None || tree.event_log.len() != 0 {
         return Err(ServiceError.Policy("cannot discard state records while selecting Empty state adapter"))
@@ -383,15 +384,15 @@ priv set_state_empty: fn(tree: &ServiceTree) ServiceError! {
 }
 
 // Services3247/3274: identical checks, then adapter followed by authority.
-priv set_state_snapshot: fn(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+priv set_state_snapshot: fn(tree: ^ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
     select_state_adapter(tree, store, schema, version, migration, false)
 }
 
-priv set_state_event_log: fn(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+priv set_state_event_log: fn(tree: ^ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
     select_state_adapter(tree, store, schema, version, migration, true)
 }
 
-select_state_adapter: fn(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String, event_log: Bool) ServiceError! {
+select_state_adapter: fn(tree: ^ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String, event_log: Bool) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot change state adapter after start"))
     if tree.snapshot != None || tree.event_log.len() != 0 {
         return Err(ServiceError.Policy("cannot replace a state adapter after it has records"))
@@ -482,7 +483,7 @@ priv upgrade_receipt: fn(tree: ServiceTree) -> ServiceUpgradeReceipt ServiceErro
 }
 
 // The rollback store is omitted from every text view.
-__upgrade_receipt_display: fn(receipt: ServiceUpgradeReceipt) -> String Never! {
+priv __upgrade_receipt_display: fn(receipt: ServiceUpgradeReceipt) -> String Never! {
     "ServiceUpgradeReceipt(from={receipt.from_generation}, to={receipt.to_generation}, migration={receipt.migration}, rollback_available={receipt.rollback_available}, pinned={receipt.pinned_shards.join(",")})"
 }
 
@@ -661,34 +662,34 @@ ServiceTree: struct {
     priv previous_generation: Int,
     priv last_upgrade: ServiceUpgradeReceipt?,
 
-    set_restart: fn(&self, restart: ServiceRestart) ServiceError! { set_restart(self, restart) }
+    set_restart: fn(^self, restart: ServiceRestart) ServiceError! { set_restart(self, restart) }
 
-    set_delivery: fn(&self, delivery: ServiceDelivery) ServiceError! { set_delivery(self, delivery) }
+    set_delivery: fn(^self, delivery: ServiceDelivery) ServiceError! { set_delivery(self, delivery) }
 
     #ServiceGroupShape
-    group: fn(&self, name: String, workers: [String]) ServiceError! { group(self, name, workers) }
+    group: fn(^self, name: String, workers: [String]) ServiceError! { group(self, name, workers) }
 
-    start: fn(&self) ServiceError! { start(self) }
+    start: fn(^self) ServiceError! { start(self) }
 
-    stop: fn(&self) ServiceError! { stop(self) }
+    stop: fn(^self) ServiceError! { stop(self) }
 
-    send: fn(&self, endpoint: ServiceEndpoint, message: String) ServiceError! { send(self, endpoint, message) }
+    send: fn(^self, endpoint: ServiceEndpoint, message: String) ServiceError! { send(self, endpoint, message) }
 
-    send_durable: fn(&self, endpoint: ServiceEndpoint, message: String, *, key: String) -> Delivery ServiceError! { send_durable(self, endpoint, message, key) }
+    send_durable: fn(^self, endpoint: ServiceEndpoint, message: String, *, key: String) -> Delivery ServiceError! { send_durable(self, endpoint, message, key) }
 
-    receive: fn(&self, endpoint: ServiceEndpoint) -> String ServiceError! { receive(self, endpoint) }
+    receive: fn(^self, endpoint: ServiceEndpoint) -> String ServiceError! { receive(self, endpoint) }
 
     mailbox_depth: fn<W: ServiceWorkerRef>(self, endpoint: W) -> Int ServiceError! { mailbox_depth(self, endpoint.__service_endpoint()) }
 
     restarts: fn<W: ServiceWorkerRef>(self, endpoint: W) -> Int ServiceError! { restarts(self, endpoint.__service_endpoint()) }
 
-    fail_worker: fn<W: ServiceWorkerRef>(&self, endpoint: W) ServiceError! { fail_worker(self, endpoint.__service_endpoint()) }
+    fail_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! { fail_worker(self, endpoint.__service_endpoint()) }
 
-    drain_worker: fn<W: ServiceWorkerRef>(&self, endpoint: W) ServiceError! { drain_worker(self, endpoint.__service_endpoint()) }
+    drain_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! { drain_worker(self, endpoint.__service_endpoint()) }
 
-    partition_worker: fn<W: ServiceWorkerRef>(&self, endpoint: W) ServiceError! { partition_worker(self, endpoint.__service_endpoint()) }
+    partition_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! { partition_worker(self, endpoint.__service_endpoint()) }
 
-    reconcile_worker: fn<W: ServiceWorkerRef>(&self, endpoint: W) ServiceError! { reconcile_worker(self, endpoint.__service_endpoint()) }
+    reconcile_worker: fn<W: ServiceWorkerRef>(^self, endpoint: W) ServiceError! { reconcile_worker(self, endpoint.__service_endpoint()) }
 
     dead_letter_count: fn(self) -> Int Never! { dead_letter_count(self) }
 
@@ -696,17 +697,17 @@ ServiceTree: struct {
 
     directory_generation: fn(self) -> Int Never! { directory_generation(self) }
 
-    drain_dead_letters: fn(&self) -> Int ServiceError! { drain_dead_letters(self) }
+    drain_dead_letters: fn(^self) -> Int ServiceError! { drain_dead_letters(self) }
 
-    set_state_empty: fn(&self) ServiceError! { set_state_empty(self) }
+    set_state_empty: fn(^self) ServiceError! { set_state_empty(self) }
 
-    set_state_snapshot: fn(&self, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! { set_state_snapshot(self, store, schema, version, migration) }
+    set_state_snapshot: fn(^self, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! { set_state_snapshot(self, store, schema, version, migration) }
 
-    set_state_event_log: fn(&self, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! { set_state_event_log(self, store, schema, version, migration) }
+    set_state_event_log: fn(^self, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! { set_state_event_log(self, store, schema, version, migration) }
 
-    commit_snapshot: fn(&self, payload: String) ServiceError! { commit_snapshot(self, payload) }
+    commit_snapshot: fn(^self, payload: String) ServiceError! { commit_snapshot(self, payload) }
 
-    append_event: fn(&self, event: String) ServiceError! { append_event(self, event) }
+    append_event: fn(^self, event: String) ServiceError! { append_event(self, event) }
 
     restore_snapshot: fn(self) -> String ServiceError! { restore_snapshot(self) }
 
@@ -715,31 +716,31 @@ ServiceTree: struct {
     observe: fn(self) -> String Never! { observe(self) }
 
     #ServiceWorkflowShape
-    workflow_start: fn(&self, id: String, version: Int) -> ServiceWorkflow ServiceError! { workflow_start(self, id, version) }
+    workflow_start: fn(^self, id: String, version: Int) -> ServiceWorkflow ServiceError! { workflow_start(self, id, version) }
 
-    workflow_step: fn(&self, run: Int | ServiceWorkflow, step: String) ServiceError! { workflow_step(self, run, step) }
+    workflow_step: fn(^self, run: Int | ServiceWorkflow, step: String) ServiceError! { workflow_step(self, run, step) }
 
-    workflow_activity: fn(&self, run: Int | ServiceWorkflow, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! { workflow_activity(self, run, activity, key, max_attempts) }
+    workflow_activity: fn(^self, run: Int | ServiceWorkflow, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! { workflow_activity(self, run, activity, key, max_attempts) }
 
-    workflow_activity_retry: fn(&self, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! { workflow_activity_retry(self, run, key, outcome) }
+    workflow_activity_retry: fn(^self, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! { workflow_activity_retry(self, run, key, outcome) }
 
-    workflow_activity_complete: fn(&self, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! { workflow_activity_complete(self, run, key, outcome) }
+    workflow_activity_complete: fn(^self, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! { workflow_activity_complete(self, run, key, outcome) }
 
     workflow_history: fn(self, run: Int | ServiceWorkflow) -> String ServiceError! { workflow_history(self, run) }
 
     workflow_outcome: fn(self, run: Int | ServiceWorkflow) -> TaskOutcome ServiceError! { workflow_outcome(self, run) }
 
     #ServiceDirectoryName
-    directory_register: fn<W: ServiceWorkerRef>(&self, name: String, endpoint: W) ServiceError! { directory_register(self, name, endpoint.__service_endpoint()) }
+    directory_register: fn<W: ServiceWorkerRef>(^self, name: String, endpoint: W) ServiceError! { directory_register(self, name, endpoint.__service_endpoint()) }
 
     #ServiceDirectoryName
     directory_resolve: fn(self, name: String) -> ServiceEndpoint ServiceError! { directory_resolve(self, name) }
 
-    handoff_generation: fn(&self) -> Int ServiceError! { handoff_generation(self) }
+    handoff_generation: fn(^self) -> Int ServiceError! { handoff_generation(self) }
 
-    rollback_generation: fn(&self) -> Int ServiceError! { rollback_generation(self) }
+    rollback_generation: fn(^self) -> Int ServiceError! { rollback_generation(self) }
 
-    chaos_fail: fn(&self) -> Int ServiceError! { chaos_fail(self) }
+    chaos_fail: fn(^self) -> Int ServiceError! { chaos_fail(self) }
 
     upgrade_receipt: fn(self) -> ServiceUpgradeReceipt ServiceError! { upgrade_receipt(self) }
 
@@ -835,17 +836,17 @@ Delivery: struct {
 
     show: fn(self) -> String Never! { "Delivery({self.id})" }
 
-    wait: fn(&&self) -> DeliveryState ServiceError! { delivery_wait(self) }
+    wait: fn(^^self) -> DeliveryState ServiceError! { delivery_wait(self) }
 
-    status: fn(&&self) -> DeliveryState ServiceError! { delivery_status(self) }
+    status: fn(^^self) -> DeliveryState ServiceError! { delivery_status(self) }
 
-    retry: fn(&&self) -> Delivery ServiceError! { delivery_retry(self) }
+    retry: fn(^^self) -> Delivery ServiceError! { delivery_retry(self) }
 
-    cancel: fn(&&self) -> Delivery ServiceError! { delivery_cancel(self) }
+    cancel: fn(^^self) -> Delivery ServiceError! { delivery_cancel(self) }
 
-    receipt: fn(&&self) -> DeliveryReceipt ServiceError! { delivery_receipt(self) }
+    receipt: fn(^^self) -> DeliveryReceipt ServiceError! { delivery_receipt(self) }
 
-    events: fn(&&self) -> [DeliveryEvent] ServiceError! { delivery_events(self) }
+    events: fn(^^self) -> [DeliveryEvent] ServiceError! { delivery_events(self) }
 
     impl Display {
         display: fn(self) -> String { self.show() }
@@ -1241,7 +1242,7 @@ priv ServiceFileLock: struct {
     path: String,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if self.path == "" {
                 return
             }
@@ -1418,7 +1419,7 @@ authority_register: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared
     registry_write_generation(registry.value.endpoints[index], endpoint.generation, started, channel)
 }
 
-registry_write_generation: fn(state: &EndpointState, generation: Int, started: Bool, channel: Shared<ServiceChannel>?) Never! {
+registry_write_generation: fn(state: ^EndpointState, generation: Int, started: Bool, channel: Shared<ServiceChannel>?) Never! {
     if state.generation != generation {
         state.store = None
         state.draining = false
@@ -1540,7 +1541,7 @@ authority_require_registered: fn(endpoint: ServiceEndpoint) ServiceError! {
     }
 }
 
-__authority_validate: fn(endpoint: ServiceEndpoint) ServiceError! {
+priv __authority_validate: fn(endpoint: ServiceEndpoint) ServiceError! {
     validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
     registry: service_registry().guard_read()
     index: registry_index(registry.value.endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
@@ -1638,7 +1639,7 @@ priv endpoint_receive: fn(endpoint: ServiceEndpoint) -> String ServiceError! {
 // wider mode or half-written; a run that loses that race reads the winner's
 // file. An existing file that is not a regular file owned by this user with
 // no group or other permission bits is refused, never overwritten.
-__active_endpoint: fn(secret_path: String) -[Env, FS, Rand]> ServiceEndpoint ServiceError! {
+priv __active_endpoint: fn(secret_path: String) -[Env, FS, Rand]> ServiceEndpoint ServiceError! {
     authority: package_authority(secret_path) ?? return Err(err)
     endpoint: endpoint_new("jobs", "package", 1, authority) ?? return Err(err)
     authority_register(endpoint, true, None) ?? return Err(err)
@@ -1702,7 +1703,7 @@ package_authority_io: fn(path: String, error: IOError) -> ServiceError Never! {
 
 // The issuing authority token of an endpoint, for Core providers (core.jobs)
 // that bind durable state to the service authority.
-__endpoint_authority: fn(endpoint: ServiceEndpoint) -> String Never! {
+priv __endpoint_authority: fn(endpoint: ServiceEndpoint) -> String Never! {
     endpoint.authority.copy()  // copy: the caller keeps the token past the borrowed endpoint
 }
 
@@ -1901,9 +1902,7 @@ state_store: fn(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
 // Metadata-only raw read: Windows identity acquisition would add failures that
 // the constructor's native symlink_metadata contract never had.
 state_path_kind: fn(path: String) -[FS.Read]> Int IOError! {
-    #Unsafe("read the final path component's OS metadata kind without opening an identity handle") {
-        return core.files.__path_kind(path)
-    }
+    service_files_rt.path_kind(path)
 }
 
 restart_one_for_one: fn() -> ServiceRestart Never! { ServiceRestart.OneForOne }
@@ -1973,7 +1972,7 @@ stat_cause: fn(error: IOError) -> String Never! {
 // The path grammar of the machine running the call: a state path names a
 // file on the disk this call reads, so a call made while building follows the
 // machine running the build, never the build's target.
-state_path_windows: fn() -> Bool Never! { core.files.__path_windows() }
+state_path_windows: fn() -> Bool Never! { service_files_rt.path_windows() }
 
 StatePathPrefix: struct {
     length: Int,
@@ -2158,7 +2157,7 @@ service_parse_count: fn(text: String) -> Int? Never! {
     workflow_i64(text)
 }
 
-state_read_line: fn(cursor: &StateCursor, label: String) -> String ServiceError! {
+state_read_line: fn(cursor: ^StateCursor, label: String) -> String ServiceError! {
     if cursor.offset > cursor.bytes.len() -> return Err(state_error("{label} is truncated"))
     end := cursor.offset
     loop end < cursor.bytes.len() && cursor.bytes[end] != (U8{10}) -> end += 1
@@ -2168,7 +2167,7 @@ state_read_line: fn(cursor: &StateCursor, label: String) -> String ServiceError!
     Ok(line)
 }
 
-state_read_frame: fn(cursor: &StateCursor, label: String) -> String ServiceError! {
+state_read_frame: fn(cursor: ^StateCursor, label: String) -> String ServiceError! {
     start: cursor.offset
     if start > cursor.bytes.len() -> return Err(state_error("{label} is truncated"))
     colon := start
@@ -2409,11 +2408,11 @@ rollout_snapshot: fn(tree: ServiceTree) -> RolloutState Never! {
     RolloutState{generation: tree.generation, previous_generation: tree.previous_generation, last_upgrade: tree.last_upgrade, workers: workers, draining: tree.draining, partitioned: tree.partitioned, directory: directory}
 }
 
-rollout_scalar: fn(lines: &[String], label: String, value: String) Never! {
+rollout_scalar: fn(lines: ^[String], label: String, value: String) Never! {
     lines.push("{label}:{value}\n")
 }
 
-rollout_frame: fn(lines: &[String], label: String, value: String) ServiceError! {
+rollout_frame: fn(lines: ^[String], label: String, value: String) ServiceError! {
     if !workflow_visible(value, 1048576) {
         return Err(state_error("rollout journal {label} contains invalid text"))
     }
@@ -2466,7 +2465,7 @@ priv RolloutLines: struct {
     next: Int,
 }
 
-rollout_read_line: fn(lines: &RolloutLines, label: String) -> String ServiceError! {
+rollout_read_line: fn(lines: ^RolloutLines, label: String) -> String ServiceError! {
     if lines.next >= lines.lines.len() {
         return Err(state_error("rollout journal {label} is truncated"))
     }
@@ -2477,26 +2476,26 @@ rollout_read_line: fn(lines: &RolloutLines, label: String) -> String ServiceErro
     Ok(line.removeprefix(prefix))
 }
 
-rollout_read_scalar: fn(lines: &RolloutLines, label: String) -> Int ServiceError! {
+rollout_read_scalar: fn(lines: ^RolloutLines, label: String) -> Int ServiceError! {
     text: rollout_read_line(lines, label)
     workflow_i64(text) ?? return Err(state_error("rollout journal {label} is invalid"))
 }
 
-rollout_read_count: fn(lines: &RolloutLines, label: String) -> Int ServiceError! {
+rollout_read_count: fn(lines: ^RolloutLines, label: String) -> Int ServiceError! {
     text: rollout_read_line(lines, label)
     count: service_parse_count(text) ?? return Err(state_error("rollout journal {label} is invalid"))
     if count > 4096 -> return Err(state_error("rollout journal {label} exceeds the worker limit"))
     Ok(count)
 }
 
-rollout_read_bool: fn(lines: &RolloutLines, label: String) -> Bool ServiceError! {
+rollout_read_bool: fn(lines: ^RolloutLines, label: String) -> Bool ServiceError! {
     text: rollout_read_line(lines, label)
     if text == "0" -> return Ok(false)
     if text == "1" -> return Ok(true)
     Err(state_error("rollout journal {label} is invalid"))
 }
 
-rollout_read_frame: fn(lines: &RolloutLines, label: String) -> String ServiceError! {
+rollout_read_frame: fn(lines: ^RolloutLines, label: String) -> String ServiceError! {
     value: rollout_read_line(lines, label)
     parts: value.split_once(":") ?? return Err(state_error("rollout journal {label} length is missing"))
     length: service_parse_count(parts.before) ?? return Err(state_error("rollout journal {label} length is invalid"))
@@ -2736,7 +2735,7 @@ service_is_file: fn(path: String) -> Bool Never! {
 
 // Re-apply a persisted rollout to a freshly declared tree before start: the
 // journal wins over the declaration's default generation and route state.
-restore_rollout_state: fn(tree: &ServiceTree) ServiceError! {
+restore_rollout_state: fn(tree: ^ServiceTree) ServiceError! {
     loaded: rollout_store_load(tree)
     state: loaded ?? return Ok()
     if state.workers.len() != tree.workers.len() {
@@ -2900,7 +2899,7 @@ workflow_replay: fn(tree: ServiceTree) -> [TreeWorkflowState] ServiceError! {
 }
 
 // Reload from the durable log, keeping each run's in-memory replay cursor.
-workflow_sync_tree: fn(tree: &ServiceTree) ServiceError! {
+workflow_sync_tree: fn(tree: ^ServiceTree) ServiceError! {
     workflows := workflow_replay(tree)
     loop index in 0..<workflows.len() {
         workflows[index].replay_cursor = workflow_cursor(tree.workflows, workflows[index].run_id)
@@ -2988,7 +2987,7 @@ workflow_index_of: fn(workflows: [TreeWorkflowState], run_id: Int, label: String
 
 // After every activity has completed, the first failed activity outcome is
 // the run's outcome, otherwise Finished.
-workflow_refresh_outcome: fn(workflow: &TreeWorkflowState) Never! {
+workflow_refresh_outcome: fn(workflow: ^TreeWorkflowState) Never! {
     keys := 0
     loop step in workflow.steps {
         definition: workflow_activity_parts(step) ?? next
@@ -3013,7 +3012,7 @@ workflow_refresh_outcome: fn(workflow: &TreeWorkflowState) Never! {
 
 // The one reader of a workflow record. Writers reach the in-memory history
 // only through it, so a record that cannot be replayed is never written.
-workflow_apply: fn(workflows: &[TreeWorkflowState], payload: String) ServiceError! {
+workflow_apply: fn(workflows: ^[TreeWorkflowState], payload: String) ServiceError! {
     if payload.starts_with("workflow-start:") {
         run: workflow_split(payload.removeprefix("workflow-start:"), "start run id")
         run_id: workflow_parse_int(run.value, "start run id")
@@ -3197,7 +3196,7 @@ workflow_last_is_sleep: fn(history: [String]) -> Bool Never! {
 // Append one record after replaying it onto the durable log, so a record the
 // reader would reject never reaches the store and drifted history is
 // reported instead of extended. The workflow file lock orders writers.
-workflow_append: fn(tree: &ServiceTree, payload: String) ServiceError! {
+workflow_append: fn(tree: ^ServiceTree, payload: String) ServiceError! {
     authority: workflow_authority(tree)
     lock: authority_file_lock(authority.store, "workflow")
     applied := workflow_replay_authority(authority)
@@ -3217,7 +3216,7 @@ workflow_append: fn(tree: &ServiceTree, payload: String) ServiceError! {
     tree.workflows = applied
 }
 
-priv workflow_start: fn(tree: &ServiceTree, id: String, version: Int) -> ServiceWorkflow ServiceError! {
+priv workflow_start: fn(tree: ^ServiceTree, id: String, version: Int) -> ServiceWorkflow ServiceError! {
     workflow_prepare(tree)
     if id.trim() == "" || !workflow_visible(id, 256) {
         return Err(ServiceError.Policy("workflow id must be non-empty and visible"))
@@ -3248,7 +3247,7 @@ priv workflow_start: fn(tree: &ServiceTree, id: String, version: Int) -> Service
     workflow_handle(tree, run_id)
 }
 
-priv workflow_step: fn(tree: &ServiceTree, run: Int | ServiceWorkflow, step: String) ServiceError! {
+priv workflow_step: fn(tree: ^ServiceTree, run: Int | ServiceWorkflow, step: String) ServiceError! {
     run_id: workflow_run_id(run)
     workflow_prepare(tree)
     if step.trim() == "" || !workflow_visible(step, 1048576) {
@@ -3381,7 +3380,7 @@ priv workflow_all: fn(workflow: ServiceWorkflow, values: [String]) -> [String] S
     Ok(values)
 }
 
-priv workflow_activity: fn(tree: &ServiceTree, run: Int | ServiceWorkflow, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! {
+priv workflow_activity: fn(tree: ^ServiceTree, run: Int | ServiceWorkflow, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! {
     run_id: workflow_run_id(run)
     workflow_prepare(tree)
     workflow_token(activity, "activity")
@@ -3422,7 +3421,7 @@ priv workflow_activity: fn(tree: &ServiceTree, run: Int | ServiceWorkflow, activ
     Ok(TaskStatus.Running)
 }
 
-priv workflow_activity_retry: fn(tree: &ServiceTree, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! {
+priv workflow_activity_retry: fn(tree: ^ServiceTree, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! {
     run_id: workflow_run_id(run)
     workflow_prepare(tree)
     workflow_token(key, "idempotency key")
@@ -3453,7 +3452,7 @@ priv workflow_activity_retry: fn(tree: &ServiceTree, run: Int | ServiceWorkflow,
     Ok(TaskStatus.Paused)
 }
 
-priv workflow_activity_complete: fn(tree: &ServiceTree, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! {
+priv workflow_activity_complete: fn(tree: ^ServiceTree, run: Int | ServiceWorkflow, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! {
     run_id: workflow_run_id(run)
     workflow_prepare(tree)
     workflow_token(key, "idempotency key")
@@ -3491,7 +3490,7 @@ priv workflow_activity_complete: fn(tree: &ServiceTree, run: Int | ServiceWorkfl
     Ok(outcome)
 }
 
-workflow_prepare: fn(tree: &ServiceTree) ServiceError! {
+workflow_prepare: fn(tree: ^ServiceTree) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     workflow_sync_tree(tree)
 }
@@ -3533,7 +3532,7 @@ workflow_outcome_wire: fn(outcome: TaskOutcome) -> String Never! {
 
 // Consume one recorded decision. A mismatch is a safety error, never a new
 // history entry.
-workflow_replay_decision: fn(tree: &ServiceTree, index: Int, expected: String) -> Bool ServiceError! {
+workflow_replay_decision: fn(tree: ^ServiceTree, index: Int, expected: String) -> Bool ServiceError! {
     cursor: tree.workflows[index].replay_cursor
     if cursor == 0 || cursor >= tree.workflows[index].history.len() -> return Ok(false)
     actual: tree.workflows[index].history[cursor]
@@ -3544,7 +3543,7 @@ workflow_replay_decision: fn(tree: &ServiceTree, index: Int, expected: String) -
     Ok(true)
 }
 
-workflow_advance: fn(tree: &ServiceTree, index: Int, replaying: Bool, amount: Int) Never! {
+workflow_advance: fn(tree: ^ServiceTree, index: Int, replaying: Bool, amount: Int) Never! {
     tree.workflows[index].replay_cursor = if replaying -> tree.workflows[index].replay_cursor + amount else -> tree.workflows[index].history.len()
 }
 
@@ -3606,7 +3605,7 @@ workflow_i64: fn(text: String) -> Int? Never! {
 
 // Retry records carry the attempt assigned by the durable log; replay
 // consumes that number instead of deriving another from replayed state.
-workflow_replay_retry: fn(tree: &ServiceTree, index: Int, key: String, maximum: Int, outcome: TaskOutcome) -> Bool ServiceError! {
+workflow_replay_retry: fn(tree: ^ServiceTree, index: Int, key: String, maximum: Int, outcome: TaskOutcome) -> Bool ServiceError! {
     cursor: tree.workflows[index].replay_cursor
     if cursor == 0 || cursor >= tree.workflows[index].history.len() -> return Ok(false)
     actual: tree.workflows[index].history[cursor]
@@ -3640,7 +3639,7 @@ workflow_replay_retry: fn(tree: &ServiceTree, index: Int, key: String, maximum: 
     assert(workflow_outcome_wire(TaskOutcome.Failed(.Panicked("λ"))) == "Panicked:2:λ")
 }
 
-priv group: fn(tree: &ServiceTree, name: String, workers: [String]) ServiceError! {
+priv group: fn(tree: ^ServiceTree, name: String, workers: [String]) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot add groups after start"))
     known := [String]{}
     loop worker in tree.workers -> known.push(worker.name)
@@ -3685,7 +3684,7 @@ validate_group: fn(name: String, workers: [String], known: [String], groups: [{n
 }
 
 // The counter advances before a running worker is chosen and failed.
-priv chaos_fail: fn(tree: &ServiceTree) -> Int ServiceError! {
+priv chaos_fail: fn(tree: ^ServiceTree) -> Int ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     if tree.chaos_fails == 9223372036854775807 {
         return Err(ServiceError.Policy("chaos failure counter exhausted"))
@@ -3704,7 +3703,7 @@ priv chaos_fail: fn(tree: &ServiceTree) -> Int ServiceError! {
 }
 
 // The durable append precedes the in-memory push.
-priv append_event: fn(tree: &ServiceTree, event: String) ServiceError! {
+priv append_event: fn(tree: ^ServiceTree, event: String) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     if tree.state_adapter != TreeStateAdapter.EventLog {
         return Err(ServiceError.Policy("append_event requires EventLog state adapter"))
@@ -3721,7 +3720,7 @@ priv append_event: fn(tree: &ServiceTree, event: String) ServiceError! {
     tree.event_log.push(record)
 }
 
-priv commit_snapshot: fn(tree: &ServiceTree, payload: String) ServiceError! {
+priv commit_snapshot: fn(tree: ^ServiceTree, payload: String) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     if tree.state_adapter != TreeStateAdapter.Snapshot {
         return Err(ServiceError.Policy("commit_snapshot requires Snapshot state adapter"))
@@ -3917,7 +3916,7 @@ priv directory_resolve: fn(tree: ServiceTree, name: String) -> ServiceEndpoint S
     Ok(endpoint)
 }
 
-priv send: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
+priv send: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     validate_tree_endpoint(tree, endpoint)
     if !valid_record_payload(message) {
@@ -4311,7 +4310,7 @@ authority_append_event: fn(runtime: ServiceRuntime, entry: DeliveryEntry, state:
 }
 
 // Pending delivery queues: one per (store, authority, worker, generation).
-pending_queue_slot: fn(pending: &PendingRegistry, store: String, endpoint: ServiceEndpoint) -> Int Never! {
+pending_queue_slot: fn(pending: ^PendingRegistry, store: String, endpoint: ServiceEndpoint) -> Int Never! {
     identity: authority_store_identity(store)
     loop index in 0..<pending.queues.len() {
         queue: pending.queues[index]
@@ -4992,7 +4991,7 @@ delivery_store: fn(store: String) -> String Never! { "{store}.delivery" }
 
 // Replace a worker's channel with one holding `messages` and publish it to
 // the endpoint registry, so routing never targets the closed channel.
-worker_restore_mailbox: fn(tree: &ServiceTree, index: Int, messages: [String], draining: Bool) ServiceError! {
+worker_restore_mailbox: fn(tree: ^ServiceTree, index: Int, messages: [String], draining: Bool) ServiceError! {
     channel_close(tree.workers[index].channel)
     if messages.len() > tree.workers[index].capacity {
         return Err(ServiceError.Policy("mailbox messages exceed the bounded channel capacity"))
@@ -5023,7 +5022,7 @@ local_delivery_ids: fn(tree: ServiceTree, endpoint: ServiceEndpoint, store: Stri
     ids
 }
 
-priv send_durable: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String, idempotency_key: String) -> Delivery ServiceError! {
+priv send_durable: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint, message: String, idempotency_key: String) -> Delivery ServiceError! {
     if tree.delivery != ServiceDelivery.DurableAtLeastOnce {
         return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
     }
@@ -5087,7 +5086,7 @@ priv send_durable: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, message: St
     Ok(delivery)
 }
 
-priv receive: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError! {
+priv receive: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     validate_tree_endpoint(tree, endpoint)
     draining: worker_contains(tree.draining, endpoint.worker)
@@ -5165,7 +5164,7 @@ worker_exact: fn(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int? Never! {
 
 // Requeue the undelivered suffix, then restore the mailbox; each runs once
 // even when the other fails.
-pending_delivery_rollback: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: [PendingEntry], before: [String], draining: Bool, error: ServiceError) -> ServiceError Never! {
+pending_delivery_rollback: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: [PendingEntry], before: [String], draining: Bool, error: ServiceError) -> ServiceError Never! {
     authority_error := ServiceError?{None}
     if authority_requeue_pending(endpoint, remaining) == {
         .Err(failure) -> { authority_error = Val(failure) }
@@ -5210,12 +5209,12 @@ pending_rollback_error: fn(error: ServiceError, authority_error: ServiceError?, 
 
 // Workers are declared before start. The tree mailbox and the endpoint
 // registry share one bounded channel per worker.
-worker: fn(tree: &ServiceTree, name: String, handler: fn(), handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
+worker: fn(tree: ^ServiceTree, name: String, handler: fn(), handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
     declare_worker(tree, name, handler_name, capacity, None)
 }
 
 // Checks a worker declaration and registers its route, not yet published.
-priv declare_worker: fn(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, room: service_tasks.Semaphore?) -> ServiceEndpoint ServiceError! {
+priv declare_worker: fn(tree: ^ServiceTree, name: String, handler_name: String, capacity: Int, room: service_tasks.Semaphore?) -> ServiceEndpoint ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot add workers after start"))
     if capacity <= 0 || capacity > 1000000 {
         return Err(ServiceError.Policy("mailbox capacity must be positive and bounded"))
@@ -5289,35 +5288,35 @@ priv BatchState: struct<Q> {
 
 /// Declares a worker whose handler takes each message: `fn(q: Q)` or, for
 /// a worker that answers `call`, `fn(q: Q) -> R`.
-typed_worker: fn<Q, R>(tree: &ServiceTree, name: String, handler: &&fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
-    typed_declare(tree, name, handler_name, capacity, false, fn(state: &Bool, message: Q) -> R Err! { handler(message) }, None)
+typed_worker: fn<Q, R>(tree: ^ServiceTree, name: String, handler: ^^fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+    typed_declare(tree, name, handler_name, capacity, false, fn(state: ^Bool, message: Q) -> R Err! { handler(message) }, None)
 }
 
-/// Declares a worker whose task keeps `state` for its handler `fn(s: &S,
+/// Declares a worker whose task keeps `state` for its handler `fn(s: ^S,
 /// q: Q) -> R`; a restart begins again from `state`.
-stateful_worker: fn<S, Q, R>(tree: &ServiceTree, name: String, handler: &&fn(&S, Q) -> R Err!, handler_name: String, state: &&S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+stateful_worker: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler: ^^fn(^S, Q) -> R Err!, handler_name: String, state: ^^S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
     typed_declare(tree, name, handler_name, capacity, state, handler, None)
 }
 
 /// Declares a worker whose handler takes a list of up to `batch` messages:
 /// once a message arrives, the worker waits at most `wait` for the rest of
 /// its batch. A failed batch is handed over again on each restart.
-batched_worker: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
+batched_worker: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
     batched_declare(tree, name, handler, handler_name, batch, wait, capacity, None)
 }
 
 /// The worker forms whose message decodes: the endpoint's pending durable
 /// receipts reach the handler too. `tree.worker` picks these for a message
 /// type that is Decode, the only kind send_durable can have queued.
-durable_worker: fn<Q: Decode, R>(tree: &ServiceTree, name: String, handler: &&fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
-    typed_declare(tree, name, handler_name, capacity, false, fn(state: &Bool, message: Q) -> R Err! { handler(message) }, Val(message_decoder<Q>()))
+durable_worker: fn<Q: Decode, R>(tree: ^ServiceTree, name: String, handler: ^^fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+    typed_declare(tree, name, handler_name, capacity, false, fn(state: ^Bool, message: Q) -> R Err! { handler(message) }, Val(message_decoder<Q>()))
 }
 
-durable_stateful_worker: fn<S, Q: Decode, R>(tree: &ServiceTree, name: String, handler: &&fn(&S, Q) -> R Err!, handler_name: String, state: &&S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+durable_stateful_worker: fn<S, Q: Decode, R>(tree: ^ServiceTree, name: String, handler: ^^fn(^S, Q) -> R Err!, handler_name: String, state: ^^S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
     typed_declare(tree, name, handler_name, capacity, state, handler, Val(message_decoder<Q>()))
 }
 
-durable_batched_worker: fn<Q: Decode>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
+durable_batched_worker: fn<Q: Decode>(tree: ^ServiceTree, name: String, handler: ^^fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
     batched_declare(tree, name, handler, handler_name, batch, wait, capacity, Val(message_decoder<Q>()))
 }
 
@@ -5328,7 +5327,7 @@ priv message_decoder: fn<Q: Decode>() -> (fn(String) -> Q ServiceError!) Never! 
     }
 }
 
-priv batched_declare: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int, decoder: &&(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, ()> ServiceError! {
+priv batched_declare: fn<Q>(tree: ^ServiceTree, name: String, handler: ^^fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int, decoder: ^^(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, ()> ServiceError! {
     if batch < 1 || batch > capacity {
         return Err(ServiceError.Policy("batch must be positive and no larger than the mailbox capacity"))
     }
@@ -5374,7 +5373,7 @@ priv worker_task_failed: fn(name: String) -> ServiceError Never! {
 // leaves the mailbox before the handler runs, so a failing handler frees
 // its place too; the answer goes to the asker of a `call`, and a durable
 // receipt is committed once its handler succeeds.
-priv typed_declare: fn<S, Q, R>(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, state: &&S, handler: &&fn(&S, Q) -> R Err!, decoder: &&(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, R> ServiceError! {
+priv typed_declare: fn<S, Q, R>(tree: ^ServiceTree, name: String, handler_name: String, capacity: Int, state: ^^S, handler: ^^fn(^S, Q) -> R Err!, decoder: ^^(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, R> ServiceError! {
     room: service_tasks.Semaphore.new(capacity)
     id: declare_worker(tree, name, handler_name, capacity, Val(room))
     starved: Shared<Bool>{false}
@@ -5426,7 +5425,7 @@ priv room_take: fn(room: service_tasks.Semaphore, starved: Shared<Bool>) -> Bool
 // it hands the worker its pending durable receipts, at the generation it
 // runs now, while the worker takes messages and its mailbox has places. A
 // worker without a decoder has no feeder.
-priv feed_start: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decoder: &&(fn(String) -> Q ServiceError!)?) Never! {
+priv feed_start: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decoder: ^^(fn(String) -> Q ServiceError!)?) Never! {
     decode: decoder ?? return
     feed_register(id, wake)
     feeder: task feed_wait(id, inbox, room, starved, wake, decode)
@@ -5482,7 +5481,7 @@ priv feed_one: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R
 // Hands the waiting batch to the handler, again after each failure up to
 // `attempts` runs, then starts the next batch. A handled batch commits its
 // durable receipts.
-priv hand_over: fn<Q>(state: &BatchState<Q>, handler: fn([Q]) Err!, attempts: Int) {
+priv hand_over: fn<Q>(state: ^BatchState<Q>, handler: fn([Q]) Err!, attempts: Int) {
     handled := false
     loop _ in 1..attempts {
         task.group group {
@@ -5534,7 +5533,7 @@ priv typed_queue: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>) -> TreeW
 
 /// Queues `message` for the worker behind `endpoint`, which runs its
 /// handler on it after every message sent before.
-typed_send: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q) ServiceError! {
+typed_send: fn<Q, R>(tree: ^ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) ServiceError! {
     worker: typed_queue(tree, endpoint)
     endpoint.inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: None}) ?? {
         endpoint.room.release()
@@ -5544,7 +5543,7 @@ typed_send: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q)
 
 /// Sends `message` and waits for the handler's answer. A handler that
 /// fails while handling it leaves the outcome unknown: Ambiguous.
-call: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q) -> R ServiceError! {
+call: fn<Q, R>(tree: ^ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q) -> R ServiceError! {
     worker: typed_queue(tree, endpoint)
     answer: endpoint.inbox.ask<R, Never>(fn(reply: service_actor.Reply<R>) -> Job<Q, R> Never! { Job<Q, R>.Message{message: message, reply: Val(reply), receipt: None} })
     handled: answer ?? return Err(ServiceError.Ambiguous("worker `{worker.name}` failed while handling the call"))
@@ -5555,7 +5554,7 @@ call: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q) -> R 
 /// it as JSON until the worker's handler succeeds on it, across restarts. A
 /// key already used answers its first receipt; a full mailbox is Full before
 /// the authority keeps anything.
-typed_send_durable: fn<Q: [Encode, Decode], R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q, key: String) -> Delivery ServiceError! {
+typed_send_durable: fn<Q: [Encode, Decode], R>(tree: ^ServiceTree, endpoint: Endpoint<Q, R>, message: ^^Q, key: String) -> Delivery ServiceError! {
     if tree.delivery != ServiceDelivery.DurableAtLeastOnce {
         return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
     }
@@ -5603,7 +5602,7 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: &ServiceTree, endpoint: End
     total: stateful_worker(
         services,
         "total",
-        fn(sum: &Int, n: Int) -> Int Err! {
+        fn(sum: ^Int, n: Int) -> Int Err! {
             if n < 0 -> return Err("negative amount {n}")
             sum += n
             sum
@@ -5976,7 +5975,7 @@ worker_pruned: fn(restarts: [Int], now: Int, per: Int) -> [Int] Never! {
 
 // One policy lookup: the supervising group's row carries both the restart
 // strategy and the budget that decides escalation.
-priv fail_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+priv fail_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     validate_tree_endpoint(tree, endpoint)
     names: worker_names(tree)
@@ -6093,12 +6092,12 @@ bind_delivery_endpoint: fn(tree: ServiceTree, endpoint: ServiceEndpoint) Service
 }
 
 // `error`, or a Policy that also names the failed recovery `step`.
-recovery_error: fn(error: &&ServiceError, recovery: ServiceError?, step: String) -> ServiceError Never! {
+recovery_error: fn(error: ^^ServiceError, recovery: ServiceError?, step: String) -> ServiceError Never! {
     failure: recovery ?? return error
     ServiceError.Policy("{service_error_show(error)}; {step} failed: {service_error_show(failure)}")
 }
 
-names_remove: fn(names: &[String], name: String) Never! {
+names_remove: fn(names: ^[String], name: String) Never! {
     if worker_index(names, name) == .Val(at) -> _: names.remove(at, .Slot)
 }
 
@@ -6110,7 +6109,7 @@ receipt_unpinned: fn(receipt: ServiceUpgradeReceipt?, name: String) -> ServiceUp
 
 // A draining worker's mailbox just emptied: a pinned old-generation shard is
 // promoted to the active generation; any other drained worker stops.
-finish_drain: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+finish_drain: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
     lock: rollout_operation_lock(tree)
     validate_tree_endpoint(tree, endpoint)
     index: worker_slot(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree"))
@@ -6126,7 +6125,7 @@ finish_drain: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
 
 // Move a pinned shard to the active generation once no durable receipt still
 // routes to its old endpoint; false leaves it pinned.
-promote_worker_generation: fn(tree: &ServiceTree, name: String) -> Bool ServiceError! {
+promote_worker_generation: fn(tree: ^ServiceTree, name: String) -> Bool ServiceError! {
     index: worker_named(tree, name) ?? return Err(ServiceError.Unknown("worker `{name}` disappeared"))
     old: tree.workers[index].endpoint
     next: endpoint_new(old.tree, old.worker, tree.generation, old.authority)
@@ -6167,7 +6166,7 @@ promote_worker_generation: fn(tree: &ServiceTree, name: String) -> Bool ServiceE
 }
 
 // The durable records a restart resumes from, when the tree has an authority.
-start_load_state: fn(tree: &ServiceTree) ServiceError! {
+start_load_state: fn(tree: ^ServiceTree) ServiceError! {
     authority: tree.state_authority ?? return Ok()
     records := state_load(authority, tree.state_adapter)
     if tree.state_adapter == TreeStateAdapter.Snapshot {
@@ -6197,7 +6196,7 @@ start_activate: fn(tree: ServiceTree, index: Int, published: Bool, running: Bool
 
 // Start reopens every mailbox and publishes each worker route, then hands
 // each typed worker the durable receipts its endpoint still owes it.
-priv start: fn(tree: &ServiceTree) ServiceError! {
+priv start: fn(tree: ^ServiceTree) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("service tree is already started"))
     lock: rollout_operation_lock(tree)
     restore_rollout_state(tree)
@@ -6258,7 +6257,7 @@ priv start: fn(tree: &ServiceTree) ServiceError! {
 
 // Stop retracts every route. Durable delivery keeps queued mail for the next
 // start; an Empty state adapter forgets everything the run accumulated.
-priv stop: fn(tree: &ServiceTree) ServiceError! {
+priv stop: fn(tree: ^ServiceTree) ServiceError! {
     lock: rollout_operation_lock(tree)
     preserve: tree.delivery == ServiceDelivery.DurableAtLeastOnce
     reset: tree.state_adapter == TreeStateAdapter.Empty
@@ -6303,7 +6302,7 @@ priv stop: fn(tree: &ServiceTree) ServiceError! {
     Err(failure)
 }
 
-priv directory_register: fn(tree: &ServiceTree, name: String, endpoint: ServiceEndpoint) ServiceError! {
+priv directory_register: fn(tree: ^ServiceTree, name: String, endpoint: ServiceEndpoint) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     lock: rollout_operation_lock(tree)
     if name.trim() == "" || !valid_service_text(name, 256) {
@@ -6344,7 +6343,7 @@ drain_reopen: fn(endpoint: ServiceEndpoint) ServiceError! {
     authority_update_draining(endpoint, false)
 }
 
-priv drain_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+priv drain_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     lock: rollout_operation_lock(tree)
     named: find_worker(tree, endpoint)
@@ -6386,7 +6385,7 @@ partition_reopen: fn(endpoint: ServiceEndpoint, was_running: Bool) ServiceError!
     if was_running -> authority_update(endpoint, true, None)
 }
 
-priv partition_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+priv partition_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     lock: rollout_operation_lock(tree)
     index: find_worker(tree, endpoint)
@@ -6426,7 +6425,7 @@ priv partition_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) Service
 
 // Rejoin a reconciled worker: an old-generation shard is promoted, a current
 // one simply reopens its route.
-reconcile_rejoin: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, generation: Int) ServiceError! {
+reconcile_rejoin: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint, generation: Int) ServiceError! {
     if generation != tree.generation {
         if !promote_worker_generation(tree, endpoint.worker) {
             return Err(ServiceError.Unavailable("partitioned worker has uncommitted durable delivery"))
@@ -6437,7 +6436,7 @@ reconcile_rejoin: fn(tree: &ServiceTree, endpoint: ServiceEndpoint, generation: 
     authority_update(endpoint, true, None)
 }
 
-priv reconcile_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+priv reconcile_worker: fn(tree: ^ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     lock: rollout_operation_lock(tree)
     if validate_tree_endpoint(tree, endpoint) == {
@@ -6490,7 +6489,7 @@ discard_rollback_store: fn(path: String) -> ServiceError? Never! {
     }
 }
 
-rollout_failure: fn(primary: &&ServiceError, authority: ServiceError?, cleanup: ServiceError?) -> ServiceError Never! {
+rollout_failure: fn(primary: ^^ServiceError, authority: ServiceError?, cleanup: ServiceError?) -> ServiceError Never! {
     failures := [String]{}
     if authority == .Val(error) {
         failures.push("authority rollback failed: {service_error_show(error)}")
@@ -6534,7 +6533,7 @@ handoff_rotate: fn(tree: ServiceTree, index: Int, next: ServiceEndpoint, running
 // Move every unpinned worker to the next generation. Partitioned shards,
 // draining shards with queued mail and shards with live durable receipts stay
 // pinned to the old generation until they drain or reconcile.
-priv handoff_generation: fn(tree: &ServiceTree) -> Int ServiceError! {
+priv handoff_generation: fn(tree: ^ServiceTree) -> Int ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     lock: rollout_operation_lock(tree)
     rollout_store_assert_current(tree)
@@ -6645,7 +6644,7 @@ rollback_rotate: fn(tree: ServiceTree, index: Int, endpoint: ServiceEndpoint, ru
 }
 
 // Put the pre-handoff state copy back in the live store and retire it.
-restore_rollback: fn(tree: &ServiceTree, from: Int, plan: RollbackPlan) ServiceError! {
+restore_rollback: fn(tree: ^ServiceTree, from: Int, plan: RollbackPlan) ServiceError! {
     if !plan.available -> return Ok()
     authority: tree.state_authority ?? return Err(ServiceError.Policy("upgrade receipt requires a state authority"))
     if plan.store != rollback_store_path(authority, from) {
@@ -6668,7 +6667,7 @@ restore_rollback: fn(tree: &ServiceTree, from: Int, plan: RollbackPlan) ServiceE
 
 // Return every worker to the handoff's source generation and restore the
 // state copy a reversible migration kept.
-priv rollback_generation: fn(tree: &ServiceTree) -> Int ServiceError! {
+priv rollback_generation: fn(tree: ^ServiceTree) -> Int ServiceError! {
     if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
     lock: rollout_operation_lock(tree)
     rollout_store_assert_current(tree)

@@ -19,6 +19,7 @@ use {
     crypto: core.crypto
     json: core.encoding.json
     rt: jet.runtime.encoding
+    world_rt: jet.runtime.testing
 }
 
 // A second spelling, never a second owner.
@@ -241,7 +242,7 @@ corpus_entries: fn(root: String, suffix: String) -[FS]> [CorpusEntry] Never! {
     entries
 }
 
-testing_corpus_walk: fn(directory: String, prefix: String, suffix: String, entries: &[CorpusEntry]) -[FS]> {
+testing_corpus_walk: fn(directory: String, prefix: String, suffix: String, entries: ^[CorpusEntry]) -[FS]> {
     children: files.list_dir(directory) ?? return
     loop child in children {
         if child.name.starts_with(".") -> next
@@ -280,7 +281,7 @@ Fake: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { "Fake {{ state: {self.state}, locale: {self.locale_code} }}" }
+        debug: fn(^^self) -> String { "Fake {{ state: {self.state}, locale: {self.locale_code} }}" }
     }
 
     locale: fn(self, locale: String) -> Fake Never! {
@@ -288,25 +289,25 @@ Fake: struct {
         Fake{state: self.state ~ wrapping(U64{code} * U64{15111065706836454659}), locale_code: code}
     }
 
-    name: fn(&self) -> String Never! {
+    name: fn(^self) -> String Never! {
         first: fake_first(self.state, self.locale_code)
         last: fake_last(self.state, self.locale_code)
         "{first} {last}"
     }
 
-    email: fn(&self) -> String Never! {
+    email: fn(^self) -> String Never! {
         first: core.text.parse.lower(fake_first(self.state, self.locale_code))
         last: core.text.parse.lower(fake_last(self.state, self.locale_code))
         host: fake_host(self.state, self.locale_code)
         "{first}.{last}@{host}"
     }
 
-    host: fn(&self) -> String Never! {
+    host: fn(^self) -> String Never! {
         name: fake_host(self.state, self.locale_code)
         "www.{name}"
     }
 
-    address: fn(&self) -> String Never! {
+    address: fn(^self) -> String Never! {
         number: core.math.random.__seeded_int(self.state, 1, 999) ?? panic("fake address has a valid range")
         street: fake_street(self.state, self.locale_code)
         city: fake_city(self.state, self.locale_code)
@@ -334,31 +335,31 @@ FAKE_DE_STREETS: [String]{"Bahnhofstraße", "Hauptstraße", "Lindenweg", "Garten
 
 FAKE_DE_CITIES: [String]{"Berlin", "Bremen", "Dresden", "Hamburg"}
 
-fake_index: fn(state: &U64, count: Int) -> Int Never! {
+fake_index: fn(state: ^U64, count: Int) -> Int Never! {
     core.math.random.__seeded_int(state, 0, count - 1) ?? panic("fake tables are nonempty")
 }
 
-fake_first: fn(state: &U64, locale: Int) -> String Never! {
+fake_first: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
     if locale == 1 -> FAKE_DE_FIRST[index] else -> FAKE_EN_FIRST[index]
 }
 
-fake_last: fn(state: &U64, locale: Int) -> String Never! {
+fake_last: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
     if locale == 1 -> FAKE_DE_LAST[index] else -> FAKE_EN_LAST[index]
 }
 
-fake_host: fn(state: &U64, locale: Int) -> String Never! {
+fake_host: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 3)
     if locale == 1 -> FAKE_DE_HOSTS[index] else -> FAKE_EN_HOSTS[index]
 }
 
-fake_street: fn(state: &U64, locale: Int) -> String Never! {
+fake_street: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
     if locale == 1 -> FAKE_DE_STREETS[index] else -> FAKE_EN_STREETS[index]
 }
 
-fake_city: fn(state: &U64, locale: Int) -> String Never! {
+fake_city: fn(state: ^U64, locale: Int) -> String Never! {
     index: fake_index(state, 4)
     if locale == 1 -> FAKE_DE_CITIES[index] else -> FAKE_EN_CITIES[index]
 }
@@ -454,7 +455,7 @@ suite_row_field: fn(text: String) -> String Never! {
 /// the code suite `name` (JET_TEST_SUITE), recording its rows in
 /// JET_TEST_SUITE_ROWS and selecting them by JET_TEST_SUITE_FILTER; any
 /// other run skips it.
-__suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
+priv __suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
     if (sys.get("JET_TEST_SUITE") ?? "") != name {
         return
     }
@@ -620,9 +621,9 @@ histories: fn<T>(
     seed: Int,
     cases: Int,
     strategy: HistoryStrategy<T>?{None},
-    model: &&fn([T]) -> Dyn,
-    actual: &&fn([T]) -> Dyn,
-    observe: &&fn(Dyn) -> Dyn,
+    model: ^^fn([T]) -> Dyn,
+    actual: ^^fn([T]) -> Dyn,
+    observe: ^^fn(Dyn) -> Dyn,
     __command_type: String{""},
     __source: String{""},
     __tool: String{""},
@@ -1332,7 +1333,7 @@ testing_history_artifact_id: fn(failure: Err) -> String Never! {
 // followed by one `:i`, `:b` or `:s` per payload field; `make` builds the
 // command from the row position and the payload values grouped by kind.
 // Every variant has weight 1.
-testing_history_derived: fn<T>(command_type: &&String, variants: [String], make: &&fn(Int, [Int], [Bool], [String]) -[]> T Never!) -> HistoryStrategy<T> {
+testing_history_derived: fn<T>(command_type: ^^String, variants: [String], make: ^^fn(Int, [Int], [Bool], [String]) -[]> T Never!) -> HistoryStrategy<T> {
     names := [String]{}
     kinds := [[String]]{}
     distributions := [HistoryDistribution]{}
@@ -1442,6 +1443,27 @@ testing_history_derived_rebuild: fn<T>(case: HistoryCase, names: [String], kinds
     Val(TypedHistoryCase<T>{case: case.copy(), commands: commands})
 }
 
+/// The deterministic world `world` runs its body in. Only the runtime fills
+/// the `priv handle`, so a literal outside core.testing cannot forge one, and
+/// the world ends with its `world` call.
+#[!Equatable, !Comparable, !Codable]
+DeterministicWorld: struct {
+    priv handle: Int,
+
+    /// The world's wall clock, in milliseconds since the Unix epoch.
+    now: fn(self) -> Int { world_rt.world_now(self) }
+
+    /// Moves the world's clock forward by exactly `by`, releasing the timers
+    /// due on the way in deadline order; the wall clock after the move.
+    advance: fn(self, by: Duration) -> Int { world_rt.world_advance(self, by.ns) }
+
+    /// Waits until every task of the world is blocked or done.
+    wait_idle: fn(self) { world_rt.world_wait_idle(self) }
+
+    /// The world's journal: its clock moves, timers and seeded random draws.
+    history: fn(self) -> String { world_rt.world_history(self) }
+}
+
 // I9: exact interpreter DiagnosticErr cleanup needs an error-capture rail.
 // Preserve the existing native lifecycle rather than changing Err-path order.
 world: fn(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
@@ -1509,7 +1531,7 @@ testing_window: fn(text: String, start: Int, end: Int) -> String Never! {
     builtin.text_window(text, U64{start}, U64{end})
 }
 
-testing_owned_text: fn(bytes: &&[U8]) -> String Never! {
+testing_owned_text: fn(bytes: ^^[U8]) -> String Never! {
     #Unsafe("all appended bytes came from complete UTF-8 strings or ASCII") {
         return rt.bytes_into_text(bytes)
     }
@@ -1543,11 +1565,11 @@ TestingDiffOutput: struct {
     truncated: Bool,
 }
 
-testing_append_bytes: fn(output: &[U8], text: String, end: Int) Never! {
+testing_append_bytes: fn(output: ^[U8], text: String, end: Int) Never! {
     loop index in 0..<end -> output.push(U8{testing_byte(text, index)})
 }
 
-testing_diff_push: fn(output: &TestingDiffOutput, text: String) Never! {
+testing_diff_push: fn(output: ^TestingDiffOutput, text: String) Never! {
     if output.truncated {
         return
     }
@@ -1567,7 +1589,7 @@ testing_diff_push: fn(output: &TestingDiffOutput, text: String) Never! {
     output.truncated = true
 }
 
-testing_diff_line: fn(output: &TestingDiffOutput, marker: String, line: String) Never! {
+testing_diff_line: fn(output: ^TestingDiffOutput, marker: String, line: String) Never! {
     if output.truncated {
         return
     }

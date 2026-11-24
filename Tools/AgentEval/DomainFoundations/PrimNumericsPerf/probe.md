@@ -47,7 +47,7 @@ See `gaps.json`. The short list is:
 
 - Exact `Int` division produces `Fraction`; radix-2 index arithmetic requires `/%` and `/%=`.
 - Decimal literals are not `Float`; every floating seed needed `Float{...}`.
-- Borrowed array elements need explicit `~` copies before later writes, and mutable calls use `&` or ownership transfer.
+- Borrowed array elements need explicit `~` copies before later writes, and mutable calls use `^` or ownership transfer.
 - `time.start()` requires a package authority grant for `Time`; compute examples also required explicit `GPU` and `Panic` grants even for the CPU path.
 - `jet check` reported L2510 on repeated generic collection indexing and L0520 for interpolated indexed values. These diagnostics are actionable, but the author still writes the representation and loop machinery.
 

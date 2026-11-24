@@ -141,8 +141,8 @@ JetCLIReservedEntry: struct {
 // What to write instead of each retired keyword, in the lexer's table order.
 // Every lexer-retired word has exactly one row; a test holds the two together.
 JET_CLI_TEACHING_RESERVED: [JetCLIReservedEntry]{
-    {spelling: "mut", kind: "reserved word", note: "borrow for write with the sigil `&`"},
-    {spelling: "take", kind: "reserved word", note: "take ownership with the sigil `&&`"},
+    {spelling: "mut", kind: "reserved word", note: "borrow for write with the sigil `^`"},
+    {spelling: "take", kind: "reserved word", note: "take ownership with the sigil `^^`"},
     {spelling: "copy", kind: "reserved word", note: "a copy is the method `value.copy()`"},
     {spelling: "const", kind: "reserved word", note: "a constant is `NAME: value`"},
 }
@@ -151,8 +151,8 @@ JET_CLI_TEACHING_RESERVED: [JetCLIReservedEntry]{
 JET_CLI_RESERVED_SIGILS: [JetCLIReservedEntry]{
     {spelling: ":", kind: "sigil", note: "bind an immutable local"},
     {spelling: ":=", kind: "sigil", note: "bind a mutable local"},
-    {spelling: "&", kind: "sigil", note: "borrow for write"},
-    {spelling: "&&", kind: "sigil", note: "take ownership"},
+    {spelling: "^", kind: "sigil", note: "borrow for write"},
+    {spelling: "^^", kind: "sigil", note: "take ownership"},
     {spelling: "@", kind: "sigil", note: "prefix `@` marks a live link"},
     {spelling: "$", kind: "sigil", note: "config-surface environment read `$NAME`"},
     {spelling: "<:", kind: "sigil", note: "open a statement-expansion fence"},
@@ -407,7 +407,7 @@ jet_cli_llm_digest: fn() -> String Never! {
         "Control: `if condition {{ ... }} else {{ ... }}`; loops use `loop name in source {{ ... }}`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
         "Construction: use `Type{{ field: value }}`; list literals use `[T]{{ value1, value2 }}`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use alias: core.module`, and two or more imports use one `use {{ … }}` block with a row per line.",
-        "Ownership is safe by default. `&T` writes, `&&T` takes, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
+        "Ownership is safe by default. `^T` writes, `^^T` takes, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     }
     core_rules_body: core_rules_lines.join("\n")
     marker_body: "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"

@@ -24,7 +24,7 @@ use {
 // `imports`: names, paths and the lists, maps, records and enum cases around
 // values are EnvModel syntax, and a secret input that is not a named
 // reference is never computed.
-envmodel_plan_integration_imports: fn(plan: &EnvValueProgram, imports: [Expr], globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_integration_imports: fn(plan: ^EnvValueProgram, imports: [Expr], globals: [String:CtValue]) EnvModelEvalError! {
     leaves := [Expr]{}
     loop import in imports -> envmodel_collect_import_leaves(import, leaves)
     loop import in leaves {
@@ -40,7 +40,7 @@ envmodel_plan_integration_imports: fn(plan: &EnvValueProgram, imports: [Expr], g
     }
 }
 
-envmodel_plan_integration_arg: fn(plan: &EnvValueProgram, expr: Expr, globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_integration_arg: fn(plan: ^EnvValueProgram, expr: Expr, globals: [String:CtValue]) EnvModelEvalError! {
     if envmodel_record_literal(expr) == .Val(record) {
         envmodel_plan_integration_arg(plan, record, globals)
         return
@@ -112,7 +112,7 @@ envmodel_integration_call_parts: fn(import: Expr) -> {args: [CallArg], name_span
 }
 
 // `imports: [a, [b, c]]` flattens to its non-list leaves in source order.
-envmodel_collect_import_leaves: fn(expr: Expr, out: &[Expr]) Never! {
+envmodel_collect_import_leaves: fn(expr: Expr, out: ^[Expr]) Never! {
     if expr == {
         .ListLit(items, _, _) -> {
             loop item in items -> envmodel_collect_import_leaves(item, out)
@@ -249,7 +249,7 @@ envmodel_integration_arg_value: fn(expr: Expr, scope: ModuleEvalScope) -> CtValu
     }
 }
 
-envmodel_lower_integration_arg: fn(integration: &EnvironmentIntegration, key: String, expr: Expr, value: CtValue) Never! {
+envmodel_lower_integration_arg: fn(integration: ^EnvironmentIntegration, key: String, expr: Expr, value: CtValue) Never! {
     display: envmodel_integration_value_text(value)
     if integration.kind == {
         .Certificates | .CloudCredentials | .Vault -> {

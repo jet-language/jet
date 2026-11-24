@@ -13,9 +13,9 @@ nixeval_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 }
 
 // Push one byte value in 0..=255 (always in range by construction).
-nixeval_push_byte: fn(out: &[U8], value: Int) Never! { out.push(checked(U8{value}) ?? U8{0}) }
+nixeval_push_byte: fn(out: ^[U8], value: Int) Never! { out.push(checked(U8{value}) ?? U8{0}) }
 
-nixeval_push_text: fn(out: &[U8], text: String) Never! {
+nixeval_push_text: fn(out: ^[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
 }
 
@@ -46,7 +46,7 @@ nixeval_scalar: fn(bytes: [U8], index: Int) -> Int Never! {
 }
 
 // Append the UTF-8 encoding of one Unicode scalar value.
-nixeval_push_scalar: fn(out: &[U8], scalar: Int) Never! {
+nixeval_push_scalar: fn(out: ^[U8], scalar: Int) Never! {
     if {
         scalar < 128 -> nixeval_push_byte(out, scalar)
         scalar < 2048 -> {

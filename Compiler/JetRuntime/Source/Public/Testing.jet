@@ -1,8 +1,9 @@
 // `jet.runtime.testing` (#6615): the running test's report cell and text
-// window that core.testing is built on, and a deterministic World's own store
-// cells, in Jet types. Each member is a runtime binding (Guest.jet
-// sema_guest_runtime_binding) of the runtime export that is its one body
-// (RouteTesting.jet, World.jet). Each is `priv`: only Core calls them.
+// window that core.testing is built on, a deterministic World's own store
+// cells, and the World handle's clock, timers and history, in Jet types. Each
+// member is a runtime binding (Guest.jet sema_guest_runtime_binding) of the
+// runtime export that is its one body (RouteTesting.jet, World.jet). Each is
+// `priv`: only Core calls them.
 testing: module {
     // Records the running test's failure `message` with its `detail`.
     #Import(c) priv record_failure: fn(message: String, detail: String) = "jet_testing_record_failure"
@@ -26,4 +27,16 @@ testing: module {
     // Whether the active World's `store` still held `expected` and now holds
     // `replacement`; None outside a World.
     #Import(c) priv world_store_replace: fn(store: String, expected: [U8], replacement: [U8]) -> Bool? = "jet_rt_world_store_replace"
+
+    // The DeterministicWorld methods' leaves (Core/Testing/Testing.jet): the
+    // world's wall clock in Unix milliseconds, a move of its clock by
+    // `duration_ns` that fires the timers due on the way and answers the new
+    // wall clock, a wait until its tasks are idle, and its event history.
+    #Import(c) priv world_now: fn(world: DeterministicWorld) -> Int = "jet_world_now"
+
+    #Import(c) priv world_advance: fn(world: DeterministicWorld, duration_ns: Int) -> Int = "jet_world_advance"
+
+    #Import(c) priv world_wait_idle: fn(world: DeterministicWorld) = "jet_world_wait_idle"
+
+    #Import(c) priv world_history: fn(world: DeterministicWorld) -> String = "jet_world_history"
 }

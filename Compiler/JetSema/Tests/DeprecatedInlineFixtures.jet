@@ -28,7 +28,7 @@ use {
 // Each L2001 the checked `source` reports, as the source its edit gives, or
 // `by hand: <fix>` when it has no edit. None, with the failure recorded,
 // when the source doesn't check.
-deprecated_inline_results: fn(failures: &[String], source: String) -> [String]? {
+deprecated_inline_results: fn(failures: ^[String], source: String) -> [String]? {
     raw: source.bytes()
     parsed := parse_source(raw)
     if parsed.diagnostics.len() != 0 {
@@ -86,7 +86,7 @@ deprecated_inline_results: fn(failures: &[String], source: String) -> [String]? 
 // `call` is the body of `run`, after DEPRECATED_INLINE_LIBRARY; it reports
 // one L2001, whose edit leaves `run`'s body `wanted`, or, when `wanted` is
 // "", which has no edit.
-deprecated_inline_expect: fn(failures: &[String], call: String, wanted: String) {
+deprecated_inline_expect: fn(failures: ^[String], call: String, wanted: String) {
     results: deprecated_inline_results(failures, "{DEPRECATED_INLINE_LIBRARY}run: fn() -> Int {{\n    {call}\n}}\n") ?? return
     if results.len() != 1 {
         failures.push("`{call}` reports {results.len()} deprecations: [{results.join("; ")}]")

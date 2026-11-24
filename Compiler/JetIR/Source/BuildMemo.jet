@@ -27,7 +27,7 @@ IR_MEMO_CELL_BYTES: 48
 // Opens the store of a memoized `function` once its parameters are bound and
 // its result row is known: the hit path returns, the miss path goes on into
 // the body with b.memo set. Nothing for a function that is not memoized.
-ir_memo_enter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
+ir_memo_enter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) Never! {
     bound := -1
     if function.memo_bound == .Val(limit) -> bound = limit else if !function.memo_unbounded {
         return
@@ -149,7 +149,7 @@ ir_memo_enter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) N
 // The slot holding the address of the store cell of the function keyed
 // `key`, a zeroed writable static object (Memo.jet's [mutex, count,
 // capacity, entries, hits, misses]) per function instance.
-ir_memo_cell: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! {
+ir_memo_cell: fn(m: ^IRModule, b: ^IRBuilder, key: String) -> Int Never! {
     object_key: "memo:{key}"
     object := name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
     if object < 0 {
@@ -171,7 +171,7 @@ ir_memo_cell: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! {
 // memoized `function`'s store, with its written bound ("128", "none"). The
 // runtime answers a `JetMemoStats` record handle, which crosses into the
 // program's layout like any route's handle result (ir_route_plain).
-ir_memo_stats: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, function: DeclID, bound: String, span: Span) -> Int Never! {
+ir_memo_stats: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, function: DeclID, bound: String, span: Span) -> Int Never! {
     row: ir_decl_row(p, function)
     if row < 0 {
         return ir_fail_slot(b, span, "memo statistics of a function (declaration {decl_id_index(function)}) outside the checked program")
@@ -186,7 +186,7 @@ ir_memo_stats: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, function:
 // A return of `slot` (-1: nothing) from a memoized body: a copy of the result
 // goes into the entry the miss opened, the entry is filed first in the store,
 // and the entry the bound evicts is dropped. Nothing outside a memoized body.
-ir_memo_file: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
+ir_memo_file: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, span: Span) Never! {
     memo: b.memo ?? return
     result_row: b.f.result
     slot_row: if slot >= 0 -> b.f.slot_type[slot] else -> -1

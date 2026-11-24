@@ -29,7 +29,7 @@ use {
 // Build the Library of `file` (whose bytes are `source`) under `options`
 // (moved in). A compile that reaches its object ends the process
 // (jet_cli_finish); a refusal before it returns.
-jet_cli_build_library: fn(file: String, source: String, color: Bool, options: &&BuildOptions, threads: Int?, trace_sink: JetCLITraceSink?) -[Env, FS, Exec, IO, Net, Time, Rand, FFI.Asm]> JetDriverVerbOutput {
+jet_cli_build_library: fn(file: String, source: String, color: Bool, options: ^^BuildOptions, threads: Int?, trace_sink: JetCLITraceSink?) -[Env, FS, Exec, IO, Net, Time, Rand, FFI.Asm]> JetDriverVerbOutput {
     owned := options.move()
     if build_options_value(owned, "os") == "web" || owned.target_machine != "" {
         return jet_cli_report_output("", "E2104", "`jet build --lib` builds a native Library for this machine, and this build targets another", jet_cli_why("E2104"), "drop `--target`, or build the program without `--lib`", color, JET_DRIVER_EXIT_USAGE)
@@ -148,7 +148,7 @@ jet_cli_library_name: fn(file: String, source: String) -[FS]> String Never! {
 // Never!` carrier an infallible export is checked with), and a parameter's
 // type is read without its tags. An export whose parameter or result has no
 // C spelling (jet_cli_inline_c_type) is a row in `problems`.
-jet_cli_library_prototypes: fn(rows: [IRLibraryExportRow], functions: [FnBody], problems: &[String]) -> [String] Never! {
+jet_cli_library_prototypes: fn(rows: [IRLibraryExportRow], functions: [FnBody], problems: ^[String]) -> [String] Never! {
     prototypes := loop _ in rows -> ""
     loop function in functions {
         loop (index, row) in rows {
@@ -160,7 +160,7 @@ jet_cli_library_prototypes: fn(rows: [IRLibraryExportRow], functions: [FnBody], 
     prototypes
 }
 
-jet_cli_library_prototype: fn(symbol: String, function: FnBody, problems: &[String]) -> String Never! {
+jet_cli_library_prototype: fn(symbol: String, function: FnBody, problems: ^[String]) -> String Never! {
     result := "void"
     if ir_c_export_result(function) == .Val(ty) {
         result = jet_cli_inline_c_type(ir_untag(ty)) ?? {

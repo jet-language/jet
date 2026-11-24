@@ -37,7 +37,7 @@ load_be64: fn(b: [U8], off: Int) -> U64 Never! {
     x
 }
 
-store_be64: fn(b: &[U8], off: Int, x: U64) Never! {
+store_be64: fn(b: ^[U8], off: Int, x: U64) Never! {
     loop i in 0..<8 -> b[off + i] = cipher.low_byte(x >> (56 - 8 * i))
 }
 
@@ -98,7 +98,7 @@ GHASHKey: struct {
     hw: [U64],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             h := self.h.move()
             core.crypto.wipe(h)
             hw := self.hw.move()
@@ -135,7 +135,7 @@ gcm_key: fn<K: ForwardBlock>(c: K) -> GCMKey<K> Never! {
 /// y = (y ^ X_i) . H for `count` 16-byte blocks X_i of `data` from `off`
 /// (SP 800-38D algorithm 2, one step per block). The host leaf runs them
 /// when it can; otherwise the Jet carry-less multiply does.
-ghash: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
+ghash: fn(k: GHASHKey, y: ^[U8], data: [U8], off: Int, count: Int) Never! {
     if count <= 0 {
         return
     }
@@ -146,7 +146,7 @@ ghash: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
 }
 
 /// `ghash` on the Jet carry-less multiply alone.
-#Overflow(.Wrapping) ghash_portable: fn(k: GHASHKey, y: &[U8], data: [#Secret U8], off: Int, count: Int) Never! {
+#Overflow(.Wrapping) ghash_portable: fn(k: GHASHKey, y: ^[U8], data: [#Secret U8], off: Int, count: Int) Never! {
     if count <= 0 {
         return
     }
@@ -198,7 +198,7 @@ ghash: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
 }
 
 /// The bytes of y = y ^ X for a block X waiting in `acc`, multiplied in.
-ghash_acc: fn(k: GHASHKey, acc: &[U8]) Never! { ghash(k, acc, ZERO_BLOCK, 0, 1) }
+ghash_acc: fn(k: GHASHKey, acc: ^[U8]) Never! { ghash(k, acc, ZERO_BLOCK, 0, 1) }
 
 /// One GCM operation in flight (mbedtls_gcm_context after starts).
 /// - `ctr`: the next counter block; inc32(J0) at the start.
@@ -216,7 +216,7 @@ GCM: struct {
     len: Int,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             ctr := self.ctr.move()
             core.crypto.wipe(ctr)
             base := self.base.move()
@@ -272,7 +272,7 @@ gcm_starts: fn<K: ForwardBlock>(k: GCMKey<K>, decrypt: Bool, iv: [U8]) -> GCM? N
 
 /// Feed additional data (mbedtls_gcm_update_ad). False past the AAD limit
 /// or once data has started.
-gcm_update_ad: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, aad: [U8]) -> Bool Never! {
+gcm_update_ad: fn<K: ForwardBlock>(k: GCMKey<K>, st: ^GCM, aad: [U8]) -> Bool Never! {
     if st.len > 0 -> return false
     if aad.len() > GCM_MAX_AAD - st.ad_len -> return false
     at := 0
@@ -294,7 +294,7 @@ gcm_update_ad: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, aad: [U8]) -> Bool Ne
 /// Encrypt or decrypt `len` bytes of `src` from `off`, appended to `out`
 /// (mbedtls_gcm_update), GHASHing the ciphertext. False past the
 /// SP 800-38D data limit.
-gcm_update: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+gcm_update: fn<K: ForwardBlock>(k: GCMKey<K>, st: ^GCM, src: [U8], off: Int, len: Int, out: ^[U8]) -> Bool Never! {
     if len == 0 -> return true
     if len > GCM_MAX_DATA - st.len -> return false
     // The first data closes a partial AAD block.
@@ -345,7 +345,7 @@ gcm_update: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, src: [U8], off: Int, len
 
 /// The first `tag_len` bytes of the tag (SP 800-38D section 7.1, steps 5
 /// to 7; mbedtls_gcm_finish). None unless 4 <= tag_len <= 16.
-gcm_finish: fn<K: ForwardBlock>(k: GCMKey<K>, st: &GCM, tag_len: Int) -> [U8]? Never! {
+gcm_finish: fn<K: ForwardBlock>(k: GCMKey<K>, st: ^GCM, tag_len: Int) -> [U8]? Never! {
     if tag_len < 4 || tag_len > 16 -> return None
     if st.len == 0 && st.ad_len %% 16 != 0 -> ghash_acc(k.g, st.acc)
     if st.len %% 16 != 0 -> ghash_acc(k.g, st.acc)
@@ -431,7 +431,7 @@ CCM: struct {
     processed: Int,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             y := self.y.move()
             core.crypto.wipe(y)
             ctr := self.ctr.move()
@@ -456,7 +456,7 @@ with_bit: fn(state: Int, bit: Int) -> Int Never! {
 
 /// Add `n` to the `q`-byte big-endian counter at the end of `ctr`, modulo
 /// 2^(8q) as mbedtls increments it. The counter is public.
-ccm_advance: fn(ctr: &[U8], q: Int, n: Int) Never! {
+ccm_advance: fn(ctr: ^[U8], q: Int, n: Int) Never! {
     carry := n
     loop i in 0..<q {
         v: Int{ctr[15 - i]} + carry
@@ -467,7 +467,7 @@ ccm_advance: fn(ctr: &[U8], q: Int, n: Int) Never! {
 
 /// B0 (SP 800-38C appendix A.2.1) enciphered into y once the nonce and the
 /// lengths are both set (ccm_calculate_first_block_if_ready).
-ccm_first_block: fn<K: ForwardBlock>(k: K, st: &CCM) -> Bool Never! {
+ccm_first_block: fn<K: ForwardBlock>(k: K, st: ^CCM) -> Bool Never! {
     if !has_bit(st.state, CCM_STARTED) || !has_bit(st.state, CCM_LENGTHS_SET) -> return true
     if st.tag_len == 0 {
         if st.mode == .StarEncrypt || st.mode == .StarDecrypt {
@@ -495,7 +495,7 @@ ccm_first_block: fn<K: ForwardBlock>(k: K, st: &CCM) -> Bool Never! {
 
 /// Set the mode and the 7- to 13-byte nonce (mbedtls_ccm_starts):
 /// A_1 = (q - 1) || N || 1 and the nonce into B0.
-ccm_starts: fn<K: ForwardBlock>(k: K, st: &CCM, mode: CCMMode, iv: [U8]) -> Bool Never! {
+ccm_starts: fn<K: ForwardBlock>(k: K, st: ^CCM, mode: CCMMode, iv: [U8]) -> Bool Never! {
     if iv.len() < 7 || iv.len() > 13 -> return false
     st.mode = mode
     st.q = 15 - iv.len()
@@ -513,7 +513,7 @@ ccm_starts: fn<K: ForwardBlock>(k: K, st: &CCM, mode: CCMMode, iv: [U8]) -> Bool
 /// Declare the AAD, message and tag lengths (mbedtls_ccm_set_lengths). The
 /// tag is 0 or 4 to 16 bytes and even; the AAD is below 0xff00 bytes, the
 /// two-byte encoding of SP 800-38C appendix A.2.2.
-ccm_set_lengths: fn<K: ForwardBlock>(k: K, st: &CCM, ad_len: Int, plain_len: Int, tag_len: Int) -> Bool Never! {
+ccm_set_lengths: fn<K: ForwardBlock>(k: K, st: ^CCM, ad_len: Int, plain_len: Int, tag_len: Int) -> Bool Never! {
     if tag_len == 2 || tag_len > 16 || tag_len %% 2 != 0 -> return false
     if ad_len >= 65280 || ad_len < 0 || plain_len < 0 -> return false
     st.plain_len = plain_len
@@ -526,7 +526,7 @@ ccm_set_lengths: fn<K: ForwardBlock>(k: K, st: &CCM, ad_len: Int, plain_len: Int
 
 /// CBC-MAC the next AAD bytes (mbedtls_ccm_update_ad); the first call
 /// prefixes the two-byte AAD length. False past the declared length.
-ccm_update_ad: fn<K: ForwardBlock>(k: K, st: &CCM, aad: [U8]) -> Bool Never! {
+ccm_update_ad: fn<K: ForwardBlock>(k: K, st: ^CCM, aad: [U8]) -> Bool Never! {
     if has_bit(st.state, CCM_ERROR) -> return false
     if aad.len() == 0 -> return true
     if has_bit(st.state, CCM_AUTH_DATA_FINISHED) -> return false
@@ -557,7 +557,7 @@ ccm_update_ad: fn<K: ForwardBlock>(k: K, st: &CCM, aad: [U8]) -> Bool Never! {
 /// CBC pass for the MAC and one counter pass for the data; the counter
 /// pass never crosses a carry out of the counter's low two bytes, so the
 /// q-byte counter wraps exactly as mbedtls's does.
-ccm_update: fn<K: ForwardBlock>(k: K, st: &CCM, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+ccm_update: fn<K: ForwardBlock>(k: K, st: ^CCM, src: [U8], off: Int, len: Int, out: ^[U8]) -> Bool Never! {
     if has_bit(st.state, CCM_ERROR) -> return false
     if st.tag_len != 0 && st.processed + len > st.plain_len -> return false
     cipher.reserve(out, len)
@@ -614,7 +614,7 @@ ccm_update: fn<K: ForwardBlock>(k: K, st: &CCM, src: [U8], off: Int, len: Int, o
 /// 6.1; mbedtls_ccm_finish), then the context clears for the next nonce.
 /// None unless every declared byte arrived and `tag_len` is the declared
 /// length.
-ccm_finish: fn<K: ForwardBlock>(k: K, st: &CCM, tag_len: Int) -> [U8]? Never! {
+ccm_finish: fn<K: ForwardBlock>(k: K, st: ^CCM, tag_len: Int) -> [U8]? Never! {
     if has_bit(st.state, CCM_ERROR) -> return None
     if !has_bit(st.state, CCM_STARTED) || !has_bit(st.state, CCM_LENGTHS_SET) -> return None
     if st.ad_len > 0 && !has_bit(st.state, CCM_AUTH_DATA_FINISHED) -> return None
@@ -680,7 +680,7 @@ word32: fn(b: [U8], off: Int) -> U32 Never! {
 
 // Little-endian, each byte the word's low bits (wrapping): no test of the
 // key stream's value.
-put_word32: fn(out: &[U8], at: Int, w: U32) Never! {
+put_word32: fn(out: ^[U8], at: Int, w: U32) Never! {
     out[at] = wrapping(U8{w})
     out[at + 1] = wrapping(U8{w >> 8})
     out[at + 2] = wrapping(U8{w >> 16})
@@ -691,7 +691,7 @@ put_word32: fn(out: &[U8], at: Int, w: U32) Never! {
 /// state `s` into the 64 bytes of `ks`: the block function of RFC 8439
 /// section 2.3 when `feed` adds the input state back, the HChaCha20 core
 /// when it does not.
-#Overflow(.Wrapping) chacha20_core: fn(s: [U32], ks: &[U8], feed: Bool) Never! {
+#Overflow(.Wrapping) chacha20_core: fn(s: [U32], ks: ^[U8], feed: Bool) Never! {
     x0 := s[0]
     x1 := s[1]
     x2 := s[2]
@@ -840,7 +840,7 @@ ChaCha20: struct {
     blocks_left: Int,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             state := self.state.move()
             loop i in 0..<state.len() -> state[i] = U32{0}
             stream := self.stream.move()
@@ -864,7 +864,7 @@ chacha20_context: fn(key: [#Secret U8]) -> ChaCha20 Never! {
 
 /// Set the 12-byte nonce and the initial block counter, 0 to 2^32 - 1
 /// (mbedtls_chacha20_starts).
-chacha20_starts: fn(c: &ChaCha20, nonce: [U8], counter: Int) -> Bool Never! {
+chacha20_starts: fn(c: ^ChaCha20, nonce: [U8], counter: Int) -> Bool Never! {
     if nonce.len() != 12 || counter < 0 || counter > 4294967295 -> return false
     c.state[12] = U32{counter}
     c.state[13] = word32(nonce, 0)
@@ -886,7 +886,7 @@ chacha20_room: fn(c: ChaCha20, size: Int) -> Bool Never! {
 }
 
 /// The next keystream block into `stream`, then the counter steps.
-#Overflow(.Wrapping) chacha20_next: fn(c: &ChaCha20) Never! {
+#Overflow(.Wrapping) chacha20_next: fn(c: ^ChaCha20) Never! {
     chacha20_core(c.state, c.stream, true)
     c.state[12] = c.state[12] + U32{1}
     c.blocks_left -= 1
@@ -895,7 +895,7 @@ chacha20_room: fn(c: ChaCha20, size: Int) -> Bool Never! {
 /// XOR `len` bytes of `src` from `off` with the keystream, appended to
 /// `out` (mbedtls_chacha20_update). False, appending nothing, when the
 /// counter would run out.
-chacha20_update: fn(c: &ChaCha20, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+chacha20_update: fn(c: ^ChaCha20, src: [U8], off: Int, len: Int, out: ^[U8]) -> Bool Never! {
     if !chacha20_room(c, len) -> return false
     cipher.reserve(out, len)
     at := off
@@ -964,7 +964,7 @@ Poly1305: struct {
     fill: Int,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             r := self.r.move()
             cipher.wipe_words(r)
             h := self.h.move()
@@ -1002,7 +1002,7 @@ poly1305_key: fn(key: [#Secret U8]) -> Poly1305? Never! {
 /// h = (h + m_i + hibit 2^128) r mod 2^130 - 5 over `count` 16-byte blocks
 /// of `m` from `off`. `hibit` is 2^24 in limb 4 for a whole block, zero for
 /// the padded last one.
-#Overflow(.Wrapping) poly1305_blocks: fn(r: [#Secret U64], h: &[U64], m: [#Secret U8], off: Int, count: Int, hibit: U64) Never! {
+#Overflow(.Wrapping) poly1305_blocks: fn(r: [#Secret U64], h: ^[U64], m: [#Secret U8], off: Int, count: Int, hibit: U64) Never! {
     mask: U64{0x3ffffff}
     five: U64{5}
     r0: r[0]
@@ -1057,7 +1057,7 @@ poly1305_key: fn(key: [#Secret U8]) -> Poly1305? Never! {
 poly1305_fill_of: fn(p: Poly1305) -> Int Never! { p.fill }
 
 /// Feed `len` bytes of `m` from `off` (mbedtls_poly1305_update).
-poly1305_update: fn(p: &Poly1305, m: [U8], off: Int, len: Int) Never! {
+poly1305_update: fn(p: ^Poly1305, m: [U8], off: Int, len: Int) Never! {
     at := off
     end: off + len
     fill := poly1305_pending(p)
@@ -1087,7 +1087,7 @@ poly1305_update: fn(p: &Poly1305, m: [U8], off: Int, len: Int) Never! {
 
 /// The 16-byte tag (h + s) mod 2^128, with h fully reduced mod 2^130 - 5
 /// by a masked select (mbedtls_poly1305_finish).
-#Overflow(.Wrapping) poly1305_finish: fn(p: &Poly1305) -> [U8] Never! {
+#Overflow(.Wrapping) poly1305_finish: fn(p: ^Poly1305) -> [U8] Never! {
     fill: poly1305_pending(p)
     if fill > 0 {
         p.buf[fill] = U8{1}
@@ -1197,7 +1197,7 @@ chachapoly_key: fn(key: [#Secret U8]) -> ChaChaPoly? Never! {
 /// Start a message under a 12-byte nonce: the Poly1305 key is the first 32
 /// bytes of keystream block 0 (RFC 8439 section 2.6), and data starts at
 /// block 1 (mbedtls_chachapoly_starts).
-chachapoly_starts: fn(cp: &ChaChaPoly, nonce: [U8], decrypt: Bool) -> Bool Never! {
+chachapoly_starts: fn(cp: ^ChaChaPoly, nonce: [U8], decrypt: Bool) -> Bool Never! {
     if !chacha20_starts(cp.chacha, nonce, 0) -> return false
     one_time := [U8]{}
     if !chacha20_update(cp.chacha, cipher.zero_bytes(64), 0, 64, one_time) -> return false
@@ -1214,14 +1214,14 @@ chachapoly_starts: fn(cp: &ChaChaPoly, nonce: [U8], decrypt: Bool) -> Bool Never
 
 /// Zero bytes up to the next 16-byte boundary of `len` bytes
 /// (chachapoly_pad_aad and chachapoly_pad_ciphertext).
-chachapoly_pad: fn(p: &Poly1305, len: Int) Never! {
+chachapoly_pad: fn(p: ^Poly1305, len: Int) Never! {
     rest: len %% 16
     if rest != 0 -> poly1305_update(p, ZERO_BLOCK, 0, 16 - rest)
 }
 
 /// Feed additional data (mbedtls_chachapoly_update_aad); false once data
 /// has started.
-chachapoly_update_ad: fn(cp: &ChaChaPoly, aad: [U8]) -> Bool Never! {
+chachapoly_update_ad: fn(cp: ^ChaChaPoly, aad: [U8]) -> Bool Never! {
     if cp.stage != CHACHAPOLY_AAD -> return false
     cp.ad_len += aad.len()
     poly1305_update(cp.poly, aad, 0, aad.len())
@@ -1231,7 +1231,7 @@ chachapoly_update_ad: fn(cp: &ChaChaPoly, aad: [U8]) -> Bool Never! {
 /// Encrypt or decrypt `len` bytes of `src` from `off`, appended to `out`,
 /// MACing the ciphertext (mbedtls_chachapoly_update). False in the wrong
 /// stage or past the counter's end.
-chachapoly_update: fn(cp: &ChaChaPoly, src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+chachapoly_update: fn(cp: ^ChaChaPoly, src: [U8], off: Int, len: Int, out: ^[U8]) -> Bool Never! {
     if cp.stage != CHACHAPOLY_AAD && cp.stage != CHACHAPOLY_CIPHERTEXT -> return false
     if !chacha20_room(cp.chacha, len) -> return false
     if cp.stage == CHACHAPOLY_AAD {
@@ -1251,7 +1251,7 @@ chachapoly_update: fn(cp: &ChaChaPoly, src: [U8], off: Int, len: Int, out: &[U8]
 
 /// The 16-byte tag over the padded AAD and ciphertext and their 64-bit
 /// lengths (mbedtls_chachapoly_finish). None before chachapoly_starts.
-chachapoly_finish: fn(cp: &ChaChaPoly) -> [U8]? Never! {
+chachapoly_finish: fn(cp: ^ChaChaPoly) -> [U8]? Never! {
     if cp.stage == CHACHAPOLY_INIT -> return None
     if cp.stage == CHACHAPOLY_AAD -> chachapoly_pad(cp.poly, cp.ad_len)
     if cp.stage == CHACHAPOLY_CIPHERTEXT -> chachapoly_pad(cp.poly, cp.len)

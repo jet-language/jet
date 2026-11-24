@@ -24,7 +24,7 @@ Words: struct {
         #Unsafe("`at` is one of the owner's live words") { self.base.offset(at).* }
     }
 
-    #Inline(Always) set: fn(&self, at: Int, value: I64) Never! {
+    #Inline(Always) set: fn(^self, at: Int, value: I64) Never! {
         if at < 0 || at >= self.count -> panic("word {at} is outside {self.count}")
         #Unsafe("`at` is one of the owner's live words") {
             mem.volatile_write(self.base.offset(at), value)
@@ -39,14 +39,14 @@ Words: struct {
     }
 
     // Every word becomes `value`.
-    #Inline(Always) set_all: fn(&self, value: I64) Never! {
+    #Inline(Always) set_all: fn(^self, value: I64) Never! {
         #Unsafe("the owner's words are live I64s, which own nothing") {
             mem.fill<I64>(self.base, value, self.count)
         }
     }
 
     // The first words, as many as both owners hold, become `from`'s.
-    #Inline(Always) copy_from: fn(&self, from: Words) Never! {
+    #Inline(Always) copy_from: fn(^self, from: Words) Never! {
         count: if from.count < self.count -> from.count else -> self.count
         #Unsafe("both owners hold at least `count` live I64s") {
             mem.copy<I64>(self.base, from.base, count)
@@ -67,7 +67,7 @@ Words: struct {
     // The owner holds twice as many words, its own first: a fresh block
     // takes them and the old block goes. False, with the words as they were,
     // when the heap refuses.
-    #Inline(Always) grow: fn(&self) -> Bool Never! {
+    #Inline(Always) grow: fn(^self) -> Bool Never! {
         count: self.count * 2
         #Unsafe("the fresh block takes the owner's words, and the old block is released once, here") {
             bytes: mem.alloc_raw(count * 8, 8) ?? return false
@@ -82,7 +82,7 @@ Words: struct {
     }
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             #Unsafe("`base` came from `alloc_raw` at `claim` or `grow`, and the owner is spent here") {
                 bytes: self.base.cast<U8>()
                 mem.free_raw(bytes)
@@ -127,7 +127,7 @@ Pages: struct {
 
     #Inline(Always) len: fn(self) -> Int Never! { self.count }
 
-    #Inline(Always) set: fn(&self, at: Int, value: I64) Never! {
+    #Inline(Always) set: fn(^self, at: Int, value: I64) Never! {
         if at < 0 || at >= self.count -> panic("word {at} is outside {self.count}")
         #Unsafe("`at` is one of the mapping's words") {
             mem.volatile_write(self.base.offset(at), value)
@@ -140,6 +140,6 @@ Pages: struct {
     }
 
     impl Close {
-        close: fn(&&self) { close(self.region) }
+        close: fn(^^self) { close(self.region) }
     }
 }

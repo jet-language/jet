@@ -1,7 +1,7 @@
 Error: Jet.TypestateWrongState: `ship` needs `Order.Confirmed`, but `order` is `Order.Draft`
   --> Tests/UI/Typestate/typestate_parameter_carries_state.jet:27:64
     |
- 27 | ship_draft_param: fn(order: &&Order.Draft) -> String { "{order.ship().id}" }
+ 27 | ship_draft_param: fn(order: ^^Order.Draft) -> String { "{order.ship().id}" }
     |                                                                ^^^^
  Why: Typestate: `ship` takes only `Order.Confirmed`; calling it with `Order` in another state is the out-of-order bug the state list rules out
  Fix: Moves from `Order.Draft`: `confirm`, `cancel`
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/Jet.TypestateWrongState
 Error: Jet.TypestateWrongState: `ship` needs `Order.Confirmed`, but `order` is `Order.Draft | Order.Confirmed`
   --> Tests/UI/Typestate/typestate_parameter_carries_state.jet:29:68
     |
- 29 | ship_open_group_param: fn(order: &&Order.Open) -> String { "{order.ship().id}" }
+ 29 | ship_open_group_param: fn(order: ^^Order.Open) -> String { "{order.ship().id}" }
     |                                                                    ^^^^
  Why: Typestate: `ship` takes only `Order.Confirmed`; calling it with `Order` in another state is the out-of-order bug the state list rules out
  Fix: Moves from `Order.Draft | Order.Confirmed`: `cancel`
@@ -19,7 +19,7 @@ More: jet-lang.dev/e/Jet.TypestateWrongState
 Error: Jet.TypestateWrongState: `label` needs `Order.Confirmed`, but `order` is `Order.Draft`
   --> Tests/UI/Typestate/typestate_parameter_carries_state.jet:31:62
     |
- 31 | label_draft_param: fn(order: &Order.Draft) -> String { order.label() }
+ 31 | label_draft_param: fn(order: ^Order.Draft) -> String { order.label() }
     |                                                              ^^^^^
  Why: Typestate: `label` takes only `Order.Confirmed`; calling it with `Order` in another state is the out-of-order bug the state list rules out
  Fix: Moves from `Order.Draft`: `confirm`, `cancel`

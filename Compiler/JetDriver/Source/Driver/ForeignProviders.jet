@@ -250,7 +250,7 @@ jet_driver_foreign_diagnostic_offset: fn(diagnostic: Diagnostic) -> Int Never! {
     span.start
 }
 
-jet_driver_foreign_add_request: fn(requests: &[JetDriverForeignRequest], language: String, library: String, root_index: Int, module_index: Int, scope: String, source_path: String, declaration: ImportDecl, alias: String, alias_span: Span, binding_span: Span, form: String, diagnostics: &[Diagnostic]) {
+jet_driver_foreign_add_request: fn(requests: ^[JetDriverForeignRequest], language: String, library: String, root_index: Int, module_index: Int, scope: String, source_path: String, declaration: ImportDecl, alias: String, alias_span: Span, binding_span: Span, form: String, diagnostics: ^[Diagnostic]) {
     loop existing in requests {
         if existing.module_index == module_index && existing.scope == scope && existing.language == language && existing.library == library && existing.form != "item" && form != "item" && existing.form != form {
             existing_header: jet_driver_foreign_import_header(existing.declaration)
@@ -289,7 +289,7 @@ jet_driver_foreign_add_request: fn(requests: &[JetDriverForeignRequest], languag
     requests.push(JetDriverForeignRequest{library: library, language: language, root_index: root_index, module_index: module_index, scope: scope, source_path: source_path, declaration: declaration, alias: alias, alias_span: alias_span, binding_span: binding_span, form: form})
 }
 
-jet_driver_foreign_collect_imports: fn(imports: [ImportDecl], root_index: Int, module_index: Int, scope: String, source_path: String, requests: &[JetDriverForeignRequest], diagnostics: &[Diagnostic]) {
+jet_driver_foreign_collect_imports: fn(imports: [ImportDecl], root_index: Int, module_index: Int, scope: String, source_path: String, requests: ^[JetDriverForeignRequest], diagnostics: ^[Diagnostic]) {
     loop declaration in imports {
         handled_members := false
         has_request := false
@@ -368,7 +368,7 @@ jet_driver_foreign_collect_imports: fn(imports: [ImportDecl], root_index: Int, m
     }
 }
 
-jet_driver_foreign_collect_items: fn(items: [Item], root_index: Int, module_index: Int, scope: String, source_path: String, requests: &[JetDriverForeignRequest], overlays: &[JetDriverForeignSurface], diagnostics: &[Diagnostic]) {
+jet_driver_foreign_collect_items: fn(items: [Item], root_index: Int, module_index: Int, scope: String, source_path: String, requests: ^[JetDriverForeignRequest], overlays: ^[JetDriverForeignSurface], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == {
             .CModule(c_module) -> {
@@ -420,7 +420,7 @@ jet_driver_foreign_collect_items: fn(items: [Item], root_index: Int, module_inde
     }
 }
 
-jet_driver_foreign_collect_requests: fn(load: &JetDriverLoadResult, requests: &[JetDriverForeignRequest], overlays: &[JetDriverForeignSurface], diagnostics: &[Diagnostic]) {
+jet_driver_foreign_collect_requests: fn(load: ^JetDriverLoadResult, requests: ^[JetDriverForeignRequest], overlays: ^[JetDriverForeignSurface], diagnostics: ^[Diagnostic]) {
     loop module_index in 0..<load.modules.len() {
         // Read through the index: a local binding of the module would copy
         // its whole parsed program.
@@ -461,12 +461,12 @@ jet_driver_foreign_display_file: fn(entry_root: String, file: JetDriverAuthorize
     Val(JetDriverAuthorizedSourceFile{path: jet_driver_display_path(entry_root, found.path), relative_path: found.relative_path, identity: found.identity, source: found.source})
 }
 
-jet_driver_foreign_cache_error: fn(path: String, reason: String, diagnostics: &[Diagnostic]) {
+jet_driver_foreign_cache_error: fn(path: String, reason: String, diagnostics: ^[Diagnostic]) {
     diagnostic: jet_driver_foreign_binding_diagnostic(path, jet_driver_foreign_artifact_library(path), reason)
     diagnostics.push(diagnostic_with_source_path(diagnostic, path, 0))
 }
 
-jet_driver_foreign_surface: fn(snapshot: JetDriverAuthorizedSourceSnapshot, request: JetDriverForeignRequest, overlays: [JetDriverForeignSurface], diagnostics: &[Diagnostic]) -> JetDriverForeignSurface {
+jet_driver_foreign_surface: fn(snapshot: JetDriverAuthorizedSourceSnapshot, request: JetDriverForeignRequest, overlays: [JetDriverForeignSurface], diagnostics: ^[Diagnostic]) -> JetDriverForeignSurface {
     found: jet_driver_foreign_find_cache(snapshot, request.root_index, request.language, request.library)
     cache_program := Program?{None}
     cache_span := jet_driver_foreign_span_zero()
@@ -583,12 +583,12 @@ jet_driver_foreign_line_parts: fn(line: String) -> {name: String, value: String,
     {name: "", valid: false, value: ""}
 }
 
-jet_driver_foreign_metadata_error: fn(path: String, reason: String, diagnostics: &[Diagnostic]) {
+jet_driver_foreign_metadata_error: fn(path: String, reason: String, diagnostics: ^[Diagnostic]) {
     diagnostic: jet_driver_foreign_binding_diagnostic(path, jet_driver_foreign_artifact_library(path), reason)
     diagnostics.push(diagnostic_with_source_path(diagnostic, path, 0))
 }
 
-jet_driver_foreign_parse_metadata: fn(file: JetDriverAuthorizedSourceFile, library: String, diagnostics: &[Diagnostic]) -> JetDriverForeignMetadata? {
+jet_driver_foreign_parse_metadata: fn(file: JetDriverAuthorizedSourceFile, library: String, diagnostics: ^[Diagnostic]) -> JetDriverForeignMetadata? {
     schema := ""
     metadata_library := ""
     direct := [String]{}
@@ -718,12 +718,12 @@ jet_driver_foreign_unique_strings: fn(values: [String]) -> [String] Never! {
     result
 }
 
-jet_driver_foreign_provenance_error: fn(path: String, reason: String, diagnostics: &[Diagnostic]) {
+jet_driver_foreign_provenance_error: fn(path: String, reason: String, diagnostics: ^[Diagnostic]) {
     diagnostic: jet_driver_foreign_binding_diagnostic(path, jet_driver_foreign_artifact_library(path), reason)
     diagnostics.push(diagnostic_with_source_path(diagnostic, path, 0))
 }
 
-jet_driver_foreign_parse_provenance: fn(file: JetDriverAuthorizedSourceFile, library: String, diagnostics: &[Diagnostic]) -> JetDriverForeignProvenance? {
+jet_driver_foreign_parse_provenance: fn(file: JetDriverAuthorizedSourceFile, library: String, diagnostics: ^[Diagnostic]) -> JetDriverForeignProvenance? {
     schema := ""
     boundary_schema := ""
     descriptor := ""
@@ -826,7 +826,7 @@ jet_driver_foreign_same_signature: fn(left: ExternFn, right: ExternFn) -> Bool N
     true
 }
 
-jet_driver_foreign_parse_cache: fn(file: JetDriverAuthorizedSourceFile, diagnostics: &[Diagnostic]) -> Program? {
+jet_driver_foreign_parse_cache: fn(file: JetDriverAuthorizedSourceFile, diagnostics: ^[Diagnostic]) -> Program? {
     lexed: lex_generated(file.source.bytes())
     // copy: `lexed` still feeds jet_driver_has_errors and parse_lexed below, so it keeps its
     // diagnostics. The caller's diagnostics list gets a copy of each, re-pathed to the authorized
@@ -878,7 +878,7 @@ jet_driver_foreign_close_adapter_text: fn(handle: String, raw_function: String) 
     "__jet_ffi_close_{handle}: fn(handle: &&{handle}) {{\n    {raw_function}(handle).drop(\"a native close status is not a Jet failure\")\n}}\n"
 }
 
-jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: String, origin_path: String, diagnostics: &[Diagnostic]) -> Func? {
+jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: String, origin_path: String, diagnostics: ^[Diagnostic]) -> Func? {
     source: jet_driver_foreign_close_adapter_text(handle, raw_function)
     lexed: lex_generated(source.bytes())
     // copy: `lexed` still feeds jet_driver_has_errors and parse_lexed below, so it keeps its
@@ -912,7 +912,7 @@ jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: Strin
     None
 }
 
-jet_driver_foreign_prepare_functions: fn(functions: [ExternFn], handles: [SemaForeignHandleInput], surface: JetDriverForeignSurface, diagnostics: &[Diagnostic]) -> {functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func]} Never! {
+jet_driver_foreign_prepare_functions: fn(functions: [ExternFn], handles: [SemaForeignHandleInput], surface: JetDriverForeignSurface, diagnostics: ^[Diagnostic]) -> {functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func]} Never! {
     prepared := functions
     adapters := [SemaForeignCloseAdapterInput]{}
     adapter_functions := [Func]{}
@@ -964,7 +964,7 @@ jet_driver_foreign_import_edge_declaration: fn(request: JetDriverForeignRequest)
     request.declaration
 }
 
-jet_driver_foreign_add_import_edge: fn(load: &JetDriverLoadResult, request: JetDriverForeignRequest, target_identity: ModuleID, target_package: String) Never! {
+jet_driver_foreign_add_import_edge: fn(load: ^JetDriverLoadResult, request: JetDriverForeignRequest, target_identity: ModuleID, target_package: String) Never! {
     declaration: jet_driver_foreign_import_edge_declaration(request)
     scope := String?{None}
     if request.scope != "" -> scope = Val(request.scope)
@@ -1036,7 +1036,7 @@ jet_driver_foreign_fragment_line_starts: fn(source: String) -> [Int] Never! {
     if segments.len() > 0 -> segments[0].line_starts else -> [Int]{0}
 }
 
-jet_driver_foreign_collect_canonical_overlay_items: fn(items: [Item], overlay_bases: [Int], overlay_ends: [Int], library: String, functions: &[ExternFn]) Never! {
+jet_driver_foreign_collect_canonical_overlay_items: fn(items: [Item], overlay_bases: [Int], overlay_ends: [Int], library: String, functions: ^[ExternFn]) Never! {
     loop item in items {
         if item == {
             .CModule(value) -> {
@@ -1073,7 +1073,7 @@ jet_driver_foreign_shift_diagnostic: fn(diagnostic: Diagnostic, offset: Int) -> 
     shifted
 }
 
-jet_driver_foreign_parse_shifted: fn(path: String, source: String, offset: Int, diagnostics: &[Diagnostic]) -> Program? {
+jet_driver_foreign_parse_shifted: fn(path: String, source: String, offset: Int, diagnostics: ^[Diagnostic]) -> Program? {
     lexed := lex_generated(source.bytes())
     loop diagnostic in lexed.diagnostics {
         shifted: jet_driver_foreign_shift_diagnostic(diagnostic, offset)
@@ -1092,7 +1092,7 @@ jet_driver_foreign_parse_shifted: fn(path: String, source: String, offset: Int, 
     Val(parsed.program.move())
 }
 
-jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: JetDriverForeignSurface, cache_path: String, cache_source: String, adapters: [SemaForeignCloseAdapterInput], diagnostics: &[Diagnostic]) -> JetDriverForeignCanonicalAssembly? {
+jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: JetDriverForeignSurface, cache_path: String, cache_source: String, adapters: [SemaForeignCloseAdapterInput], diagnostics: ^[Diagnostic]) -> JetDriverForeignCanonicalAssembly? {
     canonical := cache_source
     if canonical.len() > 0 && !canonical.ends_with("\n") -> canonical = "{canonical}\n"
     overlay_paths := [String]{}
@@ -1191,7 +1191,7 @@ jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: Je
     Val(JetDriverForeignCanonicalAssembly{source: canonical, overlay_functions: canonical_overlays, adapter_functions: canonical_adapters, source_segments: source_segments, generated_source_files: generated_source_files})
 }
 
-jet_driver_foreign_rewrite_module: fn(load: &JetDriverLoadResult, surface: JetDriverForeignSurface, merged_functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func], diagnostics: &[Diagnostic]) -> ModuleID? {
+jet_driver_foreign_rewrite_module: fn(load: ^JetDriverLoadResult, surface: JetDriverForeignSurface, merged_functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func], diagnostics: ^[Diagnostic]) -> ModuleID? {
     cached: surface.cache_program
     program: cached ?? jet_driver_foreign_empty_program()
     cache_path: jet_driver_foreign_generated_path(surface)
@@ -1268,7 +1268,7 @@ jet_driver_foreign_rewrite_module: fn(load: &JetDriverLoadResult, surface: JetDr
     Val(module_identity)
 }
 
-jet_driver_foreign_remove_overlay_items: fn(load: &JetDriverLoadResult) Never! {
+jet_driver_foreign_remove_overlay_items: fn(load: ^JetDriverLoadResult) Never! {
     loop index in 0..<load.modules.len() {
         if load.modules[index].module_name.starts_with("__c_") -> next
         // A module without overlay items keeps its list as is (rebuilding it
@@ -1295,7 +1295,7 @@ jet_driver_foreign_remove_overlay_items: fn(load: &JetDriverLoadResult) Never! {
     }
 }
 
-jet_driver_assemble_foreign_providers: fn(snapshot: JetDriverAuthorizedSourceSnapshot, load: &JetDriverLoadResult) -> [SemaForeignProviderInput] {
+jet_driver_assemble_foreign_providers: fn(snapshot: JetDriverAuthorizedSourceSnapshot, load: ^JetDriverLoadResult) -> [SemaForeignProviderInput] {
     diagnostics := [Diagnostic]{}
     requests := [JetDriverForeignRequest]{}
     overlays := [JetDriverForeignSurface]{}

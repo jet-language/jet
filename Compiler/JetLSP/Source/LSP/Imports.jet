@@ -1,0 +1,407 @@
+// Import repairs and organize-imports read the checked name ledger: Sema's
+// facts for what each module of the program declares and re-exports, and
+// which module may reach it (name_ledger_visible). The repair of a name the
+// check could not resolve offers only declarations the document's module may
+// reach, each titled with the identity the name then resolves to.
+// Organize-imports drops only the rows the check reports unused (L0103).
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[Diagnostic, ImportDecl, NameLedger, Span, TextEdit, foundation_byte_text, name_facts_leaf, name_ledger_alias, name_ledger_declaration, name_ledger_visible]
+    jet_driver.[JetDriverDocModule]
+}
+
+// A module an unresolved name may import from: the one that declares it or
+// one that re-exports it. `identity` is the declaration the name then
+// resolves to, as its declaring module's name and its own; `binding` is the
+// position, in the document's imports, of its whole-module import of that
+// module, when it has one.
+LSPImportCandidate: struct {
+    module_index: Int,
+    identity: String,
+    binding: Int?,
+}
+
+// One import repair: its title and the edits it applies together.
+LSPImportAction: struct {
+    title: String,
+    edits: [TextEdit],
+}
+
+// One `use` of the document: the bytes from `use` to its last row or its
+// block's `}`, and its rows as positions in the module's imports.
+LSPImportStatement: struct {
+    start: Int,
+    end: Int,
+    rows: [Int],
+}
+
+// The document's slot in the checked modules, when the check read its
+// current text.
+lsp_import_doc_slot: fn(view: LSPView) -> Int? Never! {
+    module_path: view.module_path ?? return None
+    lsp_module_index(view.checked, module_path)
+}
+
+// The name an unresolved-name report (E0102 for a call, E0107 for a value)
+// covers in the document.
+lsp_import_unresolved_name: fn(text: String, diagnostic: Diagnostic) -> String? Never! {
+    if diagnostic.code != "E0102" && diagnostic.code != "E0107" -> return None
+    span: diagnostic.span ?? return None
+    bytes: text.bytes()
+    if span.start < 0 || span.end > bytes.len() || span.start >= span.end -> return None
+    if bytes[span.start] >= 48 && bytes[span.start] <= 57 -> return None
+    loop at in span.start..<span.end {
+        if !lsp_import_word_byte(bytes[at]) -> return None
+    }
+    Val(foundation_byte_text(bytes, span.start, span.end))
+}
+
+lsp_import_word_byte: fn(byte: U8) -> Bool Never! {
+    byte == 95 || (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+}
+
+// The modules that offer an unresolved name in the document, when the
+// diagnostic reports one.
+lsp_import_unresolved: fn(view: LSPView, slot: Int, diagnostic: Diagnostic) -> [LSPImportCandidate]? Never! {
+    name: lsp_import_unresolved_name(view.doc.text, diagnostic) ?? return None
+    storage: view.checked.modules[slot].name_ledger ?? return None
+    permit: storage.guard_read()
+    Val(lsp_import_candidates(permit.value, view.checked.modules, view.checked.modules[slot].name_module_index, view.checked.modules[slot].imports, name))
+}
+
+// The repairs of one unresolved name: through the document's own binding of
+// a module that offers it, `binding.name`, else a new import row. The titles
+// and rows read the module names from the ledger while it is held.
+lsp_import_actions: fn(view: LSPView, diagnostic: Diagnostic) -> [LSPImportAction] Never! {
+    actions := [LSPImportAction]{}
+    span: diagnostic.span ?? return actions
+    slot: lsp_import_doc_slot(view) ?? return actions
+    name: lsp_import_unresolved_name(view.doc.text, diagnostic) ?? return actions
+    storage: view.checked.modules[slot].name_ledger ?? return actions
+    permit: storage.guard_read()
+    imports: view.checked.modules[slot].imports
+    loop candidate in lsp_import_candidates(permit.value, view.checked.modules, view.checked.modules[slot].name_module_index, imports, name) {
+        module_alias: permit.value.facts.modules[candidate.module_index].alias
+        action: if candidate.binding == {
+            .Val(binding) -> LSPImportAction{title: "Write `{imports[binding].alias}.{name}` ({candidate.identity})", edits: [TextEdit]{TextEdit{span: span, new_text: "{imports[binding].alias}.{name}"}}}
+            .None -> LSPImportAction{title: "Import `{name}` from `{module_alias}` ({candidate.identity})", edits: [TextEdit]{lsp_import_row_edit(view.doc.text, imports, module_alias, name)}}
+        }
+        actions.push(action)
+    }
+    actions
+}
+
+// Every module that offers `name` to the module `from`, by identity. A
+// member (`Shape.area`) is reached through its owner and is never offered.
+lsp_import_candidates: fn(ledger: NameLedger, modules: [JetDriverDocModule], from: Int, imports: [ImportDecl], name: String) -> [LSPImportCandidate] Never! {
+    found := [LSPImportCandidate]{}
+    if from < 0 || from >= ledger.facts.modules.len() -> return found
+    loop index in (ledger.declaration_names.get(name) ?? [Int]{}) {
+        row: ledger.facts.declarations[index]
+        if row.name != name -> next
+        identity: "{ledger.facts.modules[row.module_index].alias}.{name}"
+        if lsp_import_offered(found, ledger, from, row.module_index, name, identity) {
+            found.push(LSPImportCandidate{module_index: row.module_index, identity: identity, binding: lsp_import_module_binding(ledger, from, imports, row.module_index)})
+        }
+    }
+    loop index in (ledger.alias_names.get(name) ?? [Int]{}) {
+        alias: ledger.facts.aliases[index]
+        if alias.name != name -> next
+        identity: lsp_import_reexport_identity(ledger, modules, alias.module_index, name, alias.target, alias.target_module) ?? next
+        if lsp_import_offered(found, ledger, from, alias.module_index, name, identity) {
+            found.push(LSPImportCandidate{module_index: alias.module_index, identity: identity, binding: lsp_import_module_binding(ledger, from, imports, alias.module_index)})
+        }
+    }
+    found.sort_by(fn(a: LSPImportCandidate, b: LSPImportCandidate) { (a.identity <=> b.identity).then(ledger.facts.modules[a.module_index].alias <=> ledger.facts.modules[b.module_index].alias) })
+    found
+}
+
+// Whether `name` is offered from the module `module_index` to the module
+// `from`, which must reach it there, and is not yet in `found`. A module of
+// the document's own package namespace is never offered: the package's
+// files already see each other's names, so one they cannot resolve is
+// private. A compiler-generated name or module has no spelling an import
+// could write.
+lsp_import_offered: fn(found: [LSPImportCandidate], ledger: NameLedger, from: Int, module_index: Int, name: String, identity: String) -> Bool Never! {
+    if module_index == from || module_index < 0 || module_index >= ledger.facts.modules.len() {
+        return false
+    }
+    module_row: ledger.facts.modules[module_index]
+    if module_row.namespace != None && module_row.namespace == ledger.facts.modules[from].namespace {
+        return false
+    }
+    if name.starts_with("__") || module_row.alias == "" || module_row.alias.starts_with("__") {
+        return false
+    }
+    if !name_ledger_visible(ledger, from, module_index, name) -> return false
+    loop seen in found {
+        if seen.module_index == module_index && seen.identity == identity -> return false
+    }
+    true
+}
+
+// The position in `imports` of the document's whole-module import of
+// `module_index`.
+lsp_import_module_binding: fn(ledger: NameLedger, from: Int, imports: [ImportDecl], module_index: Int) -> Int? Never! {
+    loop (index, import) in imports {
+        if !lsp_import_plain(import) || import.kind == .Unqualified(_, _, _, _, _) -> next
+        alias: name_ledger_alias(ledger, from, import.alias) ?? next
+        if alias.target_module == .Val(target) && target == module_index -> return Val(index)
+    }
+    None
+}
+
+// The identity a re-export `name` of the module `module_index` resolves to.
+// The ledger keeps the module it reaches; the re-exporting module's own row
+// (`name: owner.member`) names the member, which must be a declaration of
+// that module.
+lsp_import_reexport_identity: fn(ledger: NameLedger, modules: [JetDriverDocModule], module_index: Int, name: String, target: String, target_module: Int?) -> String? Never! {
+    owner: target_module ?? return None
+    if owner < 0 || owner >= ledger.facts.modules.len() -> return None
+    if target.contains(".") -> return lsp_import_declared(ledger, owner, name_facts_leaf(target))
+    loop doc_module in modules {
+        if doc_module.name_module_index != module_index -> next
+        loop import in doc_module.imports {
+            if import.alias != name -> next
+            if import.kind == {
+                .Unqualified(_, _, items, _, _) -> {
+                    if items.len() == 1 {
+                        return lsp_import_declared(ledger, owner, items[0].original)
+                    }
+                }
+                .Module(path, _) -> {
+                    if path.contains(".") {
+                        return lsp_import_declared(ledger, owner, name_facts_leaf(path))
+                    }
+                }
+                .File(_, _) -> {}
+            }
+        }
+    }
+    None
+}
+
+// The identity of the declaration `member` of the module `owner`.
+lsp_import_declared: fn(ledger: NameLedger, owner: Int, member: String) -> String? Never! {
+    row: name_ledger_declaration(ledger, owner, member) ?? return None
+    Val("{ledger.facts.modules[owner].alias}.{row.name}")
+}
+
+// A row a `use` writes: not a re-export, which is a declaration, not a
+// build-only `#run use` row, and not the binding the loader adds for a
+// dependency's `use dep.[names]`, which has no width.
+lsp_import_plain: fn(import: ImportDecl) -> Bool Never! {
+    !import.is_pub && !import.is_package_pub && import.comptime_span == None && import.span.start < import.span.end
+}
+
+// The edit that imports `name` from the module `module_alias`: the name
+// added to the member list of the document's `use module_alias.[…]` row, or
+// else a `module_alias.[name]` row after the last row of the document's last
+// `use { … }` block, its lone last `use` line made a block of two, or a
+// `use` line at the top when the document imports nothing.
+lsp_import_row_edit: fn(text: String, imports: [ImportDecl], module_alias: String, name: String) -> TextEdit Never! {
+    bytes: text.bytes()
+    last := -1
+    loop (index, import) in imports {
+        if !lsp_import_plain(import) -> next
+        if import.kind == .Unqualified(written, _, items, _, _) && written == module_alias && items.len() > 0 && import.span.end <= bytes.len() && bytes[import.span.end - 1] == 93 {
+            return TextEdit{span: Span{start: import.span.end - 1, end: import.span.end - 1}, new_text: ", {name}"}
+        }
+        if last < 0 || import.span.start > imports[last].span.start -> last = index
+    }
+    row: "{module_alias}.[{name}]"
+    if last < 0 -> return TextEdit{span: Span{start: 0, end: 0}, new_text: "use {row}\n"}
+    span: imports[last].span
+    if lsp_import_starts_use(bytes, span.start) {
+        return TextEdit{span: span, new_text: "use {{\n    {lsp_import_written(bytes, span)}\n    {row}\n}}"}
+    }
+    line := span.start
+    loop line > 0 && bytes[line - 1] != 10 -> line -= 1
+    indent: foundation_byte_text(bytes, line, span.start)
+    if indent.trim() == "" && indent.count_bytes() > 0 {
+        return TextEdit{span: Span{start: span.end, end: span.end}, new_text: "\n{indent}{row}"}
+    }
+    end := span.end
+    loop end < bytes.len() && bytes[end] != 10 -> end += 1
+    TextEdit{span: Span{start: end, end: end}, new_text: "\nuse {row}"}
+}
+
+// Whether the `use` keyword starts at `at`.
+lsp_import_starts_use: fn(bytes: [U8], at: Int) -> Bool Never! {
+    if at < 0 || at + 3 >= bytes.len() -> return false
+    if at > 0 && lsp_import_word_byte(bytes[at - 1]) -> return false
+    if bytes[at] != 117 || bytes[at + 1] != 115 || bytes[at + 2] != 101 -> return false
+    after: bytes[at + 3]
+    after == 32 || after == 9 || after == 10 || after == 13 || after == 123
+}
+
+// A row as written, without the `use` of a lone `use` line.
+lsp_import_written: fn(bytes: [U8], span: Span) -> String Never! {
+    start := span.start
+    if lsp_import_starts_use(bytes, start) {
+        start += 3
+        loop start < span.end && (bytes[start] == 32 || bytes[start] == 9) -> start += 1
+    }
+    foundation_byte_text(bytes, start, span.end)
+}
+
+// The position of the last byte before `at` that is not white space, or -1.
+lsp_import_back: fn(bytes: [U8], at: Int) -> Int Never! {
+    back := at - 1
+    loop back >= 0 && (bytes[back] == 32 || bytes[back] == 9 || bytes[back] == 10 || bytes[back] == 13) {
+        back -= 1
+    }
+    back
+}
+
+// The position of the first byte from `at` that is neither white space nor
+// a `;`.
+lsp_import_ahead: fn(bytes: [U8], at: Int) -> Int Never! {
+    ahead := at
+    loop ahead < bytes.len() && (bytes[ahead] == 32 || bytes[ahead] == 9 || bytes[ahead] == 10 || bytes[ahead] == 13 || bytes[ahead] == 59) {
+        ahead += 1
+    }
+    ahead
+}
+
+// The document's `use` statements, each with its rows. A block with anything
+// but white space between its rows (a comment) is not read, so it stays as
+// written.
+lsp_import_statements: fn(bytes: [U8], imports: [ImportDecl]) -> [LSPImportStatement] Never! {
+    order := [Int]{}
+    loop (index, import) in imports {
+        if lsp_import_plain(import) -> order.push(index)
+    }
+    order.sort_by(fn(a: Int, b: Int) { imports[a].span.start <=> imports[b].span.start })
+    statements := [LSPImportStatement]{}
+    at := 0
+    loop at < order.len() {
+        first: imports[order[at]].span
+        at += 1
+        if lsp_import_starts_use(bytes, first.start) {
+            statements.push(LSPImportStatement{start: first.start, end: first.end, rows: [Int]{order[at - 1]}})
+            next
+        }
+        open: lsp_import_back(bytes, first.start)
+        if open < 0 || bytes[open] != 123 -> next
+        keyword: lsp_import_back(bytes, open)
+        if !lsp_import_starts_use(bytes, keyword - 2) -> next
+        rows := [Int]{order[at - 1]}
+        cursor := first.end
+        end := -1
+        loop {
+            ahead: lsp_import_ahead(bytes, cursor)
+            if ahead >= bytes.len() -> break
+            if bytes[ahead] == 125 {
+                end = ahead + 1
+                break
+            }
+            if at >= order.len() || imports[order[at]].span.start != ahead -> break
+            rows.push(order[at])
+            cursor = imports[order[at]].span.end
+            at += 1
+        }
+        if end >= 0 -> statements.push(LSPImportStatement{start: keyword - 2, end: end, rows: rows})
+    }
+    statements
+}
+
+// Whether a span the check reports unused (L0103) lies inside `span`.
+lsp_import_reported: fn(diagnostics: [Diagnostic], span: Span) -> Bool Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "L0103" -> next
+        if diagnostic.span == .Val(reported) && reported.start >= span.start && reported.end <= span.end {
+            return true
+        }
+    }
+    false
+}
+
+// A row without its unused names: None when none is left, the row as
+// written when every name is used or `needed` holds its position, else its
+// member list without the unused members.
+lsp_import_kept_row: fn(bytes: [U8], imports: [ImportDecl], index: Int, diagnostics: [Diagnostic], needed: [Int]) -> String? Never! {
+    import: imports[index]
+    if import.kind == .Unqualified(module_alias, _, items, _, _) {
+        members := ""
+        kept := 0
+        loop (at, item) in items {
+            item_span: if at < import.item_spans.len() -> import.item_spans[at] else -> import.span
+            local_span: if at < import.local_spans.len() -> import.local_spans[at] else -> item_span
+            if lsp_import_reported(diagnostics, item_span) || lsp_import_reported(diagnostics, local_span) {
+                next
+            }
+            members += if kept == 0 -> item.original else -> ", {item.original}"
+            kept += 1
+        }
+        if kept == 0 -> return None
+        if kept == items.len() -> return Val(lsp_import_written(bytes, import.span))
+        return Val("{module_alias}.[{members}]")
+    }
+    if lsp_import_reported(diagnostics, import.span) && !needed.contains(index) -> return None
+    Val(lsp_import_written(bytes, import.span))
+}
+
+// Organize-imports: each `use` of the document rewritten without the rows
+// and members the check reports unused, every other row kept as written,
+// and a `use` left with no row deleted with the line breaks after it. A row
+// an unresolved name's repair writes through (`binding.name`) stays.
+lsp_organize_imports_edits: fn(view: LSPView, diagnostics: [Diagnostic]) -> [TextEdit] Never! {
+    edits := [TextEdit]{}
+    reports := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "L0103" && diagnostic.span != None -> reports = true
+    }
+    if !reports -> return edits
+    slot: lsp_import_doc_slot(view) ?? return edits
+    needed := [Int]{}
+    loop diagnostic in diagnostics {
+        candidates: lsp_import_unresolved(view, slot, diagnostic) ?? next
+        loop candidate in candidates {
+            binding: candidate.binding ?? next
+            if !needed.contains(binding) -> needed.push(binding)
+        }
+    }
+    bytes: view.doc.text.bytes()
+    imports: view.checked.modules[slot].imports
+    loop statement in lsp_import_statements(bytes, imports) {
+        kept := [String]{}
+        loop index in statement.rows {
+            if lsp_import_kept_row(bytes, imports, index, diagnostics, needed) == .Val(row) {
+                kept.push(row)
+            }
+        }
+        written: if {
+            kept.len() == 0 -> ""
+            kept.len() == 1 -> "use {kept[0]}"
+            else -> "use {{\n    {kept.join("\n    ")}\n}}"
+        }
+        if written == foundation_byte_text(bytes, statement.start, statement.end) -> next
+        end := statement.end
+        if kept.len() == 0 {
+            breaks := 0
+            loop end < bytes.len() && bytes[end] == 10 && breaks < 2 {
+                end += 1
+                breaks += 1
+            }
+        }
+        edits.push(TextEdit{span: Span{start: statement.start, end: end}, new_text: written})
+    }
+    edits
+}
+
+// Whether an action of `kind` answers a code action request. A request
+// whose `context.only` names kinds asks for those alone, and a kind answers
+// its own request and each of its parents' (`source` asks for
+// `source.organizeImports`). `only` is that member, absent when unnamed.
+lsp_code_action_wanted: fn(only: Dyn?, kind: String) -> Bool Never! {
+    asked: only ?? return true
+    if asked == .Array(rows) {
+        loop row in rows {
+            if row == .Text(parent) && (kind == parent || kind.starts_with("{parent}.")) {
+                return true
+            }
+        }
+    }
+    false
+}

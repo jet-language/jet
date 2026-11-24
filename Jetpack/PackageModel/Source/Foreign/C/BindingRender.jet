@@ -15,7 +15,7 @@ CBindingSkip: struct {
 }
 
 // Render one prototype as a `#Bindgen` line, or the reason it is skipped.
-pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String CBindingSkip! {
+pkg_cbind_render_binding: fn(p: CProto, used_names: ^[String], contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String CBindingSkip! {
     managed_callback: pkg_cbind_managed_callback_param_index(p, catalog)
     managed_unsubscribe: p.name == "unsubscribe" && pkg_cbind_native_void_pointer_proto(p)
     managed_emit: p.name == "emit_async"
@@ -79,12 +79,12 @@ pkg_cbind_close_function_name: fn(close: String) -> String Never! {
 pkg_cbind_render_param_type: fn(p: CProto, idx: Int, ty: String, length_param: Int, contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String CBindingSkip! {
     if idx == length_param {
         length: catalog.map_length_type(ty) ?? return Err(CBindingSkip{reason: "array length type `{ty.trim()}` isn't bindable"})
-        return Ok("&{length}")
+        return Ok("^{length}")
     }
     if pkg_cbind_has_companion_count(p, idx, catalog) {
         if catalog.map_array_element(ty, contract, handles) == {
             .Val(element) -> {
-                access: if pkg_cbind_pointer_is_const(ty) -> "" else -> "&"
+                access: if pkg_cbind_pointer_is_const(ty) -> "" else -> "^"
                 return Ok("{access}[{element}]")
             }
             .None -> {}
@@ -92,7 +92,7 @@ pkg_cbind_render_param_type: fn(p: CProto, idx: Int, ty: String, length_param: I
     }
     if handles.handle_for_type(ty) == {
         .Val(handle) -> {
-            access: if handles.is_close_function(p.name, ty) -> "&&" else -> "&"
+            access: if handles.is_close_function(p.name, ty) -> "^^" else -> "^"
             return Ok("{access}{handle.jet_name}")
         }
         .None -> {}
@@ -106,7 +106,7 @@ pkg_cbind_render_param_type: fn(p: CProto, idx: Int, ty: String, length_param: I
 }
 
 // One uncounted C object pointer with its access convention: `const T *` is
-// a Jet read parameter (`T`), a mutable `T *` a write parameter (`&T`).
+// a Jet read parameter (`T`), a mutable `T *` a write parameter (`^T`).
 // Counted pointers were already lowered to typed list parameters.
 pkg_cbind_map_single_pointer: fn(c_type: String, p: CProto, pointer_index: Int, contract: ForeignABIContract, handles: OpaqueHandleDiscovery, catalog: CTypeCatalog) -> String? Never! {
     pointer: pkg_cbind_pointer_base(c_type)
@@ -115,7 +115,7 @@ pkg_cbind_map_single_pointer: fn(c_type: String, p: CProto, pointer_index: Int, 
     mapped: if layout != None -> layout else -> pkg_cbind_map_type(pointer.base, contract, handles, catalog) ?? return None
     if mapped == "String" -> return None
     if pkg_cbind_pointer_is_const(c_type) -> return Val(mapped)
-    Val("&{mapped}")
+    Val("^{mapped}")
 }
 
 // A C return type as a Jet type, `None` for `void`, or the skip reason.

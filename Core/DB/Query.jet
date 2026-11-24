@@ -25,7 +25,7 @@ use {
 // one WHERE value after parsing, and every referenced field must exist in the
 // all-row schema. Only WHERE, ORDER BY and LIMIT select typed rows here; a
 // projection or grouping changes the row shape.
-__query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
+priv __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
     trees := [Dyn]{}
     loop row in rows -> trees.push(row.encode())
     spec: query_sql_spec(sql) ?? return Err(query_field_error("{err}"))
@@ -180,7 +180,7 @@ priv QueryTestSale: struct {
     cents: Int,
 }
 
-__query_test_sales: fn() -> [QueryTestSale] Never! {
+priv __query_test_sales: fn() -> [QueryTestSale] Never! {
     [QueryTestSale]{QueryTestSale{item: "tools", cents: 125}, QueryTestSale{item: "core", cents: 40}, QueryTestSale{item: "apps", cents: 80}, QueryTestSale{item: "core", cents: 90}}
 }
 

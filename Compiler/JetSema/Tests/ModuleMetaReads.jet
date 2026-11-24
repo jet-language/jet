@@ -22,7 +22,7 @@ use {
     ]
 }
 
-module_meta_user_input: fn(table: &ModuleTable, source: &&String) -> SemaRegistrationModuleInput {
+module_meta_user_input: fn(table: ^ModuleTable, source: ^^String) -> SemaRegistrationModuleInput {
     parsed := parse_generated_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("fixture did not parse")
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "user/main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
@@ -31,7 +31,7 @@ module_meta_user_input: fn(table: &ModuleTable, source: &&String) -> SemaRegistr
 
 // Whether the user module of `source`, loaded beside the Prelude's error
 // module, finds module `name` among the modules read as values.
-module_meta_reads_name: fn(source: &&String, name: String) -> Bool {
+module_meta_reads_name: fn(source: ^^String, name: String) -> Bool {
     table := module_table()
     user: module_meta_user_input(table, source.move())
     errors: sema_registration_original_error_module(table)

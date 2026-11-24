@@ -146,7 +146,7 @@ JetLibStamp: struct {
     }
 
     // Seal the native payload identity once the final shared object exists.
-    seal_payload: fn(&self, payload: View<U8>) Never! {
+    seal_payload: fn(^self, payload: View<U8>) Never! {
         self.payload_digest = pkg_jetlib_payload_digest(payload)
     }
 
@@ -197,7 +197,7 @@ JetLibStamp: struct {
         Ok(stamp)
     }
 
-    decode_prefix: fn(reader: &JetLibReader) -> JetLibStamp Err! {
+    decode_prefix: fn(reader: ^JetLibReader) -> JetLibStamp Err! {
         magic: JETLIB_MAGIC.bytes()
         if reader.bytes.len() <= magic.len() -> return Err("not a .jetlib artifact (bad magic)")
         loop i in 0..<magic.len() {
@@ -301,18 +301,18 @@ JetLibWriter: struct {
 
     new: fn() -> JetLibWriter Never! { JetLibWriter{bytes: [U8]{}} }
 
-    push_raw: fn(&self, bytes: View<U8>) Never! {
+    push_raw: fn(^self, bytes: View<U8>) Never! {
         loop byte in bytes -> self.bytes.push(byte)
     }
 
-    push_u32: fn(&self, value: Int) Never! {
+    push_u32: fn(^self, value: Int) Never! {
         assert(value >= 0 && value <= 4294967295, ".jetlib header value exceeds u32")
         shift_values: [Int]{24, 16, 8, 0}
         loop shift in shift_values -> self.bytes.push(U8{(value >> shift) & 0xFF})
     }
 
     // A u32 length prefix, then the bytes.
-    push_text: fn(&self, text: String) Never! {
+    push_text: fn(^self, text: String) Never! {
         raw: text.bytes()
         assert(raw.len() <= 4294967295, "a .jetlib header field cannot exceed u32 bytes")
         self.push_u32(raw.len())
@@ -327,14 +327,14 @@ JetLibReader: struct {
     at: Int,
     loader: Bool,
 
-    take_byte: fn(&self) -> Int? Never! {
+    take_byte: fn(^self) -> Int? Never! {
         if self.at >= self.bytes.len() -> return None
         value: Int{self.bytes[self.at]}
         self.at += 1
         Val(value)
     }
 
-    take_u32: fn(&self, what: String) -> Int Err! {
+    take_u32: fn(^self, what: String) -> Int Err! {
         if self.bytes.len() - self.at < 4 -> return Err("truncated .jetlib header ({what})")
         value := 0
         loop index in 0..<4 -> value = (value << 8) | Int{self.bytes[self.at + index]}
@@ -344,7 +344,7 @@ JetLibReader: struct {
 
     // A header field's bytes. Fields become owned Strings, so the extent is
     // copied out of the input; only the payload keeps the input owner.
-    take_field: fn(&self, what: String) -> [U8] Err! {
+    take_field: fn(^self, what: String) -> [U8] Err! {
         if self.bytes.len() - self.at < 4 {
             return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.Length, field: what}, self.loader))
         }
@@ -361,13 +361,13 @@ JetLibReader: struct {
         Ok(field)
     }
 
-    take_string: fn(&self, what: String) -> String Err! {
+    take_string: fn(^self, what: String) -> String Err! {
         raw := self.take_field(what) ?? return Err(err)
         text: String.from_bytes(raw) ?? return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.UTF8, field: what}, self.loader))
         Ok(text)
     }
 
-    take_optional_string: fn(&self, what: String) -> String? Err! {
+    take_optional_string: fn(^self, what: String) -> String? Err! {
         present: self.take_byte() ?? return Err("truncated .jetlib header ({what} presence)")
         if present == {
             0 -> Ok(None)
@@ -376,7 +376,7 @@ JetLibReader: struct {
         }
     }
 
-    take_count: fn(&self, what: String) -> Int Err! {
+    take_count: fn(^self, what: String) -> Int Err! {
         count: self.take_u32("{what} count") ?? return Err(err)
         if count > JETLIB_MAX_HEADER_ITEMS {
             return Err(".jetlib header has too many {what} entries")

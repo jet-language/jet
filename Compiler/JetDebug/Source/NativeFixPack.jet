@@ -120,7 +120,7 @@ NATIVE_FIX_PACK_PLT32: 4
 
 // The pack whose file is `elf`. None when it isn't an x86-64 relocatable
 // ELF object this code can read.
-native_fix_pack: fn(elf: &&[U8]) -> NativeFixPack? Never! {
+native_fix_pack: fn(elf: ^^[U8]) -> NativeFixPack? Never! {
     if elf.len() < 64 || link_debug_le(elf, 0, 4) != 0x464c457f || link_debug_le(elf, 16, 2) != 1 || link_debug_le(elf, 18, 2) != 62 {
         return None
     }
@@ -405,7 +405,7 @@ native_fix_pack_place: fn(pack: NativeFixPack, symbols: NativeFixSymbols, code: 
 // placed from the pack, where it can place them (native_fix_pack_place),
 // after its data. The traps of the functions left then follow those
 // sections.
-native_fix_pack_load: fn(plan: &NativeFixPlan, pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode) Never! {
+native_fix_pack_load: fn(plan: ^NativeFixPlan, pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode) Never! {
     if plan.absent.len() == 0 {
         return
     }
@@ -418,7 +418,7 @@ native_fix_pack_load: fn(plan: &NativeFixPlan, pack: NativeFixPack, symbols: Nat
 // NATIVE_PLACE_PACKED it calls) placed afresh from the pack, where it can
 // place them (native_fix_pack_place), after its data. The traps of the
 // absent functions it didn't place then follow those sections.
-native_fix_pack_fresh: fn(plan: &NativeFixPlan, pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, wanted: [String:Int]) Never! {
+native_fix_pack_fresh: fn(plan: ^NativeFixPlan, pack: NativeFixPack, symbols: NativeFixSymbols, code: NativeCode, wanted: [String:Int]) Never! {
     if wanted.len() == 0 {
         return
     }
@@ -428,7 +428,7 @@ native_fix_pack_fresh: fn(plan: &NativeFixPlan, pack: NativeFixPack, symbols: Na
 
 // `plan` with the sections `loads` places at its traps, which then follow
 // them, less those of the functions `loads` placed.
-native_fix_pack_add: fn(plan: &NativeFixPlan, loads: &&NativeFixLoads) Never! {
+native_fix_pack_add: fn(plan: ^NativeFixPlan, loads: ^^NativeFixLoads) Never! {
     if loads.entries.len() == 0 {
         return
     }
@@ -449,7 +449,7 @@ native_fix_pack_add: fn(plan: &NativeFixPlan, loads: &&NativeFixLoads) Never! {
 // Writes the pack's sections `loaded` into `region`, which is mapped at
 // `base`, with every relocation resolved, a routed one at the address
 // `routes` gives its routine.
-native_fix_pack_write: fn(region: &[U8], loaded: [NativeFixLoaded], base: Int, routes: [String:Int]) Never! {
+native_fix_pack_write: fn(region: ^[U8], loaded: [NativeFixLoaded], base: Int, routes: [String:Int]) Never! {
     loop placed in loaded {
         loop (k, byte) in placed.bytes -> region[placed.offset + k] = byte
         loop reloc in placed.relocs {

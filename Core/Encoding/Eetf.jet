@@ -280,19 +280,19 @@ TermReader: struct {
         }
     }
 
-    byte: fn(&self) -> Int Never! {
+    byte: fn(^self) -> Int Never! {
         value: Int{self.bytes[self.at]}
         self.at += 1
         value
     }
 
-    take_u16: fn(&self) -> Int Never! {
+    take_u16: fn(^self) -> Int Never! {
         high: self.byte()
         low: self.byte()
         (high << 8) | low
     }
 
-    take_u32: fn(&self) -> Int Never! {
+    take_u32: fn(^self) -> Int Never! {
         value: u32_at(self.bytes, self.at)
         self.at += 4
         value
@@ -315,7 +315,7 @@ TermReader: struct {
         }
     }
 
-    term: fn(&self, path: String, depth: Int) -> Dyn EncodingError! {
+    term: fn(^self, path: String, depth: Int) -> Dyn EncodingError! {
         if depth > self.limits.max_depth {
             return Err(self.fail(.Limit, path, "max_depth {self.limits.max_depth} exceeded"))
         }
@@ -455,7 +455,7 @@ TermReader: struct {
         Ok(Dyn.Float(value))
     }
 
-    elements: fn(&self, count: Int, path: String, depth: Int) -> Dyn EncodingError! {
+    elements: fn(^self, count: Int, path: String, depth: Int) -> Dyn EncodingError! {
         self.arity(count, 1, path) ?? return Err(err)
         items := [Dyn]{}
         loop i in 0..<count {
@@ -466,7 +466,7 @@ TermReader: struct {
     }
 
     // A proplist: `count` `{Key, Value}` 2-tuples, read as an object.
-    pairs: fn(&self, count: Int, path: String, depth: Int) -> Dyn EncodingError! {
+    pairs: fn(^self, count: Int, path: String, depth: Int) -> Dyn EncodingError! {
         self.arity(count, 4, path) ?? return Err(err)
         entries := [{key: String, value: Dyn}]{}
         loop i in 0..<count {
@@ -490,7 +490,7 @@ TermReader: struct {
 
     // An atom's text: Latin-1 for the deprecated ATOM_EXT and SMALL_ATOM_EXT,
     // strict UTF-8 of at most 255 characters otherwise.
-    atom: fn(&self, op: Int, path: String) -> String EncodingError! {
+    atom: fn(^self, op: Int, path: String) -> String EncodingError! {
         self.need(if op == 100 || op == 118 -> 2 else -> 1, path) ?? return Err(err)
         count := 0
         if op == 100 || op == 118 -> count = self.take_u16() else -> count = self.byte()
@@ -510,7 +510,7 @@ TermReader: struct {
     // A map or proplist key as text: an atom, a UTF-8 binary or a proper
     // byte list. The JSON view reads a list's elements as Unicode scalars;
     // typed decode reads them as UTF-8 bytes.
-    key: fn(&self, path: String) -> String EncodingError! {
+    key: fn(^self, path: String) -> String EncodingError! {
         self.need(1, path) ?? return Err(err)
         op: self.byte()
         if op == 100 || op == 115 || op == 118 || op == 119 -> return self.atom(op, path)
@@ -587,14 +587,14 @@ TermWriter: struct {
     byte_arrays: ByteEncoding,
     limits: EncodingLimits,
 
-    put: fn(&self, value: Int) Never! { self.out.push(U8{value & 255}) }
+    put: fn(^self, value: Int) Never! { self.out.push(U8{value & 255}) }
 
-    put_u16: fn(&self, value: Int) Never! {
+    put_u16: fn(^self, value: Int) Never! {
         self.put(value >> 8)
         self.put(value)
     }
 
-    put_u32: fn(&self, value: Int) Never! {
+    put_u32: fn(^self, value: Int) Never! {
         self.put(value >> 24)
         self.put(value >> 16)
         self.put(value >> 8)
@@ -610,7 +610,7 @@ TermWriter: struct {
         }
     }
 
-    term: fn(&self, tree: Dyn, path: String, depth: Int) EncodingError! {
+    term: fn(^self, tree: Dyn, path: String, depth: Int) EncodingError! {
         if depth > self.limits.max_depth {
             return Err(etf_error(.Limit, self.out.len(), path, "max_depth {self.limits.max_depth} exceeded"))
         }
@@ -682,7 +682,7 @@ TermWriter: struct {
         }
     }
 
-    atom: fn(&self, name: String, path: String) EncodingError! {
+    atom: fn(^self, name: String, path: String) EncodingError! {
         if scalar_count(name) > 255 {
             return Err(etf_error(.Limit, self.out.len(), path, "an atom has at most 255 characters"))
         }
@@ -697,7 +697,7 @@ TermWriter: struct {
         loop b in bytes -> self.out.push(b)
     }
 
-    put_int: fn(&self, value: Int, path: String) EncodingError! {
+    put_int: fn(^self, value: Int, path: String) EncodingError! {
         if value >= 0 && value <= 255 {
             self.put(97)
             self.put(value)
@@ -726,7 +726,7 @@ TermWriter: struct {
         loop b in digits -> self.out.push(b)
     }
 
-    put_float: fn(&self, value: Float, path: String) EncodingError! {
+    put_float: fn(^self, value: Float, path: String) EncodingError! {
         if !math.is_finite(value) {
             return Err(etf_error(.Unsupported, self.out.len(), path, "a non-finite float has no ETF form"))
         }
@@ -737,7 +737,7 @@ TermWriter: struct {
 
     // Bytes as a binary, or as a byte list: NIL when empty, STRING_EXT up to
     // 65535 bytes, else a LIST_EXT of small integers.
-    payload: fn(&self, bytes: [U8], as_binary: Bool, path: String) EncodingError! {
+    payload: fn(^self, bytes: [U8], as_binary: Bool, path: String) EncodingError! {
         self.item(bytes.len(), path, if as_binary -> "a binary" else -> "a byte list") ?? return Err(err)
         if as_binary {
             self.put(109)
@@ -766,7 +766,7 @@ TermWriter: struct {
 }
 
 // UTF-8 bytes of one Unicode scalar.
-append_scalar: fn(out: &[U8], scalar: Int) Never! {
+append_scalar: fn(out: ^[U8], scalar: Int) Never! {
     if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
         out.push(U8{192 + (scalar >> 6)})
         out.push(U8{128 + (scalar & 63)})

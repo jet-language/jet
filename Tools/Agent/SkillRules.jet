@@ -125,7 +125,7 @@ source_keys: fn(source: String) -> [String] Never! {
 }
 
 // Each SKILL.md directory under `directory` that no row maps with source `key`.
-unmapped: fn(rows: [SkillRow], key: String, directory: String, names: [String], errors: &[String]) Never! {
+unmapped: fn(rows: [SkillRow], key: String, directory: String, names: [String], errors: ^[String]) Never! {
     loop name in names {
         mapped := false
         loop row in rows {
@@ -226,7 +226,7 @@ contradiction_errors: fn(path: String, text: String, rules: [Contradiction]) -> 
     errors
 }
 
-visit_markdown: fn(directory: String, found: &[String]) -[FS]> SkillRulesError! {
+visit_markdown: fn(directory: String, found: ^[String]) -[FS]> SkillRulesError! {
     loop name in sorted_names(directory) ?? return Err(err) {
         path: join_path(directory, name)
         if files.is_symlink(path) -> next

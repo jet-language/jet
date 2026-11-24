@@ -1163,7 +1163,7 @@ jet_cli_perf_published_source: fn(pid: Int, published: String) -[FS, Env]> Strin
 }
 
 // `path` when it names a file, else None.
-jet_cli_perf_readable_source: fn(path: &&String) -[FS.Read]> String? Never! {
+jet_cli_perf_readable_source: fn(path: ^^String) -[FS.Read]> String? Never! {
     facts: perf_files.stat(path) ?? return None
     if !facts.is_file -> return None
     Val(path.move())
@@ -1284,7 +1284,7 @@ jet_cli_perf_attach_cpu: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfAttachCPU
 // clock, `schedstat`, `ticks` or a zones window's `process`, and
 // resolution, null where it has no CPU, and the threads that exited in it.
 // `read` is what the attach read of the program, in order.
-jet_cli_perf_attach_keep_window: fn(capture: &JetCLIPerfCapture, pid: Int, closed: JetCLIPerfAttachWindow, read: [String]) Never! {
+jet_cli_perf_attach_keep_window: fn(capture: ^JetCLIPerfCapture, pid: Int, closed: JetCLIPerfAttachWindow, read: [String]) Never! {
     jet_cli_perf_window(capture.profile, closed.window)
     jet_cli_perf_attach_rows(capture, closed.window)
     clock := CanonicalJSON.Null
@@ -1323,7 +1323,7 @@ jet_cli_perf_attach_keep_window: fn(capture: &JetCLIPerfCapture, pid: Int, close
 // snapshot's are the program's latest publication, which can be the one
 // before its entry, so they would time the program up to then, not the
 // window. A row the window has no figure for goes.
-jet_cli_perf_attach_rows: fn(capture: &JetCLIPerfCapture, window: JetCLIPerfRuntimeWindow) Never! {
+jet_cli_perf_attach_rows: fn(capture: ^JetCLIPerfCapture, window: JetCLIPerfRuntimeWindow) Never! {
     loop index in 0..<capture.samples.len() {
         if capture.samples[index].domain == "wall" {
             capture.samples[index].duration_ns = window.elapsed_ns
@@ -1400,7 +1400,7 @@ JetCLIPerfSessionObserved: struct {
 
 // One poll of the process tree under `root` into the session
 // (`poll_observe_snapshot`).
-jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int) -[FS.Read, Env, Time]> Never! {
+jet_cli_perf_session_observe: fn(observed: ^JetCLIPerfSessionObserved, root: Int) -[FS.Read, Env, Time]> Never! {
     if jet_cli_perf_live_read(root) == .Ok(live) {
         jet_cli_perf_session_keep(observed.root, jet_cli_perf_observed(live))
     }
@@ -1429,13 +1429,13 @@ jet_cli_perf_session_observe: fn(observed: &JetCLIPerfSessionObserved, root: Int
 // the program's clock, from the process epoch its zones, waits and log spans
 // are timed from (ObserveLive.jet observe_live_start), so its task rows line
 // up with theirs. The run's first publication precedes its entry.
-jet_cli_perf_observed: fn(live: &&JetCLIPerfLive) -> JetCLIPerfObservation Never! {
+jet_cli_perf_observed: fn(live: ^^JetCLIPerfLive) -> JetCLIPerfObservation Never! {
     JetCLIPerfObservation{at_ns: live.runtime.elapsed_ns, live: live}
 }
 
 // Observations stay within the capture's 4096-row bound: past it, the newest
 // replaces the previous newest, so the first and the final one are kept.
-jet_cli_perf_session_keep: fn(rows: &[JetCLIPerfObservation], observation: &&JetCLIPerfObservation) Never! {
+jet_cli_perf_session_keep: fn(rows: ^[JetCLIPerfObservation], observation: ^^JetCLIPerfObservation) Never! {
     if rows.len() >= 4096 {
         rows[rows.len() - 1] = observation
         return
@@ -1523,7 +1523,7 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
 // allocating call allocated; then what retains its typed blocks
 // (`retained`, JetCLIPerfRetained), by type and path, a null path for the
 // blocks no root reached. None when it took none.
-jet_cli_perf_session_heaps: fn(source: &&String, heaps: &&[JetCLIPerfHeap]) -> TraceReceiptSection? Never! {
+jet_cli_perf_session_heaps: fn(source: ^^String, heaps: ^^[JetCLIPerfHeap]) -> TraceReceiptSection? Never! {
     if heaps.len() == 0 -> return None
     snapshots := [CanonicalJSON]{}
     loop heap in heaps.move() {
@@ -1584,7 +1584,7 @@ jet_cli_perf_session_heaps: fn(source: &&String, heaps: &&[JetCLIPerfHeap]) -> T
 // the time the lens spent on them, as the runtime timed it on each
 // allocation (PerfSamples.jet perf_samples_alloc_site). None when the run
 // recorded no allocation.
-jet_cli_perf_session_allocations: fn(source: &&String, sited: Bool, allocated: &&[JetCLIPerfAllocSite], charged: JetCLIPerfCost?) -> TraceReceiptSection? Never! {
+jet_cli_perf_session_allocations: fn(source: ^^String, sited: Bool, allocated: ^^[JetCLIPerfAllocSite], charged: JetCLIPerfCost?) -> TraceReceiptSection? Never! {
     if !sited -> return None
     sites := [CanonicalJSON]{}
     allocations := U64{0}

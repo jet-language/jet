@@ -13,7 +13,9 @@ package: {
 use {
     core: core
     files: core.files
+    builtin: jet_builtins
     rt: jet.runtime.process
+    files_rt: jet.runtime.files
 }
 
 // The catchable POSIX signals, in signal-number order.
@@ -80,7 +82,7 @@ Sh: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.argv.join(" ") }
+        debug: fn(^^self) -> String { self.argv.join(" ") }
     }
 
     impl Equatable {
@@ -157,7 +159,7 @@ Sh: struct {
     }
 }
 
-sh_split_into: fn(text: String, argv: &[String]) Never! {
+sh_split_into: fn(text: String, argv: ^[String]) Never! {
     loop word in text.words() -> argv.push(word)
 }
 
@@ -374,7 +376,7 @@ pipeline: fn(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
             ),
         )
     }
-    core.process.__pipeline_run(steps)
+    rt.pipeline(steps)
 }
 
 run_spec: fn(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! { spec.run() }
@@ -434,7 +436,7 @@ run_all_canceled: fn() -> IOError Never! {
 // TerminalFact names; a preview fact is any other string key. Every host the
 // runtime launches on opens a PTY (HostSpawn spawn_pty), so the report holds
 // the three stable facts whatever the spec asks for.
-__spec_abilities: fn(_spec: ProcessSpec) -> Set<String> Never! {
+priv __spec_abilities: fn(_spec: ProcessSpec) -> Set<String> Never! {
     Set.from([String]{"terminal", "resize", "raw"})
 }
 
@@ -465,7 +467,7 @@ path_is_absolute: fn(path: String) -> Bool Never! {
 
 // A PATH search follows a final link, as a shell does: package managers install tools as links.
 resolves_to_file: fn(path: String) -[FS]> Bool Never! {
-    row: core.files.__stat_at(-1, path, true) ?? return false
+    row: files_rt.stat_at(-1, path, true) ?? return false
     row[0] == 0
 }
 
@@ -841,12 +843,14 @@ default_fields: fn(argv: [String]) -> ProcessFields Never! {
     }
 }
 
-// Process stdout/stderr readers wait on the child execution boundary, not FS.
-__stdout_next_line: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
+// The line readers of a child's output and error output, which a
+// `loop line in child.stdout.lines()` calls for each line. They wait on the
+// child execution boundary, not FS.
+#Builtin.Role(.ProcessStdoutLine) priv stdout_next_line: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stdout_line_bytes(stream))
 }
 
-__stderr_next_line: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
+#Builtin.Role(.ProcessStderrLine) priv stderr_next_line: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stderr_line_bytes(stream))
 }
 
@@ -861,7 +865,7 @@ ProcessChunks: struct {
     impl Iterable {
         Iter: ProcessChunkCursor,
 
-        iter: fn(&&self) -> ProcessChunkCursor {
+        iter: fn(^^self) -> ProcessChunkCursor {
             ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
         }
     }
@@ -876,7 +880,7 @@ priv ProcessChunkCursor: struct {
     impl Iterator {
         Item: [U8],
 
-        next: fn(&self) -[Exec, Time.Wait]> [U8]? {
+        next: fn(^self) -[Exec, Time.Wait]> [U8]? {
             if self.done -> return None
             piece := [U8]{}
             if self.stdout == .Val(stream) -> piece = stream.read_bytes(self.size) ?? [U8]{} else if self.stderr == .Val(stream) {
@@ -893,15 +897,15 @@ priv ProcessChunkCursor: struct {
 
 // The loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
 // check to (Sema ProcessHandles).
-__stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
+priv __stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stdout: Val(stream), __size: size}
 }
 
-__stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
+priv __stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stderr: Val(stream), __size: size}
 }
 
-pipe_line: fn(input: &&[U8]) -> String? IOError! {
+pipe_line: fn(input: ^^[U8]) -> String? IOError! {
     bytes := input.move()
     if bytes.len() == 0 -> return Ok(None)
     trim_pipe_line(bytes)
@@ -918,7 +922,7 @@ pipe_line: fn(input: &&[U8]) -> String? IOError! {
     Ok(Val(text))
 }
 
-trim_pipe_line: fn(bytes: &[U8]) Never! {
+trim_pipe_line: fn(bytes: ^[U8]) Never! {
     if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{10}) {
         _: bytes.pop()
         if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _: bytes.pop()

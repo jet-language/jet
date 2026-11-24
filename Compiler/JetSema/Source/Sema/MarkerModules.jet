@@ -122,7 +122,7 @@ sema_marker_module_rows: fn(items: [Item]) -> [Int] Never! {
 
 // The marker declarations `segments` names from `position` on, over
 // `listed`, the lookup rows (sema_marker_module_rows) of `items`, when given.
-sema_marker_module_items: fn(items: [Item], listed: [Int]?, segments: [String], position: Int, exported: Bool, rows: &SemaMarkerModuleMatches) {
+sema_marker_module_items: fn(items: [Item], listed: [Int]?, segments: [String], position: Int, exported: Bool, rows: ^SemaMarkerModuleMatches) {
     if position >= segments.len() {
         return
     }
@@ -429,7 +429,7 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
 
 // Both direct uses and replayed group members feed this single AST projection.
 // The program is rewritten in place; with no binding it is left untouched.
-sema_marker_module_bind_program: fn(program: &Program, bindings: [SemaMarkerModuleBinding]) Never! {
+sema_marker_module_bind_program: fn(program: ^Program, bindings: [SemaMarkerModuleBinding]) Never! {
     if bindings.len() == 0 {
         return
     }
@@ -551,7 +551,7 @@ sema_marker_module_bindings: fn(inputs: [SemaRegistrationModuleInput], edges: [S
     sema_marker_module_bindings_indexed(inputs, input_by_id, edges, input)
 }
 
-sema_marker_module_check_groups: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, items: [Item], scope: String, exported: Bool, catalog: SemaScopeMembersMarkerRegistry, diagnostics: &[Diagnostic]) {
+sema_marker_module_check_groups: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, items: [Item], scope: String, exported: Bool, catalog: SemaScopeMembersMarkerRegistry, diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
             prefix: if scope == "" -> code_module.name else -> "{scope}.{code_module.name}"
@@ -762,7 +762,7 @@ sema_marker_module_check_parts: fn(graph: SemaRegistrationGraph, applied: TAppli
 
 // The marker laws of every module, parallelized across `threads` with exact
 // module-order join.
-sema_marker_module_check_threads: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, threads: CompilerThreads, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {
+sema_marker_module_check_threads: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, threads: CompilerThreads, unknown_rules: ^[[Diagnostic]]) -> [Diagnostic] {
     weights := [Int]{}
     work := 0
     loop module_row_index in 0..<graph.modules.len() {
@@ -787,7 +787,7 @@ sema_marker_module_check_threads: fn(graph: SemaRegistrationGraph, applied: TApp
     diagnostics
 }
 
-sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {
+sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: ^[[Diagnostic]]) -> [Diagnostic] {
     single := sema_marker_module_check_range(graph, applied, catalog, 0, graph.modules.len())
     unknown_rules.extend(single.unknown_rules.move())
     single.diagnostics.move()
@@ -874,7 +874,7 @@ sema_marker_package_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRul
 // its Close). Any other trait named like a built-in marker (`Layout: trait`,
 // `Job: trait`) is E0106, and so is a marker declared under a built-in
 // trait's name (`Iterable: struct { impl Marker { … } }`).
-sema_marker_module_check_trait_collisions: fn(catalog: SemaScopeMembersMarkerRegistry, items: [Item], diagnostics: &[Diagnostic]) {
+sema_marker_module_check_trait_collisions: fn(catalog: SemaScopeMembersMarkerRegistry, items: [Item], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == .Trait(definition) {
             if owned_trait(definition.name) != None -> next
@@ -895,7 +895,7 @@ sema_marker_module_check_trait_collisions: fn(catalog: SemaScopeMembersMarkerReg
 // at a legal site it is a ratified program form whose Jet implementation has
 // not landed (E2104, card #6078). An unknown or source-declared marker is
 // reported by the vocabulary and site checks above.
-sema_marker_module_check_unbuilt_rules: fn(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
+sema_marker_module_check_unbuilt_rules: fn(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: ^[Diagnostic]) {
     unbuilt: sema_policy_unsupported_applications(program)
     if unbuilt.len() == 0 {
         return
@@ -926,7 +926,7 @@ sema_marker_module_check_unbuilt_rules: fn(catalog: SemaScopeMembersMarkerRegist
 // Without this refusal `#FX` above a `fn` reached body checking as an
 // internal fault, and a misplaced rule such as `#Job` on a method checked
 // clean.
-sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
+sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: ^[Diagnostic]) {
     reported := [String:Bool]{}
     loop application in sema_policy_unsupported_applications(program) {
         reported[sema_marker_rules_application_key(application)] = true

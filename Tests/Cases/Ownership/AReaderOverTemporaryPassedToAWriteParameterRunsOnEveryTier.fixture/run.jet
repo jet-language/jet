@@ -1,11 +1,11 @@
-// A `Reader.over(…)` temporary passed to a `&term.Reader` parameter: the call
+// A `Reader.over(…)` temporary passed to a `^term.Reader` parameter: the call
 // gives the cursor a place, the callee's reads advance it, and it ends after
 // the call.
 use term: core.term
 
 // Reads one byte of `source`, then `count - 1` more: ten per byte of the
 // first read plus one per byte of the second.
-head: fn(source: &term.Reader, count: Int) -> Int IOError! {
+head: fn(source: ^term.Reader, count: Int) -> Int IOError! {
     first: source.read_bytes(1) ?? return Err(err)
     rest: source.read_bytes(count - 1) ?? return Err(err)
     Ok(first.len() * 10 + rest.len())

@@ -96,7 +96,7 @@ RustBridgeKeyInputs: struct {
     }
 }
 
-pkg_ffi_identity_entry: fn(identity: &ForeignIdentityBuilder, entry: ExternEntry) Never! {
+pkg_ffi_identity_entry: fn(identity: ^ForeignIdentityBuilder, entry: ExternEntry) Never! {
     if pkg_ffi_foreign_language_for_entry(entry) == .Val(language) {
         identity.field("foreign_descriptor", pkg_ffi_foreign_descriptor_stamp(language).bytes())
     }
@@ -121,7 +121,7 @@ pkg_ffi_identity_entry: fn(identity: &ForeignIdentityBuilder, entry: ExternEntry
     if entry.close == .Val(close) -> identity.field("close_function", close.bytes())
 }
 
-pkg_ffi_identity_inline: fn(identity: &ForeignIdentityBuilder, inline: InlineEntry) Never! {
+pkg_ffi_identity_inline: fn(identity: ^ForeignIdentityBuilder, inline: InlineEntry) Never! {
     if inline.lang == "asm" {
         identity.field("asm_lowering", "out-early-clobber-v2-exported-symbol".bytes())
     }
@@ -158,7 +158,7 @@ pkg_ffi_sorted_unique: fn(values: [String]) -> [String] Never! {
 
 // Static archives named by `-L native=<dir>` / `-l static=<name>` rustflags
 // enter the identity by exact bytes; an absent archive is recorded as such.
-pkg_ffi_identity_static_link_inputs: fn(identity: &ForeignIdentityBuilder, args: [String]) -[FS]> Never! {
+pkg_ffi_identity_static_link_inputs: fn(identity: ^ForeignIdentityBuilder, args: [String]) -[FS]> Never! {
     dirs := [String]{}
     static_libs := [String]{}
     loop index in 1..<args.len() {
@@ -659,7 +659,7 @@ pkg_ffi_parse_cargo_lock: fn(raw: String) -> [CargoLockPackage] ForeignBridgeErr
 
 // Keep one finished table when it has a source; name, version, and a
 // lowercase SHA-256 checksum are then required.
-pkg_ffi_finish_cargo_lock_package: fn(current: CargoLockPackage?, packages: &[CargoLockPackage]) ForeignBridgeError! {
+pkg_ffi_finish_cargo_lock_package: fn(current: CargoLockPackage?, packages: ^[CargoLockPackage]) ForeignBridgeError! {
     package: current ?? return
     if package.source == None {
         return

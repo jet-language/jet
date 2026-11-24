@@ -43,7 +43,7 @@ EvalProbeRun: struct {
     errors: [String]{[String]{}},
 }
 
-eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: &[String]) -> EvalProbeRun {
+eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: ^[String]) -> EvalProbeRun {
     run := EvalProbeRun{answers: [SemaEvalProbeAnswer]{}, facts: ""}
     parsed := parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 {
@@ -114,7 +114,7 @@ eval_probe_first_difference: fn(left: String, right: String) -> String {
     "line {left_lines.len()}: the end against `{right_lines[left_lines.len()]}`"
 }
 
-eval_probe_answer: fn(run: EvalProbeRun, probe: Int, expression: Int, failures: &[String]) -> SemaEvalProbeAnswer? {
+eval_probe_answer: fn(run: EvalProbeRun, probe: Int, expression: Int, failures: ^[String]) -> SemaEvalProbeAnswer? {
     loop answer in run.answers {
         if answer.probe == probe && answer.expression == expression -> return Val(answer)
     }
@@ -127,7 +127,7 @@ eval_probe_codes: fn(answer: SemaEvalProbeAnswer) -> String {
     codes.join(",")
 }
 
-eval_probe_expect_value: fn(run: EvalProbeRun, probe: Int, expression: Int, ty: Type, exact: Bool, failures: &[String]) {
+eval_probe_expect_value: fn(run: EvalProbeRun, probe: Int, expression: Int, ty: Type, exact: Bool, failures: ^[String]) {
     answer: eval_probe_answer(run, probe, expression, failures) ?? return
     if !answer.complete || answer.refusals.len() > 0 {
         failures.push("probe {probe} expression {expression} was refused: {answer.refusals:Debug}")
@@ -141,7 +141,7 @@ eval_probe_expect_value: fn(run: EvalProbeRun, probe: Int, expression: Int, ty: 
     }
 }
 
-eval_probe_expect_refusal: fn(run: EvalProbeRun, probe: Int, expression: Int, code: String, names: String, failures: &[String]) {
+eval_probe_expect_refusal: fn(run: EvalProbeRun, probe: Int, expression: Int, code: String, names: String, failures: ^[String]) {
     answer: eval_probe_answer(run, probe, expression, failures) ?? return
     loop refusal in answer.refusals {
         if refusal.code == code && refusal.what.contains(names) {
@@ -282,7 +282,7 @@ run: fn() {
 // The function `jet debug` compiles for the answer of `text` (probe `probe`,
 // expression `expression` of `run`), appended to `source`, checks clean;
 // its text, or "" when it has none.
-eval_probe_function_checks: fn(source: String, run: EvalProbeRun, probe: Int, expression: Int, text: String, failures: &[String]) -> String {
+eval_probe_function_checks: fn(source: String, run: EvalProbeRun, probe: Int, expression: Int, text: String, failures: ^[String]) -> String {
     answer: eval_probe_answer(run, probe, expression, failures) ?? return ""
     function: sema_eval_probe_function(answer, text, "jet_debug_expression_{probe}_{expression}") ?? {
         failures.push("`{text}` has no function: {answer:Debug}")
@@ -376,7 +376,7 @@ run: fn() {
 
 // A bare name of a value the stopped function doesn't own, a read parameter
 // or a loop's element, is lent: the probe checks it with no refusal, and the
-// function takes it (`&&`) and returns it as-is, so nothing copies it.
+// function takes it (`^^`) and returns it as-is, so nothing copies it.
 #Test("eval_probe_function_takes_a_lent_name") {
     failures := [String]{}
     source: `size: fn(word: String) -> Int {
@@ -402,7 +402,7 @@ run: fn() {
             failures.push("`{text}` was not lent: {answer:Debug}")
         }
         function: eval_probe_function_checks(source, probed, probe, 0, text, failures)
-        if !function.contains("({text}: &&String) -> String {{\n    {text}\n}}") {
+        if !function.contains("({text}: ^^String) -> String {{\n    {text}\n}}") {
             failures.push("`{text}` is not a function returning the name it takes:\n{function}")
         }
     }

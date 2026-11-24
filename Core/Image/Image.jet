@@ -367,7 +367,7 @@ priv paeth: fn(left: Int, up: Int, corner: Int) -> Int {
     corner
 }
 
-priv put_rgba: fn(pixels: &[U8], at: Int, rgba: Int) {
+priv put_rgba: fn(pixels: ^[U8], at: Int, rgba: Int) {
     pixels[at] = U8{rgba >> 24}
     pixels[at + 1] = U8{(rgba >> 16) & 255}
     pixels[at + 2] = U8{(rgba >> 8) & 255}
@@ -378,12 +378,12 @@ priv png_rgba: fn(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
     (red << 24) + (green << 16) + (blue << 8) + alpha
 }
 
-priv push_be32: fn(out: &[U8], value: Int) {
+priv push_be32: fn(out: ^[U8], value: Int) {
     loop shift in ([Int]{24, 16, 8, 0}) -> out.push(U8{(value >> shift) & 255})
 }
 
 // Appends a chunk: its length, its type and body, and their CRC-32.
-priv png_chunk: fn(out: &[U8], kind: Int, body: [U8]) {
+priv png_chunk: fn(out: ^[U8], kind: Int, body: [U8]) {
     push_be32(out, body.len())
     typed := [U8]{}
     push_be32(typed, kind)
@@ -660,7 +660,7 @@ priv jpeg_huffman: fn(data: [U8], at: Int, total: Int) -> JPEGHuffman? {
 }
 
 // Reads a DHT segment's tables into `tables`.
-priv jpeg_read_huffman: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) ImageError! {
+priv jpeg_read_huffman: fn(data: [U8], segment: JPEGSegment, tables: ^JPEGTables) ImageError! {
     at := segment.start
     loop at < segment.end {
         class: byte_at(data, at) >> 4
@@ -677,7 +677,7 @@ priv jpeg_read_huffman: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables
 
 // Reads a DQT segment's tables, 64 zigzag entries per slot, into `tables`
 // and marks their slots defined.
-priv jpeg_read_quant: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) ImageError! {
+priv jpeg_read_quant: fn(data: [U8], segment: JPEGSegment, tables: ^JPEGTables) ImageError! {
     at := segment.start
     loop at < segment.end {
         wide: byte_at(data, at) >> 4
@@ -693,7 +693,7 @@ priv jpeg_read_quant: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) 
     Ok()
 }
 
-priv jpeg_byte: fn(data: [U8], bits: &JPEGBits) -> Int {
+priv jpeg_byte: fn(data: [U8], bits: ^JPEGBits) -> Int {
     if bits.marker || bits.at >= data.len() -> return 0
     byte: byte_at(data, bits.at)
     if byte != 0xFF {
@@ -708,7 +708,7 @@ priv jpeg_byte: fn(data: [U8], bits: &JPEGBits) -> Int {
     0
 }
 
-priv jpeg_bit: fn(data: [U8], bits: &JPEGBits) -> Int {
+priv jpeg_bit: fn(data: [U8], bits: ^JPEGBits) -> Int {
     if bits.count == 0 {
         bits.buffer = jpeg_byte(data, bits)
         bits.count = 8
@@ -719,14 +719,14 @@ priv jpeg_bit: fn(data: [U8], bits: &JPEGBits) -> Int {
 
 // The next `size` bits as a signed coefficient: values below half the range
 // are negative.
-priv jpeg_receive: fn(data: [U8], bits: &JPEGBits, size: Int) -> Int {
+priv jpeg_receive: fn(data: [U8], bits: ^JPEGBits, size: Int) -> Int {
     value := 0
     loop _ in 0..<size -> value = (value << 1) + jpeg_bit(data, bits)
     if value < (1 << (size - 1)) -> return value - (1 << size) + 1
     value
 }
 
-priv jpeg_symbol: fn(data: [U8], bits: &JPEGBits, table: JPEGHuffman) -> Int ImageError! {
+priv jpeg_symbol: fn(data: [U8], bits: ^JPEGBits, table: JPEGHuffman) -> Int ImageError! {
     if table.maxcode.len() == 0 -> return Err(.Malformed)
     code := jpeg_bit(data, bits)
     length := 1
@@ -741,7 +741,7 @@ priv jpeg_symbol: fn(data: [U8], bits: &JPEGBits, table: JPEGHuffman) -> Int Ima
 // Decodes one block into `coef`, natural order and dequantized by the 64
 // zigzag entries of `quant` from `table`, and returns its DC value, the
 // next prediction.
-priv jpeg_block: fn(data: [U8], bits: &JPEGBits, dc: JPEGHuffman, ac: JPEGHuffman, quant: [Int], table: Int, predictor: Int, coef: &[Int]) -> Int ImageError! {
+priv jpeg_block: fn(data: [U8], bits: ^JPEGBits, dc: JPEGHuffman, ac: JPEGHuffman, quant: [Int], table: Int, predictor: Int, coef: ^[Int]) -> Int ImageError! {
     loop index in 0..<64 -> coef[index] = 0
     size: jpeg_symbol(data, bits, dc) ?? return Err(err)
     if size > 11 -> return Err(.Malformed)
@@ -771,7 +771,7 @@ priv descale: fn(value: Int, shift: Int) -> Int { (value + (1 << (shift - 1))) >
 
 // One pass of libjpeg's integer inverse DCT: eight inputs `step` apart from
 // `from`, eight outputs `step` apart from `to`, descaled by `shift`.
-priv jpeg_idct_pass: fn(input: [Int], output: &[Int], from: Int, to: Int, step: Int, shift: Int) {
+priv jpeg_idct_pass: fn(input: [Int], output: ^[Int], from: Int, to: Int, step: Int, shift: Int) {
     even_one: input[from + 2 * step]
     even_three: input[from + 6 * step]
     rotation: (even_one + even_three) * 4433
@@ -814,7 +814,7 @@ priv clamp_byte: fn(value: Int) -> U8 {
 
 // The inverse DCT of `coef` into the 8 x 8 samples at `at`, rows `stride`
 // apart, through the scratch `work` and `rows`.
-priv jpeg_idct: fn(coef: [Int], work: &[Int], rows: &[Int], samples: &[U8], at: Int, stride: Int) {
+priv jpeg_idct: fn(coef: [Int], work: ^[Int], rows: ^[Int], samples: ^[U8], at: Int, stride: Int) {
     loop column in 0..<8 -> jpeg_idct_pass(coef, work, column, column, 8, 11)
     loop row in 0..<8 -> jpeg_idct_pass(work, rows, row * 8, row * 8, 1, 18)
     loop index in 0..<64 {
@@ -824,7 +824,7 @@ priv jpeg_idct: fn(coef: [Int], work: &[Int], rows: &[Int], samples: &[U8], at: 
 
 // Steps past a restart marker after its interval's last MCU; false when it
 // is missing.
-priv jpeg_restart: fn(data: [U8], bits: &JPEGBits) -> Bool {
+priv jpeg_restart: fn(data: [U8], bits: ^JPEGBits) -> Bool {
     bits.count = 0
     at: bits.at
     if at + 1 >= data.len() || byte_at(data, at) != 0xFF || byte_at(data, at + 1) < 0xD0 || byte_at(data, at + 1) > 0xD7 {
@@ -851,7 +851,7 @@ priv jpeg_scan_end: fn(data: [U8], at: Int) -> Int {
 // A scan's components as frame indexes, in scan order, with their DC and AC
 // table slots in `dc` and `ac` by frame index. A scan must code every
 // component of the frame, sequentially and in full.
-priv jpeg_scan_header: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, dc: &[Int], ac: &[Int]) -> [Int] ImageError! {
+priv jpeg_scan_header: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, dc: ^[Int], ac: ^[Int]) -> [Int] ImageError! {
     start: segment.start
     count: frame.ids.len()
     if segment.end - start < 1 || byte_at(data, start) != count -> return Err(.Unsupported)
@@ -963,7 +963,7 @@ priv jpeg_decode: fn(data: [U8], frame: JPEGFrame, limits: Limits) -> Image Imag
 
 // Decodes one interleaved scan into `planes` and returns where the marker
 // after its data starts.
-priv jpeg_scan: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, tables: JPEGTables, planes: &JPEGPlanes) -> Int ImageError! {
+priv jpeg_scan: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, tables: JPEGTables, planes: ^JPEGPlanes) -> Int ImageError! {
     loop table in frame.tables {
         if !tables.defined[table] -> return Err(.Malformed)
     }
@@ -1424,7 +1424,7 @@ JPEGCodes: struct {
     sizes: [Int],
 }
 
-priv jpeg_put: fn(bits: &JPEGWriter, value: Int, size: Int) {
+priv jpeg_put: fn(bits: ^JPEGWriter, value: Int, size: Int) {
     loop index in 0..<size {
         bits.pending = (bits.pending << 1) + ((value >> (size - 1 - index)) & 1)
         bits.count += 1
@@ -1438,7 +1438,7 @@ priv jpeg_put: fn(bits: &JPEGWriter, value: Int, size: Int) {
 }
 
 // Pads the last byte with one bits.
-priv jpeg_flush: fn(bits: &JPEGWriter) {
+priv jpeg_flush: fn(bits: ^JPEGWriter) {
     loop bits.count > 0 -> jpeg_put(bits, 1, 1)
 }
 
@@ -1455,7 +1455,7 @@ priv bit_size: fn(value: Int) -> Int {
 
 // A coefficient's bits after its size: negative values are one less, in
 // `size` bits.
-priv jpeg_amplitude: fn(bits: &JPEGWriter, value: Int) {
+priv jpeg_amplitude: fn(bits: ^JPEGWriter, value: Int) {
     size: bit_size(value)
     jpeg_put(bits, if value < 0 -> value + (1 << size) - 1 else -> value, size)
 }
@@ -1492,7 +1492,7 @@ priv jpeg_quant: fn(base: [Int], quality: Int) -> [Int] {
 // One pass of libjpeg's integer forward DCT: eight inputs `step` apart from
 // `from`, eight outputs `step` apart. The first pass (`pass` 1) keeps two
 // fraction bits that the second descales away.
-priv jpeg_fdct_pass: fn(input: [Int], output: &[Int], from: Int, step: Int, pass: Int) {
+priv jpeg_fdct_pass: fn(input: [Int], output: ^[Int], from: Int, step: Int, pass: Int) {
     d0: input[from]
     d1: input[from + step]
     d2: input[from + 2 * step]
@@ -1535,7 +1535,7 @@ priv jpeg_divide: fn(value: Int, divisor: Int) -> Int {
 // Codes one block of level-shifted samples: forward DCT, quantization by
 // the zigzag `quant`, then Huffman codes after the DC `predictor`. Returns
 // the quantized DC, the next prediction.
-priv jpeg_encode_block: fn(samples: [Int], work: &[Int], coef: &[Int], quant: [Int], dc: JPEGCodes, ac: JPEGCodes, predictor: Int, bits: &JPEGWriter) -> Int {
+priv jpeg_encode_block: fn(samples: [Int], work: ^[Int], coef: ^[Int], quant: [Int], dc: JPEGCodes, ac: JPEGCodes, predictor: Int, bits: ^JPEGWriter) -> Int {
     loop row in 0..<8 -> jpeg_fdct_pass(samples, work, row * 8, 1, 1)
     loop column in 0..<8 -> jpeg_fdct_pass(work, coef, column, 8, 2)
     value: jpeg_divide(coef[0], quant[0] * 8)
@@ -1564,7 +1564,7 @@ priv jpeg_encode_block: fn(samples: [Int], work: &[Int], coef: &[Int], quant: [I
     value
 }
 
-priv push_marker: fn(out: &[U8], marker: Int, body: [U8]) {
+priv push_marker: fn(out: ^[U8], marker: Int, body: [U8]) {
     out.push(U8{0xFF})
     out.push(U8{marker})
     out.push(U8{(body.len() + 2) >> 8})
@@ -1844,7 +1844,7 @@ C_TEST_JPEG_LIMITS: Limits{max_input_bytes: 8192, max_pixels: 256, max_output_by
 // the test tables: DC size `s` is the 4-bit code `s`; AC symbols are 8-bit
 // codes, 0 for end-of-block, 1 for sixteen zeros and `2 + run * 10 + size
 // - 1` otherwise.
-priv test_block: fn(bits: &JPEGWriter, zigzag: [Int], predictor: Int) {
+priv test_block: fn(bits: ^JPEGWriter, zigzag: [Int], predictor: Int) {
     difference: zigzag[0] - predictor
     jpeg_put(bits, bit_size(difference), 4)
     jpeg_amplitude(bits, difference)
@@ -1881,12 +1881,12 @@ priv test_coefficients: fn(pairs: [Int]) -> [Int] {
     zigzag
 }
 
-priv push_be16: fn(out: &[U8], value: Int) {
+priv push_be16: fn(out: ^[U8], value: Int) {
     out.push(U8{value >> 8})
     out.push(U8{value & 255})
 }
 
-priv push_segment: fn(out: &[U8], marker: Int, body: [U8]) {
+priv push_segment: fn(out: ^[U8], marker: Int, body: [U8]) {
     out.push(U8{0xFF})
     out.push(U8{marker})
     push_be16(out, body.len() + 2)

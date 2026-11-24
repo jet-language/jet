@@ -8,7 +8,7 @@ Reuser: struct {
     taken: Int,
 
     impl mem.Allocator {
-        allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        allocate: fn(^self, size: Int, align: Int) -> mem.Block mem.AllocError! {
             self.taken += 1
             loop i in 0..<self.kept.len() {
                 if self.kept[i].size() >= size && self.kept[i].address() & align - 1 == 0 {
@@ -19,9 +19,9 @@ Reuser: struct {
             Ok(block)
         }
 
-        release: fn(&self, block: &&mem.Block) Never! { self.kept.push(block) }
+        release: fn(^self, block: ^^mem.Block) Never! { self.kept.push(block) }
 
-        resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        resize: fn(^self, block: ^mem.Block, new_size: Int) -> Bool Never! {
             if new_size <= 0 || new_size >= block.size() -> return false
             self.kept.push(block.split(new_size))
             true

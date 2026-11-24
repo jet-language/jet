@@ -10,7 +10,7 @@ use jet_foundation.[Type]
 // the guard's token in place (unheld while parked), so the guard crosses by
 // address. Status 0 is Ok(); status 1 leaves the owned failure text in the
 // out word; a stop propagates before either is read.
-ir_shared_guard_wait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, condition: Int, predicate: BodyLambda, span: Span) -> Int Never! {
+ir_shared_guard_wait: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, guard: Int, condition: Int, predicate: BodyLambda, span: Span) -> Int Never! {
     editable: ir_shared_guard_editable(ir_ty(m, p, b, guard)) ?? return ir_fail_slot(b, span, "SharedGuard.wait without its checked read/edit provenance")
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     string_row: ir_value_type(m, p, Type.String) ?? return ir_type_fail(b, span, Type.String)
@@ -58,7 +58,7 @@ ir_shared_guard_wait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, gu
 
 // `condition.notify_one()` / `notify_all()`: the borrowed handle wakes one
 // or every registered waiter.
-ir_condition_notify: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: Int, all: Bool) -> Int Never! {
+ir_condition_notify: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, condition: Int, all: Bool) -> Int Never! {
     wake: ir_expr(m, p, b, condition)
     if ir_failed(b) || wake < 0 -> return -1
     _: ir_runtime(m, b, if all -> "jet_condition_notify_all" else -> "jet_condition_notify_one", [Int]{wake}, -1)
@@ -76,7 +76,7 @@ ir_shared_guard_inner: fn(ty: Type) -> Type? Never! {
 
 // The byte offset of the stored field `path` inside what `guard` lends, or
 // -1 when a step is no inline field.
-ir_shared_guard_path_offset: fn(m: &IRModule, p: IRProgram, b: IRBuilder, guard: Int, path: [TFieldRef]) -> Int Never! {
+ir_shared_guard_path_offset: fn(m: ^IRModule, p: IRProgram, b: IRBuilder, guard: Int, path: [TFieldRef]) -> Int Never! {
     inner: ir_shared_guard_inner(ir_ty(m, p, b, guard)) ?? return -1
     row := ir_value_type(m, p, inner) ?? return -1
     offset := 0
@@ -92,7 +92,7 @@ ir_shared_guard_path_offset: fn(m: &IRModule, p: IRProgram, b: IRBuilder, guard:
 // `guard.map(value -> value.field)`: the guard is taken over by a projected
 // guard lending the field (jet_rt_native_shared_guard_project); the permit
 // is released when the projected guard drops.
-ir_shared_guard_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, path: [TFieldRef], span: Span) -> Int Never! {
+ir_shared_guard_map: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, guard: Int, path: [TFieldRef], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     offset: ir_shared_guard_path_offset(m, p, b, guard, path)
     if offset < 0 {
@@ -110,7 +110,7 @@ ir_shared_guard_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, gua
 // `guard.split(value -> value.a, value -> value.b)`: both halves project
 // one shared hold of the guard (jet_rt_native_shared_guard_share), which
 // releases the permit once both have dropped.
-ir_shared_guard_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, first: [TFieldRef], second: [TFieldRef], span: Span) -> Int Never! {
+ir_shared_guard_split: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, guard: Int, first: [TFieldRef], second: [TFieldRef], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     first_member: ir_member_of_row(m, p, row, "first") ?? return ir_type_fail(b, span, ty)
     second_member: ir_member_of_row(m, p, row, "second") ?? return ir_type_fail(b, span, ty)

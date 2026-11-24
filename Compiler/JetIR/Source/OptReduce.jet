@@ -167,7 +167,7 @@ ir_reduce_width: fn(kind: Int) -> Int Never! {
 // bodies into consecutive parts (compiler_threads_partition by size), one
 // thread each, joined in part order: every body, every row and the report
 // are the same for any thread count.
-ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], threads: CompilerThreads, report: &IROptReport) -> [Int] Never! {
+ir_opt_reduce_module: fn(m: ^IRModule, functions: ^[IRFunction], threads: CompilerThreads, report: ^IROptReport) -> [Int] Never! {
     word_row: ir_word_row(m)
     bodies: functions.len()
     weights := [Int]{}
@@ -277,14 +277,14 @@ ir_opt_reduce_part: fn(slot: Shared<IROptReducePart>, shared: Shared<IROptReduce
 }
 
 // Moves the module's rows back from the threads' view.
-ir_opt_reduce_unlend: fn(m: &IRModule, shared: Shared<IROptReduceView>) Never! {
+ir_opt_reduce_unlend: fn(m: ^IRModule, shared: Shared<IROptReduceView>) Never! {
     held := shared.guard_edit()
     ir_opt_lend_into(m, held.value.views[0])
 }
 
 // Gives the threads the leaves' rows and the Loops they take, for the
 // rewrite.
-ir_opt_reduce_publish: fn(shared: Shared<IROptReduceView>, leaves: [Int], taken: &&[[IRReduceLoop]]) Never! {
+ir_opt_reduce_publish: fn(shared: Shared<IROptReduceView>, leaves: [Int], taken: ^^[[IRReduceLoop]]) Never! {
     held := shared.guard_edit()
     loop row in leaves -> held.value.leaves.push(row)
     held.value.taken = taken.move()
@@ -321,7 +321,7 @@ ir_opt_reduce_leaves: fn(m: IRModule, taken: [[IRReduceLoop]]) -> [Int] Never! {
 
 // Appends, after the module's `bodies`, the leaves the Loops call that it
 // did not have, at their rows (ir_opt_reduce_leaves).
-ir_opt_reduce_add_leaves: fn(m: &IRModule, functions: &[IRFunction], leaves: [Int], bodies: Int, word_row: Int) Never! {
+ir_opt_reduce_add_leaves: fn(m: ^IRModule, functions: ^[IRFunction], leaves: [Int], bodies: Int, word_row: Int) Never! {
     loop row in bodies..<bodies + IR_REDUCE_KINDS {
         kind := -1
         loop k in 0..<IR_REDUCE_KINDS {
@@ -356,7 +356,7 @@ ir_opt_reduce_add_leaves: fn(m: &IRModule, functions: &[IRFunction], leaves: [In
 // The Loops of `f` a leaf takes, in order, with a note in the report per
 // Loop it counts (ir_opt_reduce_module); `f` comes out compacted when it
 // has a Loop.
-ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, report: &IROptReport) -> [IRReduceLoop] Never! {
+ir_opt_reduce_loops: fn(m: IRModule, f: ^IRFunction, report: ^IROptReport) -> [IRReduceLoop] Never! {
     taken := [IRReduceLoop]{}
     if f.asm != None -> return taken
     has_loop := false
@@ -413,7 +413,7 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, report: &IROptReport) -> [I
 // leaf before the fallback loop already handles the entire inline-Int fast path.
 // Drop the redundant fast copy (replacing it with Nops until rewrite compacts)
 // and keep only the fallback loop's single leaf.
-ir_reduce_collapse_versioned: fn(f: &IRFunction, latest: [Int], taken: &[IRReduceLoop]) Never! {
+ir_reduce_collapse_versioned: fn(f: ^IRFunction, latest: [Int], taken: ^[IRReduceLoop]) Never! {
     if taken.len() < 2 -> return
     keep := loop _ in 0..<taken.len() -> true
     i := 0
@@ -505,7 +505,7 @@ ir_reduce_collapse_versioned: fn(f: &IRFunction, latest: [Int], taken: &[IRReduc
 
 // Puts the leaf call (`leaves`, by kind) in front of each Loop of `f` in
 // `taken`.
-ir_opt_reduce_rewrite: fn(f: &IRFunction, taken: [IRReduceLoop], leaves: [Int], word_row: Int) Never! {
+ir_opt_reduce_rewrite: fn(f: ^IRFunction, taken: [IRReduceLoop], leaves: [Int], word_row: Int) Never! {
     if taken.len() == 0 {
         return
     }
@@ -1103,7 +1103,7 @@ ir_reduce_is_test: fn(f: IRFunction, k: Int, index: Int) -> Bool Never! {
 }
 
 // The leaf call in front of the Loop `plan.at`, as the header comment shows.
-ir_reduce_call: fn(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: Int, word_row: Int) Never! {
+ir_reduce_call: fn(f: ^IRFunction, code: ^IROptCode, plan: IRReduceLoop, leaf: Int, word_row: Int) Never! {
     line: f.code_line[plan.at]
     end: f.a[plan.at]
     data_value: ir_reduce_value(f, code, plan.at, end, plan.base, line)
@@ -1167,7 +1167,7 @@ ir_reduce_call: fn(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: I
 // The Ifs that the inline Int word `value` lies inside jet_int_checked_fixed's
 // `kind` (0..3 the signed 8..64-bit integers, 4..7 the unsigned ones:
 // Int.jet), opened in turn; returns how many.
-ir_reduce_narrow_tests: fn(f: &IRFunction, code: &IROptCode, value: Int, kind: Int, bool_row: Int, word_row: Int, line: Int) -> Int Never! {
+ir_reduce_narrow_tests: fn(f: ^IRFunction, code: ^IROptCode, value: Int, kind: Int, bool_row: Int, word_row: Int, line: Int) -> Int Never! {
     bits: 8 << (kind %% 4)
     signed: kind < 4
     opened := 0
@@ -1183,7 +1183,7 @@ ir_reduce_narrow_tests: fn(f: &IRFunction, code: &IROptCode, value: Int, kind: I
 }
 
 // `if value <op> constant`, opened.
-ir_reduce_test_const: fn(f: &IRFunction, code: &IROptCode, op: IROp, value: Int, constant: Int, bool_row: Int, word_row: Int, line: Int) Never! {
+ir_reduce_test_const: fn(f: ^IRFunction, code: ^IROptCode, op: IROp, value: Int, constant: Int, bool_row: Int, word_row: Int, line: Int) Never! {
     bound: ir_slot(f, word_row, IRSlotKind.Temp, -1, line)
     ir_opt_code_put(code, .Const, bound, constant, -1, -1, line)
     holds: ir_slot(f, bool_row, IRSlotKind.Temp, -1, line)
@@ -1193,7 +1193,7 @@ ir_reduce_test_const: fn(f: &IRFunction, code: &IROptCode, op: IROp, value: Int,
 
 // `slot`'s value before the Loop: the slot itself when the Loop never
 // writes it, else its Const, load or Move again into a fresh slot.
-ir_reduce_value: fn(f: &IRFunction, code: &IROptCode, at: Int, end: Int, slot: Int, line: Int) -> Int Never! {
+ir_reduce_value: fn(f: ^IRFunction, code: ^IROptCode, at: Int, end: Int, slot: Int, line: Int) -> Int Never! {
     def: ir_reduce_def(f, at, end, slot)
     if def < 0 -> return slot
     fresh: ir_slot(f, f.slot_type[slot], IRSlotKind.Temp, -1, line)
@@ -1209,7 +1209,7 @@ ir_reduce_value: fn(f: &IRFunction, code: &IROptCode, at: Int, end: Int, slot: I
 }
 
 // `slot` as a word of `word_row`: itself, or moved into a fresh one.
-ir_reduce_word: fn(f: &IRFunction, code: &IROptCode, slot: Int, word_row: Int, line: Int) -> Int Never! {
+ir_reduce_word: fn(f: ^IRFunction, code: ^IROptCode, slot: Int, word_row: Int, line: Int) -> Int Never! {
     if f.slot_type[slot] == word_row -> return slot
     fresh: ir_slot(f, word_row, IRSlotKind.Temp, -1, line)
     ir_opt_code_put(code, .Move, fresh, slot, -1, -1, line)

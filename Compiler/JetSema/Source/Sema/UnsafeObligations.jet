@@ -155,7 +155,7 @@ SEMA_UNSAFE_RAW_OPERATIONS: [SemaRawOperation]{
 
 // The operation of SEMA_UNSAFE_RAW_OPERATIONS the method call
 // `receiver.method(args)` performs, pushed to `out`; nothing for any other.
-sema_unsafe_method_operation: fn(method: String, receiver: Expr, args: [CallArg], span: Span, out: &[SemaUnsafeOperation]) Never! {
+sema_unsafe_method_operation: fn(method: String, receiver: Expr, args: [CallArg], span: Span, out: ^[SemaUnsafeOperation]) Never! {
     loop row in SEMA_UNSAFE_RAW_OPERATIONS {
         if row.form == SEMA_RAW_CALL || method != row.name -> next
         if row.form == SEMA_RAW_MEM && !sema_unsafe_mem_receiver(receiver) -> next
@@ -167,7 +167,7 @@ sema_unsafe_method_operation: fn(method: String, receiver: Expr, args: [CallArg]
 // The operation of SEMA_UNSAFE_RAW_OPERATIONS the direct call `name(args)`
 // performs, pushed to `out` with the roots of its leading address arguments;
 // nothing for any other call.
-sema_unsafe_call_operation: fn(name: String, args: [CallArg], span: Span, out: &[SemaUnsafeOperation]) Never! {
+sema_unsafe_call_operation: fn(name: String, args: [CallArg], span: Span, out: ^[SemaUnsafeOperation]) Never! {
     loop row in SEMA_UNSAFE_RAW_OPERATIONS {
         if row.form != SEMA_RAW_CALL -> next
         if !(if row.prefix -> name.starts_with(row.name) else -> name == row.name) -> next
@@ -208,11 +208,11 @@ sema_unsafe_inspect: fn(modules: [SemaGateModule], gates: GateSet) -> UnsafeInsp
     result
 }
 
-sema_unsafe_diagnostic: fn(result: &UnsafeInspection, source: String, code: String, span: Span?, what: String, why: String, fix: String) Never! {
+sema_unsafe_diagnostic: fn(result: ^UnsafeInspection, source: String, code: String, span: Span?, what: String, why: String, fix: String) Never! {
     result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error_optional(code, span, what, why, fix)})
 }
 
-sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspection) Never! {
+sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: ^UnsafeInspection) Never! {
     loop row in modules {
         sema_unsafe_mapping_keepers(row, result)
         path: row.policy_path ?? next
@@ -269,7 +269,7 @@ sema_unsafe_path_within: fn(path: String, prefixes: [String]) -> Bool Never! {
 // fix names the safe type that replaces it, then the kernel field. `at` names
 // the operation's own source and line in the headline when the file is a
 // composed unit, whose location is the unit's.
-sema_unsafe_memory_refusal: fn(result: &UnsafeInspection, source: String, path: String, no_kernel: Bool, kind: String, span: Span, at: String) Never! {
+sema_unsafe_memory_refusal: fn(result: ^UnsafeInspection, source: String, path: String, no_kernel: Bool, kind: String, span: Span, at: String) Never! {
     safe: if kind == "alloc_raw" || kind == "free_raw" -> "hold the memory in a `[T]` list or an owner a kernel file hands out" else -> "read and write through a `[T]` list or a `View<T>` a kernel owner hands out"
     field: if no_kernel -> "name the package's kernel files in `package.jet`: `policy: {{ memory: .Kernel([\"{path}\"]) }}`" else -> "add `{path}` to `policy.memory` in `package.jet`"
     site: if at == "" -> "" else -> " at {at}"
@@ -291,7 +291,7 @@ SEMA_MAPPING_KEEPERS: [{package: String, path: String, checkout: String}]{
 // kernel file: a mapping the sentry counts live must be one a mapping
 // primitive just made, so every other mapping goes through those
 // primitives.
-sema_unsafe_mapping_keepers: fn(row: SemaGateModule, result: &UnsafeInspection) Never! {
+sema_unsafe_mapping_keepers: fn(row: SemaGateModule, result: ^UnsafeInspection) Never! {
     loop keeper in SEMA_MAPPING_KEEPERS {
         if row.package_identity.starts_with(keeper.package) && row.policy_path == (Val(keeper.path)) {
             return
@@ -365,7 +365,7 @@ sema_unsafe_last_at: fn(starts: [Int], offset: Int) -> Int? Never! {
 // A composed unit holds many sources: each raw operation answers to the
 // source it stands in, and a refusal names that source and its line. Each
 // item of a kernel source answers the kernel address rule (E3114).
-sema_unsafe_unit_kernel: fn(row: SemaGateModule, unit: SemaUnitMap, path: String, kernel: [String], result: &UnsafeInspection) Never! {
+sema_unsafe_unit_kernel: fn(row: SemaGateModule, unit: SemaUnitMap, path: String, kernel: [String], result: ^UnsafeInspection) Never! {
     starts: loop source in unit.sources -> source.start
     loop gate in result.gates {
         if gate.source != row.source -> next
@@ -387,7 +387,7 @@ sema_unsafe_unit_kernel: fn(row: SemaGateModule, unit: SemaUnitMap, path: String
 // E3113 for a raw operation of a composed unit whose own source is no kernel
 // file, naming that source and line; one in the unit's import header answers
 // to the unit's own `path`.
-sema_unsafe_unit_refusal: fn(result: &UnsafeInspection, source: String, unit: SemaUnitMap, starts: [Int], path: String, kernel: [String], kind: String, span: Span) Never! {
+sema_unsafe_unit_refusal: fn(result: ^UnsafeInspection, source: String, unit: SemaUnitMap, starts: [Int], path: String, kernel: [String], kind: String, span: Span) Never! {
     index: sema_unsafe_last_at(starts, span.start) ?? -1
     if index < 0 {
         sema_unsafe_memory_refusal(result, source, path, kernel.len() == 0, kind, span, "")
@@ -407,7 +407,7 @@ sema_unsafe_unit_refusal: fn(result: &UnsafeInspection, source: String, unit: Se
 // integer or pointer of the caller's choosing to a raw memory operation's
 // address (E3114). An `#Unsafe` function is exempt: each caller vouches for
 // it in its own gate.
-sema_unsafe_kernel_item: fn(item: Item, program: Program, source: String, result: &UnsafeInspection) Never! {
+sema_unsafe_kernel_item: fn(item: Item, program: Program, source: String, result: ^UnsafeInspection) Never! {
     if item == {
         .Func(function) -> { sema_unsafe_kernel_function(function, "", [Field]{}, source, result) }
         .Struct(definition) -> {
@@ -443,7 +443,7 @@ sema_unsafe_kernel_item: fn(item: Item, program: Program, source: String, result
 }
 
 // An `impl` block's methods see the fields of the record it extends.
-sema_unsafe_kernel_impl: fn(implementation: ImplDef, program: Program, source: String, result: &UnsafeInspection) Never! {
+sema_unsafe_kernel_impl: fn(implementation: ImplDef, program: Program, source: String, result: ^UnsafeInspection) Never! {
     loop item in program.items {
         if item == .Struct(definition) {
             if definition.name == implementation.type_name {
@@ -464,7 +464,7 @@ sema_unsafe_kernel_impl: fn(implementation: ImplDef, program: Program, source: S
 // record `owner` it belongs to, read as `self.field`. Each local computed
 // from one joins them; a raw operation inside the function whose address
 // comes from one is refused, once per origin.
-sema_unsafe_kernel_function: fn(function: Func, owner: String, fields: [Field], source: String, result: &UnsafeInspection) Never! {
+sema_unsafe_kernel_function: fn(function: Func, owner: String, fields: [Field], source: String, result: ^UnsafeInspection) Never! {
     names := [String]{}
     if function.is_pub && !function.is_unsafe {
         loop param in function.params {
@@ -510,7 +510,7 @@ sema_unsafe_address_type: fn(ty: Type) -> Bool Never! {
 
 // Add each local of `body` whose value is computed from one of `names`,
 // with the origin it came from.
-sema_unsafe_address_locals: fn(body: [Stmt], names: &[String], origins: &[Int]) Never! {
+sema_unsafe_address_locals: fn(body: [Stmt], names: ^[String], origins: ^[Int]) Never! {
     loop statement in body {
         if statement == .Val(binding) {
             sema_unsafe_address_local(binding.name, binding.init, names, origins)
@@ -527,7 +527,7 @@ sema_unsafe_address_locals: fn(body: [Stmt], names: &[String], origins: &[Int]) 
     }
 }
 
-sema_unsafe_address_local: fn(name: String, value: Expr, names: &[String], origins: &[Int]) Never! {
+sema_unsafe_address_local: fn(name: String, value: Expr, names: ^[String], origins: ^[Int]) Never! {
     if name == "" || names.contains(name) {
         return
     }
@@ -543,7 +543,7 @@ sema_unsafe_address_local: fn(name: String, value: Expr, names: &[String], origi
 
 // Refuse a raw operation inside `function` whose address comes from one of
 // `names`; each origin is reported once.
-sema_unsafe_kernel_address: fn(function: Func, owner: String, kind: String, span: Span, address: [String], names: [String], origins: [Int], reported: &[Int], source: String, result: &UnsafeInspection) Never! {
+sema_unsafe_kernel_address: fn(function: Func, owner: String, kind: String, span: Span, address: [String], names: [String], origins: [Int], reported: ^[Int], source: String, result: ^UnsafeInspection) Never! {
     if span.start < function.span.start || span.end > function.span.end {
         return
     }
@@ -566,7 +566,7 @@ sema_unsafe_kernel_address: fn(function: Func, owner: String, kind: String, span
 // within what its base names (`p.offset(i)`, `list[i]`), so only the base
 // counts; `*x` and `mem.address_of(x)` take the address of a place the
 // function owns, so they name nothing.
-sema_unsafe_address_roots: fn(expression: Expr, out: &[String]) Never! {
+sema_unsafe_address_roots: fn(expression: Expr, out: ^[String]) Never! {
     if expression == {
         .Ident(name, _, _) -> {
             if !out.contains(name) -> out.push(name.copy())
@@ -652,7 +652,7 @@ sema_unsafe_address_roots: fn(expression: Expr, out: &[String]) Never! {
 }
 
 // `mem.op(pointer, …)` takes its pointer first; `pointer.op(…)` is its receiver.
-sema_unsafe_pointer_roots: fn(receiver: Expr, args: [CallArg], out: &[String]) Never! {
+sema_unsafe_pointer_roots: fn(receiver: Expr, args: [CallArg], out: ^[String]) Never! {
     if sema_unsafe_mem_receiver(receiver) {
         if args.len() > 0 -> sema_unsafe_address_roots(args[0].expr, out)
         return
@@ -693,7 +693,7 @@ sema_unsafe_operation_roots: fn(method: String, receiver: Expr, args: [CallArg])
     roots
 }
 
-sema_unsafe_expert_diagnostic: fn(result: &UnsafeInspection, source: String, subject: String, path: String, span: Span?) Never! {
+sema_unsafe_expert_diagnostic: fn(result: ^UnsafeInspection, source: String, subject: String, path: String, span: Span?) Never! {
     sema_unsafe_diagnostic(result, source, "E2960", span, "Package policy `policy.expert` rejects `{subject}` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.expert` in `package.jet`.")
 }
 
@@ -768,7 +768,7 @@ sema_unsafe_expert_body: fn(body: [Stmt]) -> {name: String, span: Span}? Never! 
     None
 }
 
-sema_unsafe_visit_item: fn(item: Item, source: String, declarations: [PolicyDeclaration], program: Program, gates: GateSet, result: &UnsafeInspection) Never! {
+sema_unsafe_visit_item: fn(item: Item, source: String, declarations: [PolicyDeclaration], program: Program, gates: GateSet, result: ^UnsafeInspection) Never! {
     if item == {
         .Func(function) -> {
             sema_unsafe_visit_function(function, source, declarations, program, gates, result)
@@ -810,7 +810,7 @@ sema_unsafe_visit_item: fn(item: Item, source: String, declarations: [PolicyDecl
     }
 }
 
-sema_unsafe_visit_function: fn(function: Func, source: String, declarations: [PolicyDeclaration], program: Program, gates: GateSet, result: &UnsafeInspection) Never! {
+sema_unsafe_visit_function: fn(function: Func, source: String, declarations: [PolicyDeclaration], program: Program, gates: GateSet, result: ^UnsafeInspection) Never! {
     if !function.is_unsafe {
         sema_unsafe_plain_body(function.body, source, declarations, gates, result)
         return
@@ -827,7 +827,7 @@ sema_unsafe_visit_function: fn(function: Func, source: String, declarations: [Po
 // A body outside any `#Unsafe`: its nested gates, then each obligation
 // assertion outside them, which has no meaning there. One walk finds both;
 // the assertions are reported after the gates, in walk order.
-sema_unsafe_plain_body: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
+sema_unsafe_plain_body: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: ^UnsafeInspection) Never! {
     outside := [Span]{}
     sema_unsafe_plain_walk(body, source, declarations, gates, result, outside)
     loop span in outside {
@@ -835,7 +835,7 @@ sema_unsafe_plain_body: fn(body: [Stmt], source: String, declarations: [PolicyDe
     }
 }
 
-sema_unsafe_plain_walk: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection, outside: &[Span]) Never! {
+sema_unsafe_plain_walk: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: ^UnsafeInspection, outside: ^[Span]) Never! {
     loop statement in body {
         if statement == .Unsafe(audit, audit_expr, nested, span) {
             sema_unsafe_visit_gate(span, span, false, audit, audit_expr != None, nested, source, declarations, gates, result)
@@ -848,7 +848,7 @@ sema_unsafe_plain_walk: fn(body: [Stmt], source: String, declarations: [PolicyDe
     }
 }
 
-sema_unsafe_nested_gates: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
+sema_unsafe_nested_gates: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: ^UnsafeInspection) Never! {
     loop statement in body {
         if statement == .Unsafe(audit, audit_expr, nested, span) {
             sema_unsafe_visit_gate(span, span, false, audit, audit_expr != None, nested, source, declarations, gates, result)
@@ -860,7 +860,7 @@ sema_unsafe_nested_gates: fn(body: [Stmt], source: String, declarations: [Policy
     }
 }
 
-sema_unsafe_visit_gate: fn(target: Span, span: Span, is_function: Bool, reason: String?, source_has_reason: Bool, body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
+sema_unsafe_visit_gate: fn(target: Span, span: Span, is_function: Bool, reason: String?, source_has_reason: Bool, body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: ^UnsafeInspection) Never! {
     outer := [PolicyDeclaration]{}
     site := [PolicyDeclaration]{}
     loop declaration in declarations {
@@ -961,7 +961,7 @@ sema_unsafe_assertion_span: fn(statement: Stmt) -> Span? Never! {
     None
 }
 
-sema_unsafe_scan_sequence: fn(body: [Stmt], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
+sema_unsafe_scan_sequence: fn(body: [Stmt], track: Bool, gate: ^UnsafeGateInspection, source: String, diagnostics: ^[UnsafeDiagnostic]) Never! {
     pending := [SemaUnsafeOperation]{}
     loop statement in body {
         if sema_unsafe_assertion(statement) == .Val(assertion) {
@@ -1002,7 +1002,7 @@ sema_unsafe_any_obligation: fn(pending: [SemaUnsafeOperation]) -> Bool Never! {
     false
 }
 
-sema_unsafe_discharge: fn(operations: &&[SemaUnsafeOperation], asserted: [String], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
+sema_unsafe_discharge: fn(operations: ^^[SemaUnsafeOperation], asserted: [String], track: Bool, gate: ^UnsafeGateInspection, source: String, diagnostics: ^[UnsafeDiagnostic]) Never! {
     loop operation in operations.move() {
         if operation.required.len() == 0 {
             gate.memory_operations.push(operation)
@@ -1020,7 +1020,7 @@ sema_unsafe_discharge: fn(operations: &&[SemaUnsafeOperation], asserted: [String
     }
 }
 
-sema_unsafe_shallow_operations: fn(statement: Stmt, out: &[SemaUnsafeOperation]) Never! {
+sema_unsafe_shallow_operations: fn(statement: Stmt, out: ^[SemaUnsafeOperation]) Never! {
     if statement == {
         .Expr(expression) | .DeferClose(expression, _) | .Return(.Val(expression), _) -> {
             sema_unsafe_expr_operations(expression, out)
@@ -1072,7 +1072,7 @@ sema_unsafe_shallow_operations: fn(statement: Stmt, out: &[SemaUnsafeOperation])
     }
 }
 
-sema_unsafe_expr_operations: fn(expression: Expr, out: &[SemaUnsafeOperation]) Never! {
+sema_unsafe_expr_operations: fn(expression: Expr, out: ^[SemaUnsafeOperation]) Never! {
     if expression == {
         .PtrFromAddr(_, _, _, addr, span, _) -> {
             roots := [String]{}

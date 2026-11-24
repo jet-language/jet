@@ -111,7 +111,7 @@ navigate: fn(router: WebRouter, path: String) -> WebNavigation WebRouterError! {
     Ok(nav)
 }
 
-preload: fn(router: &WebRouter, path: String) -> WebNavigation WebRouterError! {
+preload: fn(router: ^WebRouter, path: String) -> WebNavigation WebRouterError! {
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) {
         return Err(WebRouterError.Invalid)
     }
@@ -125,7 +125,7 @@ preload: fn(router: &WebRouter, path: String) -> WebNavigation WebRouterError! {
     Ok(nav)
 }
 
-abort: fn(router: &WebRouter) -> Bool Never! {
+abort: fn(router: ^WebRouter) -> Bool Never! {
     if router.status != WebNavigationStatus.Preloading && router.status != WebNavigationStatus.Pending {
         return false
     }
@@ -139,14 +139,14 @@ stale: fn(router: WebRouter, path: String) -> Int Never! {
 }
 
 // Drops the cached result for `path`; 1 when the router held one.
-expire: fn(router: &WebRouter, path: String) -> Int Never! {
+expire: fn(router: ^WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
     _: cache_path(router, path, WebRouterCacheStatus.Invalidated)
     1
 }
 
-collect: fn(router: &WebRouter, path: String) -> Int Never! {
+collect: fn(router: ^WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
     _: cache_path(router, path, WebRouterCacheStatus.Collected)
@@ -512,7 +512,7 @@ field_name_allowed: fn(fields: [WebRouterField], name: String) -> Bool Never! {
     false
 }
 
-cache_path: fn(router: &WebRouter, path: String, state: WebRouterCacheStatus) -> Int Never! {
+cache_path: fn(router: ^WebRouter, path: String, state: WebRouterCacheStatus) -> Int Never! {
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !valid_percent_encoding(path) {
         return -1
     }

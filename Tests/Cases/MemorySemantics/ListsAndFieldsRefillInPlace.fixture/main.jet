@@ -37,23 +37,23 @@ status_kb: fn(field: String) -> Int {
     panic("no {field} line")
 }
 
-fill: fn(out: &[Int]) {
+fill: fn(out: ^[Int]) {
     out = [Int]{}
     loop i in 0..<COUNT -> out.push(i)
 }
 
-append_text: fn(out: &String, chunk: String) {
+append_text: fn(out: ^String, chunk: String) {
     loop _ in 0..<CHUNKS -> out += chunk
 }
 
-fill_fields: fn(into: &Buffers, chunk: String) {
+fill_fields: fn(into: ^Buffers, chunk: String) {
     into.text = ""
     into.items = [Int]{}
     loop i in 0..<COUNT -> into.items.push(i)
     append_text(into.text, chunk)
 }
 
-words: fn(out: &[String], seed: Int) {
+words: fn(out: ^[String], seed: Int) {
     out = [String]{}
     loop i in 0..<(2 + seed % 3) -> out.push("w{seed}-{i}")
 }

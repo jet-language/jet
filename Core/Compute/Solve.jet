@@ -19,7 +19,7 @@ Solver: struct {
 
     new: fn(seed: Int) -> Solver Never! { Solver{seed: seed, checked: 0, failures: 0} }
 
-    require: fn(&self, ok: Bool) Never! {
+    require: fn(^self, ok: Bool) Never! {
         self.checked += 1
         if !ok -> self.failures += 1
     }
@@ -165,7 +165,7 @@ checked_numel: fn(shape: [Int]) -> Int ComputeError! {
     Ok(n)
 }
 
-factorize: fn(input: &&[Float], n: Int, profile: String) -> Factorization ComputeError! {
+factorize: fn(input: ^^[Float], n: Int, profile: String) -> Factorization ComputeError! {
     factors := input
     pivots := [Int]{}
     matrix_scale := Float{0.0}

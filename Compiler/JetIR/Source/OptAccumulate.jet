@@ -62,14 +62,14 @@
 use jet_foundation.[Type, compiler_threads_single]
 
 // Rewrites each recursive function the header comment describes.
-ir_opt_accumulate: fn(m: &IRModule, functions: &[IRFunction], recursive: [Bool], keys: [String]) Never! {
+ir_opt_accumulate: fn(m: ^IRModule, functions: ^[IRFunction], recursive: [Bool], keys: [String]) Never! {
     loop id in 0..<functions.len() {
         if recursive[id] -> _ := ir_opt_accumulate_function(m, functions[id], id, keys)
     }
 }
 
 // Rewrites function `id` (`f`) as the header comment says; whether it did.
-ir_opt_accumulate_function: fn(m: &IRModule, f: &IRFunction, id: Int, keys: [String]) -> Bool Never! {
+ir_opt_accumulate_function: fn(m: ^IRModule, f: ^IRFunction, id: Int, keys: [String]) -> Bool Never! {
     count: f.op.len()
     if f.asm != None || count == 0 || f.result < 0 || !ir_opt_accumulate_value(m, f.result) {
         return false
@@ -461,7 +461,7 @@ ir_opt_accumulate_const: fn(f: IRFunction, slot: Int, before: Int) -> Int? Never
 }
 
 // `own := source`: a clone of an Int, else a copy.
-ir_opt_accumulate_take: fn(m: IRModule, f: &IRFunction, code: &IROptCode, own: Int, source: Int, clone: Int, line: Int) Never! {
+ir_opt_accumulate_take: fn(m: IRModule, f: ^IRFunction, code: ^IROptCode, own: Int, source: Int, clone: Int, line: Int) Never! {
     if m.types[f.slot_type[own]].kind == .Int {
         args: ir_args(f, [Int]{source})
         ir_opt_code_put(code, IROp.CallRuntime, own, clone, args, 1, line)
@@ -470,7 +470,7 @@ ir_opt_accumulate_take: fn(m: IRModule, f: &IRFunction, code: &IROptCode, own: I
 
 // The drops before a return out of the loop: the accumulator, the
 // parameters' copies and the arguments the body gave away (`pending`).
-ir_opt_accumulate_release: fn(m: IRModule, f: IRFunction, code: &IROptCode, acc: Int, owns: [Int], pending: [Int], line: Int) Never! {
+ir_opt_accumulate_release: fn(m: IRModule, f: IRFunction, code: ^IROptCode, acc: Int, owns: [Int], pending: [Int], line: Int) Never! {
     if m.types[f.result].drop != "" -> ir_opt_code_put(code, IROp.Drop, -1, acc, -1, -1, line)
     loop own in owns {
         if m.types[f.slot_type[own]].kind == .Int {
@@ -487,13 +487,13 @@ ir_opt_accumulate_release: fn(m: IRModule, f: IRFunction, code: &IROptCode, acc:
 // stop point. Function 0 is the stop poll, g is function 1 and its
 // parameter n slot 0.
 
-ir_accumulate_test_head: fn(m: &IRModule, int: Bool) -> IRFunction Never! {
+ir_accumulate_test_head: fn(m: ^IRModule, int: Bool) -> IRFunction Never! {
     ir_accumulate_test_guarded(m, int, IROp.Lt, 2)
 }
 
 // g starting with `if n test bound -> return 1`, or with no test when `test`
 // is Nop.
-ir_accumulate_test_guarded: fn(m: &IRModule, int: Bool, test: IROp, bound: Int) -> IRFunction Never! {
+ir_accumulate_test_guarded: fn(m: ^IRModule, int: Bool, test: IROp, bound: Int) -> IRFunction Never! {
     _: ir_stop_poll(m, IR_STOP_POLL_KEY)
     ty := ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     if int -> ty = ir_type_row(m, Type.Int) ?? panic("no Int row")
@@ -526,7 +526,7 @@ ir_accumulate_test_int: fn(m: IRModule, g: IRFunction) -> Bool Never! {
 
 // `got := g(n - less)`, the drop of its argument, and the stop point after
 // the call; returns `got`.
-ir_accumulate_test_call: fn(m: &IRModule, g: &IRFunction, less: Int, line: Int) -> Int Never! {
+ir_accumulate_test_call: fn(m: ^IRModule, g: ^IRFunction, less: Int, line: Int) -> Int Never! {
     int: ir_accumulate_test_int(m, g)
     by: ir_slot(g, g.result, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(g, IROp.Const, by, less, -1, -1, line)
@@ -547,7 +547,7 @@ ir_accumulate_test_call: fn(m: &IRModule, g: &IRFunction, less: Int, line: Int) 
 }
 
 // `out := a op b` with overflow `c`; returns `out`.
-ir_accumulate_test_op: fn(g: &IRFunction, op: IROp, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
+ir_accumulate_test_op: fn(g: ^IRFunction, op: IROp, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
     out: ir_slot(g, g.result, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(g, op, out, a, b, c, line)
     out
@@ -556,7 +556,7 @@ ir_accumulate_test_op: fn(g: &IRFunction, op: IROp, a: Int, b: Int, c: Int, line
 // Ends g with `drops` and `return sum`, runs the passes of `level` over the
 // module (without "accumulate" unless `enabled`) with IR Lint after each,
 // and returns g's calls of itself and its Loops.
-ir_accumulate_test_run: fn(m: &&IRModule, g: &&IRFunction, sum: Int, drops: [Int], level: Int, enabled: Bool) -> {calls: Int, loops: Int} Never! {
+ir_accumulate_test_run: fn(m: ^^IRModule, g: ^^IRFunction, sum: Int, drops: [Int], level: Int, enabled: Bool) -> {calls: Int, loops: Int} Never! {
     built := m.move()
     f := g.move()
     loop slot in drops -> _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 9)

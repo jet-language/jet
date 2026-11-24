@@ -99,14 +99,14 @@ envmodel_value_program: fn(source: String, environment: [String:CtValue]) -> Env
 }
 
 // A fresh generated name.
-envmodel_value_name: fn(plan: &EnvValueProgram) -> String Never! {
+envmodel_value_name: fn(plan: ^EnvValueProgram) -> String Never! {
     name: "{plan.prefix}{plan.count}"
     plan.count += 1
     name
 }
 
 // Append generated text standing for the whole of `source`.
-envmodel_value_append: fn(plan: &EnvValueProgram, text: &&String, source: Span) Never! {
+envmodel_value_append: fn(plan: ^EnvValueProgram, text: ^^String, source: Span) Never! {
     size: text.count_bytes()
     if size == 0 {
         return
@@ -117,7 +117,7 @@ envmodel_value_append: fn(plan: &EnvValueProgram, text: &&String, source: Span) 
 }
 
 // Append a copy of the source bytes from `start` to `end`.
-envmodel_value_copy: fn(plan: &EnvValueProgram, start: Int, end: Int) Never! {
+envmodel_value_copy: fn(plan: ^EnvValueProgram, start: Int, end: Int) Never! {
     if end <= start {
         return
     }
@@ -161,7 +161,7 @@ envmodel_value_structural: fn(expr: Expr) -> Bool Never! {
 // walked, and each value inside it (or the whole value) is one generated
 // value. `siblings` names the generated value of each sibling field ("" for
 // a field written in EnvModel syntax, which no value can read).
-envmodel_value_plan: fn(plan: &EnvValueProgram, expr: Expr, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_value_plan: fn(plan: ^EnvValueProgram, expr: Expr, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     current: envmodel_unparen(expr)
     if !envmodel_value_structural(current) {
         extent: envmodel_value_extent(plan, current)
@@ -193,7 +193,7 @@ envmodel_value_plan: fn(plan: &EnvValueProgram, expr: Expr, siblings: [String:St
 // Plan a value at a position whose records have one type: a headless
 // record in it, alone or as a list, map or bare-name entry, is passed
 // through `expect`, the type's `envmodel_expect_*` function.
-envmodel_value_plan_typed: fn(plan: &EnvValueProgram, expr: Expr, expect: String, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_value_plan_typed: fn(plan: ^EnvValueProgram, expr: Expr, expect: String, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     current: envmodel_unparen(expr)
     if !envmodel_value_structural(current) {
         extent: envmodel_value_extent(plan, current)
@@ -222,7 +222,7 @@ envmodel_value_plan_typed: fn(plan: &EnvValueProgram, expr: Expr, expect: String
 
 // One element of a typed position: a headless record is passed through
 // `expect`; anything else is planned as written.
-envmodel_value_plan_element: fn(plan: &EnvValueProgram, expr: Expr, expect: String, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_value_plan_element: fn(plan: ^EnvValueProgram, expr: Expr, expect: String, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     current: envmodel_unparen(expr)
     if envmodel_value_headless_record(current) {
         extent: envmodel_value_extent(plan, current)
@@ -291,7 +291,7 @@ envmodel_value_reads_as_type: fn(expr: Expr) -> Bool Never! {
 // One generated value computing `expr`, passed through `expect` unless it is
 // empty. `name` is the generated name a sibling field reads ("" for a fresh
 // one), and `label_span` the span its declaration stands for.
-envmodel_value_leaf: fn(plan: &EnvValueProgram, expr: Expr, expect: String, name: String, label_span: Span, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_value_leaf: fn(plan: ^EnvValueProgram, expr: Expr, expect: String, name: String, label_span: Span, siblings: [String:String], globals: [String:CtValue]) EnvModelEvalError! {
     span: expr_span(expr)
     extent: envmodel_value_extent(plan, expr)
     known := CtValue?{None}

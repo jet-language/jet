@@ -177,7 +177,7 @@ x64_object_section_size: fn(section: X64ObjectSection) -> Int Never! {
 }
 
 // Appends `section`'s contents to `bytes`, where the section starts at `start`.
-x64_object_section_write: fn(bytes: &[U8], start: Int, section: X64ObjectSection) Never! {
+x64_object_section_write: fn(bytes: ^[U8], start: Int, section: X64ObjectSection) Never! {
     bytes.extend(section.bytes)
     loop piece in section.pieces {
         loop bytes.len() < start + piece.at -> bytes.push(U8{section.fill})
@@ -189,7 +189,7 @@ x64_object_section_write: fn(bytes: &[U8], start: Int, section: X64ObjectSection
 }
 
 // Append `text` to a string table; returns its offset.
-elf64_string: fn(table: &[U8], text: String) -> Int Never! {
+elf64_string: fn(table: ^[U8], text: String) -> Int Never! {
     at: table.len()
     table.extend(text.bytes())
     table.push(U8{0})
@@ -199,7 +199,7 @@ elf64_string: fn(table: &[U8], text: String) -> Int Never! {
 // One symbol's `.symtab` row, its name at `name_at` in `.strtab`, and with
 // `extended` numbering its `.symtab_shndx` entry: a reserved section index
 // is SHN_XINDEX in the row and the index in the entry.
-x64_object_symbol_put: fn(symtab: &[U8], xindex: &[U8], extended: Bool, name_at: Int, info: Int, section: Int, value: Int, size: Int) Never! {
+x64_object_symbol_put: fn(symtab: ^[U8], xindex: ^[U8], extended: Bool, name_at: Int, info: Int, section: Int, value: Int, size: Int) Never! {
     elf64_u32(symtab, name_at)
     symtab.push(U8{info})
     symtab.push(U8{0})
@@ -212,7 +212,7 @@ x64_object_symbol_put: fn(symtab: &[U8], xindex: &[U8], extended: Bool, name_at:
 
 // Moves the names of a `.text` part's symbol rows (X64ObjectTextRows) to
 // the object's `.strtab`, where the part's names start at `base`.
-x64_object_symbol_rebase: fn(symtab: &[U8], base: Int) Never! {
+x64_object_symbol_rebase: fn(symtab: ^[U8], base: Int) Never! {
     loop row in 0..<(symtab.len() /% ELF64_SYMBOL_SIZE) {
         at: row * ELF64_SYMBOL_SIZE
         name: Int{symtab[at]} + (Int{symtab[at + 1]} << 8) + (Int{symtab[at + 2]} << 16) + (Int{symtab[at + 3]} << 24)
@@ -220,11 +220,11 @@ x64_object_symbol_rebase: fn(symtab: &[U8], base: Int) Never! {
     }
 }
 
-elf64_pad: fn(bytes: &[U8], align: Int) Never! {
+elf64_pad: fn(bytes: ^[U8], align: Int) Never! {
     loop bytes.len() % align != 0 -> bytes.push(U8{0})
 }
 
-elf64_section_header: fn(bytes: &[U8], name: Int, kind: Int, flags: Int, offset: Int, size: Int, link: Int, info: Int, align: Int, entry_size: Int) Never! {
+elf64_section_header: fn(bytes: ^[U8], name: Int, kind: Int, flags: Int, offset: Int, size: Int, link: Int, info: Int, align: Int, entry_size: Int) Never! {
     elf64_u32(bytes, name)
     elf64_u32(bytes, kind)
     elf64_u64(bytes, flags)
@@ -363,14 +363,14 @@ x64_object_rela_section: fn(name: String, relas: [X64ObjectRela], target: Int) -
 }
 
 // One RELA entry: offset, (symbol << 32) | kind, addend.
-x64_object_rela_put: fn(bytes: &[U8], at: Int, symbol: Int, kind: Int, addend: Int) Never! {
+x64_object_rela_put: fn(bytes: ^[U8], at: Int, symbol: Int, kind: Int, addend: Int) Never! {
     elf64_u64(bytes, at)
     elf64_u64(bytes, (symbol << 32) | kind)
     elf64_u64(bytes, addend)
 }
 
 // A RELA section of encoded entries: RELA, INFO_LINK, against .symtab, for `target`.
-x64_object_rela_bytes_section: fn(name: String, bytes: &&[U8], target: Int) -> X64ObjectSection Never! {
+x64_object_rela_bytes_section: fn(name: String, bytes: ^^[U8], target: Int) -> X64ObjectSection Never! {
     X64ObjectSection{name: name, kind: 4, flags: 0x40, bytes: bytes.move(), link: ELF64_OBJECT_SYMTAB, info: target, align: 8, entry_size: ELF64_RELA_SIZE}
 }
 
@@ -467,7 +467,7 @@ X64ObjectTextFinalize: struct {
 
 // Finalizes `items` (in reverse order, popped off the end so each task owns
 // its item without copying) in parallel and returns them in original order.
-x64_object_text_finalize_items: fn(items: &&[X64ObjectTextFinalize]) -> [X64ObjectTextRows] {
+x64_object_text_finalize_items: fn(items: ^^[X64ObjectTextFinalize]) -> [X64ObjectTextRows] {
     owned := items.move()
     if owned.len() == 0 -> return [X64ObjectTextRows]{}
     head: owned.pop() ?? panic("lost finalize item")
@@ -483,7 +483,7 @@ x64_object_text_finalize_items: fn(items: &&[X64ObjectTextFinalize]) -> [X64Obje
     out
 }
 
-x64_object_text_finalize_one: fn(item: &&X64ObjectTextFinalize) -> X64ObjectTextRows Never! {
+x64_object_text_finalize_one: fn(item: ^^X64ObjectTextFinalize) -> X64ObjectTextRows Never! {
     owned := item.move()
     rows := owned.rows.move()
     globals: owned.globals
@@ -612,13 +612,13 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
 // The `.rela.text` entry of a runtime import at `at`, a call (PLT32) or a
 // data address (PC32), with symbol 0 until the merge names its symbol
 // (X64ObjectTextRows).
-x64_object_import: fn(imports: &[String], import_names: &NameTable, import_of: &[Int], runtime_at: &[Int], runtime_local: &[Int], relas: &[U8], at: Int, symbol: String, kind: Int) Never! {
+x64_object_import: fn(imports: ^[String], import_names: ^NameTable, import_of: ^[Int], runtime_at: ^[Int], runtime_local: ^[Int], relas: ^[U8], at: Int, symbol: String, kind: Int) Never! {
     local: x64_object_import_local(imports, import_names, import_of, symbol)
     x64_object_import_rela(runtime_at, runtime_local, relas, at, local, kind)
 }
 
 // The part-local import row of runtime symbol `symbol`, added when new.
-x64_object_import_local: fn(imports: &[String], import_names: &NameTable, import_of: &[Int], symbol: String) -> Int Never! {
+x64_object_import_local: fn(imports: ^[String], import_names: ^NameTable, import_of: ^[Int], symbol: String) -> Int Never! {
     id: name_index(name_intern(import_names, symbol))
     loop import_of.len() <= id -> import_of.push(-1)
     if import_of[id] < 0 {
@@ -629,7 +629,7 @@ x64_object_import_local: fn(imports: &[String], import_names: &NameTable, import
 }
 
 // The `.rela.text` entry at `at` for part-local import row `local`.
-x64_object_import_rela: fn(runtime_at: &[Int], runtime_local: &[Int], relas: &[U8], at: Int, local: Int, kind: Int) Never! {
+x64_object_import_rela: fn(runtime_at: ^[Int], runtime_local: ^[Int], relas: ^[U8], at: Int, local: Int, kind: Int) Never! {
     runtime_at.push(relas.len())
     runtime_local.push(local)
     x64_object_rela_put(relas, at, 0, kind, -4)
@@ -637,7 +637,7 @@ x64_object_import_rela: fn(runtime_at: &[Int], runtime_local: &[Int], relas: &[U
 
 // The id of symbol name `name` in `names`, interned when new, with its rows
 // in `import_of` and `export_of` (x64_object_functions_threads).
-x64_object_symbol: fn(names: &NameTable, import_of: &[Int], export_of: &[Int], name: String) -> Int Never! {
+x64_object_symbol: fn(names: ^NameTable, import_of: ^[Int], export_of: ^[Int], name: String) -> Int Never! {
     id: name_index(name_intern(names, name))
     loop import_of.len() <= id {
         import_of.push(-1)
@@ -654,7 +654,7 @@ x64_object_text_part_take: fn(part: Shared<X64ObjectTextPart>) -> X64ObjectTextR
 
 // Takes each function's code out of `functions`, in function order; each
 // is left with none.
-x64_object_take_codes: fn(functions: &[X64CompiledFunction]) -> [[U8]] Never! {
+x64_object_take_codes: fn(functions: ^[X64CompiledFunction]) -> [[U8]] Never! {
     count: functions.len()
     codes := [[U8]]{}
     kept := [X64CompiledFunction]{}
@@ -702,7 +702,7 @@ x64_object_read_only: fn(object: X64Data) -> Bool Never! {
 // object of `data`, then, depth first in relocation order, every object its
 // relocations reach (x64_object_functions_threads lays `.data` and `.rodata`
 // out so).
-x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[Int]) Never! {
+x64_object_data_place: fn(data: [X64Data], row: Int, placed: ^[Bool], order: ^[Int]) Never! {
     if row < 0 || row >= placed.len() || placed[row] {
         return
     }
@@ -732,7 +732,7 @@ x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[I
 // reads (X64Data cold: a bounds stop's site, a `panic` report's texts), in
 // the same order. With the hot functions first (ir_x64_hot_order) a short
 // run reads its data from few pages, with no stop's report between them.
-x64_object_data_order: fn(data: [X64Data], functions: [X64CompiledFunction], data_rows: [Int], placed: &[Bool]) -> [Int] Never! {
+x64_object_data_order: fn(data: [X64Data], functions: [X64CompiledFunction], data_rows: [Int], placed: ^[Bool]) -> [Int] Never! {
     order := [Int]{}
     order.try_reserve(data.len()) ?? panic("reserve failed")
     cold_refs := [Int]{}
@@ -875,7 +875,7 @@ x64_object_test_field: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
 // always written. With `own_sections` (a library object) every function and
 // data object is in a section of its own (see the file comment). Each of
 // `data_exports` is a global symbol of its data object.
-x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool, split: Bool{false}) -> X64ExecutableResult Never! {
+x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64CompiledFunction], debug: ^^[X64FunctionDebug], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool, split: Bool{false}) -> X64ExecutableResult Never! {
     // Owned here: their code leaves them below (x64_object_take_codes).
     functions := compiled.move()
     // Per function id + 1 its first function row (-1: none); the entry stub
@@ -1098,7 +1098,7 @@ X64ObjectLaid: struct {
 // RUNTIME_PROVIDER_HOOKS of the hook it exports, -1 for none, in
 // `provider_hooks`), kept their `sizes` and `.text` `weights` and took their
 // `codes` out of them; `.text` on the threads `threads` admits.
-x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], codes: &[[U8]], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, own_sections: Bool, guard_sections: [[Int]], offsets: [Int], sizes: [Int], weights: [Int], function_rows: [Int], exported: [Bool], provider_hooks: [Int], data_rows: [Int], function_symbols: [Int]) -> X64ObjectLaid Never! {
+x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], codes: ^[[U8]], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, own_sections: Bool, guard_sections: [[Int]], offsets: [Int], sizes: [Int], weights: [Int], function_rows: [Int], exported: [Bool], provider_hooks: [Int], data_rows: [Int], function_symbols: [Int]) -> X64ObjectLaid Never! {
     // Whether a section index reaches SHN_LORESERVE (extended numbering).
     extended := false
     if own_sections {
@@ -1427,7 +1427,7 @@ x64_object_text_release: fn(inputs: Shared<X64ObjectTextShared>) {
     permit.value.functions = [X64CompiledFunction]{}
 }
 
-x64_object_release_fill: fn(released: Shared<X64ObjectReleased>, program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug]) {
+x64_object_release_fill: fn(released: Shared<X64ObjectReleased>, program: ^^X64ObjectModule, functions: ^^[X64CompiledFunction], debug: ^^[X64FunctionDebug]) {
     permit: released.guard_edit()
     permit.value.functions = functions.move()
     permit.value.debug = debug.move()
@@ -1475,7 +1475,7 @@ x64_object_encode_relas: fn(relas: [X64ObjectRela]) -> [U8] Never! {
 // `xindex` holds the symbols' extended section indices, empty when no
 // index reaches ELF64_OBJECT_SECTION_LIMIT; with them the object ends in
 // `.symtab_shndx`, and with that many headers section 0 holds their count.
-x64_object_materialize_one: fn(section: &&X64ObjectSection) -> [U8] Never! {
+x64_object_materialize_one: fn(section: ^^X64ObjectSection) -> [U8] Never! {
     s := section.move()
     if s.pieces.len() == 0 && s.relas.len() == 0 -> return s.bytes.move()
     if s.pieces.len() == 1 && s.bytes.len() == 0 && s.relas.len() == 0 && s.pieces[0].at == 0 {
@@ -1489,14 +1489,14 @@ x64_object_materialize_one: fn(section: &&X64ObjectSection) -> [U8] Never! {
     out
 }
 
-x64_object_materialize_parallel: fn(items: &&[X64ObjectSection]) -> [[U8]] Never! {
+x64_object_materialize_parallel: fn(items: ^^[X64ObjectSection]) -> [[U8]] Never! {
     owned := items.move()
     if owned.len() == 0 -> return [[U8]]{}
     head: owned.pop() ?? panic("lost section item")
     if owned.len() == 0 -> return [[U8]]{x64_object_materialize_one(head)}
     out := [[U8]]{}
     task.group x64_object_materialize_threads {
-        done_head: task &&head { x64_object_materialize_one(head) }
+        done_head: task ^^head { x64_object_materialize_one(head) }
         rest := x64_object_materialize_parallel(owned)
         first: done_head.join() ?? panic(compiler_threads_failure_text(err))
         out.push(first)
@@ -1508,7 +1508,7 @@ x64_object_materialize_parallel: fn(items: &&[X64ObjectSection]) -> [[U8]] Never
 // Flattens a split-buffer object (`bytes` + `split_bufs` + `split_sec_buf`)
 // back into a single contiguous ELF relocatable object when a fallback path
 // needs flat bytes.
-x64_object_split_flatten: fn(header: &&[U8], split_bufs: [[U8]], split_sec_buf: [Int]) -> [U8] Never! {
+x64_object_split_flatten: fn(header: ^^[U8], split_bufs: [[U8]], split_sec_buf: [Int]) -> [U8] Never! {
     if split_bufs.len() == 0 -> return header.move()
     shoff: x64_object_test_field(header, 40, 8)
     count := x64_object_test_field(header, 60, 2)
@@ -1553,11 +1553,11 @@ x64_object_split_flatten: fn(header: &&[U8], split_bufs: [[U8]], split_sec_buf: 
     out
 }
 
-x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection], zone_spans: [U8], parallel_relas: Bool{false}) -> [U8] Never! {
+x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: ^^[X64ObjectSection], zone_spans: [U8], parallel_relas: Bool{false}) -> [U8] Never! {
     x64_object_file_assembled(dwarf, text, text_align, data, data_align, rodata, rodata_align, rela_text, symtab, xindex, strtab, first_global, data_relas, exports, guard_sections, own, zone_spans, parallel_relas, false).bytes
 }
 
-x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection], zone_spans: [U8], parallel_relas: Bool{false}, split: Bool{false}) -> X64ExecutableResult Never! {
+x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: ^^[X64ObjectSection], zone_spans: [U8], parallel_relas: Bool{false}, split: Bool{false}) -> X64ExecutableResult Never! {
     rela_data_sec := X64ObjectSection{name: ".rela.data", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DATA, align: 8, entry_size: ELF64_RELA_SIZE}
     rela_eh_sec := X64ObjectSection{name: ".rela.eh_frame", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_EH_FRAME, align: 8, entry_size: ELF64_RELA_SIZE}
     rela_info_sec := X64ObjectSection{name: ".rela.debug_info", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DEBUG_INFO, align: 8, entry_size: ELF64_RELA_SIZE}

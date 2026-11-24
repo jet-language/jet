@@ -244,7 +244,7 @@ sema_derive_template_loop_waits: fn(items: [Item]) -> [String] {
 
 // Fills in each of `waits` the value a first pass computed: the value of
 // the constant of that name in that module, as a template value.
-sema_derive_template_loop_landed: fn(waits: &[SemaRootLoopValue], table: ModuleTable, sources: [SemaComptimeItemSource], values: [SemaComptimeItemValue]) {
+sema_derive_template_loop_landed: fn(waits: ^[SemaRootLoopValue], table: ModuleTable, sources: [SemaComptimeItemSource], values: [SemaComptimeItemValue]) {
     loop index in 0..<waits.len() {
         waits[index].value = sema_derive_template_loop_value(waits[index], table, sources, values)
     }
@@ -270,7 +270,8 @@ sema_derive_template_loop_value: fn(wait: SemaRootLoopValue, table: ModuleTable,
 // driver's first pass), a loop over a value not computed yet is left out
 // without a report; after it, a loop whose value could not be computed is
 // E0956.
-sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue], pending: Bool, diagnostics: &[Diagnostic]) {
+// `reserved_pastes` is true only in a Core module (sema_derive_paste_refused).
+sema_derive_expand_template_loops: fn(items: ^[Item], computed: ^^[NamedCtValue], pending: Bool, reserved_pastes: Bool, diagnostics: ^[Diagnostic]) {
     has_loop: loop item in items {
         if item == .TemplateLoop(_) {
             break true
@@ -291,7 +292,7 @@ sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue]
                 next
             }
             body: [DeriveBodyItem]{DeriveBodyItem.Loop{var: template.var, var_span: template.var_span, source: template.source, body: template.body, span: template.span}}
-            generated: sema_derive_expand_template_body(body, scope, diagnostics) ?? next
+            generated: sema_derive_expand_template_body(body, scope, diagnostics, reserved_pastes) ?? next
             loop generated_item in generated -> expanded.push(generated_item)
             next
         }
@@ -310,7 +311,7 @@ sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue]
 // declares or imports a type under a size name (`U8: struct`) gets no copy
 // for that size, whose name there is its own type. A list with no family
 // impl comes back as it was.
-sema_derive_expand_family_impls: fn(items: &&[Item], imports: [ImportDecl], diagnostics: &[Diagnostic]) -> [Item] {
+sema_derive_expand_family_impls: fn(items: ^^[Item], imports: [ImportDecl], diagnostics: ^[Diagnostic]) -> [Item] {
     has_family: loop item in items {
         if item == .Impl(definition) && foundation_number_family(definition.type_name) {
             break true
@@ -404,7 +405,7 @@ sema_family_impls_rows: fn(items: [Item]) -> [String] {
 // Registration of generated items: roots first, then impls, exactly like a
 // prepared module, so a generated impl may extend a generated type.
 
-sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int, written: [Item], diagnostics: [Diagnostic]) {
+sema_user_template_register: fn(graph: ^SemaRegistrationGraph, module_index: Int, written: [Item], diagnostics: [Diagnostic]) {
     problems := diagnostics
     if written.len() > 0 {
         // Generated items take the written items' capability passes
@@ -478,6 +479,9 @@ SemaUserRule: struct {
     // Under `jet debug --build`: where the body was written (Derives.jet
     // sema_derive_debug_stop); None otherwise.
     origin: SemaTemplateOrigin?{None},
+    // Whether the rule is Core's own, so its pastes may write a reserved `__`
+    // name (Derives.jet sema_derive_paste_refused).
+    reserved_pastes: Bool,
 }
 
 // The effect a template needs to write declarations.
@@ -526,7 +530,7 @@ sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: ModuleID,
             origin = Val(SemaTemplateOrigin{file: declaring.source_file.copy(), line_starts: parser_line_starts(declaring.source.bytes()), rule: marker.name.copy()})
         }
     }
-    Val(SemaUserRule{body: body, reports: reports, generates: sema_user_rule_row_generates(declaration.row), receiver: sema_user_rule_receiver(declaration, marker), definition_module: definition_module, origin: origin})
+    Val(SemaUserRule{body: body, reports: reports, generates: sema_user_rule_row_generates(declaration.row), receiver: sema_user_rule_receiver(declaration, marker), definition_module: definition_module, origin: origin, reserved_pastes: module_is_core(resolved.declaring_module_identity)})
 }
 
 // One use site's argument as a known-time value.
@@ -598,7 +602,7 @@ sema_user_rule_row_generates: fn(row: [EffectRowEntry]?) -> Bool Never! {
 // `Meta.Code` entry asks for an action above marker expansion (rewriting a
 // body, making a type from text), which only the root build's `Compiler`
 // value performs, so its report points there.
-sema_user_rule_row_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
+sema_user_rule_row_check: fn(items: [Item], diagnostics: ^[Diagnostic]) {
     loop declaration in sema_marker_module_declarations(items, "", false) {
         entries: declaration.row ?? next
         loop entry in entries {
@@ -617,7 +621,7 @@ sema_user_rule_row_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
 // `#loop` name in `expand`) may not hide a `use` name of its file or
 // a Prelude name, so the names its code reads mean the same at every marker.
 // A `#NoPrelude` file has no Prelude names to hide.
-sema_user_rule_local_check: fn(imports: [ImportDecl], items: [Item], no_prelude: Bool, diagnostics: &[Diagnostic]) {
+sema_user_rule_local_check: fn(imports: [ImportDecl], items: [Item], no_prelude: Bool, diagnostics: ^[Diagnostic]) {
     taken := [String]{}
     loop declaration in imports {
         loop binding in import_walk_bindings(declaration) -> taken.push(binding.local)
@@ -628,7 +632,7 @@ sema_user_rule_local_check: fn(imports: [ImportDecl], items: [Item], no_prelude:
     }
 }
 
-sema_user_rule_local_names: fn(body: [DeriveBodyItem], taken: [String], no_prelude: Bool, diagnostics: &[Diagnostic]) {
+sema_user_rule_local_names: fn(body: [DeriveBodyItem], taken: [String], no_prelude: Bool, diagnostics: ^[Diagnostic]) {
     loop body_item in body {
         if body_item == {
             .Stmt(stmt) -> {
@@ -651,7 +655,7 @@ sema_user_rule_local_names: fn(body: [DeriveBodyItem], taken: [String], no_prelu
     }
 }
 
-sema_user_rule_local_name: fn(name: String, span: Span, taken: [String], no_prelude: Bool, diagnostics: &[Diagnostic]) {
+sema_user_rule_local_name: fn(name: String, span: Span, taken: [String], no_prelude: Bool, diagnostics: ^[Diagnostic]) {
     owner: if taken.contains(name) -> "a `use` name of this file" else if !no_prelude && SEMA_CALL_PRELUDE_NAMES.contains(name) -> "a Prelude name" else -> {
         return
     }
@@ -660,7 +664,7 @@ sema_user_rule_local_name: fn(name: String, span: Span, taken: [String], no_prel
 
 // A template whose row lacks `Meta.Generate` may reject or warn, not write
 // declarations.
-sema_user_rule_row_admits: fn(rule: SemaUserRule, marker: String, span: Span, expanded: [Item], diagnostics: &[Diagnostic]) -> Bool {
+sema_user_rule_row_admits: fn(rule: SemaUserRule, marker: String, span: Span, expanded: [Item], diagnostics: ^[Diagnostic]) -> Bool {
     if rule.generates || expanded.len() == 0 -> return true
     diagnostics.push(sema_error("E0775", span, "`{marker}`'s template writes declarations, but its row has no `Meta.Generate`", "a template whose row is `-[]>` only reads the program, so it may reject or warn but not add code", "write `-[Meta.Generate]>` on `{marker}`'s `expand`, or remove the declarations its template writes"))
     false
@@ -668,7 +672,7 @@ sema_user_rule_row_admits: fn(rule: SemaUserRule, marker: String, span: Span, ex
 
 // A struct's or enum's `impl Diagnostic { … }` written inside its body is the
 // same report as a top-level `impl Name.Diagnostic { … }`.
-sema_user_rule_nested_reports: fn(module_name: String, owner: String, owner_span: Span, blocks: [TraitImplBlock], reports: &[SemaDeriveReport]) Never! {
+sema_user_rule_nested_reports: fn(module_name: String, owner: String, owner_span: Span, blocks: [TraitImplBlock], reports: ^[SemaDeriveReport]) Never! {
     loop block in blocks {
         if block.trait_name != "Diagnostic" -> next
         definition: ImplDef{
@@ -728,7 +732,7 @@ sema_user_rule_existing_span: fn(items: [Item], owner: String, member: String) -
 // (`owner`) a function written directly in the template is a member of the
 // marked type: the direct members join one impl on `owner`, checked for
 // collisions like a written `impl`. The expanded items move into `generated`.
-sema_user_rule_accept: fn(items: [Item], rule: String, owner: String?, owner_span: Span, expanded: &&[Item], generated: &[Item], diagnostics: &[Diagnostic]) {
+sema_user_rule_accept: fn(items: [Item], rule: String, owner: String?, owner_span: Span, expanded: ^^[Item], generated: ^[Item], diagnostics: ^[Diagnostic]) {
     entries := [Item]{}
     if owner == {
         .Val(type_name) -> {
@@ -773,7 +777,7 @@ sema_user_rule_accept: fn(items: [Item], rule: String, owner: String?, owner_spa
     }
 }
 
-sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: Int, generated: &[Item], diagnostics: &[Diagnostic]) {
+sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: Int, generated: ^[Item], diagnostics: ^[Diagnostic]) {
     items: graph.modules[module_index].program.items
     loop item in items {
         if item == {
@@ -828,7 +832,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 markers: sema_comptime_reflection_written_markers(graph, graph.modules[module_index].module_identity, graph.modules[module_index].program, sema_user_template_catalog(), function.markers, registry) ?? next
                 info: sema_user_template_function_info(graph, module_index, function, markers) ?? next
-                expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+                expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
                 if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) {
                     next
                 }
@@ -879,7 +883,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
     loop block in blocks {
         marker: Marker{name: block.name, negated: false, name_span: block.span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: block.span, ct: None}
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, Val(rule.receiver), rule.reports, Val(block.site), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, Val(rule.receiver), rule.reports, Val(block.site), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, block.name, block.site, expanded, diagnostics) -> next
         loop expanded_item in expanded -> generated.push(expanded_item)
     }
@@ -888,14 +892,14 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
 // A struct's or enum's own rules see its TypeInfo, built once for the type
 // and the rules on its members (`type_info`); a function written directly
 // in such a rule is a member of `owner` (written at `owner_span`).
-sema_user_rule_collect_type: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String, owner_span: Span, markers: [Marker], type_info: &CtValue?, generated: &[Item], diagnostics: &[Diagnostic]) {
+sema_user_rule_collect_type: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String, owner_span: Span, markers: [Marker], type_info: ^CtValue?, generated: ^[Item], diagnostics: ^[Diagnostic]) {
     items: graph.modules[module_index].program.items
     loop marker in markers {
         if marker.negated -> next
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
         if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, owner)
         info: type_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(items, marker.name, Val(owner), owner_span, expanded.move(), generated, diagnostics)
     }
@@ -906,14 +910,14 @@ sema_user_rule_collect_type: fn(graph: SemaRegistrationGraph, module_index: Int,
 // field, a CaseInfo for a case (found at `at`), a MethodInfo for a method. A
 // member the TypeInfo leaves out (a computed field, a method of a trait impl)
 // sees a handle naming it.
-sema_user_rule_collect_member: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String, list: String, member: String, at: Int?, kind: String, markers: [Marker], type_info: &CtValue?, generated: &[Item], diagnostics: &[Diagnostic]) {
+sema_user_rule_collect_member: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String, list: String, member: String, at: Int?, kind: String, markers: [Marker], type_info: ^CtValue?, generated: ^[Item], diagnostics: ^[Diagnostic]) {
     items: graph.modules[module_index].program.items
     loop marker in markers {
         if marker.negated -> next
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
         if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, owner)
         info: sema_user_template_member_info(type_info, list, member, at) ?? sema_user_template_handle(kind, member)
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(items, marker.name, None, marker.span, expanded.move(), generated, diagnostics)
     }
@@ -923,7 +927,7 @@ sema_user_rule_collect_member: fn(graph: SemaRegistrationGraph, module_index: In
 // for each of its modules: its name and identity, the TypeInfo of each struct
 // and enum, the FunctionInfo of each function written in its body, the
 // module's own written markers and the comments written in it.
-sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_index: Int, code_module: CodeModule, generated: &[Item], diagnostics: &[Diagnostic]) {
+sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_index: Int, code_module: CodeModule, generated: ^[Item], diagnostics: ^[Diagnostic]) {
     items: graph.modules[module_index].program.items
     module_info := CtValue?{None}
     loop marker in code_module.markers {
@@ -933,7 +937,7 @@ sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_inde
             module_info = sema_user_template_module_info(graph, module_index, code_module)
         }
         info: module_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(items, marker.name, None, marker.span, expanded.move(), generated, diagnostics)
     }
@@ -1053,7 +1057,7 @@ sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
 // module; its refusals point at its header line in `package.jet`. The
 // package's dependencies were fixed before any template ran, so a template
 // can't change them.
-sema_user_rule_expand_package: fn(graph: &SemaRegistrationGraph) {
+sema_user_rule_expand_package: fn(graph: ^SemaRegistrationGraph) {
     if graph.build_facts.package_markers.len() == 0 {
         return
     }
@@ -1066,7 +1070,7 @@ sema_user_rule_expand_package: fn(graph: &SemaRegistrationGraph) {
         rule: sema_user_rule_body(graph, graph.entry_module_identity, marker) ?? next
         if package_info == None -> package_info = sema_user_template_package_info(graph)
         info: package_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(graph.modules[entry].program.items, marker.name, None, marker.span, expanded.move(), generated, diagnostics)
     }
@@ -1112,7 +1116,7 @@ sema_user_template_handle: fn(kind: String, name: String) -> CtValue Never! {
 // One impl's markers: each rule body runs over the implementing type's
 // TypeInfo, or over a handle naming the type when the type has no
 // registered declaration here (`impl String -> Err`).
-sema_user_rule_collect_impl: fn(graph: SemaRegistrationGraph, module_index: Int, type_name: String, markers: [Marker], generated: &[Item], diagnostics: &[Diagnostic]) {
+sema_user_rule_collect_impl: fn(graph: SemaRegistrationGraph, module_index: Int, type_name: String, markers: [Marker], generated: ^[Item], diagnostics: ^[Diagnostic]) {
     items: graph.modules[module_index].program.items
     type_info := CtValue?{None}
     loop marker in markers {
@@ -1125,7 +1129,7 @@ sema_user_rule_collect_impl: fn(graph: SemaRegistrationGraph, module_index: Int,
             }
         }
         info: type_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(items, marker.name, Val(type_name), marker.span, expanded.move(), generated, diagnostics)
     }
@@ -1213,7 +1217,7 @@ sema_user_text_statement_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
     }
 }
 
-sema_user_text_blocks_in: fn(statements: [Stmt], source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
+sema_user_text_blocks_in: fn(statements: [Stmt], source: String, block_spans: [Span], blocks: ^[SemaUserTextBlock]) {
     loop statement in statements {
         if statement == .ScopeMember(name, name_span, _, _, body, dsl, hash_span, span) {
             if dsl {
@@ -1226,11 +1230,11 @@ sema_user_text_blocks_in: fn(statements: [Stmt], source: String, block_spans: [S
     }
 }
 
-sema_user_text_blocks_in_methods: fn(methods: [Func], source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
+sema_user_text_blocks_in_methods: fn(methods: [Func], source: String, block_spans: [Span], blocks: ^[SemaUserTextBlock]) {
     loop method in methods -> sema_user_text_blocks_in(method.body, source, block_spans, blocks)
 }
 
-sema_user_text_blocks_in_item: fn(item: Item, source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
+sema_user_text_blocks_in_item: fn(item: Item, source: String, block_spans: [Span], blocks: ^[SemaUserTextBlock]) {
     if item == {
         .Func(function) -> { sema_user_text_blocks_in(function.body, source, block_spans, blocks) }
         .Test(test) -> { sema_user_text_blocks_in(test.body, source, block_spans, blocks) }
@@ -1260,7 +1264,7 @@ sema_user_text_blocks_in_item: fn(item: Item, source: String, block_spans: [Span
     }
 }
 
-sema_user_rule_expand_module: fn(graph: &SemaRegistrationGraph, module_index: Int) {
+sema_user_rule_expand_module: fn(graph: ^SemaRegistrationGraph, module_index: Int) {
     generated := [Item]{}
     diagnostics := [Diagnostic]{}
     sema_user_rule_row_check(graph.modules[module_index].program.items, diagnostics)
@@ -1283,7 +1287,7 @@ sema_marker_checking_setting: fn(name: String) -> Bool Never! {
 // add checked items and reject code, but only the embedded Prelude's own
 // marker rows (Prelude/Markers.jet, read into the rule catalog and never a
 // package module) change checking settings.
-sema_user_rule_tier_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
+sema_user_rule_tier_check: fn(items: [Item], diagnostics: ^[Diagnostic]) {
     loop declaration in sema_marker_module_declarations(items, "", false) {
         loop param in declaration.params {
             if !sema_marker_checking_setting(param.name) -> next
@@ -1298,7 +1302,7 @@ sema_user_rule_tier_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
 // every registered declaration; generated items register into the target's
 // module before any body is checked.
 
-sema_registration_expand_user_templates: fn(graph: &SemaRegistrationGraph) {
+sema_registration_expand_user_templates: fn(graph: ^SemaRegistrationGraph) {
     if !graph.complete {
         return
     }

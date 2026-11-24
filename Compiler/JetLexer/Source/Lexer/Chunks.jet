@@ -404,7 +404,7 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
 
 // A later chunk's name ids mapped onto the joined table in chunk-local id
 // order via `name_table_merge` (reusing precomputed hashes and strings).
-lexer_chunk_name_map: fn(part: Shared<LexerChunkPart>, tables: &TokenTables) -> [Name] {
+lexer_chunk_name_map: fn(part: Shared<LexerChunkPart>, tables: ^TokenTables) -> [Name] {
     reads: part.guard_read()
     name_table_merge(tables.names, reads.value.outputs[0].tables.names, 0)
 }
@@ -532,7 +532,7 @@ lexer_remap_chunk_part: fn(part: Shared<LexerChunkPart>) -> Int {
 
 lexer_remap_name: fn(name: Name, map: [Name]) -> Name Never! { map[name_index(name)] }
 
-lexer_remap_tokens: fn(tokens: &[Token], map: [Name], base: Int) Never! {
+lexer_remap_tokens: fn(tokens: ^[Token], map: [Name], base: Int) Never! {
     loop index in 0..<tokens.len() {
         tokens[index].text = lexer_remap_name(tokens[index].text, map)
         tokens[index].decoded = lexer_remap_name(tokens[index].decoded, map)

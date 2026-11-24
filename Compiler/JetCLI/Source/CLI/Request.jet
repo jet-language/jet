@@ -121,7 +121,7 @@ use {
 // `--keep-going` (Controls.jet). A diagnostic trap is a failed compile, never
 // an artifact. `trace_sink` traces the keep-going report write
 // (`keepgoing.report`).
-jet_cli_compile_request: fn(request: &&JetDriverCompileRequest, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
+jet_cli_compile_request: fn(request: ^^JetDriverCompileRequest, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
     if !jet_cli_keep_going_enabled() {
         compiled: jet_driver_compile(request)
         jet_cli_comptime_debug_trace(compiled)
@@ -140,7 +140,7 @@ jet_cli_compile_request: fn(request: &&JetDriverCompileRequest, trace_sink: JetC
 // jet_cli_compile_request for the native executable route: the compile
 // stopped before lowering, with the checked inputs the route builds from
 // (Pipeline `jet_driver_lowering_inputs`), under the same keep-going collector.
-jet_cli_lowering_inputs: fn(request: &&JetDriverCompileRequest, trace_sink: JetCLITraceSink?) -> JetDriverLoweringInputsResult {
+jet_cli_lowering_inputs: fn(request: ^^JetDriverCompileRequest, trace_sink: JetCLITraceSink?) -> JetDriverLoweringInputsResult {
     if !jet_cli_keep_going_enabled() {
         lowered: jet_driver_lowering_inputs_owned(request, None)
         jet_cli_comptime_debug_trace(lowered.compile)
@@ -239,7 +239,7 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // (compiler_threads_join): while both compile each phase admits its share
 // of the cap, the Core check waiting for its image holds none, and Core
 // takes the whole cap once the runtime's object is made.
-jet_cli_runtime_library: fn(request: &&JetDriverCompileRequest, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
+jet_cli_runtime_library: fn(request: ^^JetDriverCompileRequest, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     selected := request.move()
     selected.release_state_aside = true
     if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) {
@@ -259,7 +259,7 @@ jet_cli_runtime_library: fn(request: &&JetDriverCompileRequest, prefix: String, 
 
 // The runtime library with the Core library beside it, whose object lands
 // at `core_prefix` (jet_cli_runtime_library).
-jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String, lifecycle: String?, core_prefix: String, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
+jet_cli_runtime_with_core: fn(request: ^^JetDriverCompileRequest, prefix: String, lifecycle: String?, core_prefix: String, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     problem: jet_cli_core_identity()
     if problem != "" -> return jet_driver_compile_escaped_failure(problem)
     // The Core build's own threads, with the memory free when it starts, as
@@ -354,7 +354,7 @@ JetCLIRuntimeMade: enum {
 // carries (`carried`, jet_cli_core_image_carried). The image links from the
 // pack's bytes, so a pack that links is written to its file first, before
 // the Core object is made, and marked `written`.
-jet_cli_runtime_made_built: fn(result: &&JetDriverCompileResult, library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, checked: &X64ImageFile?, trace_sink: JetCLITraceSink?, carried: Bool{false}) -> JetCLIRuntimeMade {
+jet_cli_runtime_made_built: fn(result: ^^JetDriverCompileResult, library: ^^IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, checked: ^X64ImageFile?, trace_sink: JetCLITraceSink?, carried: Bool{false}) -> JetCLIRuntimeMade {
     object := jet_cli_runtime_object_emit(library, interface_text, threads, prefix, trace_sink)
     if object.problem != "" {
         return JetCLIRuntimeMade.Made{result: result.move(), object_problem: object.problem, pack: None, deferred: None}
@@ -377,7 +377,7 @@ jet_cli_runtime_made_built: fn(result: &&JetDriverCompileResult, library: &&IRLi
 // (jet_cli_runtime_pack), kept in memory as the `runtime.core.image` span.
 // The check lowers each Core function its compile-time code calls from
 // source, as the image holds none. None when the image doesn't link.
-jet_cli_core_check_image: fn(path: String, bytes: &&[U8], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> X64ImageFile? {
+jet_cli_core_check_image: fn(path: String, bytes: ^^[U8], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> X64ImageFile? {
     if trace_sink == .Val(sink) -> sink.begin("runtime.core.image", "", -1, -1)
     linked: x64_link_runtime_image(path, bytes.move(), threads)
     if trace_sink == .Val(sink) -> sink.end("runtime.core.image", linked.bytes.len())
@@ -387,20 +387,20 @@ jet_cli_core_check_image: fn(path: String, bytes: &&[U8], threads: CompilerThrea
 
 // Hands the Core check its image (jet_cli_core_check_image); an error
 // means the check is gone.
-jet_cli_core_image_send: fn(image: Sender<X64ImageFile?>, value: &&X64ImageFile?) Err! {
+jet_cli_core_image_send: fn(image: Sender<X64ImageFile?>, value: ^^X64ImageFile?) Err! {
     image.send(value)
 }
 
 // Hands the Core library task the runtime's thread receipt; an error means
 // the Core task is gone.
-jet_cli_core_threads_send: fn(sender: Sender<[String]?>, value: &&[String]?) Err! {
+jet_cli_core_threads_send: fn(sender: Sender<[String]?>, value: ^^[String]?) Err! {
     sender.send(value)
 }
 
 // The runtime `result` with its pack `pack` (jet_cli_runtime_pack_linked)
 // and the Core library's object `core` (None: no Core object): the pack and
 // the image, on `threads` (jet_cli_runtime_pack).
-jet_cli_runtime_packed: fn(result: &&JetDriverCompileResult, prefix: String, pack: &&JetCLIRuntimePackLinked?, core: &&[U8]?, threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
+jet_cli_runtime_packed: fn(result: ^^JetDriverCompileResult, prefix: String, pack: ^^JetCLIRuntimePackLinked?, core: ^^[U8]?, threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     if trace_sink == .Val(sink) -> sink.begin("runtime.pack", "", -1, -1)
     packed: jet_cli_runtime_pack(result, prefix, pack, core, threads)
     if trace_sink == .Val(sink) -> sink.end("runtime.pack", -1)
@@ -432,7 +432,7 @@ JetCLIRuntimeObject: struct {
     deferred: JetCLIRuntimeDeferred?{None},
 }
 
-jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeIR {
+jet_cli_runtime_ir: fn(front: ^^JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeIR {
     owned := front.move()
     result := owned.compile.move()
     if !result.complete || result.internal_problem != None {
@@ -498,7 +498,7 @@ JetCLILibraryIR: struct {
 // the optimizer inlines. The runtime
 // library (jet_cli_runtime_ir) and `jet build --lib` (LibraryBuild.jet)
 // build through it.
-jet_cli_library_ir: fn(checked: &&JetDriverLoweringInputs, rows: [IRLibraryExportRow], lifecycle_rows: [String], opt: IROptOptions, stops: Bool, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLILibraryIR {
+jet_cli_library_ir: fn(checked: ^^JetDriverLoweringInputs, rows: [IRLibraryExportRow], lifecycle_rows: [String], opt: IROptOptions, stops: Bool, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLILibraryIR {
     owned := checked.move()
     declarations := jet_driver_checked_declarations(owned)
     // The eval receipt reads each composed unit's sources (the runtime is
@@ -547,7 +547,7 @@ jet_cli_library_ir: fn(checked: &&JetDriverLoweringInputs, rows: [IRLibraryExpor
 // The runtime's machine code and object file from its IR `library`, deferring
 // the web runtime partition and metadata files into `deferred` so
 // jet_cli_runtime_with_core can unblock Core before running them.
-jet_cli_runtime_object_emit: fn(library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeObject {
+jet_cli_runtime_object_emit: fn(library: ^^IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeObject {
     owned := library.move()
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
     compiled := ir_x64_compile_module(owned.program.move(), threads)
@@ -591,7 +591,7 @@ jet_cli_runtime_object_finish: fn(deferred: JetCLIRuntimeDeferred, prefix: Strin
 // JET_FRONT_RUNTIME_WEB_OUTPUT, the runtime partition of a web build (JetWeb
 // Build.jet) selected from the same lowered module, as `{prefix}.wasm` with
 // its receipt `{prefix}.wasm.tsv`, and the object with its files.
-jet_cli_runtime_object: fn(library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeObject {
+jet_cli_runtime_object: fn(library: ^^IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeObject {
     emitted := jet_cli_runtime_object_emit(library, interface_text, threads, prefix, trace_sink)
     if emitted.problem != "" -> return emitted
     if emitted.deferred == .Val(pending) {
@@ -631,7 +631,7 @@ JetCLIRuntimePackLinked: struct {
     written: Bool,
 }
 
-jet_cli_runtime_pack_linked: fn(prefix: String, object: &&[U8], trace_sink: JetCLITraceSink?) -> JetCLIRuntimePackLinked? {
+jet_cli_runtime_pack_linked: fn(prefix: String, object: ^^[U8], trace_sink: JetCLITraceSink?) -> JetCLIRuntimePackLinked? {
     path: cli_sys.get(ENV_JET_FRONT_RUNTIME_PACK_OUTPUT) ?? return None
     if trace_sink == .Val(sink) -> sink.begin("runtime.pack.alone", "", -1, -1)
     linked: x64_link_runtime_pack([String]{"{prefix}.o"}, [[U8]]{object.move()}, [String]{})
@@ -647,7 +647,7 @@ jet_cli_runtime_pack_linked: fn(prefix: String, object: &&[U8], trace_sink: JetC
 // runtime object and it together, so a program bound to the image can call
 // a Core function by its symbol; the pack, which a full link reads, stays
 // the runtime's alone.
-jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, pack: &&JetCLIRuntimePackLinked?, core: &&[U8]?, threads: CompilerThreads) -> JetDriverCompileResult {
+jet_cli_runtime_pack: fn(result: ^^JetDriverCompileResult, prefix: String, pack: ^^JetCLIRuntimePackLinked?, core: ^^[U8]?, threads: CompilerThreads) -> JetDriverCompileResult {
     if pack.move() == .Val(made) {
         linked := made.linked.move()
         if linked.errors.len() > 0 {
@@ -849,7 +849,7 @@ jet_cli_source_tree: fn(directory: String) -[FS.Read]> String? Never! {
 
 // The files under `root`/`relative` into `paths`; why one can't be named,
 // if one can't.
-jet_cli_source_key_walk: fn(root: String, relative: String, paths: &[String]) -[FS.Read]> String? Never! {
+jet_cli_source_key_walk: fn(root: String, relative: String, paths: ^[String]) -[FS.Read]> String? Never! {
     folder: jet_cli_authority_path(root, relative)
     listed: cli_files.list_dir(folder) ?? return Val("can't list `{folder}`: {jet_cli_io_error_text(err)}")
     loop entry in listed {
@@ -982,7 +982,7 @@ jet_cli_source_read_limit: fn(budget: JetCLISourceBudget, size: Int, path: Strin
     Ok(if remaining < JET_CLI_MAX_SOURCE_BYTES -> remaining else -> JET_CLI_MAX_SOURCE_BYTES)
 }
 
-jet_cli_replace_source_budget: fn(budget: &JetCLISourceBudget, before: String, after: String, path: String) -> Int JetCLIReadError! {
+jet_cli_replace_source_budget: fn(budget: ^JetCLISourceBudget, before: String, after: String, path: String) -> Int JetCLIReadError! {
     replacement: JetCLISourceBudget{entries: budget.entries, bytes: budget.bytes - before.count_bytes(), files: budget.files - 1}
     size: after.count_bytes()
     _: jet_cli_source_read_limit(replacement, size, path)
@@ -990,7 +990,7 @@ jet_cli_replace_source_budget: fn(budget: &JetCLISourceBudget, before: String, a
     Ok(budget.bytes)
 }
 
-jet_cli_walk_sources: fn(root: String, relative: String, depth: Int, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool, budget: &JetCLISourceBudget) -[FS]> String? Never! {
+jet_cli_walk_sources: fn(root: String, relative: String, depth: Int, files: ^[JetDriverAuthorizedSourceFile], directories: ^[AppAuthorizedDirectory], retain_directories: Bool, budget: ^JetCLISourceBudget) -[FS]> String? Never! {
     directory: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
     chain := [cli_files.Directory]{}
     names := [String]{}
@@ -1007,7 +1007,7 @@ jet_cli_walk_sources: fn(root: String, relative: String, depth: Int, files: &[Je
     None
 }
 
-jet_cli_walk_held_sources: fn(root: String, relative: String, depth: Int, held: cli_files.Directory, files: &[JetDriverAuthorizedSourceFile], directories: &[AppAuthorizedDirectory], retain_directories: Bool, budget: &JetCLISourceBudget) -[FS]> String? Never! {
+jet_cli_walk_held_sources: fn(root: String, relative: String, depth: Int, held: cli_files.Directory, files: ^[JetDriverAuthorizedSourceFile], directories: ^[AppAuthorizedDirectory], retain_directories: Bool, budget: ^JetCLISourceBudget) -[FS]> String? Never! {
     directory: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
     listing: held.list() ?? return Val("cannot list `{directory}`: {err}")
     if listing.len() > JET_CLI_MAX_SOURCE_FILES - budget.entries {
@@ -1097,7 +1097,7 @@ jet_cli_walk_held_sources: fn(root: String, relative: String, depth: Int, held: 
 // `.routes(from:)` reads a directory's shape, or a reached source declares
 // the build entry `build: fn(b: Build)`, whose source lists may name any
 // file of the folder.
-jet_cli_reach_sources: fn(root: String, entry: String, files: &[JetDriverAuthorizedSourceFile], budget: &JetCLISourceBudget) -[FS]> Bool JetCLIReadError! {
+jet_cli_reach_sources: fn(root: String, entry: String, files: ^[JetDriverAuthorizedSourceFile], budget: ^JetCLISourceBudget) -[FS]> Bool JetCLIReadError! {
     pending := [String]{entry.copy()}
     loop stock in JET_CLI_STOCK_ENTRIES {
         if stock != entry -> pending.push(stock.copy())
@@ -1147,7 +1147,7 @@ jet_cli_reach_sources: fn(root: String, entry: String, files: &[JetDriverAuthori
 // The root-relative paths the source at `relative` reaches, onto `pending`
 // (jet_cli_reach_sources); false when one may name any file of the tree: an
 // app route or the build entry.
-jet_cli_reached_paths: fn(root: String, relative: String, program: Program, pending: &[String]) -[FS]> Bool Never! {
+jet_cli_reached_paths: fn(root: String, relative: String, program: Program, pending: ^[String]) -[FS]> Bool Never! {
     if jet_driver_app_route_names(program).len() > 0 -> return false
     scoped := [JetDriverScopedImport]{}
     jet_driver_scoped_imports(program.imports, program.items, "", true, scoped)
@@ -1232,7 +1232,7 @@ JetCLICacheSource: struct {
 }
 
 // One checked foreign-cache record under `root` (a binding or its sidecar).
-jet_cli_cache_file: fn(root: String, relative: String, budget: &JetCLISourceBudget) -[FS]> JetCLICacheSource JetCLIReadError! {
+jet_cli_cache_file: fn(root: String, relative: String, budget: ^JetCLISourceBudget) -[FS]> JetCLICacheSource JetCLIReadError! {
     path: jet_cli_authority_path(root, relative)
     stat: cli_files.stat(path) ?? return Err(jet_cli_read_error("cannot inspect `{path}`: {err}"))
     if stat.is_symlink -> return Err(jet_cli_read_error("`{path}` is a symbolic link"))
@@ -1250,7 +1250,7 @@ jet_cli_cache_file: fn(root: String, relative: String, budget: &JetCLISourceBudg
 // `collect_authorized_foreign_cache_files`: every generated C and C++ binding
 // (not the `.adapted.jet` views) with its `.metadata` and `.provenance`
 // sidecars, in relative-path order.
-jet_cli_foreign_cache_files: fn(root: String, caches: &[JetDriverAuthorizedSourceFile], budget: &JetCLISourceBudget) -[FS]> String? Never! {
+jet_cli_foreign_cache_files: fn(root: String, caches: ^[JetDriverAuthorizedSourceFile], budget: ^JetCLISourceBudget) -[FS]> String? Never! {
     collected := [JetCLICacheSource]{}
     loop cache_directory in JET_CLI_FOREIGN_CACHE_DIRECTORIES {
         directory: jet_cli_authority_path(root, cache_directory)
@@ -1420,7 +1420,7 @@ jet_cli_path_dependency_escape: fn(name: String, relative: String, parent: Strin
 // block of `entry_path` or a stock entry. The driver's catalog still owns
 // dependency binding and semantic diagnostics; this host only reads trees the
 // declared graph permits. No provider or network is run.
-jet_cli_path_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], entry_path: String, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
+jet_cli_path_dependency_roots: fn(roots: ^[JetDriverAuthorizedSourceRoot], entry_path: String, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
     entry: roots[0].canonical_path
     root_reach: jet_cli_root_path_reach(entry, jet_cli_root_dependencies(roots[0], entry_path))
     index := 0
@@ -1517,7 +1517,7 @@ jet_cli_first_party_battery: fn(name: String, source: String, entry: String) -[F
 
 // Authorizes the directory `canonical` as one more source root unless a root
 // already holds it; the refusal when its tree can't be read securely.
-jet_cli_authorize_dependency_root: fn(roots: &[JetDriverAuthorizedSourceRoot], canonical: String, color: Bool) -[FS]> JetDriverVerbOutput? Never! {
+jet_cli_authorize_dependency_root: fn(roots: ^[JetDriverAuthorizedSourceRoot], canonical: String, color: Bool) -[FS]> JetDriverVerbOutput? Never! {
     loop existing in roots {
         if existing.canonical_path == canonical -> return None
     }
@@ -1703,7 +1703,7 @@ jet_cli_load_start: fn() -[FS, Time]> {
 
 // The thread default over the window from the process's last load sample to
 // `now` (jet_cli_window_threads); `now` becomes the last sample.
-jet_cli_load_window: fn(logical: Int, allowed: [Int], now: &&JetCLILoadSample) -> Int Never! {
+jet_cli_load_window: fn(logical: Int, allowed: [Int], now: ^^JetCLILoadSample) -> Int Never! {
     held := JET_CLI_LOAD_SAMPLE.guard_edit()
     threads: jet_cli_window_threads(logical, allowed, held.value, now)
     held.value = now
@@ -1921,7 +1921,7 @@ JetCLICoreInterface: struct {
             jet_cli_runtime_part_range(JET_CLI_CORE_INTERFACE_FILE, at, size)
         }
 
-        read_into: fn(self, at: Int, into: &[U8], size: Int) -[Env, FFI.Asm]> Bool {
+        read_into: fn(self, at: Int, into: ^[U8], size: Int) -[Env, FFI.Asm]> Bool {
             if at < 0 || size < 0 || at + size > self.size -> return false
             if self.at >= 0 -> return x64_self_read_into(self.at + at, into, size)
             lent: jet_cli_runtime_part_range(JET_CLI_CORE_INTERFACE_FILE, at, size) ?? return false
@@ -2331,7 +2331,7 @@ jet_cli_read_rooted_source: fn(root: String, relative: String, limit: Int) -[FS.
     Ok(read)
 }
 
-jet_cli_hold_root_chain: fn(root: String, directories: &[cli_files.Directory], names: &[String]) -[FS.Read]> String JetCLIReadError! {
+jet_cli_hold_root_chain: fn(root: String, directories: ^[cli_files.Directory], names: ^[String]) -[FS.Read]> String JetCLIReadError! {
     initial: if root.starts_with("/") -> "/" else -> "."
     directories.push(cli_files.open_directory(initial) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err))))
     loop part in root.split("/") {
@@ -2395,7 +2395,7 @@ jet_cli_build_read_same_file: fn(left: cli_files.Stat, right: cli_files.Stat) ->
     right.is_file && right.links == 1 && left.id == right.id && left.size == right.size && left.modified == right.modified && left.changed == right.changed
 }
 
-jet_cli_build_read_chain_current: fn(directories: &[cli_files.Directory], names: &[String], initial: String) -[FS.Read]> Bool JetCLIReadError! {
+jet_cli_build_read_chain_current: fn(directories: ^[cli_files.Directory], names: ^[String], initial: String) -[FS.Read]> Bool JetCLIReadError! {
     base: cli_files.stat(initial) ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
     held_base: directories[0].stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
     if !base.is_dir || base.is_symlink || base.id != held_base.id {
@@ -2534,7 +2534,7 @@ jet_cli_outside_walk: fn(root: String, relative: String) -[FS]> Bool Never! {
 }
 
 // `files` with `added` placed at its root-relative position in walk order.
-jet_cli_insert_source: fn(files: &&[JetDriverAuthorizedSourceFile], added: JetDriverAuthorizedSourceFile) -> [JetDriverAuthorizedSourceFile] Never! {
+jet_cli_insert_source: fn(files: ^^[JetDriverAuthorizedSourceFile], added: JetDriverAuthorizedSourceFile) -> [JetDriverAuthorizedSourceFile] Never! {
     ordered := [JetDriverAuthorizedSourceFile]{}
     ordered.try_reserve(files.len() + 1) ?? panic("cannot reserve the authorized source ordering: {err}")
     placed := false
@@ -2621,7 +2621,7 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // entry package's `build: fn` generates load beside its sources
 // (jet_cli_generated_request), as under `jet run` and `jet build`; a library
 // check of `jet build` passes false, as it carries what its build generated.
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}, load_generated: Bool{true}) -> JetCLICompiled {
+jet_cli_compile_prepared: fn(prepared: ^^JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}, load_generated: Bool{true}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -2706,7 +2706,7 @@ jet_cli_compile_executable_file: fn(file: String, entry: String?, color: Bool, t
 // `core_bound` is jet_cli_core_binding's answer for the entry with no Core
 // source under test, when the caller holds it: a debugger's session decides
 // it once (DebugCompile.jet jet_cli_debug_eval_core).
-jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, color: Bool, core_bound: Bool?{None}) -> JetCLIExecutableCompiled {
+jet_cli_compile_executable: fn(prepared: ^^JetCLIPrepared, entry: String?, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, color: Bool, core_bound: Bool?{None}) -> JetCLIExecutableCompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLIExecutableCompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -3499,7 +3499,7 @@ jet_cli_trace_boxed: fn(sink: JetCLITraceSink?) -> CompilerTraceSink? Never! {
     Val(jet_cli_trace_object(opened.copy()))
 }
 
-jet_cli_trace_object: fn(sink: &&JetCLITraceSink) -> CompilerTraceSink Never! { sink.move() }
+jet_cli_trace_object: fn(sink: ^^JetCLITraceSink) -> CompilerTraceSink Never! { sink.move() }
 
 // Adds `text`, the trace file another jet process wrote (`--trace=FILE`; a
 // package build's step, BuildExecute.jet jet_cli_build_splice_traces), to
@@ -3773,7 +3773,7 @@ jet_cli_trace_adopt: fn(trace_sink: JetCLITraceSink?) Never! {
 // threads that run it; a plain thread's), and the CPU clock the spans read
 // (core.tasks.cpu_ns) is that task's too, so a span that parks and resumes
 // on another carrier still closes on its own stack and clock.
-jet_cli_trace_lane: fn(state: &JetCLITraceState, task: cli_tasks.TaskID) -> Int Never! {
+jet_cli_trace_lane: fn(state: ^JetCLITraceState, task: cli_tasks.TaskID) -> Int Never! {
     if state.lanes.get(task) == .Val(lane) -> return lane
     lane: state.lanes.len() + 1
     state.lanes[task] = lane
@@ -3838,7 +3838,7 @@ jet_cli_trace_process_cpu_ns: fn() -[Env]> Int Never! {
 // `state.memory` set: the process's clocks, faults and memory read again
 // when `fresh` (a top-level span) or when the last read is
 // JET_CLI_TRACE_PROCESS_MS old, else the last read's.
-jet_cli_trace_process: fn(state: &JetCLITraceState, now_ms: Int, cpu_ns: Int, fresh: Bool) -> JetCLITraceUsage Never! {
+jet_cli_trace_process: fn(state: ^JetCLITraceState, now_ms: Int, cpu_ns: Int, fresh: Bool) -> JetCLITraceUsage Never! {
     if fresh || state.process_ms < 0 || now_ms - state.process_ms >= JET_CLI_TRACE_PROCESS_MS {
         state.process = jet_cli_trace_process_usage()
         state.memory = jet_cli_trace_memory()
@@ -3860,7 +3860,7 @@ jet_cli_trace_usage_since: fn(start: JetCLITraceUsage, now: JetCLITraceUsage) ->
 // top-level span's begin or end, or a splice), JET_CLI_TRACE_BLOCK_BYTES
 // waiting, or the trace's finish, and they are written as one block
 // (jet_cli_trace_drain).
-jet_cli_trace_write: fn(target: String, state: &JetCLITraceState, text: &&String, settle: Bool{false}) Never! {
+jet_cli_trace_write: fn(target: String, state: ^JetCLITraceState, text: ^^String, settle: Bool{false}) Never! {
     if !state.writing {
         return
     }
@@ -3875,7 +3875,7 @@ jet_cli_trace_write: fn(target: String, state: &JetCLITraceState, text: &&String
 
 // Writes and flushes every waiting event as one block; the first failure
 // stops the trace.
-jet_cli_trace_drain: fn(target: String, state: &JetCLITraceState) Never! {
+jet_cli_trace_drain: fn(target: String, state: ^JetCLITraceState) Never! {
     if !state.writing || state.pending.len() == 0 {
         return
     }
@@ -3936,7 +3936,7 @@ jet_cli_trace_totals: fn(state: Shared<JetCLITraceState>) -> {bytes: Int, flushe
     {bytes: permit.value.bytes, flushes: permit.value.flushes}
 }
 
-jet_cli_trace_put: fn(writer: &cli_files.FileWriter, text: String) -> String? Never! {
+jet_cli_trace_put: fn(writer: ^cli_files.FileWriter, text: String) -> String? Never! {
     writer.write_bytes(text.bytes()) ?? return Val("{err}")
     writer.flush() ?? return Val("{err}")
     None

@@ -128,7 +128,7 @@ failed: fn(integ: String, name: String, note: String{""}) {
 }
 
 // Applies SUB `sub`; whether it applied.
-apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[String], failures: &[String]) -> Bool {
+apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: ^[String], failures: ^[String]) -> Bool {
     s: sub.removesuffix("/")
     n: files.basename(s)
     listed: Sh{"git apply --numstat {"{s}/patch"}"}.run().output.tsv_records().map(fn(cells) { cells.get(2) ?? "" })

@@ -74,7 +74,7 @@ matches: fn(condition: RulePredicate, value: Int) -> Bool {
     return false
 }
 
-apply: fn(facts: &[String:Int], fact: String, action: Action) -> String {
+apply: fn(facts: ^[String:Int], fact: String, action: Action) -> String {
     current: facts.get(fact.copy()) ?? 0
     if action == {
         .Add(delta) -> {
@@ -92,7 +92,7 @@ apply: fn(facts: &[String:Int], fact: String, action: Action) -> String {
     return ""
 }
 
-fire: fn(facts: &[String:Int], rules: [Rule]) -> [String] {
+fire: fn(facts: ^[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
         value: facts.get(rule.fact.copy()) ?? 0

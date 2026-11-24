@@ -179,7 +179,7 @@ line_error: fn(started: time.Instant, timeout_ms: Int, error: String) -> String 
 }
 
 // The line probe's answer `body`.
-answered_line: fn(body: &&String, started: time.Instant) -> Dyn {
+answered_line: fn(body: ^^String, started: time.Instant) -> Dyn {
     out := Dyn.object()
     out["ok"] = Dyn.Bool(true)
     out["body"] = Dyn.Text(body)
@@ -188,7 +188,7 @@ answered_line: fn(body: &&String, started: time.Instant) -> Dyn {
 }
 
 // `result`, once `stream` is closed.
-closed_probe: fn(stream: &TCPStream, result: &&Dyn) -> Dyn {
+closed_probe: fn(stream: ^TCPStream, result: ^^Dyn) -> Dyn {
     net.tcp_close(stream).drop("the probe is answered whether or not its socket closes cleanly")
     result
 }

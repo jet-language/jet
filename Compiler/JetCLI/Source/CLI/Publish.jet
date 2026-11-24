@@ -80,18 +80,18 @@ JetCLIPublishLog: struct {
     stderr: String,
     color: Bool,
 
-    out: fn(&self, line: String) Never! { self.stdout = "{self.stdout}{line}\n" }
+    out: fn(^self, line: String) Never! { self.stdout = "{self.stdout}{line}\n" }
 
-    raw_out: fn(&self, text: String) Never! { self.stdout = "{self.stdout}{text}" }
+    raw_out: fn(^self, text: String) Never! { self.stdout = "{self.stdout}{text}" }
 
-    err: fn(&self, text: String) Never! { self.stderr = "{self.stderr}{text}" }
+    err: fn(^self, text: String) Never! { self.stderr = "{self.stderr}{text}" }
 
-    render: fn(&self, diagnostic: Diagnostic) Never! {
+    render: fn(^self, diagnostic: Diagnostic) Never! {
         self.stderr = "{self.stderr}{diagnostic_render_all("package.jet", "", [Diagnostic]{diagnostic}, self.color)}"
     }
 
     // `cli_error!(code, what)`: the code's shared Why and Fix.
-    error: fn(&self, code: String, what: String) Never! {
+    error: fn(^self, code: String, what: String) Never! {
         shared: jet_cli_diagnostic_copy(code)
         self.stderr = "{self.stderr}{jet_cli_report_output("", code, what, shared.why, shared.fix, self.color, JET_DRIVER_EXIT_USER_ERROR).stderr}"
     }
@@ -204,7 +204,7 @@ jet_cli_publish_self: fn(root: String, args: [String]) -[Env, Exec, Time.Wait]> 
 }
 
 // The removal failure of a checkout, reported before the primary failure.
-jet_cli_publish_drop_checkout: fn(log: &JetCLIPublishLog, checkout: PublicationPublishCheckout) -[FS]> {
+jet_cli_publish_drop_checkout: fn(log: ^JetCLIPublishLog, checkout: PublicationPublishCheckout) -[FS]> {
     if publication_cleanup_publish_checkout(checkout) == .Err(error) {
         log.error("E2105", "couldn't remove registry checkout `{checkout.path}`: {error}")
     }

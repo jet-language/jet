@@ -22,15 +22,15 @@ use {
     ]
 }
 
-parser_state_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_state_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "state" && parser_kind_at(state, 1) == TOKEN_IDENT
 }
 
-parser_state_section_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_state_section_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "state" && parser_kind_at(state, 1) == TOKEN_LBRACE
 }
 
-parser_parse_state_decl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> StateDecl {
+parser_parse_state_decl: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -> StateDecl {
     start: parser_bump(state)
     type_name: parser_state_dotted_name(state, "for a state owner type")
     parser_expect(state, TOKEN_LBRACE, "`{{` before state names")
@@ -39,7 +39,7 @@ parser_parse_state_decl: fn(state: &JetParserState, modifiers: ParsedItemModifie
     StateDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_name: type_name.name, type_name_span: type_name.span, states: list.states, arrows: list.arrows, groups: list.groups, span: parser_cover(start.span, close.span)}
 }
 
-parser_parse_state_section: fn(state: &JetParserState, type_name: String, type_name_span: Span) -> StateDecl {
+parser_parse_state_section: fn(state: ^JetParserState, type_name: String, type_name_span: Span) -> StateDecl {
     start: parser_bump(state)
     parser_expect(state, TOKEN_LBRACE, "`{{` before a state section")
     list: parser_state_list(state)
@@ -58,7 +58,7 @@ ParsedStateList: struct {
 //   `Draft -> Confirmed, Canceled`  a state and its moves
 //   `Open: Draft | Confirmed`     a named group of states
 // After `->`, commas join the targets until the line ends.
-parser_state_list: fn(state: &JetParserState) -> ParsedStateList {
+parser_state_list: fn(state: ^JetParserState) -> ParsedStateList {
     list := ParsedStateList{states: [NamedSpan]{}, arrows: [StateArrow]{}, groups: [StateGroup]{}}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
         if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
@@ -96,12 +96,12 @@ parser_state_list: fn(state: &JetParserState) -> ParsedStateList {
     list
 }
 
-parser_state_name: fn(state: &JetParserState, context: String) -> NamedSpan {
+parser_state_name: fn(state: ^JetParserState, context: String) -> NamedSpan {
     name: parser_expect_name(state, context)
     NamedSpan{name: parser_value(state, name), span: name.span}
 }
 
-parser_state_dotted_name: fn(state: &JetParserState, context: String) -> NamedSpan {
+parser_state_dotted_name: fn(state: ^JetParserState, context: String) -> NamedSpan {
     first: parser_expect_name(state, context)
     name := parser_value(state, first)
     end := first.span

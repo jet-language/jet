@@ -153,7 +153,7 @@ NativeOverlayAdapter: struct {
         NativeOverlayAdapter.new(session.id())
     }
 
-    set_release_build: fn(&self, release_build: Bool) {
+    set_release_build: fn(^self, release_build: Bool) {
         self.release_build = release_build
         if release_build {
             self.revision = None
@@ -178,23 +178,23 @@ NativeOverlayAdapter: struct {
     }
 
     // Retain already-typed nodes/actions without deriving semantics from names.
-    set_typed_panels: fn(&self, panels: [NativeOverlayPanelFact]) NativeOverlayAdapterError! {
+    set_typed_panels: fn(^self, panels: [NativeOverlayPanelFact]) NativeOverlayAdapterError! {
         if self.release_build {
             return Err(NativeOverlayAdapterError.HostRejected{message: "native overlay is excluded from release builds"})
         }
         self.typed_panels = typed_panel_map(panels)
     }
 
-    apply_projection: fn(&self, projection: DevtoolsProjection) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+    apply_projection: fn(^self, projection: DevtoolsProjection) -> NativeOverlayUpdate NativeOverlayAdapterError! {
         self.apply_projection_internal(projection, false)
     }
 
-    apply_projection_with_panels: fn(&self, projection: DevtoolsProjection, panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+    apply_projection_with_panels: fn(^self, projection: DevtoolsProjection, panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
         self.set_typed_panels(panels)
         self.apply_projection_internal(projection, true)
     }
 
-    apply_projection_internal: fn(&self, projection: DevtoolsProjection, retain_typed_panels: Bool) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+    apply_projection_internal: fn(^self, projection: DevtoolsProjection, retain_typed_panels: Bool) -> NativeOverlayUpdate NativeOverlayAdapterError! {
         if self.release_build {
             return Err(NativeOverlayAdapterError.HostRejected{message: "native overlay is excluded from release builds"})
         }
@@ -264,7 +264,7 @@ NativeOverlayAdapter: struct {
         update
     }
 
-    sync_session: fn(&self, session: ResidentDevSession) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+    sync_session: fn(^self, session: ResidentDevSession) -> NativeOverlayUpdate NativeOverlayAdapterError! {
         if session.id() != self.session_id {
             return Err(NativeOverlayAdapterError.SessionMismatch{expected: self.session_id, received: session.id()})
         }
@@ -447,7 +447,7 @@ typed_panel_map: fn(panels: [NativeOverlayPanelFact]) -> [String:NativeOverlayPa
     output
 }
 
-validate_panel: fn(panel: NativeOverlayPanelFact, count: &Int) NativeOverlayAdapterError! {
+validate_panel: fn(panel: NativeOverlayPanelFact, count: ^Int) NativeOverlayAdapterError! {
     validate_text(panel.panel_id, "panel id", false)
     validate_text(panel.title, "panel title", false)
     validate_text(panel.status, "panel status", true)
@@ -455,7 +455,7 @@ validate_panel: fn(panel: NativeOverlayPanelFact, count: &Int) NativeOverlayAdap
     loop node in panel.nodes -> validate_node(node, 0, count, ids)
 }
 
-validate_node: fn(node: NativeOverlayNode, depth: Int, count: &Int, ids: &[String:Bool]) NativeOverlayAdapterError! {
+validate_node: fn(node: NativeOverlayNode, depth: Int, count: ^Int, ids: ^[String:Bool]) NativeOverlayAdapterError! {
     if depth > MAX_OVERLAY_DEPTH {
         return Err(NativeOverlayAdapterError.InvalidNode{message: "native overlay node tree exceeds its depth budget"})
     }

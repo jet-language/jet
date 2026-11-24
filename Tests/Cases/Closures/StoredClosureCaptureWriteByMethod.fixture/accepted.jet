@@ -1,11 +1,11 @@
-// A lambda's `&self` method write lands where the lambda can reach it: one
+// A lambda's `^self` method write lands where the lambda can reach it: one
 // only called where it is bound borrows the local and writes it; a stored
 // one (in a struct field or a list) writes its own copy, which each call
 // sees; and a stored one over a write parameter writes the caller's value.
 Counter: struct {
     count: Int,
 
-    bump: fn(&self) { self.count += 1 }
+    bump: fn(^self) { self.count += 1 }
 }
 
 Holder: struct {
@@ -32,7 +32,7 @@ tallies: fn() -> [fn() -[]> Int] {
     }
 }
 
-record: fn(tally: &Counter) {
+record: fn(tally: ^Counter) {
     h: Holder{
         action: fn() {
             tally.bump()

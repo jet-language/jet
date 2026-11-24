@@ -1,0 +1,29 @@
+// A struct literal's written head names its type: references and rename reach
+// `Server{` as they reach `server: Server`.
+LSP_TEST_LITERAL_URI: "file:///w/literal.jet"
+
+// `Server` is declared on line 0 (characters 0-6), written as a parameter type
+// on line 4 (characters 18-24) and as a literal head on line 9 (characters
+// 16-22).
+LSP_TEST_LITERAL: `Server: struct {
+    port: Int
+}
+
+serve: fn(server: Server) -> Int {
+    server.port
+}
+
+main: fn() {
+    print(serve(Server{port: 1}))
+}
+`
+
+#Test("references and rename reach a struct literal's head") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_LITERAL_URI, LSP_TEST_LITERAL)
+    found: "{{{lsp_test_text_document(LSP_TEST_LITERAL_URI)},\"position\":{{\"line\":9,\"character\":17}},\"context\":{{\"includeDeclaration\":true}}}}"
+    assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_result(server, "textDocument/references", found))), [String]{"0:0-0:6", "4:18-4:24", "9:16-9:22"})
+    params: "{{{lsp_test_text_document(LSP_TEST_LITERAL_URI)},\"position\":{{\"line\":0,\"character\":1}},\"newName\":\"Host\"}}"
+    edits: lsp_test_rows(lsp_test_field(lsp_test_field(lsp_test_result(server, "textDocument/rename", params), "changes"), LSP_TEST_LITERAL_URI))
+    assert_eq(lsp_test_ranges(edits), [String]{"0:0-0:6", "4:18-4:24", "9:16-9:22"})
+}

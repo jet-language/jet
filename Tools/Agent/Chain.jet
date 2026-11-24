@@ -163,7 +163,7 @@ list: fn(path: String) -[Exec, FS, IO]> [files.DirEntry] Never! {
 // Every file under `dir` (relative to `root`), skipping dot names and build
 // output names, appended to `out`; `dir` itself when it is not a directory,
 // nothing when it does not exist.
-walk_into: fn(root: String, dir: String, out: &[String]) -[Exec, FS, IO]> {
+walk_into: fn(root: String, dir: String, out: ^[String]) -[Exec, FS, IO]> {
     if !files.exists(files.join(root, dir)) {
         return
     }
@@ -1171,7 +1171,7 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
     code
 }
 
-chain_run: fn(c: &Chain, options: ChainOptions, seedpub: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+chain_run: fn(c: ^Chain, options: ChainOptions, seedpub: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     if options.auto || c.level == "check" {
         found: diff(c.tree, c.base, c.r.repo)
         diff_path: files.join(c.out, "diff.json")
@@ -1278,7 +1278,7 @@ changed_summary: fn(changed: [Change]) -> String Never! {
 // The chain for its level in its mode (dry: resolve keys from the store only;
 // probe: reuse what the store holds and stop at the first stage it lacks;
 // run: build every stage it lacks). 3 at a miss in dry and probe.
-chain: fn(c: &Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+chain: fn(c: ^Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     c.rows = [String]{}
     c.miss = ""
     if c.level == "check" -> return check_stage(c)
@@ -1297,12 +1297,12 @@ chain: fn(c: &Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
 }
 
 // One RESULT row: stage status rc wall_s peak_rss_mb sha256 key note.
-rec: fn(c: &Chain, cells: [String]) { c.rows.push(cells.join("\t")) }
+rec: fn(c: ^Chain, cells: [String]) { c.rows.push(cells.join("\t")) }
 
 since: fn(t0: Int) -[Time]> String Never! { tenths(time.unix_ns() - t0) }
 
 // A stage's key: SHA-256 over its material lines and the canonical root.
-key_of: fn(c: &Chain, mat: [String]) -> String Never! {
+key_of: fn(c: ^Chain, mat: [String]) -> String Never! {
     text := "chain-stage-v1\n"
     loop line in mat -> text = "{text}{line}\n"
     hasher := crypto.new()
@@ -1310,11 +1310,11 @@ key_of: fn(c: &Chain, mat: [String]) -> String Never! {
     hasher.digest()
 }
 
-write_keys: fn(c: &Chain, name: String, mat: [String]) -[FS]> {
+write_keys: fn(c: ^Chain, name: String, mat: [String]) -[FS]> {
     files.write(files.join(c.out, "keys/{name}.txt"), "{mat.join("\n")}\n") ?? ()
 }
 
-find_entry: fn(c: &Chain, k: String) -[FS]> String Never! {
+find_entry: fn(c: ^Chain, k: String) -[FS]> String Never! {
     stores: [String]{c.store.copy(), "{c.r.scratch}/stagestore", "{c.r.run}/stagestore"}
     loop store in stores {
         if files.is_file("{store}/{k}/meta") -> return "{store}/{k}"
@@ -1342,7 +1342,7 @@ STAGE_FILES: ["jet", "jet.debug", "jet.o", "jet-bare", "IDENTITY"]
 // Store `src` (a build's STAGE_FILES and jet-runtime/, or a check's
 // logs) under `k` with meta `lines`, built in a temp dir and renamed in; then
 // evict the store to its cap.
-store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> {
+store_put: fn(c: ^Chain, k: String, kind: String, src: String, lines: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> {
     dest: files.join(c.store, k)
     if files.is_dir(dest) {
         return
@@ -1381,7 +1381,7 @@ store_put: fn(c: &Chain, k: String, kind: String, src: String, lines: [String]) 
 
 // The material of a build stage's key. `files` names what its store entry
 // holds, so an entry stored with fewer files is never reused.
-build_mat: fn(c: &Chain, builder: String, builder_pack: String, identity: String, threads: Int) -> [String] Never! {
+build_mat: fn(c: ^Chain, builder: String, builder_pack: String, identity: String, threads: Int) -> [String] Never! {
     [String]{"kind=build", "builder={builder}", "builderpack={builder_pack}", "inputs={c.bin}", "identity={identity}", "args=JetEnv.jet --norust jet build -O1 --keep-going --threads {threads} Compiler", "files={STAGE_FILES.join(" ")} jet-runtime"}
 }
 
@@ -1395,7 +1395,7 @@ StageRun: struct {
 // under the chain's memory cap (no swap) and the slot's CPUs. `vars` are
 // its NAME=VALUE settings. A `canonical` stage runs with the tree mounted at
 // the canonical root in a private mount namespace (`inroot`), from there.
-stage_run: fn(c: &Chain, name: String, argv: [String], vars: [String], seconds: Int, canonical: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> StageRun Never! {
+stage_run: fn(c: ^Chain, name: String, argv: [String], vars: [String], seconds: Int, canonical: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> StageRun Never! {
     spec := process.cmd(argv).cwd(c.tree)
     if canonical {
         files.create_dir_all(files.join(c.nsdir, "snap")) ?? fail("cannot create `{c.nsdir}/snap`: {err}")
@@ -1474,7 +1474,7 @@ bind: fn(from: String, to: String) -[Exec, IO, Time.Wait]> Bool Never! {
 // Every stage builds at `basic`, the level of the Compiler workspace's `ship`
 // profile, which builders older than these profiles take as a flag.
 // 0 built or reused, 1 failed, 3 a miss outside a run.
-build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, builder_pack: String, identity: String, threads: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+build_stage: fn(c: ^Chain, n: String, builder_dir: String, builder: String, builder_pack: String, identity: String, threads: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     mat: build_mat(c, builder, builder_pack, identity, threads)
     k: key_of(c, mat)
     write_keys(c, n, mat)
@@ -1572,7 +1572,7 @@ build_stage: fn(c: &Chain, n: String, builder_dir: String, builder: String, buil
 
 // check_stage: the seed's `jet check` of each member, from the tree (no
 // canonical root: check writes no artifact).
-check_stage: fn(c: &Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+check_stage: fn(c: ^Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     mat: [String]{"kind=check", "seed={c.seed_sha}", "seedpack={c.seed_pk}", "base={c.base}", "diff={c.digest}", "members={c.members.join(" ")}", "identity={c.cid}", "args=check --keep-going --threads 12"}
     k: key_of(c, mat)
     write_keys(c, "check", mat)
@@ -1640,7 +1640,7 @@ check_stage: fn(c: &Chain) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     worst
 }
 
-same_build: fn(c: &Chain, left: String, right: String) -[FS]> Bool Never! {
+same_build: fn(c: ^Chain, left: String, right: String) -[FS]> Bool Never! {
     one: files.join(c.out, left)
     two: files.join(c.out, right)
     if !same_file("{one}/jet", "{two}/jet") -> return false
@@ -1649,7 +1649,7 @@ same_build: fn(c: &Chain, left: String, right: String) -[FS]> Bool Never! {
 }
 
 // The largest peak of the stages this run built, in MB.
-peak_mb: fn(c: &Chain) -> Int Never! {
+peak_mb: fn(c: ^Chain) -> Int Never! {
     peak := 0
     loop row in c.rows {
         cells: row.split("\t").to_list()
@@ -1661,7 +1661,7 @@ peak_mb: fn(c: &Chain) -> Int Never! {
 }
 
 // The verdict of the run, RESULT and REPORT.md; the exit code.
-finish: fn(c: &Chain, slot_note: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+finish: fn(c: ^Chain, slot_note: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     verdict := "OK"
     code := 0
     note := ""
@@ -1720,7 +1720,7 @@ finish: fn(c: &Chain, slot_note: String) -[Env, Exec, FS, IO, Time, Time.Wait]> 
     code
 }
 
-write_report: fn(c: &Chain, verdict: String, code: Int, note: String, slot_note: String) -[Env, Exec, FS, IO, Time]> {
+write_report: fn(c: ^Chain, verdict: String, code: Int, note: String, slot_note: String) -[Env, Exec, FS, IO, Time]> {
     total: since(c.started)
     rows := [String]{"stage\tstatus\trc\twall_s\tpeak_rss_mb\tsha256\tkey\tnote"}
     rows.extend(c.rows.copy())
@@ -1761,7 +1761,7 @@ write_report: fn(c: &Chain, verdict: String, code: Int, note: String, slot_note:
 // output is still these bytes (jet and pack), it is newer than the seed, the
 // census build was clean, the identity is the seed's, and the pack was
 // lowered by this compiler.
-seed_published: fn(c: &Chain, install: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+seed_published: fn(c: ^Chain, install: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     seedpub: files.canonicalize(install) ?? {
         print("seed-published: no install at {install}")
         return 2
@@ -2223,7 +2223,7 @@ owner: fn(symbols: [Symbol], va: Int) -> String Never! {
     best
 }
 
-put: fn(b: &[U8], at: Int, width: Int, value: Int) {
+put: fn(b: ^[U8], at: Int, width: Int, value: Int) {
     rest := value
     loop k in 0..<width {
         b[at + k] = checked(U8{rest % 256}) ?? U8{0}
@@ -2231,7 +2231,7 @@ put: fn(b: &[U8], at: Int, width: Int, value: Int) {
     }
 }
 
-put_text: fn(b: &[U8], at: Int, text: String) {
+put_text: fn(b: ^[U8], at: Int, text: String) {
     place := at
     loop letter in text.bytes() {
         b[place] = letter

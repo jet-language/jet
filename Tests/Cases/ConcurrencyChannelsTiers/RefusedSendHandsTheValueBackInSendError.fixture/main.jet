@@ -4,10 +4,10 @@
 // A bare send propagates: `relay` infers the default Err, since a Core error
 // family member like `SendError<String>` is no typed member of an inferred
 // failure union, so the refused send reads "send on a closed channel".
-relay: fn(tx: Sender<String>, text: &&String) { tx.send(text) }
+relay: fn(tx: Sender<String>, text: ^^String) { tx.send(text) }
 
 // Through the default Err, a refused send reads "send on a closed channel".
-forward: fn(tx: Sender<String>, text: &&String) Err! { tx.send(text) }
+forward: fn(tx: Sender<String>, text: ^^String) Err! { tx.send(text) }
 
 run: fn() {
     { sender: tx, receiver: rx }: channel<String>(capacity: 4)

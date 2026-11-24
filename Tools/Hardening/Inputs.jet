@@ -34,7 +34,7 @@ read_source: fn(root: String, path: String) -[FS]> SourceFile Err! {
 }
 
 // Sorted repository-relative paths of the `.jet` files under `relative`.
-jet_files: fn(root: String, relative: String, out: &[String]) -[FS]> Err! {
+jet_files: fn(root: String, relative: String, out: ^[String]) -[FS]> Err! {
     entries: files.list_dir(files.join(root, relative)) ?? return Err("cannot list {relative}: {err}")
     names := [String]{}
     loop entry in entries -> names.push(entry.name.copy())

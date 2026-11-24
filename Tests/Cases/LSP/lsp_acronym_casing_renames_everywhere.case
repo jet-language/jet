@@ -1,0 +1,25 @@
+# Jet.AcronymCasing's quick fix renames the declaration to its lexicon
+# spelling everywhere through the rename machinery: the declaration, a
+# parameter type and a struct literal's head, in one edit the casing error
+# itself does not block.
+fixture: LSPAcronymCasingRenamesEverywhere.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
+recv lsp until $.id = 7
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"HttpServer: struct {\\n    port: Int\\n}\\n\\nserve: fn(server: HttpServer) -> Int {\\n    server.port\\n}\\n\\nrun: fn() {\\n    print(serve(HttpServer{port: 1}))\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/codeAction\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":10}},\"context\":{\"diagnostics\":[]}}}"
+recv lsp until $.id = 7
+json: stdout doc $.result[0].title = "Rename `HttpServer` to `HTTPServer` everywhere"
+json: stdout doc $.result[0].kind = "quickfix"
+json: stdout doc $.result[0].isPreferred = true
+json: stdout doc $.result[0].edit.documentChanges #= 1
+json: stdout doc $.result[0].edit.documentChanges[0].textDocument.uri = "file://{work}/main.jet"
+json: stdout doc $.result[0].edit.documentChanges[0].edits #= 3
+json: stdout doc $.result[0].edit.documentChanges[0].edits[0].range = {"start":{"line":0,"character":0},"end":{"line":0,"character":10}}
+json: stdout doc $.result[0].edit.documentChanges[0].edits[1].range = {"start":{"line":4,"character":18},"end":{"line":4,"character":28}}
+json: stdout doc $.result[0].edit.documentChanges[0].edits[2].range = {"start":{"line":9,"character":16},"end":{"line":9,"character":26}}
+json: stdout doc $.result[0].edit.documentChanges[0].edits[*].newText in ["HTTPServer"]
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 7
+close lsp

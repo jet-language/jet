@@ -22,7 +22,7 @@ PackageSourceSnapshot: struct {
     path: fn(self) -> String Never! { self.directory.path() }
 
     impl Close {
-        close: fn(&&self) -[FS]> {
+        close: fn(^^self) -[FS]> {
             // Never remove a replacement bound at the private snapshot name.
             self.directory.revalidate() ?? return
             self.parent.remove_tree(self.name).drop("snapshot cleanup must not replace the caller's outcome")
@@ -98,7 +98,7 @@ pkg_source_snapshot_authority: fn(source: FoundationDirectoryAuthority) -[FS, En
 }
 
 // The snapshot takes `snapshots`: it removes its stage through that handle on close.
-pkg_source_snapshot_into: fn(source: FoundationDirectoryAuthority, snapshots: &&FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+pkg_source_snapshot_into: fn(source: FoundationDirectoryAuthority, snapshots: ^^FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
     stage: snapshots.private_child("source") ?? return Err(pkg_source_store_io("creating source snapshot", snapshots.path(), err))
     name: files.basename(stage.path())
     stage.copy_tree_from(source) ?? {

@@ -66,7 +66,7 @@ LPTypes: struct {
     guard: Int,
 }
 
-lp_types: fn(m: &IRModule) -> LPTypes {
+lp_types: fn(m: ^IRModule) -> LPTypes {
     // `twice`'s signature, the type of the function value whose code word
     // `code` is.
     twice_ty: Type.Fn{params: [Type]{Type.Int}, ret: Val(Type.Int), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
@@ -91,7 +91,7 @@ lp_types: fn(m: &IRModule) -> LPTypes {
     }
 }
 
-lp_add: fn(m: &IRModule, f: IRFunction) -> Int {
+lp_add: fn(m: ^IRModule, f: IRFunction) -> Int {
     row: m.functions.len()
     ir_function_bind(m, f.key, row)
     m.functions.push(f.copy())
@@ -102,15 +102,15 @@ lp_fn: fn(name: String) -> IRFunction {
     ir_function_new(name, "test:lint.jet.{name}", "", "lint.jet", 1)
 }
 
-lp_temp: fn(f: &IRFunction, ty: Int) -> Int { ir_slot(f, ty, IRSlotKind.Temp, -1, 0) }
+lp_temp: fn(f: ^IRFunction, ty: Int) -> Int { ir_slot(f, ty, IRSlotKind.Temp, -1, 0) }
 
-lp_const: fn(f: &IRFunction, ty: Int, value: Int) -> Int {
+lp_const: fn(f: ^IRFunction, ty: Int, value: Int) -> Int {
     slot: lp_temp(f, ty)
     _ := ir_emit(f, IROp.Const, slot, value, -1, -1, 0)
     slot
 }
 
-lp_return: fn(f: &IRFunction, slot: Int) { _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0) }
+lp_return: fn(f: ^IRFunction, slot: Int) { _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0) }
 
 // A module with `twice(n: Int) -> Int` (function 0), `release(g: Guard)`
 // (function 1, Guard's drop) and a `run` that is valid but for the bug
@@ -140,7 +140,7 @@ lp_module: fn(plant: String) -> IRModule {
 // text and big Int constants, frame storage stored, loaded, copied and
 // viewed, a call through a function value's code, drops, and a fixed word
 // masked with no jump.
-lp_valid: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_valid: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     six: lp_temp(f, t.int)
     call_args: ir_args(f, [Int]{three})
@@ -204,36 +204,36 @@ lp_valid: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
-lp_slot_range: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_slot_range: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     sum: lp_temp(f, t.int)
     _ := ir_emit(f, IROp.Add, sum, sum, 99, IR_OVERFLOW_TRAP, 1)
     lp_return(f, -1)
 }
 
-lp_dst_range: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_dst_range: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     _ := ir_emit(f, IROp.Const, 77, 1, -1, -1, 1)
     lp_return(f, -1)
 }
 
-lp_name_range: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_name_range: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     none: ir_args(f, [Int]{})
     _ := ir_emit(f, IROp.CallRuntime, -1, 500, none, 0, 1)
     lp_return(f, -1)
 }
 
-lp_kind: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_kind: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     _ := ir_open_if(f, three, 1)
     ir_end(f, 1)
     lp_return(f, -1)
 }
 
-lp_imm: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_imm: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     _ := lp_const(f, t.bool, 2)
     lp_return(f, -1)
 }
 
-lp_layout: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_layout: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     half: lp_temp(f, t.float)
     sum: lp_temp(f, t.int)
@@ -241,28 +241,28 @@ lp_layout: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
-lp_convert: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_convert: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     word: lp_temp(f, t.word)
     other: lp_temp(f, t.word)
     _ := ir_emit(f, IROp.Convert, other, word, -1, -1, 1)
     lp_return(f, -1)
 }
 
-lp_clone: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_clone: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     handle: lp_temp(f, t.owned)
     second: lp_temp(f, t.owned)
     _ := ir_emit(f, IROp.Copy, second, handle, -1, -1, 1)
     lp_return(f, -1)
 }
 
-lp_arity: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_arity: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     six: lp_temp(f, t.int)
     none: ir_args(f, [Int]{})
     _ := ir_emit(f, IROp.Call, six, 0, none, 0, 1)
     lp_return(f, -1)
 }
 
-lp_arg: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_arg: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     half: lp_temp(f, t.float)
     six: lp_temp(f, t.int)
     call_args: ir_args(f, [Int]{half})
@@ -270,7 +270,7 @@ lp_arg: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
-lp_result: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_result: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     flag: lp_temp(f, t.bool)
     call_args: ir_args(f, [Int]{three})
@@ -280,7 +280,7 @@ lp_result: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 
 // `twice` marked `#Inline(Always)` and still called once the module's
 // marked calls count as inlined.
-lp_marked: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_marked: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     m.functions[0].inline_always = true
     m.marked_inlined = true
     three: lp_const(f, t.int, 3)
@@ -292,77 +292,77 @@ lp_marked: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 
 // The route jet_std_io_stdout_is_tty takes the stdout handle (one word),
 // here called with none.
-lp_route: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_route: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     tty: lp_temp(f, t.bool)
     none: ir_args(f, [Int]{})
     _ := ir_emit(f, IROp.CallRuntime, tty, ir_intern_name(m, "jet_std_io_stdout_is_tty"), none, 0, 1)
     lp_return(f, -1)
 }
 
-lp_nesting: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_nesting: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     _ := ir_emit(f, IROp.Block, -1, 2, -1, -1, 1)
     lp_return(f, -1)
     _ := ir_emit(f, IROp.End, -1, 1, -1, -1, 1)
 }
 
-lp_depth: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_depth: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     _ := ir_open(f, IROp.Block, 1)
     _ := ir_emit(f, IROp.Br, -1, 3, -1, -1, 1)
     ir_end(f, 1)
     lp_return(f, -1)
 }
 
-lp_return_value: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_return_value: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     lp_return(f, three)
 }
 
-lp_arena: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_arena: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     _ := ir_slot(f, 4000, IRSlotKind.Temp, -1, 0)
     lp_return(f, -1)
 }
 
 // The rows a renumbering of the slots must carry along: a slot column cut
 // short, a split naming a slot past the body's and a bind row of one word.
-lp_site_short: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_site_short: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     _ := lp_const(f, t.int, 3)
     _ := f.slot_site.pop()
     lp_return(f, -1)
 }
 
-lp_split_range: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_split_range: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     f.splits.push(three)
     f.splits.push(three + 1)
     lp_return(f, -1)
 }
 
-lp_bind_half: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_bind_half: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     f.binds.push(three)
     lp_return(f, -1)
 }
 
-lp_type_kind: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_type_kind: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     _ := ir_intern_type(m, "Wrong", IRType{ty: TYPE_ID_INT, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
     lp_return(f, -1)
 }
 
-lp_type_layout: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_type_layout: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     narrow_tid: ir_module_intern_tid(m, Type.IntN{signed: false, bits: 24})
     _ := ir_intern_type(m, "U24", IRType{ty: narrow_tid, kind: IRTypeKind.Word, size: 3, align: 1, class: IRClass.Integer, signed: false, bits: 24, drop: ""})
     lp_return(f, -1)
 }
 
 // ConstBigInt's name row must spell a decimal integer.
-lp_big_text: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_big_text: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     big: lp_temp(f, t.int)
     _ := ir_emit(f, IROp.ConstBigInt, big, ir_intern_name(m, "12x"), -1, -1, 1)
     lp_return(f, -1)
 }
 
 // ConstText's data row is UTF-8 text: an overlong encoding of NUL is not.
-lp_bad_text: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_bad_text: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     row: m.data.len()
     m.data.push([U8]{U8{192}, U8{128}})
     label: lp_temp(f, t.string)
@@ -371,7 +371,7 @@ lp_bad_text: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // ConstText's data row is text, not a static object with relocations.
-lp_object_text: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_object_text: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     row: m.data.len()
     m.data.push([U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}})
     m.data_relocs[row] = [IRDataReloc]{}
@@ -381,7 +381,7 @@ lp_object_text: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A Load past a 16-byte pair's end.
-lp_load_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_load_past: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     pair: lp_temp(f, t.pair)
     _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
     value: lp_temp(f, t.int)
@@ -390,7 +390,7 @@ lp_load_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A Store whose displacement no x86-64 address encodes.
-lp_store_far: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_store_far: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     base: lp_temp(f, t.pointer)
     value: lp_const(f, t.int, 3)
     _ := ir_emit(f, IROp.Store, -1, base, 4294967296, value, 1)
@@ -398,7 +398,7 @@ lp_store_far: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A CopyBytes of 32 bytes into a 16-byte pair.
-lp_copy_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_copy_past: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     pair: lp_temp(f, t.pair)
     _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
     source: lp_temp(f, t.pointer)
@@ -407,14 +407,14 @@ lp_copy_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // Frame storage of 8 bytes for a 16-byte pair.
-lp_frame_short: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_frame_short: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     pair: lp_temp(f, t.pair)
     _ := ir_emit(f, IROp.StackAddress, pair, 8, 8, -1, 1)
     lp_return(f, -1)
 }
 
 // A pair viewed at 8 inside a 16-byte pair: its last 8 bytes are past the end.
-lp_view_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_view_past: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     pair: lp_temp(f, t.pair)
     _ := ir_emit(f, IROp.StackAddress, pair, 16, 8, -1, 1)
     view: lp_temp(f, t.pair)
@@ -423,14 +423,14 @@ lp_view_past: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A function's address in a 32-bit word.
-lp_narrow_address: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_narrow_address: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     address: lp_temp(f, t.narrow)
     _ := ir_emit(f, IROp.FunctionAddress, address, 0, -1, -1, 1)
     lp_return(f, -1)
 }
 
 // A drop whose routine is `twice`, which takes an Int and has a result.
-lp_drop_routine: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_drop_routine: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     doubled_tid: ir_module_intern_tid(m, Type.Named{name: "Doubled"})
     wrong: ir_intern_type(m, "Doubled", IRType{ty: doubled_tid, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "test:lint.jet.twice"})
     slot: lp_temp(f, wrong)
@@ -439,14 +439,14 @@ lp_drop_routine: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A Close of a Float, which lives in no general register.
-lp_close_float: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_close_float: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     half: lp_temp(f, t.float)
     _ := ir_emit(f, IROp.Close, -1, half, ir_intern_name(m, "jet_handle_close"), -1, 1)
     lp_return(f, -1)
 }
 
 // A call through `twice`'s code word with only its box.
-lp_indirect_arity: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_indirect_arity: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     box: lp_temp(f, t.pointer)
     code: lp_temp(f, t.code)
     _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
@@ -457,7 +457,7 @@ lp_indirect_arity: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A call through `twice`'s code word with a Float argument.
-lp_indirect_arg: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_indirect_arg: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     box: lp_temp(f, t.pointer)
     code: lp_temp(f, t.code)
     _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
@@ -469,7 +469,7 @@ lp_indirect_arg: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A call through `twice`'s code word into a Bool.
-lp_indirect_result: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_indirect_result: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     box: lp_temp(f, t.pointer)
     code: lp_temp(f, t.code)
     _ := ir_emit(f, IROp.Load, code, box, 8, -1, 1)
@@ -481,7 +481,7 @@ lp_indirect_result: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // An IntBig guard wider than an inline Int.
-lp_int_big_width: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_int_big_width: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     three: lp_const(f, t.int, 3)
     wide: lp_temp(f, t.bool)
     _ := ir_emit(f, IROp.IntBig, wide, three, 64, -1, 1)
@@ -489,7 +489,7 @@ lp_int_big_width: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A word the builder marked fixed, read through a Copy.
-lp_fixed: fn(f: &IRFunction, t: LPTypes) -> Int {
+lp_fixed: fn(f: ^IRFunction, t: LPTypes) -> Int {
     marked: lp_temp(f, t.word)
     f.slot_fixed[marked] = true
     key: lp_temp(f, t.word)
@@ -498,7 +498,7 @@ lp_fixed: fn(f: &IRFunction, t: LPTypes) -> Int {
 }
 
 // A branch on a compare of a fixed word.
-lp_fixed_branch: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_fixed_branch: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     key: lp_fixed(f, t)
     zero: lp_const(f, t.word, 0)
     flag: lp_temp(f, t.bool)
@@ -509,7 +509,7 @@ lp_fixed_branch: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 // A division by a fixed word, a shift by one and an add that traps.
-lp_fixed_divide: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_fixed_divide: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     key: lp_fixed(f, t)
     seven: lp_const(f, t.word, 7)
     quotient: lp_temp(f, t.word)
@@ -517,7 +517,7 @@ lp_fixed_divide: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
-lp_fixed_shift: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_fixed_shift: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     key: lp_fixed(f, t)
     seven: lp_const(f, t.word, 7)
     shifted: lp_temp(f, t.word)
@@ -525,7 +525,7 @@ lp_fixed_shift: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
     lp_return(f, -1)
 }
 
-lp_fixed_trap: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_fixed_trap: fn(m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     key: lp_fixed(f, t)
     seven: lp_const(f, t.word, 7)
     sum: lp_temp(f, t.word)
@@ -579,7 +579,7 @@ LP_RULES: [String]{
     "timing.fixed#trap",
 }
 
-lp_plant: fn(plant: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
+lp_plant: fn(plant: String, m: ^IRModule, t: LPTypes, f: ^IRFunction) {
     if plant == {
         "arena" -> lp_arena(m, t, f)
         "arena#site" -> lp_site_short(m, t, f)

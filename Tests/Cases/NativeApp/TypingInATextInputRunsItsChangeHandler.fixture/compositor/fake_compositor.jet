@@ -94,7 +94,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat"}
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -129,13 +129,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -147,7 +147,7 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
 }
 
@@ -167,7 +167,7 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
 
 // The pixel (x, y) of `buffer` as red, green, blue and alpha, decoded by
 // the format the window gave the buffer.
-fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
+fake_pixel: fn(f: ^Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
     if buffer.pool >= f.fds.len() || x >= buffer.width || y >= buffer.height {
         fake_fail(f, "pixel {x},{y} is outside buffer {buffer.id}")
         return [U8]{}
@@ -189,7 +189,7 @@ fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
 
 // Presses and releases each key in `codes` in turn, the keyboard first
 // entering the window.
-fake_keys: fn(f: &Fake, codes: [Int]) {
+fake_keys: fn(f: ^Fake, codes: [Int]) {
     keyboard: f.keyboard
     if keyboard == 0 {
         fake_fail(f, "the window has no keyboard")
@@ -208,7 +208,7 @@ fake_keys: fn(f: &Fake, codes: [Int]) {
 }
 
 // Moves to the next phase, noting what the fake did.
-fake_next: fn(f: &Fake, what: String) {
+fake_next: fn(f: ^Fake, what: String) {
     f.records.push(what.copy())
     f.phase += 1
     f.waited = 0
@@ -216,7 +216,7 @@ fake_next: fn(f: &Fake, what: String) {
 
 // Whether a phase that waits for what a frame shows has waited too long;
 // if it has, the window closes.
-fake_waited_out: fn(f: &Fake, what: String) -> Bool {
+fake_waited_out: fn(f: ^Fake, what: String) -> Bool {
     f.waited += 1
     if f.waited < FRAMES_PER_STEP -> return false
     fake_fail(f, "the window never showed {what}")
@@ -224,7 +224,7 @@ fake_waited_out: fn(f: &Fake, what: String) -> Bool {
     true
 }
 
-fake_close: fn(f: &Fake) {
+fake_close: fn(f: ^Fake) {
     toplevel: f.toplevel
     fake_event(f, toplevel, 1, [U8]{})
     f.records.push("closed the window")
@@ -233,7 +233,7 @@ fake_close: fn(f: &Fake) {
 
 // A commit of the window's surface: its frame callbacks are done, and a
 // new buffer is a frame to look at.
-fake_commit: fn(f: &Fake) {
+fake_commit: fn(f: ^Fake) {
     f.commits += 1
     callbacks: f.callbacks.copy()
     f.callbacks = [Int]{}
@@ -277,7 +277,7 @@ fake_commit: fn(f: &Fake) {
     fake_close(f)
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -369,7 +369,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
     }
 }
 
-fake_dispatch: fn(f: &Fake) -[Env, Net, Time]> {
+fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

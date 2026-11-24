@@ -201,7 +201,7 @@ Peer: struct {
 }
 
 // Read what the client has sent so far; an end of stream or a socket error ends the peer.
-receive: fn(peer: &Peer) {
+receive: fn(peer: ^Peer) {
     chunk: if peer.stream.read_bytes(65536, deadline: remaining(peer.started)) == {
         .Ok(got) -> got
         .Err(_) -> {
@@ -216,7 +216,7 @@ receive: fn(peer: &Peer) {
     loop b in chunk -> peer.buffer.push(b)
 }
 
-take_bytes: fn(peer: &Peer, n: Int) -> [U8] {
+take_bytes: fn(peer: ^Peer, n: Int) -> [U8] {
     loop peer.buffer.len() < n {
         if peer.ended -> fail("client closed while {n} bytes were expected")
         receive(peer)
@@ -226,7 +226,7 @@ take_bytes: fn(peer: &Peer, n: Int) -> [U8] {
     out
 }
 
-send: fn(peer: &Peer, bytes: [U8]) {
+send: fn(peer: ^Peer, bytes: [U8]) {
     if peer.stream.write_bytes(bytes) == {
         .Ok(_) -> {}
         .Err(_) -> {}
@@ -234,7 +234,7 @@ send: fn(peer: &Peer, bytes: [U8]) {
 }
 
 // Port of accept_websocket.
-accept: fn(peer: &Peer) {
+accept: fn(peer: ^Peer) {
     terminator: "\r\n\r\n".bytes()
     loop index_of(peer.buffer, terminator, 0) < 0 {
         if peer.ended -> fail("client closed during handshake")
@@ -261,7 +261,7 @@ accept: fn(peer: &Peer) {
 }
 
 // Port of read_text_frame.
-read: fn(peer: &Peer) -> String {
+read: fn(peer: ^Peer) -> String {
     head: take_bytes(peer, 2)
     if (Int{head[0]}) & 15 != 1 -> fail("expected text frame")
     if (Int{head[1]}) & 128 == 0 -> fail("client frame must be masked")
@@ -282,7 +282,7 @@ read: fn(peer: &Peer) -> String {
 }
 
 // Port of write_text_frame.
-write: fn(peer: &Peer, message: String) {
+write: fn(peer: ^Peer, message: String) {
     bytes: message.bytes()
     frame := [U8]{U8{0x81}}
     if bytes.len() <= 125 -> frame.push(U8{bytes.len()}) else {
@@ -296,7 +296,7 @@ write: fn(peer: &Peer, message: String) {
 }
 
 // Data pending within `ms`, the way run_handshake peeked with a 100ms read timeout.
-pending: fn(peer: &Peer, ms: Int) -> Bool {
+pending: fn(peer: ^Peer, ms: Int) -> Bool {
     if peer.buffer.len() > 0 -> return true
     if peer.ended -> return false
     readable: if net.tcp_ready(peer.stream, NetReadyInterest.Read, ms) == {
@@ -330,7 +330,7 @@ resolve: fn(reply: Dyn, request: String, n: Int) -> Dyn {
 // "else": REPLY}, or a list indexed by the method's 1-based occurrence (the last entry repeats).
 // `{id}` names the request id and `{n}` the occurrence in results and frames. require/forbid are the
 // request assertions the Rust server made before replying.
-run_script: fn(peer: &Peer, spec: Dyn) {
+run_script: fn(peer: ^Peer, spec: Dyn) {
     seen := [String:Int]{}
     stop: child(spec, "stop")
     loop _ in 0..<count(child(spec, "max")) {
@@ -362,7 +362,7 @@ run_script: fn(peer: &Peer, spec: Dyn) {
 }
 
 // Port of run_handshake.
-run_handshake: fn(peer: &Peer, spec: Dyn) {
+run_handshake: fn(peer: ^Peer, spec: Dyn) {
     request: read(peer)
     record(field(request, "method"))
     write(peer, success(field(request, "id"), text(child(spec, "status"))))
@@ -379,7 +379,7 @@ run_handshake: fn(peer: &Peer, spec: Dyn) {
 }
 
 // Port of run_malformed_session.
-run_malformed_session: fn(peer: &Peer) {
+run_malformed_session: fn(peer: ^Peer) {
     loop result in [READY, "{{\"sessionId\":1,\"capabilities\":[]}}", "{{}}"] {
         request: read(peer)
         record(field(request, "method"))
@@ -388,7 +388,7 @@ run_malformed_session: fn(peer: &Peer) {
 }
 
 // Port of run_event_storm.
-run_event_storm: fn(peer: &Peer) {
+run_event_storm: fn(peer: ^Peer) {
     results: [READY, "{{\"sessionId\":\"storm\",\"capabilities\":{{}}}}", READY, "{{}}"]
     filler := ""
     loop _ in 0..<4000 -> filler = "{filler}x"
@@ -407,7 +407,7 @@ run_event_storm: fn(peer: &Peer) {
 }
 
 // Port of run_continuous_events.
-run_continuous_events: fn(peer: &Peer) {
+run_continuous_events: fn(peer: ^Peer) {
     loop result in [READY, "{{\"sessionId\":\"deadline\",\"capabilities\":{{}}}}"] {
         request: read(peer)
         record(field(request, "method"))
@@ -424,7 +424,7 @@ run_continuous_events: fn(peer: &Peer) {
 }
 
 // Port of run_hostile and its HostileReply arms.
-run_hostile: fn(peer: &Peer, mode: String) {
+run_hostile: fn(peer: ^Peer, mode: String) {
     request: read(peer)
     record(field(request, "method"))
     id: field(request, "id")

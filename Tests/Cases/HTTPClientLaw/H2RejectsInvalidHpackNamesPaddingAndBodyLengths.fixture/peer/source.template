@@ -42,7 +42,7 @@ first_headers: fn(stream: TCPStream) -> Frame {
         if frame.kind == 1 -> return frame
     }
 }
-preface: fn(stream: &TCPStream) {
+preface: fn(stream: ^TCPStream) {
     assert_eq(read_exact(stream, 24), "PRI * HTTP/2.0{PEER_CRLF}{PEER_CRLF}SM{PEER_CRLF}{PEER_CRLF}".bytes())
     assert(read_frame(stream).kind == 4)
     write_frame(stream, 4, 0, 0, [U8]{})

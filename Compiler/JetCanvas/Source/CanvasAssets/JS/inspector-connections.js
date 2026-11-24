@@ -1298,7 +1298,7 @@
   function expressionFacts(graph, source) {
     const text = String(source || "").trim();
     const fallible = text.includes("?") && !text.includes("??");
-    const ability = /^&\s*/.test(text) ? "&" : "";
+    const ability = /^\^\s*/.test(text) ? "^" : "";
     if (!text) return { type: "unknown", known: true, invalid: true, label: "Expression is required" };
     if (/^\"(?:[^\"\\]|\\.)*\"$/.test(text)) return { type: "String", known: true, fallible, ability };
     if (/^'(?:[^'\\]|\\.)'$/.test(text)) return { type: "Char", known: true, fallible, ability };

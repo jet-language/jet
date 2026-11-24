@@ -37,6 +37,7 @@ migration_plans: fn() -> [MigrationPlan] {
         MigrationPlan{name: "american-ident1", toolchain: "a0.0.45"},
         MigrationPlan{name: "american-tokens1", toolchain: "a0.0.45"},
         MigrationPlan{name: "diagnostic-names1", toolchain: "a0.0.46"},
+        MigrationPlan{name: "mark-caret1", toolchain: "a0.0.47"},
     }
 }
 
@@ -51,6 +52,7 @@ migration_rewrite: fn(plan: String, path: String, text: String, source: Bool) ->
         "american-ident1" -> american_ident1_file(path, text, source)
         "american-tokens1" -> american_tokens1_file(path, text)
         "diagnostic-names1" -> diagnostic_names1_file(path, text, source)
+        "mark-caret1" -> mark_caret1_file(path, text, source)
         else -> panic("no migration plan named {plan}")
     }
 }
@@ -89,7 +91,7 @@ migration_database_same_meaning: fn(plan: String, before: String, after: String)
     }
 }
 
-migration_listing: fn(path: String, into: &[String]) {
+migration_listing: fn(path: String, into: ^[String]) {
     listing: files.read(path) ?? panic("cannot read {path}: {err}")
     loop line in listing.split("\n") {
         if line != "" -> into.push(line.copy())

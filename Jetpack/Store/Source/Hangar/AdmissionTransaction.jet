@@ -95,7 +95,7 @@ AdmissionTransaction: struct {
     priv receipts: [String],
     priv committed: Bool,
 
-    new: fn(verification: &StoreVerification, roots: HangarRoots) -> AdmissionTransaction StoreError! {
+    new: fn(verification: ^StoreVerification, roots: HangarRoots) -> AdmissionTransaction StoreError! {
         hangar: roots.hangar_dir()
         store_ensure_real_directory(hangar, "Hangar root")
         stage_parent: files.join(hangar, STORE_STAGE_DIR)
@@ -147,7 +147,7 @@ AdmissionTransaction: struct {
 
     // Queue one adapter-verified object and return its deterministic CAS
     // path. No bytes become visible until `commit`.
-    stage_object: fn(&self, object: AdmissionObject) -> String StoreError! {
+    stage_object: fn(^self, object: AdmissionObject) -> String StoreError! {
         store_transaction_validate_digest(object.digest)
         files.stat(object.source) ?? return Err(StoreError.IO(err).with_message("cannot inspect staged Hangar object `{object.source}`: {StoreError.IO(err).message()}"))
         destination: files.join(files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR), object.digest)
@@ -158,7 +158,7 @@ AdmissionTransaction: struct {
     // Publish staged objects, extra format receipts, package receipts, and
     // the closure delta in one shared order. The adapter supplies only the
     // representation-specific registration mode and already-built entries.
-    commit: fn(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
+    commit: fn(^self, entries: ^[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
         if self.committed {
             return Err(StoreError.Other("Hangar admission transaction already committed"))
         }
@@ -174,7 +174,7 @@ AdmissionTransaction: struct {
         Ok(registered)
     }
 
-    commit_steps: fn(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
+    commit_steps: fn(^self, entries: ^[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
         verification := self.verification.copy()
         self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
@@ -200,7 +200,7 @@ AdmissionTransaction: struct {
 
     // Compatibility seam for the projection claim helpers: the same object
     // publication and rollback without package metadata to register.
-    commit_objects: fn(&self, excluded: String?) -> [String] StoreError! {
+    commit_objects: fn(^self, excluded: String?) -> [String] StoreError! {
         if self.commit_objects_steps(excluded) == {
             .Ok(published) -> Ok(published)
             .Err(error) -> {
@@ -210,7 +210,7 @@ AdmissionTransaction: struct {
         }
     }
 
-    commit_objects_steps: fn(&self, excluded: String?) -> [String] StoreError! {
+    commit_objects_steps: fn(^self, excluded: String?) -> [String] StoreError! {
         self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
         objects_dir: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
@@ -221,7 +221,7 @@ AdmissionTransaction: struct {
         Ok(destinations)
     }
 
-    publish_objects: fn(&self, excluded: String?) StoreError! {
+    publish_objects: fn(^self, excluded: String?) StoreError! {
         verification := self.verification.copy()
         objects_dir: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         store_ensure_real_directory(objects_dir, "Hangar object pool")
@@ -283,7 +283,7 @@ AdmissionTransaction: struct {
         Ok(store_path_starts_with(files.canonicalize(source), hangar))
     }
 
-    publish_object: fn(&self, index: Int) StoreError! {
+    publish_object: fn(^self, index: Int) StoreError! {
         verification := self.verification.copy()
         object: self.objects[index]
         objects_dir: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
@@ -402,14 +402,14 @@ AdmissionTransaction: struct {
         Ok(published)
     }
 
-    remove_new_receipts: fn(&self) Never! {
+    remove_new_receipts: fn(^self) Never! {
         loop path in self.receipts {
             files.remove(path).drop("an unregistered receipt is swept by the next cleanup")
         }
         self.receipts = [String]{}
     }
 
-    finish: fn(&self) Never! {
+    finish: fn(^self) Never! {
         loop published in self.published {
             if published.held_source == {
                 .Val(path) -> {
@@ -430,7 +430,7 @@ AdmissionTransaction: struct {
 
     // Undo every publication step in reverse order. Rust ran this from
     // `Drop` for an uncommitted transaction.
-    rollback: fn(&self) Never! {
+    rollback: fn(^self) Never! {
         verification := self.verification.copy()
         if self.committed {
             return
@@ -448,7 +448,7 @@ AdmissionTransaction: struct {
 }
 
 // Reverse one publication step, best effort.
-store_transaction_undo: fn(verification: &StoreVerification, hangar: String, published: PublishedObject) Never! {
+store_transaction_undo: fn(verification: ^StoreVerification, hangar: String, published: PublishedObject) Never! {
     if published.pending == {
         .Val(pending) -> {
             if files.lexists(pending) {

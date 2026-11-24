@@ -44,7 +44,7 @@ IROptSlotPlan: struct {
 // split the functions into consecutive parts (compiler_threads_partition by
 // size), one thread each, joined in part order: the plan and every body
 // are the same for any thread count.
-ir_opt_return_slots: fn(m: &IRModule, threads: CompilerThreads) -> Int Never! {
+ir_opt_return_slots: fn(m: ^IRModule, threads: CompilerThreads) -> Int Never! {
     if m.entry < 0 -> return 0
     alloc: ir_interned_name(m, "jet_rt_alloc") ?? -2
     value: ir_interned_name(m, "jet_rt_alloc_value") ?? -2
@@ -206,7 +206,7 @@ ir_opt_slot_rebuild_parts: fn(m: IRModule, touched: [Int], bounds: [Int], plan: 
 // function) whose result it uses other than as a box a return slot can
 // stand for. `calls` holds the name rows of `jet_rt_alloc`,
 // `jet_rt_alloc_value`, `jet_rt_block_unique` and `jet_rt_free`.
-ir_opt_slot_scan: fn(m: IRModule, f: IRFunction, calls: [Int], results: [Int], allocs: &[Int], marks: &[Int]) -> Int Never! {
+ir_opt_slot_scan: fn(m: IRModule, f: IRFunction, calls: [Int], results: [Int], allocs: ^[Int], marks: ^[Int]) -> Int Never! {
     size: ir_opt_slot_size(m, f, calls[0], calls[1], allocs)
     has_ptr_call := false
     loop at in 0..<f.op.len() {
@@ -240,7 +240,7 @@ ir_opt_slot_scan: fn(m: IRModule, f: IRFunction, calls: [Int], results: [Int], a
 
 // The plan's sizes with every function in `marks`, the entry and each drop
 // and clone glue ruled out; returns the functions left using a return slot.
-ir_opt_slot_mark: fn(m: IRModule, plan: &IROptSlotPlan, marks: [Int]) -> Int Never! {
+ir_opt_slot_mark: fn(m: IRModule, plan: ^IROptSlotPlan, marks: [Int]) -> Int Never! {
     count: plan.size.len()
     loop id in marks {
         if id < count -> plan.size[id] = -1
@@ -263,7 +263,7 @@ ir_opt_slot_mark: fn(m: IRModule, plan: &IROptSlotPlan, marks: [Int]) -> Int Nev
 }
 
 // Function `f` (function `id`) rebuilt when it changes (ir_opt_slot_touches).
-ir_opt_slot_rewrite: fn(f: &IRFunction, plan: IROptSlotPlan, results: [Int], id: Int, calls: [Int]) Never! {
+ir_opt_slot_rewrite: fn(f: ^IRFunction, plan: IROptSlotPlan, results: [Int], id: Int, calls: [Int]) Never! {
     if f.asm != None || f.op.len() == 0 || !ir_opt_slot_touches(f, plan, id) {
         return
     }
@@ -274,7 +274,7 @@ ir_opt_slot_rewrite: fn(f: &IRFunction, plan: IROptSlotPlan, results: [Int], id:
 // The box size `f` returns in every value Return (-1 when it cannot use a
 // return slot), with the allocations (calls of name rows `alloc` or
 // `value`) it returns into `allocs`.
-ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs: &[Int]) -> Int Never! {
+ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs: ^[Int]) -> Int Never! {
     if f.asm != None || f.op.len() == 0 || f.result < 0 || m.types[f.result].kind != .Pointer {
         return -1
     }
@@ -489,7 +489,7 @@ ir_opt_slot_rebuild: fn(f: IRFunction, plan: IROptSlotPlan, results: [Int], id: 
 
 // Instruction `k` of `f` appended to `v` with its slots through `map` (its
 // argument list copied into v's args pool); compaction relinks openers.
-ir_opt_slot_emit: fn(v: &IRFunction, f: IRFunction, k: Int, map: [Int]) Never! {
+ir_opt_slot_emit: fn(v: ^IRFunction, f: IRFunction, k: Int, map: [Int]) Never! {
     op: f.op[k]
     written: ir_x64_write(f, k)
     dst: if written >= 0 -> map[written] else -> f.dst[k]
@@ -619,7 +619,7 @@ ir_opt_slot_test_wide: fn(users: Int, leak: Bool) -> IRModule Never! {
 
 // Caller `k` of make (ir_opt_slot_test_wide); with `leaks`, it returns the
 // box.
-ir_opt_slot_test_use: fn(m: &IRModule, word: Int, boxed: Int, k: Int, leaks: Bool) -> IRFunction Never! {
+ir_opt_slot_test_use: fn(m: ^IRModule, word: Int, boxed: Int, k: Int, leaks: Bool) -> IRFunction Never! {
     line: 20 + k
     f := ir_function_new("use{k}", "test:slot.jet.use{k}", "", "slot.jet", line)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), line)

@@ -51,7 +51,7 @@ SemaLoopScan: struct {
 
 // Records the facts of every counted loop of `tree` that sema can prove
 // (none in a `#Scalar` function).
-sema_loop_facts: fn(tree: &BodyTree, scalar: Bool, program: SemaProgramTables, context: SemaCheckContext) Never! {
+sema_loop_facts: fn(tree: ^BodyTree, scalar: Bool, program: SemaProgramTables, context: SemaCheckContext) Never! {
     if scalar {
         return
     }
@@ -98,7 +98,7 @@ sema_loop_int_literal: fn(tree: BodyTree, id: Int) -> Int? Never! {
     None
 }
 
-sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
+sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: ^SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     statement: body_stmt(tree, row)
     if statement == {
         .Assign(place, op, value, _, _) -> {
@@ -139,7 +139,7 @@ sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan, program: 
     }
 }
 
-sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
+sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: ^SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     if condition == {
         .Plain(value) -> { sema_loop_scan_expr(tree, value, scan, program, context) }
         .And(left, right) -> {
@@ -152,7 +152,7 @@ sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: &SemaL
 
 // A write through place expression `target`: `xs[i]` of a local list keeps
 // the rounds independent; any other place does not.
-sema_loop_scan_write: fn(tree: BodyTree, target: Int, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
+sema_loop_scan_write: fn(tree: BodyTree, target: Int, scan: ^SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     if body_node(tree, target).kind == .Index(base, index, _, _, _, _) {
         if scan.element == None -> scan.element = Val(sema_type_syntax_in(program, context, body_type_id(tree, target)))
         name: sema_loop_local_name(tree, base) ?? ""
@@ -169,7 +169,7 @@ sema_loop_scan_write: fn(tree: BodyTree, target: Int, scan: &SemaLoopScan, progr
 // One read or write `base[index]`: whether it is at the loop index. An access
 // at the index of a local fixed list the extent covers is proven; any other
 // may stop the round.
-sema_loop_scan_access: fn(tree: BodyTree, base: Int, index: Int, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
+sema_loop_scan_access: fn(tree: BodyTree, base: Int, index: Int, scan: ^SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     name: sema_loop_local_name(tree, base) ?? ""
     if name == "" -> scan.aliasing_free = false
     at_index: (sema_loop_local_name(tree, index) ?? "") == scan.local
@@ -194,7 +194,7 @@ sema_loop_local_name: fn(tree: BodyTree, id: Int) -> String? Never! {
     None
 }
 
-sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
+sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: ^SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     node: body_node(tree, id)
     if node.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .Unit -> {}

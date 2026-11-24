@@ -139,7 +139,7 @@ expr_data_type: fn(db: conn.Conn, a: ast.AST, e0: Int) -> Int Never! {
 }
 
 // sqlite3ExprCollSeq: the collating sequence of `e0`, -1 when it has none.
-expr_coll_seq: fn(p: &cg.Parse, a: &ast.AST, e0: Int) -> Int Never! {
+expr_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int) -> Int Never! {
     coll := -1
     q := e0
     loop q >= 0 {
@@ -189,13 +189,13 @@ expr_coll_seq: fn(p: &cg.Parse, a: &ast.AST, e0: Int) -> Int Never! {
 }
 
 // sqlite3ExprNNCollSeq: as expr_coll_seq, BINARY for none.
-expr_nn_coll_seq: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> Int Never! {
+expr_nn_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -> Int Never! {
     c: expr_coll_seq(p, a, e)
     if c < 0 -> record.COLL_BINARY else -> c
 }
 
 // sqlite3ExprCollSeqMatch.
-expr_coll_seq_match: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int) -> Bool Never! {
+expr_coll_seq_match: fn(p: ^cg.Parse, a: ^ast.AST, e1: Int, e2: Int) -> Bool Never! {
     c1: expr_nn_coll_seq(p, a, e1)
     c2: expr_nn_coll_seq(p, a, e2)
     c1 == c2
@@ -241,7 +241,7 @@ binary_compare_p5: fn(db: conn.Conn, a: ast.AST, e1: Int, e2: Int, jump_if_null:
 
 // sqlite3BinaryCompareCollSeq: the collation comparing `l` with `r` (-1
 // for no right operand) uses.
-binary_compare_coll_seq: fn(p: &cg.Parse, a: &ast.AST, l: Int, r: Int) -> Int Never! {
+binary_compare_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, l: Int, r: Int) -> Int Never! {
     if ast.has(a, l, ast.EP_COLLATE) -> return expr_coll_seq(p, a, l)
     if r >= 0 && ast.has(a, r, ast.EP_COLLATE) -> return expr_coll_seq(p, a, r)
     c := expr_coll_seq(p, a, l)
@@ -250,7 +250,7 @@ binary_compare_coll_seq: fn(p: &cg.Parse, a: &ast.AST, l: Int, r: Int) -> Int Ne
 }
 
 // sqlite3ExprCompareCollSeq.
-expr_compare_coll_seq: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> Int Never! {
+expr_compare_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -> Int Never! {
     l: a.exprs[e].left
     r: a.exprs[e].right
     if ast.has(a, e, ast.EP_COMMUTED) -> return binary_compare_coll_seq(p, a, r, l)
@@ -258,7 +258,7 @@ expr_compare_coll_seq: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> Int Never! {
 }
 
 // codeCompare: a comparison opcode over registers in1 and in2.
-code_compare: fn(p: &cg.Parse, a: &ast.AST, l: Int, r: Int, opcode: Int, in1: Int, in2: Int, dest: Int, jump_if_null: Int, is_commuted: Bool) -> Int Never! {
+code_compare: fn(p: ^cg.Parse, a: ^ast.AST, l: Int, r: Int, opcode: Int, in1: Int, in2: Int, dest: Int, jump_if_null: Int, is_commuted: Bool) -> Int Never! {
     if cg.n_err(a) > 0 -> return 0
     coll: if is_commuted -> binary_compare_coll_seq(p, a, r, l) else -> binary_compare_coll_seq(p, a, l, r)
     p5: binary_compare_p5(p.db, a, l, r, jump_if_null)
@@ -271,7 +271,7 @@ code_compare: fn(p: &cg.Parse, a: &ast.AST, l: Int, r: Int, opcode: Int, in1: In
 // Vectors.
 
 // exprCodeSubselect.
-expr_code_subselect: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+expr_code_subselect: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
     if a.exprs[e].op == tk.TK_SELECT -> return code_subselect(p, a, e)
     0
 }
@@ -279,7 +279,7 @@ expr_code_subselect: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
 // exprVectorRegister: the register of field i_field of vector `v` (a
 // TK_SELECT's results start at reg_select), the field's expression, and a
 // temporary register for the caller to free.
-expr_vector_register: fn(p: &cg.Parse, a: &ast.AST, v: Int, i_field: Int, reg_select: Int) -[DB]> {reg: Int, e: Int, free: Int} Never! {
+expr_vector_register: fn(p: ^cg.Parse, a: ^ast.AST, v: Int, i_field: Int, reg_select: Int) -[DB]> {reg: Int, e: Int, free: Int} Never! {
     op: a.exprs[v].op
     if op == tk.TK_REGISTER {
         return {reg: a.exprs[v].itable + i_field, e: ast.vector_field_subexpr(a, v, i_field), free: 0}
@@ -297,7 +297,7 @@ expr_vector_register: fn(p: &cg.Parse, a: &ast.AST, v: Int, i_field: Int, reg_se
 
 // codeVectorCompare: the comparison `e` of two vectors, its result (1, 0 or
 // NULL) into register dest.
-code_vector_compare: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, op: Int, p5: Int) -[DB]> Never! {
+code_vector_compare: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, op: Int, p5: Int) -[DB]> Never! {
     l: a.exprs[e].left
     r: a.exprs[e].right
     n_left: ast.vector_size(a, l)
@@ -350,7 +350,7 @@ code_vector_compare: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, op: Int, p
 
 // sqlite3ExprIsSingleTableConstraint: whether `e` constrains item i_src of
 // FROM list `src` alone.
-expr_is_single_table_constraint: fn(a: &ast.AST, e: Int, src: Int, i_src: Int) -> Bool Never! {
+expr_is_single_table_constraint: fn(a: ^ast.AST, e: Int, src: Int, i_src: Int) -> Bool Never! {
     si: ast.src_item(a, src, i_src)
     jt: a.items[si].jointype
     if jt & ast.JT_LTORJ != 0 -> return false
@@ -376,7 +376,7 @@ ConstOrGroupByWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
             gb: p.walks[t].u
             loop i in 0..<ast.list_len(a, gb) {
@@ -398,13 +398,13 @@ ConstOrGroupByWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { false }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             ast.WRC_CONTINUE
         }
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -412,7 +412,7 @@ ConstOrGroupByWalker: struct {
 
 // sqlite3ExprIsConstantOrGroupBy: whether `e` is constants and BINARY copies
 // of GROUP BY terms only.
-expr_is_constant_or_group_by: fn(p: &cg.Parse, a: &ast.AST, e: Int, group_by: Int) -[DB]> Bool Never! {
+expr_is_constant_or_group_by: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, group_by: Int) -[DB]> Bool Never! {
     w := ConstOrGroupByWalker{unused: 0}
     cg.walk_push(p, w, group_by)
     p.walks[cg.walk_top(p)].e_code = 1
@@ -482,7 +482,7 @@ is_candidate_for_in_opt: fn(db: conn.Conn, a: ast.AST, x: Int) -> Int Never! {
 
 // sqlite3SetHasNullFlag: register reg_has_null is NULL when the first
 // column of cursor i_cur holds a NULL.
-set_has_null_flag: fn(p: &cg.Parse, i_cur: Int, reg_has_null: Int) Never! {
+set_has_null_flag: fn(p: ^cg.Parse, i_cur: Int, reg_has_null: Int) Never! {
     _: cg.op2(p, opc.OP_INTEGER, 0, reg_has_null)
     addr1: cg.op1(p, opc.OP_REWIND, i_cur)
     _: cg.op3(p, opc.OP_COLUMN, i_cur, 0, reg_has_null)
@@ -491,7 +491,7 @@ set_has_null_flag: fn(p: &cg.Parse, i_cur: Int, reg_has_null: Int) Never! {
 }
 
 // sqlite3InRhsIsConstant.
-in_rhs_is_constant: fn(a: &ast.AST, e: Int) -> Bool Never! {
+in_rhs_is_constant: fn(a: ^ast.AST, e: Int) -> Bool Never! {
     l: a.exprs[e].left
     a.exprs[e].left = -1
     res: ast.expr_is_constant(a, e)
@@ -503,7 +503,7 @@ in_rhs_is_constant: fn(a: &ast.AST, e: Int) -> Bool Never! {
 // (an IN_INDEX_* type), its cursor, and the index column each LHS field
 // maps to. With want_null, rhs_has_null receives the register that is NULL
 // when the RHS holds a NULL (untouched when it cannot).
-find_in_index: fn(p: &cg.Parse, a: &ast.AST, x: Int, in_flags: Int, want_null: Bool, rhs_has_null: &Int) -[DB]> {typ: Int, tab: Int, map: [Int]} Never! {
+find_in_index: fn(p: ^cg.Parse, a: ^ast.AST, x: Int, in_flags: Int, want_null: Bool, rhs_has_null: ^Int) -[DB]> {typ: Int, tab: Int, map: [Int]} Never! {
     must_be_unique: in_flags & IN_INDEX_LOOP != 0
     i_tab := p.f.n_tab
     p.f.n_tab += 1
@@ -638,14 +638,14 @@ expr_in_affinity: fn(db: conn.Conn, a: ast.AST, e: Int) -> [U8] Never! {
 }
 
 // sqlite3SubselectError.
-subselect_error: fn(a: &ast.AST, n_actual: Int, n_expect: Int) Never! {
+subselect_error: fn(a: ^ast.AST, n_actual: Int, n_expect: Int) Never! {
     if cg.n_err(a) == 0 {
         ast.error(a, "sub-select returns {n_actual} columns - expected {n_expect}")
     }
 }
 
 // sqlite3VectorErrorMsg.
-vector_error_msg: fn(a: &ast.AST, e: Int) Never! {
+vector_error_msg: fn(a: ^ast.AST, e: Int) Never! {
     if ast.has(a, e, ast.EP_X_IS_SELECT) {
         n: ast.list_len(a, a.selects[a.exprs[e].x].elist)
         subselect_error(a, n, 1)
@@ -654,7 +654,7 @@ vector_error_msg: fn(a: &ast.AST, e: Int) Never! {
 
 // sqlite3CodeRhsOfIN: an ephemeral index on cursor i_tab holding the right
 // side of IN `e`, coded once as a subroutine when it does not vary.
-code_rhs_of_in: fn(p: &cg.Parse, a: &ast.AST, e: Int, i_tab: Int) -[DB]> Never! {
+code_rhs_of_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, i_tab: Int) -[DB]> Never! {
     addr_once := 0
     if !ast.has(a, e, ast.EP_VAR_SELECT) && p.f.i_self_tab == 0 {
         if ast.has(a, e, ast.EP_SUBRTN) {
@@ -737,7 +737,7 @@ code_rhs_of_in: fn(p: &cg.Parse, a: &ast.AST, e: Int, i_tab: Int) -[DB]> Never! 
 
 // sqlite3CodeSubselect: code scalar subquery or EXISTS `e`, once as a
 // subroutine; the register of its (first) result, 0 on error.
-code_subselect: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+code_subselect: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
     if cg.n_err(a) > 0 -> return 0
     s: a.exprs[e].x
     if ast.has(a, e, ast.EP_SUBRTN) {
@@ -792,7 +792,7 @@ code_subselect: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
 
 // sqlite3ExprCheckIN: an error when the sides of IN `e` differ in size;
 // whether there was one.
-expr_check_in: fn(p: cg.Parse, a: &ast.AST, e: Int) -> Bool Never! {
+expr_check_in: fn(p: cg.Parse, a: ^ast.AST, e: Int) -> Bool Never! {
     n_vector: ast.vector_size(a, a.exprs[e].left)
     if ast.has(a, e, ast.EP_X_IS_SELECT) && !p.db.malloc_failed {
         n: ast.list_len(a, a.selects[a.exprs[e].x].elist)
@@ -810,7 +810,7 @@ expr_check_in: fn(p: cg.Parse, a: &ast.AST, e: Int) -> Bool Never! {
 // sqlite3ExprCodeIN: jump to dest_if_false when the left side of IN `e` is
 // not on its right, to dest_if_null when NULLs leave it unknown, and fall
 // through when it is.
-expr_code_in: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest_if_false: Int, dest_if_null: Int) -[DB]> Never! {
+expr_code_in: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest_if_false: Int, dest_if_null: Int) -[DB]> Never! {
     ok_const_factor: p.f.ok_const_factor
     l: a.exprs[e].left
     if expr_check_in(p, a, e) {
@@ -934,14 +934,14 @@ expr_code_in: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest_if_false: Int, dest_if_
 // Literals, columns and registers.
 
 // codeReal: OP_Real with the value of numeric text `z`.
-code_real: fn(p: &cg.Parse, z: [U8], negate: Bool, i_mem: Int) Never! {
+code_real: fn(p: ^cg.Parse, z: [U8], negate: Bool, i_mem: Int) Never! {
     r: util.atof(z, base.UTF8)
     v: if negate -> -r.value else -> r.value
     _: cg.op4(p, opc.OP_REAL, 0, i_mem, 0, conn.P4.Real(v))
 }
 
 // codeInteger: the integer literal `e` (negated with neg) into i_mem.
-code_integer: fn(p: &cg.Parse, a: &ast.AST, e: Int, neg: Bool, i_mem: Int) Never! {
+code_integer: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, neg: Bool, i_mem: Int) Never! {
     if ast.has(a, e, ast.EP_INT_VALUE) {
         i: a.exprs[e].ivalue
         _: cg.op2(p, opc.OP_INTEGER, if neg -> -i else -> i, i_mem)
@@ -966,7 +966,7 @@ code_integer: fn(p: &cg.Parse, a: &ast.AST, e: Int, neg: Bool, i_mem: Int) Never
 
 // sqlite3ExprCodeLoadIndexColumn: column i_idx_col of index ix, for the
 // table row under cursor i_tab_cur, into reg_out.
-expr_code_load_index_column: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_tab_cur: Int, i_idx_col: Int, reg_out: Int) -[DB]> Never! {
+expr_code_load_index_column: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int, i_tab_cur: Int, i_idx_col: Int, reg_out: Int) -[DB]> Never! {
     i_tab_col: p.db.indexes[ix].ai_column[i_idx_col]
     if i_tab_col == conn.XN_EXPR {
         p.f.i_self_tab = i_tab_cur + 1
@@ -980,7 +980,7 @@ expr_code_load_index_column: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_tab_cur: I
 
 // sqlite3ExprCodeGeneratedColumn: generated column i_col of table t into
 // reg_out.
-expr_code_generated_column: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_col: Int, reg_out: Int) -[DB]> Never! {
+expr_code_generated_column: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_col: Int, reg_out: Int) -[DB]> Never! {
     n_err: cg.n_err(a)
     i_addr: if p.f.i_self_tab > 0 -> cg.op3(p, opc.OP_IF_NULL_ROW, p.f.i_self_tab - 1, 0, reg_out) else -> 0
     ce: cat.column_expr(p.db, a, t, i_col)
@@ -995,7 +995,7 @@ expr_code_generated_column: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_col: Int, re
 
 // sqlite3ExprCodeGetColumnOfTable: column i_col (the rowid when negative)
 // of table t under cursor i_tab_cur into reg_out.
-expr_code_get_column_of_table: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_tab_cur: Int, i_col: Int, reg_out: Int) -[DB]> Never! {
+expr_code_get_column_of_table: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_tab_cur: Int, i_col: Int, reg_out: Int) -[DB]> Never! {
     if i_col < 0 || i_col == p.db.tables[t].ipkey {
         _: cg.op2(p, opc.OP_ROWID, i_tab_cur, reg_out)
         return
@@ -1024,7 +1024,7 @@ expr_code_get_column_of_table: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_tab_cur: 
 // sqlite3ExprCodeGetColumn: as expr_code_get_column_of_table, with the P5
 // flags (OPFLAG_NOCHNG, OPFLAG_TYPEOFARG, OPFLAG_LENGTHARG) on its
 // OP_Column; reg.
-expr_code_get_column: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_column: Int, i_table: Int, i_reg: Int, p5: Int) -[DB]> Int Never! {
+expr_code_get_column: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_column: Int, i_table: Int, i_reg: Int, p5: Int) -[DB]> Int Never! {
     expr_code_get_column_of_table(p, a, t, i_table, i_column, i_reg)
     if p5 != 0 {
         last: cg.v_last_addr(p)
@@ -1036,12 +1036,12 @@ expr_code_get_column: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_column: Int, i_tab
 }
 
 // sqlite3ExprCodeMove.
-expr_code_move: fn(p: &cg.Parse, i_from: Int, i_to: Int, n_reg: Int) Never! {
+expr_code_move: fn(p: ^cg.Parse, i_from: Int, i_to: Int, n_reg: Int) Never! {
     _: cg.op3(p, opc.OP_MOVE, i_from, i_to, n_reg)
 }
 
 // exprToRegister: scalar `e` becomes a TK_REGISTER of i_reg.
-expr_to_register: fn(a: &ast.AST, e: Int, i_reg: Int) Never! {
+expr_to_register: fn(a: ^ast.AST, e: Int, i_reg: Int) Never! {
     q: ast.skip_collate_and_likely(a, e)
     if q < 0 {
         return
@@ -1054,7 +1054,7 @@ expr_to_register: fn(a: &ast.AST, e: Int, i_reg: Int) Never! {
 
 // exprCodeVector: vector or scalar `e` into consecutive registers; the
 // first, and a temporary scalar register to free (0 for none).
-expr_code_vector: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> {reg: Int, free: Int} Never! {
+expr_code_vector: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> {reg: Int, free: Int} Never! {
     n_result: ast.vector_size(a, e)
     if n_result == 1 {
         t: expr_code_temp(p, a, e)
@@ -1072,7 +1072,7 @@ expr_code_vector: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> {reg: Int, free: 
 }
 
 // setDoNotMergeFlagOnCopy.
-set_do_not_merge_flag_on_copy: fn(p: &cg.Parse) Never! {
+set_do_not_merge_flag_on_copy: fn(p: ^cg.Parse) Never! {
     if cg.v_op_at(p, cg.v_last_addr(p)).opcode == opc.OP_COPY -> cg.v_change_p5(p, 1)
 }
 
@@ -1081,7 +1081,7 @@ set_do_not_merge_flag_on_copy: fn(p: &cg.Parse) Never! {
 
 // sqlite3VtabOverloadFunction's guard: a virtual table column argument `e`
 // lets its module overload function `def` (vtab.c, up the part order).
-vtab_overload_function: fn(p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
+vtab_overload_function: fn(p: ^cg.Parse, a: ^ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
     if a.exprs[e].op != tk.TK_COLUMN -> return def.copy()
     t: a.exprs[e].y
     if t < 0 || !is_virtual(p.db, t) -> return def.copy()
@@ -1091,7 +1091,7 @@ vtab_overload_function: fn(p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: 
 
 // sqlite3VdbeAddFunctionCall: OP_Function, or OP_PureFunc in a calling
 // context e_call_ctx (NC_IsCheck, NC_IdxExpr, NC_PartIdx, NC_GenCol).
-add_function_call: fn(p: &cg.Parse, p1: Int, p2: Int, p3: Int, n_arg: Int, func: conn.FuncDef, e_call_ctx: Int) -> Int Never! {
+add_function_call: fn(p: ^cg.Parse, p1: Int, p2: Int, p3: Int, n_arg: Int, func: conn.FuncDef, e_call_ctx: Int) -> Int Never! {
     op: if e_call_ctx != 0 -> opc.OP_PURE_FUNC else -> opc.OP_FUNCTION
     addr: cg.op4(p, op, p1, p2, p3, conn.P4.FuncCtx{func: func.copy(), argc: n_arg})
     cg.v_change_p5(p, e_call_ctx & ast.NC_SELF_REF)
@@ -1100,7 +1100,7 @@ add_function_call: fn(p: &cg.Parse, p1: Int, p2: Int, p3: Int, n_arg: Int, func:
 }
 
 // The "unknown function" error of sqlite3ExprCodeTarget; target.
-unknown_function_error: fn(a: &ast.AST, e: Int, target: Int) -> Int Never! {
+unknown_function_error: fn(a: ^ast.AST, e: Int, target: Int) -> Int Never! {
     t: ast.expr_text(a, e)
     off: ast.expr_offset(a, e)
     ast.error_at(a, "unknown function: {t}()", off)
@@ -1109,7 +1109,7 @@ unknown_function_error: fn(a: &ast.AST, e: Int, target: Int) -> Int Never! {
 
 // exprCodeInlineFunction: in-line function func_id (cat.INLINEFUNC_*) over
 // argument list farg.
-expr_code_inline_function: fn(p: &cg.Parse, a: &ast.AST, farg: Int, func_id: Int, target: Int) -[DB]> Int Never! {
+expr_code_inline_function: fn(p: ^cg.Parse, a: ^ast.AST, farg: Int, func_id: Int, target: Int) -[DB]> Int Never! {
     n_farg: ast.list_len(a, farg)
     a0: ast.list_expr(a, farg, 0)
     if func_id == cat.INLINEFUNC_COALESCE {
@@ -1163,7 +1163,7 @@ expr_code_inline_function: fn(p: &cg.Parse, a: &ast.AST, farg: Int, func_id: Int
 
 // sqlite3IndexedExprLookup: when `e` is an expression of an index on
 // p.f.idx_epr, read it from the index into target; target, or -1.
-indexed_expr_lookup: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Int Never! {
+indexed_expr_lookup: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Int Never! {
     ie := p.f.idx_epr
     loop ie >= 0 {
         x: p.idx_exprs[ie].copy()
@@ -1197,7 +1197,7 @@ indexed_expr_lookup: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> I
 
 // exprPartidxExprLookup: when column `e` is fixed by the WHERE clause of a
 // partial index on p.f.idx_part_epr, code that value; its register, or 0.
-partidx_expr_lookup: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Int Never! {
+partidx_expr_lookup: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Int Never! {
     ie := p.f.idx_part_epr
     loop ie >= 0 {
         x: p.idx_exprs[ie].copy()
@@ -1223,7 +1223,7 @@ is_comparison: fn(op: Int) -> Bool Never! {
 
 // sqlite3ExprCodeTarget: code `e0`, ideally into register target; the
 // register that holds the result.
-expr_code_target: fn(p: &cg.Parse, a: &ast.AST, e0: Int, target: Int) -[DB]> Int Never! {
+expr_code_target: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, target: Int) -[DB]> Int Never! {
     e := e0
     op := tk.TK_NULL
     // expr_code_doover
@@ -1538,7 +1538,7 @@ expr_code_target: fn(p: &cg.Parse, a: &ast.AST, e0: Int, target: Int) -[DB]> Int
 }
 
 // The TK_FUNCTION case of sqlite3ExprCodeTarget.
-expr_code_function: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Int Never! {
+expr_code_function: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Int Never! {
     if ast.has(a, e, ast.EP_WIN_FUNC) -> return a.windows[a.exprs[e].y].reg_result
     if p.f.ok_const_factor && ast.expr_is_constant_not_join(a, e) {
         return expr_code_run_just_once(p, a, e, -1)
@@ -1600,7 +1600,7 @@ expr_code_function: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> In
 // The TK_CASE case of sqlite3ExprCodeTarget: CASE x WHEN e1 THEN r1 ...
 // ELSE y END, x in the left operand, the WHEN and THEN terms in pairs in
 // the list, then y when the list's length is odd.
-expr_code_case: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Int Never! {
+expr_code_case: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Int Never! {
     list: a.exprs[e].x
     n_expr: ast.list_len(a, list)
     end_label: cg.v_make_label(p)
@@ -1644,7 +1644,7 @@ expr_code_case: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Int Ne
 // initialization section, or under OP_Once when it calls functions;
 // reg_dest when positive, else a register of its choosing (which equal
 // factored expressions share).
-expr_code_run_just_once: fn(p: &cg.Parse, a: &ast.AST, e0: Int, reg_dest0: Int) -[DB]> Int Never! {
+expr_code_run_just_once: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, reg_dest0: Int) -[DB]> Int Never! {
     reg_dest := reg_dest0
     l: p.f.const_expr
     if reg_dest < 0 && l >= 0 {
@@ -1684,7 +1684,7 @@ expr_code_run_just_once: fn(p: &cg.Parse, a: &ast.AST, e0: Int, reg_dest0: Int) 
 
 // sqlite3ExprCodeTemp: code `e0` into a register; the register, and the
 // temporary register to free (0 when the result is not a temporary).
-expr_code_temp: fn(p: &cg.Parse, a: &ast.AST, e0: Int) -[DB]> {reg: Int, free: Int} Never! {
+expr_code_temp: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int) -[DB]> {reg: Int, free: Int} Never! {
     e: ast.skip_collate_and_likely(a, e0)
     if p.f.ok_const_factor && e >= 0 && a.exprs[e].op != tk.TK_REGISTER && ast.expr_is_constant_not_join(a, e) {
         return {reg: expr_code_run_just_once(p, a, e, -1), free: 0}
@@ -1697,7 +1697,7 @@ expr_code_temp: fn(p: &cg.Parse, a: &ast.AST, e0: Int) -[DB]> {reg: Int, free: I
 }
 
 // sqlite3ExprCode: code `e` into register target.
-expr_code: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Never! {
+expr_code: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Never! {
     if !p.f.has_vdbe {
         return
     }
@@ -1711,14 +1711,14 @@ expr_code: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Never! {
 }
 
 // sqlite3ExprCodeCopy: expr_code over a copy of `e0`, which stays as it is.
-expr_code_copy: fn(p: &cg.Parse, a: &ast.AST, e0: Int, target: Int) -[DB]> Never! {
+expr_code_copy: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, target: Int) -[DB]> Never! {
     e: ast.expr_dup(a, e0, 0)
     if !p.db.malloc_failed -> expr_code(p, a, e, target)
 }
 
 // sqlite3ExprCodeFactorable: expr_code_copy, factored out of the loop
 // when `e` is constant.
-expr_code_factorable: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> Never! {
+expr_code_factorable: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, target: Int) -[DB]> Never! {
     if p.f.ok_const_factor && ast.expr_is_constant_not_join(a, e) {
         _: expr_code_run_just_once(p, a, e, target)
     } else { expr_code_copy(p, a, e, target) }
@@ -1726,7 +1726,7 @@ expr_code_factorable: fn(p: &cg.Parse, a: &ast.AST, e: Int, target: Int) -[DB]> 
 
 // sqlite3ExprCodeExprList: each element of `list` into registers from
 // target (flags cg.ECEL_*); the number coded.
-expr_code_expr_list: fn(p: &cg.Parse, a: &ast.AST, list: Int, target: Int, src_reg: Int, flags0: Int) -[DB]> Int Never! {
+expr_code_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, target: Int, src_reg: Int, flags0: Int) -[DB]> Int Never! {
     copy_op: if flags0 & cg.ECEL_DUP != 0 -> opc.OP_COPY else -> opc.OP_SCOPY
     flags := flags0
     if !p.f.ok_const_factor -> flags = util.clear_bits(flags, cg.ECEL_FACTOR)
@@ -1767,7 +1767,7 @@ expr_code_expr_list: fn(p: &cg.Parse, a: &ast.AST, list: Int, target: Int, src_r
 // exprCodeBetween: x BETWEEN y AND z as x>=y AND x<=z, x coded once.
 // `jump` 0 stores the result in register dest; 1 jumps to dest when true
 // (sqlite3ExprIfTrue), 2 when false (sqlite3ExprIfFalse).
-expr_code_between: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump: Int, jump_if_null: Int) -[DB]> Never! {
+expr_code_between: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, jump: Int, jump_if_null: Int) -[DB]> Never! {
     del: ast.expr_dup(a, a.exprs[e].left, 0)
     if p.db.malloc_failed {
         return
@@ -1800,7 +1800,7 @@ expr_code_between: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump: Int, j
 
 // sqlite3ExprIfTrue: jump to dest when `e` is true, and when it is NULL
 // with jump_if_null cg.JUMPIFNULL; fall through otherwise.
-expr_if_true: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: Int) -[DB]> Never! {
+expr_if_true: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, jump_if_null0: Int) -[DB]> Never! {
     if !p.f.has_vdbe || e < 0 {
         return
     }
@@ -1867,7 +1867,7 @@ expr_if_true: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: In
 
 // sqlite3ExprIfFalse: jump to dest when `e` is false, and when it is NULL
 // with jump_if_null cg.JUMPIFNULL; fall through otherwise.
-expr_if_false: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: Int) -[DB]> Never! {
+expr_if_false: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, dest: Int, jump_if_null0: Int) -[DB]> Never! {
     if !p.f.has_vdbe || e < 0 {
         return
     }
@@ -1937,7 +1937,7 @@ expr_if_false: fn(p: &cg.Parse, a: &ast.AST, e: Int, dest: Int, jump_if_null0: I
 }
 
 // sqlite3ExprIfFalseDup: expr_if_false over a copy of `e0`.
-expr_if_false_dup: fn(p: &cg.Parse, a: &ast.AST, e0: Int, dest: Int, jump_if_null: Int) -[DB]> Never! {
+expr_if_false_dup: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, dest: Int, jump_if_null: Int) -[DB]> Never! {
     e: ast.expr_dup(a, e0, 0)
     if !p.db.malloc_failed -> expr_if_false(p, a, e, dest, jump_if_null)
 }
@@ -1953,7 +1953,7 @@ ParseVarMatch: struct {
     used: [Int],
 
     impl SQLVarMatch {
-        var_match: fn(&self, a: &ast.AST, var: Int, e: Int) -> Bool Never! {
+        var_match: fn(^self, a: ^ast.AST, var: Int, e: Int) -> Bool Never! {
             found: value_from_expr(a, e, base.UTF8, base.AFF_BLOB)
             if found == .Val(pr) {
                 i_var: a.exprs[var].icolumn
@@ -1970,7 +1970,7 @@ ParseVarMatch: struct {
 }
 
 // exprImpliesNotNull: whether `e` being true implies `nn` is not NULL.
-expr_implies_not_null: fn(m: &ParseVarMatch, a: &ast.AST, e: Int, nn: Int, i_tab: Int, seen_not0: Bool) -> Bool Never! {
+expr_implies_not_null: fn(m: ^ParseVarMatch, a: ^ast.AST, e: Int, nn: Int, i_tab: Int, seen_not0: Bool) -> Bool Never! {
     if ast.expr_compare_with<ParseVarMatch>(m, a, e, nn, i_tab) == 0 {
         return a.exprs[nn].op != tk.TK_NULL
     }
@@ -2010,7 +2010,7 @@ expr_implies_not_null: fn(m: &ParseVarMatch, a: &ast.AST, e: Int, nn: Int, i_tab
     false
 }
 
-implies_expr_with: fn(m: &ParseVarMatch, a: &ast.AST, e1: Int, e2: Int, i_tab: Int) -> Bool Never! {
+implies_expr_with: fn(m: ^ParseVarMatch, a: ^ast.AST, e1: Int, e2: Int, i_tab: Int) -> Bool Never! {
     if ast.expr_compare_with<ParseVarMatch>(m, a, e1, e2, i_tab) == 0 -> return true
     op2: a.exprs[e2].op
     if op2 == tk.TK_OR && (implies_expr_with(m, a, e1, a.exprs[e2].left, i_tab) || implies_expr_with(m, a, e1, a.exprs[e2].right, i_tab)) {
@@ -2023,7 +2023,7 @@ implies_expr_with: fn(m: &ParseVarMatch, a: &ast.AST, e1: Int, e2: Int, i_tab: I
 // in doubt). A column of e2 with itable -1 stands for table i_tab; bound
 // variables of e1 match equal literals of e2, and mark the Vdbe to
 // reprepare when they are rebound.
-expr_implies_expr: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int, i_tab: Int) -> Bool Never! {
+expr_implies_expr: fn(p: ^cg.Parse, a: ^ast.AST, e1: Int, e2: Int, i_tab: Int) -> Bool Never! {
     m := ParseVarMatch{vars: p.reprepare_vars, used: [Int]{}}
     r: implies_expr_with(m, a, e1, e2, i_tab)
     loop i in m.used -> aux.set_varmask(p.f.v, i)
@@ -2036,7 +2036,7 @@ ImpliesNotNullRowWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
             if ast.has(a, e, ast.EP_OUTER_ON) -> return ast.WRC_PRUNE
             // Any inner-join use of the cursor is ignored for a RIGHT JOIN.
@@ -2087,20 +2087,20 @@ ImpliesNotNullRowWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { false }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             ast.WRC_CONTINUE
         }
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
 
 // bothImplyNotNullRow.
-both_imply_not_null_row: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int) -[DB]> Never! {
+both_imply_not_null_row: fn(p: ^cg.Parse, a: ^ast.AST, e1: Int, e2: Int) -[DB]> Never! {
     t: cg.walk_top(p)
     if p.walks[t].e_code != 0 {
         return
@@ -2115,7 +2115,7 @@ both_imply_not_null_row: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int) -[DB]> 
 // sqlite3ExprImpliesNonNullRow: whether `e0` can be true only when some
 // column of cursor i_tab is not NULL (false when in doubt); is_rj for a
 // RIGHT JOIN.
-expr_implies_non_null_row: fn(p: &cg.Parse, a: &ast.AST, e0: Int, i_tab: Int, is_rj: Bool) -[DB]> Bool Never! {
+expr_implies_non_null_row: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, i_tab: Int, is_rj: Bool) -[DB]> Bool Never! {
     e := ast.skip_collate_and_likely(a, e0)
     if e < 0 -> return false
     if a.exprs[e].op == tk.TK_NOTNULL -> e = a.exprs[e].left else {
@@ -2139,7 +2139,7 @@ IdxCoverWalker: struct {
     code: Int,
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             if a.exprs[e].op != tk.TK_COLUMN || a.exprs[e].itable != self.cur {
                 return ast.WRC_CONTINUE
             }
@@ -2151,21 +2151,21 @@ IdxCoverWalker: struct {
             ast.WRC_ABORT
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
 // sqlite3ExprCoveredByIndex: whether index ix on the table of cursor i_cur
 // holds every column of it `e` reads.
-expr_covered_by_index: fn(db: conn.Conn, a: &ast.AST, e: Int, i_cur: Int, ix: Int) -> Bool Never! {
+expr_covered_by_index: fn(db: conn.Conn, a: ^ast.AST, e: Int, i_cur: Int, ix: Int) -> Bool Never! {
     cols := [Int]{}
     loop i in 0..<db.indexes[ix].n_column -> cols.push(db.indexes[ix].ai_column[i])
     w := IdxCoverWalker{cur: i_cur, cols: cols, code: 0}
@@ -2182,7 +2182,7 @@ AggInfoPersistWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             ai: a.exprs[e].agg_info
             if ast.has(a, e, ast.EP_TOKEN_ONLY | ast.EP_REDUCED) || ai < 0 {
                 return ast.WRC_CONTINUE
@@ -2202,20 +2202,20 @@ AggInfoPersistWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { true }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             ast.WRC_CONTINUE
         }
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
 
 // sqlite3AggInfoPersistWalkerInit and sqlite3WalkSelect over SELECT `s`.
-agg_info_persist_select: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
+agg_info_persist_select: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
     w := AggInfoPersistWalker{unused: 0}
     cg.walk_push(p, w, 0)
     _: cg.pwalk_select(p, a, s)
@@ -2224,7 +2224,7 @@ agg_info_persist_select: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
 
 // findOrCreateAggInfoColumn: point column `e` at its entry in AggInfo ai,
 // adding one when there is none.
-find_or_create_agg_info_column: fn(p: &cg.Parse, a: &ast.AST, ai: Int, e: Int) Never! {
+find_or_create_agg_info_column: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int, e: Int) Never! {
     op: a.exprs[e].op
     n: p.aggs[ai].cols.len()
     k := 0
@@ -2266,7 +2266,7 @@ AnalyzeAggWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
             nc: p.walks[t].u
             src: p.ncs[nc].src
@@ -2363,13 +2363,13 @@ AnalyzeAggWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { true }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             cg.walker_depth_increase(p)
         }
 
         has_select2: fn(self) -[]> Bool Never! { true }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
             cg.walker_depth_decrease(p)
         }
 
@@ -2379,7 +2379,7 @@ AnalyzeAggWalker: struct {
 
 // sqlite3ExprAnalyzeAggregates: add the aggregate functions and columns of
 // `e` to the AggInfo of NameContext nc.
-expr_analyze_aggregates: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Never! {
+expr_analyze_aggregates: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, e: Int) -[DB]> Never! {
     w := AnalyzeAggWalker{unused: 0}
     cg.walk_push(p, w, nc)
     _: cg.pwalk_expr(p, a, e)
@@ -2387,7 +2387,7 @@ expr_analyze_aggregates: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> N
 }
 
 // sqlite3ExprAnalyzeAggList.
-expr_analyze_agg_list: fn(p: &cg.Parse, a: &ast.AST, nc: Int, list: Int) -[DB]> Never! {
+expr_analyze_agg_list: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, list: Int) -[DB]> Never! {
     loop i in 0..<ast.list_len(a, list) {
         ie: ast.list_expr(a, list, i)
         expr_analyze_aggregates(p, a, nc, ie)
@@ -2477,7 +2477,7 @@ value_from_expr: fn(a: ast.AST, e0: Int, enc: Int, aff: Int) -> base.Mem? Never!
 
 // sqlite3ColumnDefault (update.c): the DEFAULT of column i_col of table t as
 // the P4 of the OP_Column just coded, and REAL affinity for i_reg.
-column_default: fn(p: &cg.Parse, a: ast.AST, t: Int, i_col: Int, i_reg: Int) Never! {
+column_default: fn(p: ^cg.Parse, a: ast.AST, t: Int, i_col: Int, i_reg: Int) Never! {
     aff: p.db.tables[t].cols[i_col].affinity
     if p.db.tables[t].cols[i_col].i_dflt != 0 {
         de: cat.column_expr(p.db, a, t, i_col)
@@ -2491,7 +2491,7 @@ column_default: fn(p: &cg.Parse, a: ast.AST, t: Int, i_col: Int, i_reg: Int) Nev
 
 // sqlite3VdbeSetP4KeyInfo (vdbeaux.c): index ix's KeyInfo as the P4 of the
 // last opcode.
-set_p4_key_info: fn(p: &cg.Parse, a: &ast.AST, ix: Int) Never! {
+set_p4_key_info: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int) Never! {
     k: cat.key_info_of_index(p, a, ix)
     if k == .Val(ki) -> cg.v_append_p4(p, conn.P4.KeyInfo(ki))
 }
@@ -2499,7 +2499,7 @@ set_p4_key_info: fn(p: &cg.Parse, a: &ast.AST, ix: Int) Never! {
 // sqlite3OpenTable (insert.c): open cursor i_cur on table t of database
 // i_db with `opcode` (OP_OpenRead or OP_OpenWrite). The table lock it
 // takes is a no-op without shared cache.
-open_table: fn(p: &cg.Parse, a: &ast.AST, i_cur: Int, i_db: Int, t: Int, opcode: Int) Never! {
+open_table: fn(p: ^cg.Parse, a: ^ast.AST, i_cur: Int, i_db: Int, t: Int, opcode: Int) Never! {
     if has_rowid(p.db, t) {
         _: cg.op4_int(p, opcode, i_cur, p.db.tables[t].tnum, i_db, p.db.tables[t].n_nv_col)
         return
@@ -2518,14 +2518,14 @@ select_dest_init: fn(e_dest: Int, i_parm: Int) -> cg.SelectDest Never! {
 // Tests.
 
 // A register reference expression for register r.
-expr_test_reg: fn(a: &ast.AST, r: Int) -> Int Never! {
+expr_test_reg: fn(a: ^ast.AST, r: Int) -> Int Never! {
     e: ast.expr(a, tk.TK_REGISTER, [U8]{})
     a.exprs[e].itable = r
     e
 }
 
 // A column reference to column c of cursor 0, table t.
-expr_test_col: fn(a: &ast.AST, c: Int) -> Int Never! {
+expr_test_col: fn(a: ^ast.AST, c: Int) -> Int Never! {
     e: ast.expr(a, tk.TK_COLUMN, [U8]{})
     a.exprs[e].itable = 0
     a.exprs[e].icolumn = c

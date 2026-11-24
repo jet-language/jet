@@ -4,7 +4,7 @@ use {
     core.encoding.[Dyn]
     jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem, jet_driver_tool_stage_plan]
     jet_lexer.[Lexed, lex]
-    jet_foundation.[foundation_json_integer]
+    jet_foundation.[foundation_json_integer, path_case_diagnostic, path_case_disk_findings]
     jet_pkg_model.[pkg_mask_inline_package_source]
 }
 
@@ -30,10 +30,23 @@ LSPServer: struct {
     // files below them.
     workspace_named: Bool{false},
     workspace_roots: [String]{[String]{}},
+    // The client resolves a code action's edit
+    // (`textDocument.codeAction.resolveSupport` lists `edit`), so the action
+    // list leaves the edits out.
+    code_action_resolve: Bool{false},
+    // The client pulls diagnostics (`textDocument.diagnostic`), so none is
+    // pushed: each document's are answered when the client asks.
+    pull_diagnostics: Bool{false},
 
     // Every open document is overlaid, so a check sees unsaved imports too.
+    // In the Jet repository the document's own path is held to the path case
+    // rule (jet_foundation's PathCase.jet), as `jet check` holds it.
     check: fn(self, doc: LSPDocument) -> LSPChecked {
-        self.checker.check(doc.path, self.overlays())
+        checked := self.checker.check(doc.path, self.overlays())
+        loop placed in path_case_disk_findings([String]{doc.path}) {
+            checked.diagnostics.push(path_case_diagnostic(placed.finding))
+        }
+        checked
     }
 
     // The answer rows of `stage`'s hooks on the document `view` reads: the
@@ -70,7 +83,7 @@ LSPServer: struct {
     lex: fn(self, doc: LSPDocument) -> Lexed Never! { lsp_lex_source(doc.text) }
 }
 
-lsp_server: fn(checker: &&LSPChecker) -> LSPServer Never! {
+lsp_server: fn(checker: ^^LSPChecker) -> LSPServer Never! {
     LSPServer{diagnostic_state: lsp_diagnostic_state(), checker: checker, published: [String:LSPChecked]{}, initialized: false, shutdown: false, exited: false, document_changes: false, semantic_results: [String:LSPSemanticResult]{}, semantic_serial: 0}
 }
 
@@ -83,7 +96,7 @@ lsp_lex_source: fn(text: String) -> Lexed Never! {
     lex(text.bytes())
 }
 
-lsp_apply_content_change: fn(doc: &LSPDocument, change: Dyn) -> Bool Never! {
+lsp_apply_content_change: fn(doc: ^LSPDocument, change: Dyn) -> Bool Never! {
     replacement: lsp_text_member(change, "text") ?? return false
     length := Int?{None}
     if lsp_member(change, "rangeLength") == .Val(value) {
@@ -103,7 +116,7 @@ lsp_apply_content_change: fn(doc: &LSPDocument, change: Dyn) -> Bool Never! {
 // accepted change list, even an empty one, advances the version and marks the
 // document dirty. A document opened in another language is not Jet and is not
 // kept, so it is never checked. Returns the document's URI.
-lsp_update_document: fn(state: &LSPDiagnosticState, params: Dyn?, is_open: Bool{false}) -> String? Never! {
+lsp_update_document: fn(state: ^LSPDiagnosticState, params: Dyn?, is_open: Bool{false}) -> String? Never! {
     document: lsp_param(params, "textDocument") ?? return None
     uri: lsp_text_member(document, "uri") ?? return None
     version: foundation_json_integer(lsp_member(document, "version") ?? return None) ?? return None

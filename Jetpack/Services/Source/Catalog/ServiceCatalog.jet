@@ -333,7 +333,7 @@ ServicePresetKind: enum {
     }
 
     // First-start state setup inside `data_dir`, run through `env`'s PATH.
-    prepare: fn(self, port: Int, data_dir: String, env: &ShellEnv) -[FS, Env, Exec, Time.Wait]> ServicesError! {
+    prepare: fn(self, port: Int, data_dir: String, env: ^ShellEnv) -[FS, Env, Exec, Time.Wait]> ServicesError! {
         if self == {
             .Postgres -> {
                 services_prepare_database(port, data_dir, env, "initdb", [String]{"--no-locale", "--encoding=UTF8", "--pgdata", data_dir})
@@ -526,7 +526,7 @@ services_prepare_nginx: fn(port: Int, data_dir: String) -[FS, Env]> ServicesErro
 
 // Initialize a database directory once; an existing initialized directory
 // only gains the marker.
-services_prepare_database: fn(port: Int, data_dir: String, env: &ShellEnv, tool: String, args: [String]) -[FS, Env, Exec, Time.Wait]> ServicesError! {
+services_prepare_database: fn(port: Int, data_dir: String, env: ^ShellEnv, tool: String, args: [String]) -[FS, Env, Exec, Time.Wait]> ServicesError! {
     marker: services_catalog_marker(data_dir)
     if files.is_file(marker) {
         return
@@ -538,7 +538,7 @@ services_prepare_database: fn(port: Int, data_dir: String, env: &ShellEnv, tool:
     }
 }
 
-services_run_catalog_tool: fn(env: &ShellEnv, tool: String, args: [String], data_dir: String) -[FS, Env, Exec, Time.Wait]> ServicesError! {
+services_run_catalog_tool: fn(env: ^ShellEnv, tool: String, args: [String], data_dir: String) -[FS, Env, Exec, Time.Wait]> ServicesError! {
     argv := [String]{tool}
     loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).cwd(data_dir).stdout(.Capture).stderr(.Capture)

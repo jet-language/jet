@@ -49,7 +49,7 @@ mksh_declares: fn(line: String, name: String) -> Bool Never! {
     line.starts_with("{name}: fn") || line.contains(" {name}: fn") || line.contains("){name}: fn")
 }
 
-mksh_walk: fn(path: String, out: &[String]) {
+mksh_walk: fn(path: String, out: ^[String]) {
     if !mksh_files.is_dir(path) {
         if path.ends_with(".jet") -> out.push(path.copy())
         return
@@ -178,7 +178,7 @@ mksh_home_findings: fn(source: String) -> [String] Never! {
 #Test("the single-home census reads declarations, not mentions") {
     assert(mksh_declares("#Unsafe(\"why\") alloc_raw: fn(size: Int) -> Int", "alloc_raw"))
     assert(mksh_declares("window: fn<T, O>(owner: O) -> View<T>", "window"))
-    assert(!mksh_declares("ir_core_alloc_raw: fn(m: &IRModule) -> Int", "alloc_raw"))
+    assert(!mksh_declares("ir_core_alloc_raw: fn(m: ^IRModule) -> Int", "alloc_raw"))
     assert(!mksh_declares("    copy: fn(self) -> Int", "copy"))
     assert(!mksh_declares("// alloc_raw: fn is the kernel's", "alloc_raw"))
     assert_eq(mksh_kernel_entries("policy: {{\n    memory: .Kernel([\"Source/A.jet\", \"Source/B.jet\"]),\n}}"), [String]{"Source/A.jet", "Source/B.jet"})

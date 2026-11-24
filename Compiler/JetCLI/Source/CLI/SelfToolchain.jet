@@ -33,7 +33,7 @@ jet_cli_self_toolchain: fn(json: Bool) -[FS, Env]> JetCLIPlan Never! {
 // when the verb names one, the working directory's otherwise, so the pin means
 // the same thing whatever directory the verb runs from. `cache` is the
 // command's discovery cache, which its run receipt walks again.
-jet_cli_pinned_toolchain: fn(cache: &WorkspaceDeclarationCache, raw: [String], target: String?, color: Bool, quiet: Bool) -> JetCLIPlan? {
+jet_cli_pinned_toolchain: fn(cache: ^WorkspaceDeclarationCache, raw: [String], target: String?, color: Bool, quiet: Bool) -> JetCLIPlan? {
     start: if target == {
         .Val(path) -> if cli_files.is_dir(path) -> path else -> jet_cli_parent(path) ?? "."
         .None -> cli_files.cwd() ?? "."

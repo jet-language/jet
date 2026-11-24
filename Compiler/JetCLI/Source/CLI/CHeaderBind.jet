@@ -121,7 +121,7 @@ jet_cli_c_bind_stale: fn(root: String, lib: String) -[FS, Time]> String? Never! 
 // Admit the close contracts a parsed `#Import c.<lib>: module` overlay names:
 // a constructor's `#Close(f)` maps its returned handle to `f`. Contracts
 // already present stay; source markers only fill missing ones.
-jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: &[String:HandleOverlay]) Never! {
+jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: ^[String:HandleOverlay]) Never! {
     loop item in items {
         if item == {
             .CModule(c_module) -> {
@@ -153,7 +153,7 @@ jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: &[String:HandleOverla
 // `name.jet` and `name/module.jet` (Loader.jet's rules). A header whose
 // library the same scope also brings in through `c.<lib>` or `c.[<lib>]` is
 // not bound: the compile reports that pair as E3204.
-jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl], items: [Item], headers: &[JetCLICHeaderImport], modules: &[String]) Never! {
+jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl], items: [Item], headers: ^[JetCLICHeaderImport], modules: ^[String]) Never! {
     loop declaration in imports {
         if declaration.kind == .File(path, _) {
             if jet_driver_foreign_library_from_header(path) == .Val(lib) {
@@ -202,7 +202,7 @@ jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl],
 
 // Adds the root-relative `path` to `modules` once; an invalid import path
 // (empty) adds nothing.
-jet_cli_c_bind_reach: fn(path: String, modules: &[String]) Never! {
+jet_cli_c_bind_reach: fn(path: String, modules: ^[String]) Never! {
     if path != "" && !modules.contains(path) -> modules.push(path.copy())
 }
 
@@ -238,7 +238,7 @@ jet_cli_c_bind_inputs: fn(files: [JetDriverAuthorizedSourceFile], entry_path: St
 
 // Adds the header imports and overlays of `file` to `inputs`, and the files
 // it imports to `modules`.
-jet_cli_c_bind_read_file: fn(file: JetDriverAuthorizedSourceFile, inputs: &JetCLICBindInputs, modules: &[String]) Never! {
+jet_cli_c_bind_read_file: fn(file: JetDriverAuthorizedSourceFile, inputs: ^JetCLICBindInputs, modules: ^[String]) Never! {
     parsed: parse_source(file.source.bytes())
     failed: loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR {

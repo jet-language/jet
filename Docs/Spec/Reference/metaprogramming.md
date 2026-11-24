@@ -612,7 +612,7 @@ its owner's parameters the same way.
 Each `ParamInfo` carries the parameter's `name`; the `label` a call writes
 (its public label, else its name); its `zone` (`ParamZone`: `PositionalOnly`,
 `Either` or `LabelOnly`); its `type`, a TypeId; its `access` (`ParamAccess`: `Read`,
-`Write` for a `&` parameter, or `Move` for a `&&` one); its `default`, a
+`Write` for a `^` parameter, or `Move` for a `^^` one); its `default`, a
 `DefaultInfo?` read the same way as a field's and never run; and whether it is
 `variadic`. A catalog reads a callable's parameters without parsing a
 signature string (`Examples/Metaprogramming/Reflection/CallableCatalog/`).
@@ -725,8 +725,10 @@ A `TypeInfo` lists what the type implements and binds, and the form of a number:
 - `numeric` is the `NumericInfo` of a number type: whether it is `signed`, its
   width in `bits` and whether it `is_float`. A builtin number reflects too:
   `I32.reflect().numeric` is `signed: true, bits: 32`, `U8`'s is unsigned
-  with 8 bits and `F32`'s is a 32-bit float. A `distinct` type over a number
-  reports its base's form; any other type has `None`.
+  with 8 bits and `F32`'s is a 32-bit float. Its `identity` is the number
+  type's `TypeId`, so `F64` and `Float` reflect one identity, and a sized
+  number's (`I32`, `Float`) binds its width as `bits`. A `distinct` type over
+  a number reports its base's form; any other type has `None`.
 
 [`TypeFacts`](../../../Examples/Metaprogramming/Reflection/TypeFacts/run.jet)
 reads all three: a marker body, a comptime constant, ordinary code and fn
@@ -926,10 +928,22 @@ bounds as `effects.declared` (`inferred` is `None`: a type has no body), the
 `Jet` calling convention and no generic bindings. Each `ParamInfo` keeps
 what the type writes: the label and zone a `/` or `*` gives it (positional
 and unlabeled with neither, as in `step: fn(Int) -[]> String`) and the
-access a `&` or `&&` mark gives it (`Read` with none); a written function
+access a `^` or `^^` mark gives it (`Read` with none); a written function
 type has no defaults and no variadic parameters, while the type of a named
 function keeps that function's parameter names, defaults and variadic
-flags. A
+flags. Its `generic_bindings` list the type's arguments, one
+`GenericBindingInfo` each, in the same way for every constructed type: a
+declared generic names each argument by its type parameter
+(`Transform<Screen, World>` binds `From` to `Screen` and `To` to `World`),
+`[T]` binds `element`, `T?`, `Shared<T>` and a tagged type `inner`, `[K: V]`
+`key` and `value`, `T E!` `ok` and `err`, a tuple each field by its name
+(`0`, `1`, ... when positional), a union each member by position, a
+function type each parameter by its label (else its position) and then
+`result`, and a quantity `base`. A number argument is a size: its `type`
+is `Int` and its `size` the number, as a fixed list's `length`, the `bits`
+of `I32`, `U8`, `Float` and `F32`, and a ranged int's `lo` and `hi` beside
+its `base`. Any other binding's `size` is `None`. A declared type named
+without arguments, and a builtin scalar, bind nothing. A
 PreparedValue is a compile-time value with its type kept, one case per case
 of the compile-time value algebra: `.Int(Int)`, `.Float(Float)`,
 `.Bool(Bool)`, `.Char(Char)`, `.String(String)`, `.Enum(PreparedCase)` (the

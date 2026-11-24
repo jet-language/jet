@@ -42,7 +42,7 @@ lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
 
 // Serves until `exit` or the end of input. The exit code is 0 when a
 // `shutdown` request came first, else 1.
-lsp_serve: fn(checker: &&LSPChecker) -> Int {
+lsp_serve: fn(checker: ^^LSPChecker) -> Int {
     server := lsp_server(checker)
     stdout := lsp_loop_term.stdout()
     loop {
@@ -67,7 +67,7 @@ lsp_stop: fn(message: String) -> Int {
     1
 }
 
-lsp_serve_message: fn(server: &LSPServer, text: String, stdout: &lsp_loop_term.Stdout) IOError! {
+lsp_serve_message: fn(server: ^LSPServer, text: String, stdout: ^lsp_loop_term.Stdout) IOError! {
     message: if lsp_parse_rpc_message(text) == {
         .Ok(value) -> value
         .Err(problem) -> {

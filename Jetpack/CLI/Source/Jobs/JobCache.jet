@@ -229,7 +229,7 @@ cli_task_project_scope_fingerprint: fn(project_dir: String, metadata: JobMetadat
     Ok(cli_sha256_hex(identity.bytes()))
 }
 
-cli_collect_job_scope_files: fn(root: String, directory: String, metadata: JobMetadata, found: &[{path: String, digest: String}]) -[FS]> CLIError! {
+cli_collect_job_scope_files: fn(root: String, directory: String, metadata: JobMetadata, found: ^[{path: String, digest: String}]) -[FS]> CLIError! {
     entries: files.list_dir(directory) ?? return Err(CLIError.Other("couldn't read job cache scope `{directory}`: {err}"))
     loop item in entries {
         relative: item.path.removeprefix(root).removeprefix("/")

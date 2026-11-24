@@ -11,7 +11,7 @@ Table: struct {
 }
 
 // Big-endian `width`-byte fields; negative values wrap as two's complement.
-put_field: fn(out: &[U8], value: Int, width: Int) {
+put_field: fn(out: ^[U8], value: Int, width: Int) {
     wrapped: value % (1 << (width * 8))
     loop k in 0..<width -> out.push(U8{(wrapped >> ((width - 1 - k) * 8)) & 255})
 }

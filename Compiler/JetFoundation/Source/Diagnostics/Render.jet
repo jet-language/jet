@@ -42,7 +42,7 @@ diagnostic_theme_severity: fn(color: Bool, diagnostic: Diagnostic, text: String)
     diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ERROR, text)
 }
 
-diagnostic_push_text: fn(out: &[U8], text: String) Never! {
+diagnostic_push_text: fn(out: ^[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
 }
 
@@ -201,7 +201,7 @@ diagnostic_source_texts: fn() -> DiagnosticSourceTexts Never! {
 // The position in `sources.texts` of the source a diagnostic reads: its
 // origin's bytes (keyed by path and revision), else the batch's `source`.
 // The source is indexed on first use.
-diagnostic_source_position: fn(sources: &DiagnosticSourceTexts, origin: DiagnosticOrigin?, source: String) -> Int Never! {
+diagnostic_source_position: fn(sources: ^DiagnosticSourceTexts, origin: DiagnosticOrigin?, source: String) -> Int Never! {
     key: if origin == .Val(found) -> "origin:{found.path}\n{found.revision}" else -> "batch"
     loop (position, known) in sources.keys {
         if known == key -> return position
@@ -260,7 +260,7 @@ diagnostic_right_align: fn(text: String, width: Int) -> String Never! {
 // Draw one `--> file:line:col` snippet with a caret under `span`; a secondary
 // label prints its message after the carets. `text` is the indexed source,
 // read in place.
-diagnostic_push_snippet: fn(out: &[U8], diagnostic: Diagnostic, color: Bool, file: String, text: DiagnosticSourceText, span: Span, message: String?) Never! {
+diagnostic_push_snippet: fn(out: ^[U8], diagnostic: Diagnostic, color: Bool, file: String, text: DiagnosticSourceText, span: Span, message: String?) Never! {
     line: diagnostic_source_line(text, span.start)
     column: diagnostic_source_column(text, span.start)
     location: diagnostic_theme_dim(color, "--> {file}:{line}:{column}")
@@ -332,7 +332,7 @@ diagnostic_render: fn(diagnostic: Diagnostic, file: String, source: String, colo
 
 // diagnostic_render over the batch's indexed sources: a source is indexed the
 // first time a snippet reads it, and only then.
-diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String, color: Bool, sources: &DiagnosticSourceTexts) -> String Never! {
+diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String, color: Bool, sources: ^DiagnosticSourceTexts) -> String Never! {
     display: diagnostic_escape_terminal_text(if diagnostic.origin == .Val(origin) -> origin.display else -> file)
     what: diagnostic_escape_terminal_text(diagnostic.what)
     why: diagnostic_escape_terminal_text(diagnostic.why)

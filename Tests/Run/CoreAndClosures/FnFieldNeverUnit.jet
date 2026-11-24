@@ -1,5 +1,5 @@
 // A `fn(..) Never!` value that returns nothing, called through a struct
-// field from a `&self` method, a borrowed struct, a parameter and a local
+// field from a `^self` method, a borrowed struct, a parameter and a local
 // bound to the named function. A named function, one with an effect and a
 // capturing lambda all fill the field; every tier calls them through the same
 // Result-returning callable ABI.
@@ -14,7 +14,7 @@ Hook: struct {
 
     recording: fn() -> Hook Never! { Hook{events: [String]{}, react: ignore} }
 
-    observe: fn(&self, path: String, stage: Stage) -[IO]> Never! {
+    observe: fn(^self, path: String, stage: Stage) -[IO]> Never! {
         self.events.push(path.copy())
         self.react(path, stage)
     }
@@ -29,7 +29,7 @@ announce: fn(path: String, stage: Stage) -[IO]> Never! {
     }
 }
 
-walk: fn(path: String, hook: &Hook) -[IO]> {
+walk: fn(path: String, hook: ^Hook) -[IO]> {
     hook.observe(path, Stage.Node)
     hook.observe("{path}/leaf", Stage.Leaf)
 }

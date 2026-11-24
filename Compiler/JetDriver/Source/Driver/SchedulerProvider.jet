@@ -124,7 +124,7 @@ jet_driver_scheduler_hooks_source: fn(provider: String) -> String Never! {
 
 // Parse-time step for the entry file: binds the scheduler provider its
 // package's machine profile selects. Returns whether it bound one.
-jet_driver_bind_scheduler_provider: fn(program: &Program, profile: String) -> Bool {
+jet_driver_bind_scheduler_provider: fn(program: ^Program, profile: String) -> Bool {
     provider: jet_driver_scheduler_provider(program.items, profile) ?? return false
     parsed: parse_generated_source(jet_driver_scheduler_hooks_source(provider).bytes())
     if parsed.diagnostics.len() > 0 -> return false
@@ -136,7 +136,7 @@ jet_driver_bind_scheduler_provider: fn(program: &Program, profile: String) -> Bo
 
 // The entry's spellings gain the Core functions the hooks call, after a `.`,
 // so the load keeps them.
-jet_driver_scheduler_spell: fn(words: &JetDriverUnitWords) {
+jet_driver_scheduler_spell: fn(words: ^JetDriverUnitWords) {
     if words.spells.len() == 0 -> words.spells.push([Int]{})
     last: words.spells.len() - 1
     loop word in JET_DRIVER_SCHEDULER_SPELLINGS {

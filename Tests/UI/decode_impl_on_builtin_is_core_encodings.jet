@@ -1,0 +1,10 @@
+// core.encoding declares `Decode` and writes its impls for F32 and Dyn, so a
+// program can't write another one for a builtin type.
+impl F32.Decode {
+    decode: fn(tree: Dyn) -> F32 [FieldError]! { Ok(F32{0.0}) }
+}
+
+run: fn() {
+    single: Dyn.Float(2.5).decode<F32>() ?? panic("f32")
+    print(single)
+}

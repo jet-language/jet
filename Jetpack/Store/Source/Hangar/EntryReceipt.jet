@@ -16,14 +16,14 @@ STORE_RECEIPT_SEQUENCE: Shared{ProcessSequence{next: 0}}
 // The caller keeps the returned digest in the package projection, so the
 // in-memory result, `meta.json`, closure record, and project lock all name
 // the same object.
-store_prepare_entry_receipt: fn(roots: HangarRoots, entry: &StoreEntry) StoreError! {
+store_prepare_entry_receipt: fn(roots: HangarRoots, entry: ^StoreEntry) StoreError! {
     materialized: store_materialize_receipt(roots, entry)
     entry.receipt = materialized.digest
 }
 
 // Prepare the package receipt and report whether this call published a new
 // receipt file. The admission transaction uses the status for rollback.
-store_prepare_entry_receipt_with_status: fn(roots: HangarRoots, entry: &StoreEntry) -> Bool StoreError! {
+store_prepare_entry_receipt_with_status: fn(roots: HangarRoots, entry: ^StoreEntry) -> Bool StoreError! {
     materialized: store_materialize_receipt(roots, entry)
     entry.receipt = materialized.digest
     Ok(materialized.wrote)

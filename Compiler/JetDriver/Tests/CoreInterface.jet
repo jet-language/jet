@@ -178,7 +178,7 @@ InterfaceTestReader: struct {
             Val(self.bytes[at..<at + size])
         }
 
-        read_into: fn(self, at: Int, into: &[U8], size: Int) -[Env, FFI.Asm]> Bool {
+        read_into: fn(self, at: Int, into: ^[U8], size: Int) -[Env, FFI.Asm]> Bool {
             if at < 0 || size < 0 || at + size > self.bytes.len() -> return false
             loop index in 0..<min(size, into.len()) -> into[index] = self.bytes[at + index]
             if into.len() < size -> into.extend(self.bytes[at + into.len()..<at + size])
@@ -213,7 +213,7 @@ InterfaceTestTrace: struct {
     }
 }
 
-interface_test_sink: fn(trace: &&InterfaceTestTrace) -> CompilerTraceSink Never! { trace.move() }
+interface_test_sink: fn(trace: ^^InterfaceTestTrace) -> CompilerTraceSink Never! { trace.move() }
 
 // The check request of the one user file `source` over Core `rows`, on at
 // most `threads` compiler threads, reading the interface file `interface`

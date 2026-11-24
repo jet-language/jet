@@ -29,7 +29,7 @@ SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG: 2
 
 // The server_name extension with the hostname set, nothing without one
 // (ssl_write_hostname_ext, RFC 6066 3).
-ssl_cli_write_hostname_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+ssl_cli_write_hostname_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
     hostname: ssltls.ssl_get_hostname_pointer(ssl) ?? return Ok(0)
     name: hostname.bytes()
     hostname_len: name.len()
@@ -50,7 +50,7 @@ ssl_cli_write_hostname_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> 
 // The application_layer_protocol_negotiation extension with the
 // configured protocols, nothing without them (ssl_write_alpn_ext,
 // RFC 7301 3.1). Setting the list checked each name is under 256 bytes.
-ssl_cli_write_alpn_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
+ssl_cli_write_alpn_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> Int ssldefs.SSLError! {
     alpn_list: ssl.conf.alpn_list ?? return Ok(0)
     p := buf
     // The extension type, its length and the list length.
@@ -77,7 +77,7 @@ ssl_cli_write_alpn_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> Int 
 // groups the versions in `flags` can use (ssl_write_supported_groups_ext).
 // TLS 1.3 takes its ECDHE curves and the RFC 7919 groups, TLS 1.2 its
 // ECDHE curves. A configuration without groups is BadConfig.
-ssl_cli_write_supported_groups_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int, flags: Int) -> Int ssldefs.SSLError! {
+ssl_cli_write_supported_groups_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int, flags: Int) -> Int ssldefs.SSLError! {
     p := buf
     // The extension type, its length and the list length.
     ssltls.ssl_chk_buf(p, end, 6) ?? return Err(err)
@@ -121,7 +121,7 @@ SSLCipherSuitesWritten: struct {
 // The configured ciphersuites the versions offered allow, then on an
 // initial handshake the empty renegotiation_info signaling suite
 // (ssl_write_client_hello_cipher_suites, RFC 5746 3.3).
-ssl_cli_write_client_hello_cipher_suites: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) -> SSLCipherSuitesWritten ssldefs.SSLError! {
+ssl_cli_write_client_hello_cipher_suites: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) -> SSLCipherSuitesWritten ssldefs.SSLError! {
     p := buf
     tls12_uses_ec := false
     // The list length.
@@ -166,7 +166,7 @@ SSLClientHelloWritten: struct {
 // RFC 6347 4.2.1). The version field is TLS 1.2's in both versions. The
 // extensions are those of every version proposed, the TLS 1.3
 // pre_shared_key one last; an empty extension list is left out.
-ssl_write_client_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end: Int, rng: &R) -> SSLClientHelloWritten ssldefs.SSLError! {
+ssl_write_client_hello_body: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: Int, end: Int, rng: ^R) -> SSLClientHelloWritten ssldefs.SSLError! {
     p := buf
     binders_len := 0
     propose_tls12: ssl.handshake.min_tls_version <= ssldefs.SSL_VERSION_TLS1_2 && ssldefs.SSL_VERSION_TLS1_2 <= ssl.tls_version
@@ -245,7 +245,7 @@ ssl_write_client_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end:
 
 // The client random: TLS 1.2's starts with the time in seconds
 // (ssl_generate_random, RFC 5246 7.4.1.2); TLS 1.3's is all random.
-ssl_cli_generate_random: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_cli_generate_random: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     gmt_unix_time_len := 0
     if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 {
         ssldefs.ssl_put_u32(ssl.handshake.randbytes, 0, ssldefs.ssl_time())
@@ -264,7 +264,7 @@ ssl_cli_generate_random: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.S
 // random bytes of TLS 1.3 middlebox compatibility. A TLS 1.3 resumption
 // must be to the host the ticket came from; else the session takes the
 // hostname.
-ssl_prepare_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_prepare_client_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     sn: ssl.session_negotiate
     if sn < 0 -> return Err(.InternalError)
     if ssl.handshake.resume != 0 && ssl.spool[sn].tls_version == ssldefs.SSL_VERSION_TLS1_3 && ssl.spool[sn].ticket != None {
@@ -322,7 +322,7 @@ ssl_prepare_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.
 /// with the state moved on first so a retried send does not write it
 /// again. Over TLS the PSK binders are computed over the transcript up to
 /// them, and a TLS 1.3 proposal may go on to other states.
-ssl_write_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_write_client_hello: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl_prepare_client_hello(ssl, rng) ?? return Err(err)
     buf: sslmsg.ssl_start_handshake_msg(ssl, ssldefs.SSL_HS_CLIENT_HELLO)
     buf_len: ssldefs.SSL_OUT_CONTENT_LEN - 4

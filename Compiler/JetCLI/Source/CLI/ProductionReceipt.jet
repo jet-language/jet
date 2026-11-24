@@ -39,7 +39,7 @@ JetCLIEnvVar: struct {
 // one failure of one run writes one receipt wherever it runs. `cache` is the
 // command's discovery cache: its walk climbs the directories the pinned
 // toolchain check climbed (jet_cli_pinned_toolchain).
-jet_cli_production_receipt_env: fn(cache: &WorkspaceDeclarationCache, file: String, program_args: [String]) -> [JetCLIEnvVar] {
+jet_cli_production_receipt_env: fn(cache: ^WorkspaceDeclarationCache, file: String, program_args: [String]) -> [JetCLIEnvVar] {
     cwd := cli_sys.current_dir() ?? "."
     source_file: if file.starts_with("/") -> file.copy() else -> "{cwd}/{file}"
     root: jet_cli_selected_project_root(cache, jet_cli_parent(source_file) ?? ".") ?? cwd.move()
@@ -109,7 +109,7 @@ jet_cli_production_relative: fn(path: String, root: String) -> String? {
 // package that holds the source (`package`, its manifest root): its kind, its
 // path relative to `root`, and its digest. A package without that file, or a
 // source outside any package, adds nothing.
-jet_cli_production_project_input: fn(closure: &[U8], package: String?, root: String, kind: String) {
+jet_cli_production_project_input: fn(closure: ^[U8], package: String?, root: String, kind: String) {
     found: package ?? return
     path: if kind == "manifest" -> "{found}/{PACKAGE_FILE}" else -> "{found}/{UNIFIED_LOCK_FILE}"
     bytes: cli_files.read_bytes(path) ?? return

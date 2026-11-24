@@ -88,7 +88,7 @@ derive_record_items: fn(source: String) -> [Item] {
 }
 
 // The bodies file of `bodies`, read back whole.
-derive_record_file: fn(bodies: &&[SemaCoreBody]) -> SemaCoreBodies {
+derive_record_file: fn(bodies: ^^[SemaCoreBody]) -> SemaCoreBodies {
     bytes: sema_core_bodies_bytes(bodies.move(), "derive-record")
     if sema_core_bodies_problem(bytes) == .Val(problem) {
         panic("DeriveRecord: the bodies file does not read back: {problem}")
@@ -123,7 +123,7 @@ derive_record_memo: fn(source: String) -> SemaDeriveMemo {
 
 // How many expansions the items of `source` take from `memo`, whose
 // expansion must give the items expanding without it gives.
-derive_record_apply: fn(source: String, memo: &SemaDeriveMemo) -> Int {
+derive_record_apply: fn(source: String, memo: ^SemaDeriveMemo) -> Int {
     diagnostics := [Diagnostic]{}
     items := derive_record_items(source)
     sema_derive_expand_builtin_items_with(items, diagnostics, memo)

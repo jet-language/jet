@@ -39,7 +39,7 @@ ForeignIdentityBuilder: struct {
 
     // Add one ordered, length-delimited input field: little-endian u64
     // length, name bytes, little-endian u64 length, value bytes.
-    field: fn(&self, name: String, value: [U8]) Never! {
+    field: fn(^self, name: String, value: [U8]) Never! {
         name_bytes: name.bytes()
         pkg_bridge_push_u64_le(self.bytes, name_bytes.len())
         loop byte in name_bytes -> self.bytes.push(byte)
@@ -51,7 +51,7 @@ ForeignIdentityBuilder: struct {
     finish: fn(self) -> String Never! { pkg_sha256_hex(self.bytes) }
 }
 
-pkg_bridge_push_u64_le: fn(bytes: &[U8], value: Int) Never! {
+pkg_bridge_push_u64_le: fn(bytes: ^[U8], value: Int) Never! {
     loop index in 0..<8 -> bytes.push(U8{((value >> (index * 8))) & 255})
 }
 

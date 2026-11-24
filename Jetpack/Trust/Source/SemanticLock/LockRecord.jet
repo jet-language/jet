@@ -112,7 +112,7 @@ LockRationale: struct {
     }
 
     // Set one `.jet/lock` rationale field by its key; unknown keys are ignored.
-    set_field: fn(&self, key: String, value: String) Never! {
+    set_field: fn(^self, key: String, value: String) Never! {
         if key == {
             "owner-package" -> self.owner_package = value
             "reason" -> self.reason = value
@@ -169,7 +169,7 @@ SemanticLockFile: struct {
     }
 
     // Drop every record of `kind` whose key is `key`.
-    remove_records: fn(&self, kind: LockRecordKind, key: String) Never! {
+    remove_records: fn(^self, kind: LockRecordKind, key: String) Never! {
         kept := [SemanticRecord]{}
         loop record in self.records {
             if record.identity.kind == kind && record.identity.key == key -> next
@@ -180,7 +180,7 @@ SemanticLockFile: struct {
 
     // Selective update: replace one semantic key; unrelated records keep
     // their bytes. Returns the replaced record.
-    selective_update: fn(&self, new_record: SemanticRecord) -> SemanticRecord? Never! {
+    selective_update: fn(^self, new_record: SemanticRecord) -> SemanticRecord? Never! {
         key: new_record.identity.semantic_key()
         found := -1
         loop index in 0..<self.records.len() {
@@ -205,7 +205,7 @@ SemanticLockFile: struct {
 
     // Record a selected typed variant (E4-JP15). `platform` holds the
     // canonical `PackageVariant::identity_key()`.
-    record_selected_variant: fn(&self, package: String, variant_identity: String, hash: String, reason: String) Never! {
+    record_selected_variant: fn(^self, package: String, variant_identity: String, hash: String, reason: String) Never! {
         identity: LockIdentity{kind: LockRecordKind.Variant, key: package, exact: variant_identity, hash: hash, platform: variant_identity}
         rationale := LockRationale.empty()
         rationale.owner_package = package
@@ -226,7 +226,7 @@ SemanticLockFile: struct {
     }
 
     // Record a workspace catalog selection (E4-JP13).
-    record_catalog_selection: fn(&self, owner: String, logical_name: String, provider_ref: String, hash: String, platform: String, rationale: String) Never! {
+    record_catalog_selection: fn(^self, owner: String, logical_name: String, provider_ref: String, hash: String, platform: String, rationale: String) Never! {
         identity: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash: hash, platform: platform}
         provider: if trust_text_split_first(provider_ref, TRUST_COLON) == {
             .Val(parts) -> parts.before

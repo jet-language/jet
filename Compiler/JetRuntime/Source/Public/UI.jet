@@ -1,15 +1,16 @@
-// `jet.runtime.ui` (#6615): the UI host provider's primitives (core.ui.host),
-// in Jet types. Each member is a runtime binding (Guest.jet
-// sema_guest_runtime_binding) of the runtime export that is its one body
-// (UiHostProvider.jet). Each is `priv`: only core.ui.host calls them, but
-// for `clipboard_set`, `save_file`, `device` and `device_bytes`, which the
-// app module calls, and the core.ui.host function that reaches a
-// capability's service carries its `UI.<capability>` requirement
-// (Compiler/Prelude/Core.rows `.with_ui_capabilities`, E2937). Each reads
-// or writes the provider's live state, so each is run-time only
-// (RUNTIME_ONLY_READS): the compiler never computes one while building,
-// where its answer would stand in for every run's clipboard, events,
-// dialogs, saved files and device answers.
+// `jet.runtime.ui` (#6615): the UI host provider's primitives (core.ui.host)
+// and core.ui's native window and web page hooks, in Jet types. Each member
+// is a runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
+// export that is its one body (UiHostProvider.jet, UIBackends.jet). Each is
+// `priv`: only core.ui.host and core.ui call them, but for `clipboard_set`,
+// `save_file`, `device` and `device_bytes`, which the app module calls, and
+// the core.ui.host function that reaches a capability's service carries its
+// `UI.<capability>` requirement (Compiler/Prelude/Core.rows
+// `.with_ui_capabilities`, E2937). Each reads or writes the provider's or the
+// window's live state, so each is run-time only (RUNTIME_ONLY_READS): the
+// compiler never computes one while building, where its answer would stand
+// in for every run's clipboard, events, dialogs, saved files, device answers
+// and scene.
 ui: module {
     // Whether the provider has the capability with code `code`
     // (core.ui.host's provider capability codes).
@@ -47,4 +48,19 @@ ui: module {
     // `device` for a request whose answer is bytes (3: a part of a file the
     // provider holds for the app).
     #Import(c) priv device_bytes: fn(kind: Int, request: String) -> [U8]? = "jet_ui_host_device_bytes"
+
+    // Whether a web page attached, and keeps a copy of `scene` as its latest
+    // scene (core.ui's web backend).
+    #Import(c) priv web_attached: fn() -[Browser]> Bool = "jet_ui_web_attached"
+
+    #Import(c) priv web_scene: fn(scene: String) -[Browser]> = "jet_ui_web_scene"
+
+    // A native window's click on slot `id`, drop of one item of `kind` on a
+    // text input, and typing in a text input: each runs the handler the slot
+    // keeps, as a web page's does. An unknown id does nothing.
+    #Import(c) priv click: fn(id: Int) = "jet_ui_click"
+
+    #Import(c) priv drop: fn(id: Int, kind: Int, text: String) = "jet_ui_drop"
+
+    #Import(c) priv change: fn(id: Int, text: String) = "jet_ui_change"
 }

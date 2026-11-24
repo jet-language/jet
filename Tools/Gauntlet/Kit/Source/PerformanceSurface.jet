@@ -473,7 +473,7 @@ arm_sample: fn(row: Dyn, arm: String) -> Dyn {
     Dyn{[String:Dyn]{"wall_time_ms": time, "status": 0, "output_verified": true, "signal": Dyn.Null, "timed_out": false}}
 }
 
-priv flag: fn(out: &[SurfaceIssue], hit: Bool, kind: String, cause: String) {
+priv flag: fn(out: ^[SurfaceIssue], hit: Bool, kind: String, cause: String) {
     if hit -> out.push(SurfaceIssue{kind: kind, cause: cause})
 }
 
@@ -481,7 +481,7 @@ texts_differ: fn(tree: Dyn, path: String, expected: String) -> Bool {
     text_at(tree, path) != Val(expected)
 }
 
-pair_identity_issues: fn(receipt: Dyn, row: Dyn, spec: Dyn, out: &[SurfaceIssue]) {
+pair_identity_issues: fn(receipt: Dyn, row: Dyn, spec: Dyn, out: ^[SurfaceIssue]) {
     pair: pair_definition(spec)
     differs: fn(path: String, other: String) -> Bool { dyn_at(row, path) != dyn_at(pair, other) }
     relabeled: fn(path: String) -> Bool { truthy_at(spec, path) && dyn_at(spec, path) != dyn_at(pair, path) }
@@ -504,7 +504,7 @@ is_hex64: fn(text: String) -> Bool {
     text.len() == 64 && text.bytes().all(fn(byte) { (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{70})) || (byte >= (U8{97}) && byte <= (U8{102})) })
 }
 
-identity_issues: fn(receipt: Dyn, row: Dyn, out: &[SurfaceIssue]) {
+identity_issues: fn(receipt: Dyn, row: Dyn, out: ^[SurfaceIssue]) {
     artifact_sha: first_present([dyn_at(receipt, "artifact_sha256"), dyn_at(receipt, "artifact/sha256")])
     hex: is_hex64(text_at(artifact_sha, "") ?? "")
     flag(out, !hex, "missing-identity", "compiler artifact SHA-256 is missing")
@@ -515,7 +515,7 @@ identity_issues: fn(receipt: Dyn, row: Dyn, out: &[SurfaceIssue]) {
     flag(out, truthy_at(row, "revision") && truthy_at(receipt, "revision") && dyn_at(row, "revision") != dyn_at(receipt, "revision"), "stale-identity", "pair revision differs from receipt revision")
 }
 
-sample_issues: fn(sample: Dyn, expected: String, location: String, out: &[SurfaceIssue]) {
+sample_issues: fn(sample: Dyn, expected: String, location: String, out: ^[SurfaceIssue]) {
     flag(out, (sample_time(sample) ?? 0.0) <= 0.0, "missing-sample", "{location} has no positive wall_time_ms sample")
     if !sample_succeeded(sample) {
         flag(out, is_true(sample, "timed_out"), "timeout", "{location} timed out")
@@ -534,7 +534,7 @@ sample_clean: fn(sample: Dyn, expected: String) -> Bool {
     found.len() == 0
 }
 
-context_issues: fn(receipt: Dyn, row: Dyn, pair: Dyn, out: &[SurfaceIssue]) {
+context_issues: fn(receipt: Dyn, row: Dyn, pair: Dyn, out: ^[SurfaceIssue]) {
     context: dyn_at(receipt, "measurement_context")
     if !(context == .Object(_)) {
         out.push(SurfaceIssue{kind: "missing-identity", cause: "shared pair measurement context is missing"})
@@ -562,7 +562,7 @@ context_issues: fn(receipt: Dyn, row: Dyn, pair: Dyn, out: &[SurfaceIssue]) {
     flag(out, dyn_at(receipt, "artifact_sha256_after") != dyn_at(receipt, "artifact_sha256"), "stale-identity", "compiler artifact changed or disappeared during measurement")
 }
 
-binding_issues: fn(sample: Dyn, source: String, context: Dyn, location: String, pair: Dyn, out: &[SurfaceIssue]) {
+binding_issues: fn(sample: Dyn, source: String, context: Dyn, location: String, pair: Dyn, out: ^[SurfaceIssue]) {
     if !(sample == .Object(_)) {
         out.push(SurfaceIssue{kind: "unpaired-row", cause: "{location} arm is missing"})
         return
@@ -574,7 +574,7 @@ binding_issues: fn(sample: Dyn, source: String, context: Dyn, location: String, 
 }
 
 // The output, process and binding issues of the two samples of one row.
-arm_issues: fn(surface: Dyn, plain: Dyn, pair: Dyn, context: Dyn, place: String, out: &[SurfaceIssue]) {
+arm_issues: fn(surface: Dyn, plain: Dyn, pair: Dyn, context: Dyn, place: String, out: ^[SurfaceIssue]) {
     oracle: text_or_empty(pair, "expected_output")
     sample_issues(surface, oracle, "{place} surface", out)
     sample_issues(plain, oracle, "{place} plain", out)
@@ -595,7 +595,7 @@ balanced: fn(orders: [Dyn], count: Int) -> Bool {
 }
 
 // The issues of each entry of `vector` that is not the computed value.
-stale_entries: fn(vector: [Dyn], computed: [Float], what: String, out: &[SurfaceIssue]) {
+stale_entries: fn(vector: [Dyn], computed: [Float], what: String, out: ^[SurfaceIssue]) {
     if vector.len() != PS_TRIALS {
         return
     }
@@ -606,7 +606,7 @@ stale_entries: fn(vector: [Dyn], computed: [Float], what: String, out: &[Surface
 
 // The issues of a row's declared statistics against those `found` from its
 // raw samples.
-statistics_issues: fn(row: Dyn, found: SurfaceStatistics, out: &[SurfaceIssue]) {
+statistics_issues: fn(row: Dyn, found: SurfaceStatistics, out: ^[SurfaceIssue]) {
     declared: fn(field: String, inner: String) -> Float? { number_at(first_present([dyn_at(row, field), dyn_at(row, "statistics/{inner}")]), "") }
     flag(out, !close_enough(declared("surface_wall_time_ms", "surface_median_ms"), Val(found.surface_median)), "wrong-ratio", "reported surface median differs from all raw samples")
     flag(out, !close_enough(declared("plain_wall_time_ms", "plain_median_ms"), Val(found.plain_median)), "wrong-ratio", "reported plain median differs from all raw samples")

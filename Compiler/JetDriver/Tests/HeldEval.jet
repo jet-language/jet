@@ -67,7 +67,7 @@ held_eval_lib_source: fn() -> String {
     }.join("\n")
 }
 
-held_eval_answer: fn(opened: &JetDriverHeldOpened, path: String, offset: Int, text: String) -> SemaEvalProbeAnswer? {
+held_eval_answer: fn(opened: ^JetDriverHeldOpened, path: String, offset: Int, text: String) -> SemaEvalProbeAnswer? {
     done := jet_driver_held_eval_answer(opened.eval, path, offset, text, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move())
     opened.inputs.symbols = done.symbols.move()
     opened.inputs.interner = done.interner.move()
@@ -75,7 +75,7 @@ held_eval_answer: fn(opened: &JetDriverHeldOpened, path: String, offset: Int, te
     done.answer.move()
 }
 
-held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) -> SemaScriptProbeChecked {
+held_eval_check: fn(opened: ^JetDriverHeldOpened, path: String, text: String) -> SemaScriptProbeChecked {
     done := jet_driver_held_eval_check(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move(), text)
     opened.inputs.symbols = done.symbols.move()
     opened.inputs.interner = done.interner.move()
@@ -86,7 +86,7 @@ held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) ->
 // Appends `text` to `opened`'s module of `path`, its function kept among
 // the checked functions where the next check finds the functions it calls.
 // Whether it was.
-held_eval_append: fn(opened: &JetDriverHeldOpened, path: String, text: String) -> Bool {
+held_eval_append: fn(opened: ^JetDriverHeldOpened, path: String, text: String) -> Bool {
     done := jet_driver_held_eval_append(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move(), text)
     opened.inputs.symbols = done.symbols.move()
     opened.inputs.interner = done.interner.move()
@@ -204,7 +204,7 @@ held_eval_stop_source: fn() -> String {
         "        self.x + self.y",
         "    }}",
         "}}",
-        "consume: fn(label: &&String) -> Int {{ label.len() }}",
+        "consume: fn(label: ^^String) -> Int {{ label.len() }}",
         "run: fn() {{",
         "    point: Point{{x: 1, y: 2}}",
         "    xs: [Int]{{3, 4}}",

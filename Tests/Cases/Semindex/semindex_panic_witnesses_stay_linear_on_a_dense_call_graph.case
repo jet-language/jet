@@ -1,0 +1,17 @@
+# The index names each function's Panic witness the way `jet explain effects`
+# does: a function that panics in its own body (`stop`) is its own witness,
+# and its callers' paths run down to it. The fixture's eighteen layers of
+# three functions, each calling all three below, hold 3^18 call paths from
+# `top`; a search that found no witness and walked every path again from
+# each function took minutes, so finishing under the step's timeout proves
+# each function's search runs once.
+fixture: SemindexPanicWitnessesStayLinearOnADenseCallGraph.fixture
+env: NO_COLOR=1
+step: jet inspect semindex dense.jet --json
+timeout: 60s
+exit: 0
+json: stdout doc $.semindex.effects[?function="stop"][0].inferred = ["Panic"]
+json: stdout doc $.semindex.effects[?function="stop"][0].provenance[0].effect = "Panic"
+json: stdout doc $.semindex.effects[?function="stop"][0].provenance[0].call_path = ["stop"]
+json: stdout doc $.semindex.effects[?function="top"][0].provenance[0].effect = "Panic"
+json: stdout doc $.semindex.effects[?function="top"][0].provenance[0].call_path = ["top","dense.a18","dense.a17","dense.a16","dense.a15","dense.a14","dense.a13","dense.a12","dense.a11","dense.a10","dense.a9","dense.a8","dense.a7","dense.a6","dense.a5","dense.a4","dense.a3","dense.a2","dense.a1","dense.stop"]

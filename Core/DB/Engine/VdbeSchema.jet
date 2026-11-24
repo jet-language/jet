@@ -76,13 +76,13 @@ p4_argc: fn(v: conn.Vdbe, pc: Int) -> Int Never! {
 }
 
 // Vdbe.expired of the statement (its Conn.vdbe_links entry).
-set_expired: fn(db: &conn.Conn, v: conn.Vdbe, x: Int) Never! {
+set_expired: fn(db: ^conn.Conn, v: conn.Vdbe, x: Int) Never! {
     if v.slot >= 0 -> db.vdbe_links[v.slot].expired = x
 }
 
 // sqlite3_value_text of register i as an error message: its UTF-8 text,
 // empty for NULL.
-err_text: fn(v: &conn.Vdbe, i: Int) -> [U8] Never! {
+err_text: fn(v: ^conn.Vdbe, i: Int) -> [U8] Never! {
     if mem.value_text(v.mem[i], base.UTF8) -> return v.mem[i].z.copy()
     [U8]{}
 }
@@ -91,7 +91,7 @@ err_text: fn(v: &conn.Vdbe, i: Int) -> [U8] Never! {
 // into register out, the argc arguments from register arg, agg the
 // accumulator register (-1 for a scalar function). The collating sequence
 // is that of the OP_CollSeq before the op (sqlite3GetFuncCollSeq).
-func_begin: fn(v: &conn.Vdbe, f: conn.FuncDef, pc: Int, out: Int, arg: Int, argc: Int, agg: Int) Never! {
+func_begin: fn(v: ^conn.Vdbe, f: conn.FuncDef, pc: Int, out: Int, arg: Int, argc: Int, agg: Int) Never! {
     c := conn.func_context_new()
     c.out = out
     c.impl_id = f.impl_id
@@ -110,7 +110,7 @@ func_begin: fn(v: &conn.Vdbe, f: conn.FuncDef, pc: Int, out: Int, arg: Int, argc
 
 // OP_Destroy: drop the btree rooted at page P1 of database P3; P2 gets the
 // root page auto-vacuum moved into P1's place (0 for none).
-op_destroy: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_destroy: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     v.mem[o].flags = MEM_NULL
@@ -133,7 +133,7 @@ op_destroy: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // OP_Clear: delete every row of the btree rooted at page P1 of database
 // P2, counting them as changes when P3 is set (and into register P3 when
 // it is positive).
-op_clear: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_clear: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     n := 0
     rc: btree.btree_clear_table(db.btrees[db.dbs[r.p2].bt], r.p1, n)
     if r.p3 != 0 {
@@ -145,7 +145,7 @@ op_clear: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 }
 
 // OP_ResetSorter: empty the sorter or ephemeral table of cursor P1.
-op_reset_sorter: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_reset_sorter: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].cur_type == conn.CURTYPE_SORTER {
         s := vc.sorter_take(v, ci)
@@ -160,7 +160,7 @@ op_reset_sorter: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_CreateBtree: a new btree of kind P3 in database P1; its root page
 // into P2.
-op_create_btree: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_create_btree: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     pgno := 0
@@ -172,7 +172,7 @@ op_create_btree: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_SqlExec: run the SQL of P4, without the authorizer and the trace
 // callback when P1 is set.
-op_sql_exec: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_sql_exec: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     sql: run.p4_text(v, r.pc) ?? [U8]{}
     db.n_sql_exec += 1
     msg := [U8]?{None}
@@ -189,7 +189,7 @@ op_sql_exec: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> I
 // OP_ParseSchema: read into the schema of database P1 the schema rows
 // that match the WHERE clause P4; with no P4, reread the whole schema
 // (sqlite3InitOne with flags P5).
-op_parse_schema: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_parse_schema: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     msg := [U8]?{None}
     rc := base.OK
     if run.p4_text(v, r.pc) == .Val(where) -> rc = h.parse_schema(db, r.p1, where, msg) else {
@@ -209,7 +209,7 @@ op_parse_schema: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB
 }
 
 // OP_LoadAnalysis: read the sqlite_stat tables of database P1.
-op_load_analysis: fn<H: Host>(h: &H, db: &conn.Conn, r: &Run) -[DB]> Int Never! {
+op_load_analysis: fn<H: Host>(h: ^H, db: ^conn.Conn, r: ^Run) -[DB]> Int Never! {
     rc: h.load_analysis(db, r.p1)
     if rc != base.OK -> return vc.fail(r, rc)
     GO_NEXT
@@ -217,7 +217,7 @@ op_load_analysis: fn<H: Host>(h: &H, db: &conn.Conn, r: &Run) -[DB]> Int Never! 
 
 // OP_DropTable, OP_DropIndex, OP_DropTrigger: remove the object named P4
 // from the schema of database P1.
-op_drop_object: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_drop_object: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     name: run.p4_text(v, r.pc) ?? [U8]{}
     if r.op == opc.OP_DROP_TABLE -> conn.unlink_and_delete_table(db, r.p1, name) else if r.op == opc.OP_DROP_INDEX {
         conn.unlink_and_delete_index(db, r.p1, name)
@@ -229,7 +229,7 @@ op_drop_object: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 // second entry) in database P5, finding at most the count in register P3
 // of errors; register P1 gets the report (NULL when all is well) and P3
 // what is left of the count.
-op_integrity_ck: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_integrity_ck: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     roots := [Int]{}
     if v.ops[r.pc].p4 == .IntArray(ai) {
         loop j in 1..<1 + r.p2 -> roots.push(ai[j])
@@ -259,7 +259,7 @@ is_rowset: fn(v: conn.Vdbe, i: Int) -> Bool Never! {
 
 // The Vdbe.rowsets slot of register i's RowSet, giving it an empty one
 // first when it holds none (sqlite3VdbeMemSetRowSet).
-rowset_of: fn(v: &conn.Vdbe, i: Int) -> Int Never! {
+rowset_of: fn(v: ^conn.Vdbe, i: Int) -> Int Never! {
     if is_rowset(v, i) -> return v.mem[i].i
     run.release_dyn(v, i)
     k := 0
@@ -275,7 +275,7 @@ rowset_of: fn(v: &conn.Vdbe, i: Int) -> Int Never! {
 }
 
 // OP_RowSetAdd: the integer in P2 into the RowSet of P1.
-op_row_set_add: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_row_set_add: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     k: rowset_of(v, v.mem_base + r.p1)
     x: v.mem[v.mem_base + r.p2].i
     rowset.rowset_insert(v.rowsets[k], x)
@@ -284,7 +284,7 @@ op_row_set_add: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_RowSetRead: the smallest value of the RowSet of P1 out of it into P3;
 // when it is empty P1 becomes NULL and the op jumps to P2.
-op_row_set_read: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_row_set_read: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     if is_rowset(v, i) {
         k: v.mem[i].i
@@ -299,7 +299,7 @@ op_row_set_read: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_RowSetTest: jump to P2 when the integer in P3 is in the RowSet of P1
 // from a batch before P4; unless P4 is negative, then insert it.
-op_row_set_test: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_row_set_test: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i_set: run.p4_int(v, r.pc)
     k: rowset_of(v, v.mem_base + r.p1)
     x: v.mem[v.mem_base + r.p3].i
@@ -315,7 +315,7 @@ op_row_set_test: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // after this one). With P5 set, a program already running is not entered
 // again (no recursive triggers). The program's registers, cursors and once
 // flags follow the caller's; its registers start undefined.
-op_program: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_program: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     prog: p4_program(v, r.pc)
     if prog < 0 -> return vc.fail(r, base.INTERNAL)
     token: v.programs[prog].token
@@ -348,7 +348,7 @@ op_program: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_Param: into P2 a copy of the caller's register that the OP_Program
 // running this program names by its P1 plus this op's P1.
-op_param: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_param: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     k: v.frames.len() - 1
     from: v.frames[k].mem_base + r.p1 + v.frames[k].ops[v.frames[k].pc].p1
     run.reg_copy(v, v.mem_base + r.p2, from)
@@ -358,7 +358,7 @@ op_param: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_FkCounter: count P2 foreign key violations: deferred ones (P1) on the
 // connection, immediate ones on the statement; with SQLITE_DeferFKs all of
 // them are deferred to the commit.
-op_fk_counter: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_fk_counter: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if db.flags & conn.SQLITE_DEFER_FKS != 0 -> db.n_deferred_imm_cons += r.p2 else if r.p1 != 0 {
         db.n_deferred_cons += r.p2
     } else { v.n_fk_constraint += r.p2 }
@@ -378,7 +378,7 @@ op_fk_if_zero: fn(db: conn.Conn, v: conn.Vdbe, r: Run) -> Int Never! {
 
 // OP_MemMax: register P1 (of the statement's own program while a trigger
 // runs) becomes the larger of its integer and P2's.
-op_mem_max: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_mem_max: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i1: if v.frames.len() > 0 -> v.frames[0].mem_base + r.p1 else -> v.mem_base + r.p1
     i2: v.mem_base + r.p2
     mem.integerify(v.mem[i1])
@@ -388,7 +388,7 @@ op_mem_max: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_IfPos: when register P1 is positive, take P3 from it and jump to P2.
-op_if_pos: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_if_pos: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     if v.mem[i].i > 0 {
         v.mem[i].i -= r.p3
@@ -399,7 +399,7 @@ op_if_pos: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_OffsetLimit: P2 becomes LIMIT P1 plus OFFSET P3 (a negative OFFSET as
 // 0), or -1 when there is no limit (P1 not positive or the sum overflows).
-op_offset_limit: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_offset_limit: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     x: v.mem[v.mem_base + r.p1].i
     off: v.mem[v.mem_base + r.p3].i
     o: v.mem_base + r.p2
@@ -413,7 +413,7 @@ op_offset_limit: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_IfNotZero: when register P1 is not zero, count it down (if positive)
 // and jump to P2.
-op_if_not_zero: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_if_not_zero: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     if v.mem[i].i != 0 {
         if v.mem[i].i > 0 -> v.mem[i].i -= 1
@@ -424,7 +424,7 @@ op_if_not_zero: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_DecrJumpZero: count register P1 down (not past the smallest integer)
 // and jump to P2 when it reaches zero.
-op_decr_jump_zero: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_decr_jump_zero: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     if v.mem[i].i > base.I64_MIN -> v.mem[i].i -= 1
     if v.mem[i].i == 0 -> return GO_JUMP
@@ -437,7 +437,7 @@ op_decr_jump_zero: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_Function, OP_PureFunc: the function of P4's context on the registers
 // from P2 into P3. P1 is the mask of the constant arguments whose
 // auxiliary data outlives an error.
-op_function: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_function: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     f: p4_func(v, r.pc) ?? return vc.fail(r, base.INTERNAL)
     o: v.mem_base + r.p3
     argc: p4_argc(v, r.pc)
@@ -461,7 +461,7 @@ op_function: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> I
 
 // OP_AggStep, OP_AggInverse: the op becomes OP_AggStep1 with a context of
 // the P5 arguments, then runs as one.
-op_agg_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_agg_step: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     f: p4_func(v, r.pc) ?? return vc.fail(r, base.INTERNAL)
     run.set_p4(v, r.pc, conn.P4.FuncCtx{func: f, argc: r.p5})
     run.set_opcode(v, r.pc, opc.OP_AGG_STEP1)
@@ -472,7 +472,7 @@ op_agg_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> I
 // context on the registers from P2, accumulating in register P3. A step
 // that skips (min() and max() on a NULL) sets the register of the
 // OP_CollSeq before the op.
-op_agg_step1: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_agg_step1: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     f: p4_func(v, r.pc) ?? return vc.fail(r, base.INTERNAL)
     o: v.mem.len()
     v.mem.push(base.mem_null())
@@ -502,7 +502,7 @@ op_agg_step1: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
 // OP_AggFinal: the result of the aggregate P4 accumulated in register P1
 // replaces the accumulator (sqlite3VdbeMemFinalize). OP_AggValue: its
 // current value (xValue) into P3, the accumulator staying.
-op_agg_final: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_agg_final: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     f: p4_func(v, r.pc) ?? return vc.fail(r, base.INTERNAL)
     acc: v.mem_base + r.p1
     res := acc
@@ -538,7 +538,7 @@ op_agg_final: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
 // OP_Checkpoint: checkpoint database P1 (all of them for SQLITE_MAX_DB)
 // in mode P2; registers P3.. get busy (0 or 1), the frames in the log and
 // the frames checkpointed (-1 when unknown).
-op_checkpoint: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_checkpoint: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     busy := 0
     n_log := -1
     n_ckpt := -1
@@ -560,7 +560,7 @@ JOURNAL_MODE_NAMES: ["delete", "persist", "off", "truncate", "memory", "wal"]
 // OP_JournalMode: the journal mode of database P1 becomes P3 (QUERY keeps
 // it) where the pager allows; its name into P2. Into or out of WAL takes
 // a transaction of its own (no other statement reading).
-op_journal_mode: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_journal_mode: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     bt: db.dbs[r.p1].bt
@@ -598,7 +598,7 @@ op_journal_mode: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_Vacuum: vacuum database P1, into the file named by register P2 when
 // P2 is set.
-op_vacuum: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vacuum: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     into := base.Mem?{None}
     if r.p2 != 0 -> into = Val(v.mem[v.mem_base + r.p2].copy())
     msg := [U8]?{None}
@@ -610,7 +610,7 @@ op_vacuum: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
 
 // OP_IncrVacuum: one step of incremental vacuum of database P1; jump to P2
 // when there is nothing left to do.
-op_incr_vacuum: fn(db: &conn.Conn, r: &Run) -[DB]> Int Never! {
+op_incr_vacuum: fn(db: ^conn.Conn, r: ^Run) -[DB]> Int Never! {
     rc: btree.btree_incr_vacuum(db.btrees[db.dbs[r.p1].bt])
     if rc != base.OK {
         if rc != base.DONE -> return vc.fail(r, rc)
@@ -621,14 +621,14 @@ op_incr_vacuum: fn(db: &conn.Conn, r: &Run) -[DB]> Int Never! {
 
 // OP_Expire: expire every statement (P1 = 0) or this one, at once (P2 = 0)
 // or once it stops running (P2 = 1).
-op_expire: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_expire: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     if r.p1 == 0 -> conn.expire_prepared_statements(db, r.p2) else -> set_expired(db, v, r.p2 + 1)
     GO_NEXT
 }
 
 // OP_CursorLock, OP_CursorUnlock: pin cursor P1's btree cursor (a write
 // through another cursor must not move it) or unpin it.
-op_cursor_lock: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_cursor_lock: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     if r.op == opc.OP_CURSOR_LOCK -> btree.btree_cursor_pin(db.btrees[v.csr[ci].bt], v.csr[ci].btc) else {
         btree.btree_cursor_unpin(db.btrees[v.csr[ci].bt], v.csr[ci].btc)
@@ -641,7 +641,7 @@ op_cursor_lock: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 // handle, its vtab the Conn.vtables slot.
 
 // OP_VBegin: the VTable of P4 joins the transaction (xBegin).
-op_vbegin: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vbegin: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     vt: p4_vtab(v, r.pc)
     rc: aux.vtab_begin<H>(h, db, vt)
     if vt >= 0 -> aux.vtab_import_errmsg<H>(h, db, v, vt)
@@ -651,7 +651,7 @@ op_vbegin: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
 
 // OP_VCreate: create the virtual table named by register P2 in database
 // P1 (xCreate).
-op_vcreate: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vcreate: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     m := v.mem[v.mem_base + r.p2].copy()
     rc := base.OK
     msg := [U8]?{None}
@@ -662,7 +662,7 @@ op_vcreate: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
 }
 
 // OP_VDestroy: destroy the virtual table P4 of database P1 (xDestroy).
-op_vdestroy: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vdestroy: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     db.n_vdestroy += 1
     rc: h.vtab_call_destroy(db, r.p1, run.p4_text(v, r.pc) ?? [U8]{})
     db.n_vdestroy -= 1
@@ -671,7 +671,7 @@ op_vdestroy: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> I
 }
 
 // OP_VOpen: cursor P1 on the VTable of P4 (xOpen).
-op_vopen: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vopen: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     vt: p4_vtab(v, r.pc)
     if vt < 0 || db.vtables[vt].vtab < 0 -> return vc.fail(r, base.LOCKED)
     cursor := -1
@@ -687,7 +687,7 @@ op_vopen: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int 
 
 // OP_VCheck: register P2 gets the xIntegrity report on the virtual table
 // P4 of database P1 with flags P3, NULL when it finds nothing.
-op_vcheck: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vcheck: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     o: v.mem_base + r.p2
     run.reg_null(v, o)
     tab: p4_table(v, r.pc)
@@ -710,7 +710,7 @@ op_vcheck: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
 // sqlite3_vtab_in_first and _next read the IN list through: the values
 // of ephemeral cursor P1, each into register P3. Its i is this op, whose
 // operands name the cursor and register while the program runs.
-op_vinit_in: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_vinit_in: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     m := base.mem_init(MEM_NULL | conn.MEM_DYN | MEM_SUBTYPE)
@@ -724,7 +724,7 @@ op_vinit_in: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_VFilter: start cursor P1 with xFilter: idxNum in register P3, the
 // argument count in P3+1 and the arguments from P3+2, idxStr P4; jump to
 // P2 when it has no rows.
-op_vfilter: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vfilter: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     q: v.mem_base + r.p3
     argc: v.mem[q + 1].i
@@ -744,7 +744,7 @@ op_vfilter: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
 // OP_VColumn: column P2 of cursor P1's row into P3 (xColumn). With
 // OPFLAG_NOCHNG the register starts as the "unchanged" NULL that
 // sqlite3_vtab_nochange tests.
-op_vcolumn: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vcolumn: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     dest: v.mem_base + r.p3
     if v.csr[ci].null_row {
@@ -777,7 +777,7 @@ op_vcolumn: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
 }
 
 // OP_VNext: step cursor P1 (xNext) and jump to P2 while it has a row.
-op_vnext: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vnext: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].null_row -> return GO_NEXT
     cur: v.csr[ci].vtab_cursor
@@ -790,7 +790,7 @@ op_vnext: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int 
 
 // OP_VRename: rename the VTable of P4 to the name in register P1
 // (xRename), under SQLITE_LegacyAlter.
-op_vrename: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vrename: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     vt: p4_vtab(v, r.pc)
     i: v.mem_base + r.p1
     legacy: db.flags & conn.SQLITE_LEGACY_ALTER != 0
@@ -807,7 +807,7 @@ op_vrename: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
 // OP_VUpdate: xUpdate of the VTable of P4 with the P2 values from register
 // P3 (a delete, an insert or an update), under the conflict mode P5; with
 // P1 set an inserted row's rowid becomes the last rowid.
-op_vupdate: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_vupdate: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if db.malloc_failed -> return GO_NO_MEM
     vt: p4_vtab(v, r.pc)
     if vt < 0 || db.vtables[vt].vtab < 0 -> return vc.fail(r, base.LOCKED)
@@ -831,7 +831,7 @@ op_vupdate: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> In
 // Page counts, subtypes, Bloom filters and the program start.
 
 // OP_Pagecount: the pages of database P1 into P2.
-op_pagecount: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_pagecount: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     v.mem[o].i = btree.btree_last_page(db.btrees[db.dbs[r.p1].bt])
@@ -840,7 +840,7 @@ op_pagecount: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_MaxPgcnt: the page limit of database P1 becomes P3 (not below its
 // size) unless P3 is 0; the limit into P2.
-op_max_pgcnt: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_max_pgcnt: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     bt: db.dbs[r.p1].bt
@@ -856,7 +856,7 @@ op_max_pgcnt: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_ClrSubtype, OP_GetSubtype, OP_SetSubtype: drop register P1's subtype;
 // copy it into P2 as an integer (NULL when it has none); or give P2 the
 // subtype in P1 (none when P1 is NULL).
-op_subtype: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_subtype: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     if r.op == opc.OP_CLR_SUBTYPE {
         v.mem[i].flags = clear_bits(v.mem[i].flags, MEM_SUBTYPE)
@@ -883,7 +883,7 @@ filter_bit: fn(v: conn.Vdbe, r: Run, i: Int) -> Int Never! {
 }
 
 // OP_FilterAdd: add the P4 registers from P3 to the Bloom filter in P1.
-op_filter_add: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_filter_add: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     b: filter_bit(v, r, i)
     at: b >> 3
@@ -893,7 +893,7 @@ op_filter_add: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_Filter: jump to P2 when the P4 registers from P3 are surely not in
 // the Bloom filter in P1.
-op_filter: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_filter: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i: v.mem_base + r.p1
     b: filter_bit(v, r, i)
     if (Int{v.mem[i].z[b >> 3]}) & 1 << (b & 7) == 0 {
@@ -911,7 +911,7 @@ ONCE_RESET_THRESHOLD: 2147483646
 // OP_Init, OP_Trace: report the statement's SQL (P4, else its text) to the
 // trace callback, count the run and jump to P2. OP_Init's P1 counts the
 // runs, the value OP_Once compares its P1 with.
-op_init: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_init: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if db.m_trace & conn.TRACE_STMT != 0 && v.min_write_file_format != 254 {
         z: run.p4_text(v, r.pc) ?? v.sql.copy()
         if z.len() > 0 {

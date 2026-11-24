@@ -15,7 +15,7 @@ Entity: struct {
 Rows: struct<T> {
     items: [T],
 
-    add: fn(&self, item: &&T) -> Int {
+    add: fn(^self, item: ^^T) -> Int {
         self.items.push(item)
         self.items.len() - 1
     }
@@ -47,7 +47,7 @@ add_world: fn(meta: Compiler) {
         name: entry.site.name
         rows: "{name.lower()}_rows"
         fields.push("    {rows}: engine.Rows<{name}>{{engine.Rows<{name}>{{items: [{name}]{{}}}}}},")
-        spawns.push("    spawn_{name.lower()}: fn(&self) -> Int {{ self.{rows}.add({name}{{}}) }}")
+        spawns.push("    spawn_{name.lower()}: fn(^self) -> Int {{ self.{rows}.add({name}{{}}) }}")
     }
     meta.add("use engine\n\nWorld: struct {{\n{fields.join("\n")}\n\n{spawns.join("\n\n")}\n}}\n", scope: "world")
 }

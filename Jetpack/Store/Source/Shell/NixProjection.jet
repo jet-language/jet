@@ -127,7 +127,7 @@ ShellProjectionMounts: struct {
 // Build the empty store directory and the fstab that mounts it and every
 // exact closure object. Bind-mounted logicals are verified inside the
 // namespace; symlink roots are created directly in the projected store.
-env_shell_projection_fstab: fn(projections: [String:String], scratch: &ShellScratch) -[FS, Env, Time]> ShellProjectionMounts EnvironmentError! {
+env_shell_projection_fstab: fn(projections: [String:String], scratch: ^ShellScratch) -[FS, Env, Time]> ShellProjectionMounts EnvironmentError! {
     empty_store: env_shell_unique_tmp("jetpack-nix-store")
     files.create_dir_all(empty_store) ?? return Err(EnvironmentError.InvalidData("{err}"))
     scratch.scratch_dirs.push(empty_store.copy())

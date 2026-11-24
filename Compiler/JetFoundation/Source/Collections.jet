@@ -18,7 +18,7 @@
 // destination grows once to its final length, the source is reversed in
 // place and popped, and its emptied buffer is released at once, so a
 // transfer never holds a third buffer of rows.
-compiler_transfer_rows: fn<T>(to: &[T], from: &[T]) Never! {
+compiler_transfer_rows: fn<T>(to: ^[T], from: ^[T]) Never! {
     to.try_reserve(from.len()) ?? panic("cannot reserve {from.len()} compiler rows: {err}")
     from.reverse()
     loop from.len() > 0 {
@@ -34,7 +34,7 @@ compiler_transfer_rows: fn<T>(to: &[T], from: &[T]) Never! {
 // order, then pop them back in canonical order into the original receiver
 // (whose allocation and capacity pop retains). No row is read out of
 // a borrowed indexed place and no owning payload is copied.
-compiler_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
+compiler_apply_order: fn<T>(rows: ^[T], order: [Int]) Never! {
     count: rows.len()
     if count < 2 {
         return
@@ -70,7 +70,7 @@ compiler_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
 // popped (an owned move) into a list reserved to its length, and the result
 // is reversed in place, so no owning payload is copied; reading a list field
 // of a borrowed owner into a binding would copy every row.
-compiler_take_rows: fn<T>(rows: &[T]) -> [T] Never! {
+compiler_take_rows: fn<T>(rows: ^[T]) -> [T] Never! {
     taken := [T]{}
     taken.try_reserve(rows.len()) ?? panic("cannot reserve {rows.len()} compiler rows: {err}")
     loop rows.len() > 0 {
@@ -698,7 +698,7 @@ collection_receivers_accept: fn(receivers: CollectionReceivers, family: Collecti
     receivers == CollectionReceivers.Sequence && (family == CollectionReceivers.List || family == CollectionReceivers.Iter)
 }
 
-// A write window (`ViewMut<T>`, `&xs[a..b]`) has a fixed length: of the list
+// A write window (`ViewMut<T>`, `^xs[a..b]`) has a fixed length: of the list
 // writes it takes only those that rearrange its elements in place.
 collection_window_write: fn(receiver: Type, row: CollectionOperationRow) -> Bool Never! {
     if row.receivers != CollectionReceivers.List -> return false
@@ -727,7 +727,7 @@ collection_arg_is_callback: fn(arg: CollectionArg) -> Bool Never! {
 }
 
 // A call never copies on its own (#6611): an argument a row stores in its receiver owns
-// what it receives, as a `&&` parameter does, so a bare name passed there is
+// what it receives, as a `^^` parameter does, so a bare name passed there is
 // taken, never copied. The row's `stores` fact marks those rows; rows that only
 // compare their argument (`remove`, `discard`, `take`, `delete`, `pop`, the
 // difference and intersection updates) take nothing.
@@ -743,7 +743,7 @@ collection_row_takes_argument: fn(row: CollectionOperationRow, index: Int) -> Bo
 // cutover from the bootstrap's Collections.RESERVED_TYPES; this table is its
 // only home. Source-owned Core declarations are admitted by registration, not
 // by weakening this predicate for users or for unrelated Core modules.
-SEMA_RESERVED_TYPES: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Solver", "Unit"}
+SEMA_RESERVED_TYPES: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Solver", "Unit"}
 
 sema_reserved_type_name: fn(name: String) -> Bool Never! { SEMA_RESERVED_TYPES.contains(name) }
 

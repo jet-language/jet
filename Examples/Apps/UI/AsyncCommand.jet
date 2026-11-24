@@ -50,7 +50,7 @@ save_job: fn(value: Int, wait: Duration) -> Status {
 }
 
 // A finished, canceled or failed task becomes the command's status.
-settle: fn(job: &&Task<Status>) -> Status {
+settle: fn(job: ^^Task<Status>) -> Status {
     if job.join() == {
         .Ok(status) -> status
         .Err(.Canceled) -> Status.Failed("canceled")

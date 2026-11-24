@@ -1,0 +1,31 @@
+# Hover shows one signature in Jet syntax with the failure its callers get
+# written after the return: a function's written contract, the contract sema
+# inferred for a function that wrote none, a method called on a checked
+# receiver, and the compiler-owned `copy`. No hover adds a `failure:` line.
+session lsp content-length: jet self lsp
+send lsp: Messages/LSPHoverShowsOneJetSignature/0.json
+recv lsp
+stdout: ~ "hoverProvider"
+send lsp: Messages/LSPHoverShowsOneJetSignature/1.json
+send lsp: Messages/LSPHoverShowsOneJetSignature/2.json
+recv lsp
+stdout: ~ "publishDiagnostics"
+send lsp: Messages/LSPHoverShowsOneJetSignature/3.json
+recv lsp
+stdout: ~ "jet\\nparse: fn(text: String) -> Int Bad!\\n```"
+stdout: !~ "failure:"
+send lsp: Messages/LSPHoverShowsOneJetSignature/4.json
+recv lsp
+stdout: ~ "jet\\nrelay: fn(text: String) -> Int Bad!\\n```"
+stdout: !~ "failure:"
+send lsp: Messages/LSPHoverShowsOneJetSignature/5.json
+recv lsp
+stdout: ~ "jet\\nMeter.scale(by: Int) -> Int"
+send lsp: Messages/LSPHoverShowsOneJetSignature/6.json
+recv lsp
+stdout: ~ "jet\\nMeter.copy() -> Meter\\n```"
+send lsp: Messages/LSPHoverShowsOneJetSignature/7.json
+recv lsp
+stdout: ~ "result"
+close lsp
+exit: any

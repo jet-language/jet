@@ -213,7 +213,7 @@ ir_x64_read_form: fn(op: IROp) -> Int Never! {
 
 // The slots instruction `at` reads, into `reads` (cleared first), in
 // operand order.
-ir_x64_reads_into: fn(f: IRFunction, at: Int, reads: &[Int]) Never! {
+ir_x64_reads_into: fn(f: IRFunction, at: Int, reads: ^[Int]) Never! {
     reads.clear()
     form: ir_x64_read_form(f.op[at])
     if form == IR_X64_READS_NONE {
@@ -442,7 +442,7 @@ ir_x64_covered_drop: fn(m: IRModule, f: IRFunction, consts: [Bool], at: Int) -> 
 // and any outward Br leaving past every open Loop into a non-Loop Block, as an
 // inlined stop edge does) its [start, end, escape_end] triple, and per
 // instruction the index of its enclosing cold arm (-1 if hot).
-ir_x64_cold_arms: fn(f: IRFunction, arm_starts: &[Int], arm_ends: &[Int], arm_escapes: &[Int]) -> [Int] Never! {
+ir_x64_cold_arms: fn(f: IRFunction, arm_starts: ^[Int], arm_ends: ^[Int], arm_escapes: ^[Int]) -> [Int] Never! {
     count: f.op.len()
     owner := loop _ in 0..<count -> -1
     open_is_loop := [Bool]{}
@@ -580,7 +580,7 @@ ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int
 
 // Computes both `silent` (routes=false) and `open` (routes=true) in a single
 // pass over `f`, avoiding duplicate cold-arm discovery and `ir_x64_silent` walks.
-ir_x64_silent_both: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], general: [Bool], starts: [Int], ends: [Int], silent: &[Bool], open: &[Bool]) Never! {
+ir_x64_silent_both: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], general: [Bool], starts: [Int], ends: [Int], silent: ^[Bool], open: ^[Bool]) Never! {
     arm_starts := [Int]{}
     arm_ends := [Int]{}
     arm_escapes := [Int]{}
@@ -681,7 +681,7 @@ ir_x64_leaf_open: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [Int]
 // leaf saves it no more, then each slot the scan sent home. A parameter
 // stays, as its import reads the argument registers in order. Bounded by
 // IR_X64_FILL_WORK.
-ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [Int], ends: [Int], regs: &[Int]) Never! {
+ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [Int], ends: [Int], regs: ^[Int]) Never! {
     count: starts.len()
     // Per instruction (from -1, a parameter's start): the registers slots
     // hold there, one bit each.
@@ -911,7 +911,7 @@ ir_x64_align: fn(value: Int, align: Int) -> Int Never! {
 // Grows `slot`'s range to the whole loop `head`..`tail` when the range is
 // live around its back edge: it overlaps the loop without lying inside it,
 // or lies inside but its first reference reads it. Whether it changed.
-ir_x64_grow_range: fn(starts: &[Int], ends: &[Int], slot: Int, head: Int, tail: Int, first_write: Bool) -> Bool Never! {
+ir_x64_grow_range: fn(starts: ^[Int], ends: ^[Int], slot: Int, head: Int, tail: Int, first_write: Bool) -> Bool Never! {
     if ends[slot] < head || starts[slot] > tail -> return false
     if starts[slot] > head && ends[slot] <= tail && first_write -> return false
     changed := false
@@ -933,7 +933,7 @@ ir_x64_grow_range: fn(starts: &[Int], ends: &[Int], slot: Int, head: Int, tail: 
 // counts its loops from is the If's loop depth less the most loops around
 // such a place (the deepest such arm's). `around` holds per instruction the
 // innermost Block, Loop or If around it.
-ir_x64_one_shot: fn(f: IRFunction, depths: [Int], around: [Int], bases: &[Int], head: Int, lo: Int, hi: Int) Never! {
+ir_x64_one_shot: fn(f: IRFunction, depths: [Int], around: [Int], bases: ^[Int], head: Int, lo: Int, hi: Int) Never! {
     if hi < lo {
         return
     }
@@ -1044,7 +1044,7 @@ ir_x64_homes: fn(starts: [Int], ends: [Int], weights: [Int], homed: [Bool], name
 }
 
 // Records a read of `slot` at instruction `at` during ir_x64_allocate.
-#Inline(Always) ir_x64_mark_read: fn(slot: Int, count: Int, at: Int, w: Int, starts: &[Int], ends: &[Int], first_writes: &[Bool], weights: &[Int]) Never! {
+#Inline(Always) ir_x64_mark_read: fn(slot: Int, count: Int, at: Int, w: Int, starts: ^[Int], ends: ^[Int], first_writes: ^[Bool], weights: ^[Int]) Never! {
     if slot < 0 || slot >= count {
         return
     }
@@ -1056,7 +1056,7 @@ ir_x64_homes: fn(starts: [Int], ends: [Int], weights: [Int], homed: [Bool], name
     weights[slot] = weights[slot] + w
 }
 
-#Inline(Always) ir_x64_mark_peak: fn(slot: Int, count: Int, heat: Int, heat_w: Int, peaks: &[Int], peak_weights: &[Int]) Never! {
+#Inline(Always) ir_x64_mark_peak: fn(slot: Int, count: Int, heat: Int, heat_w: Int, peaks: ^[Int], peak_weights: ^[Int]) Never! {
     if slot < 0 || slot >= count {
         return
     }
@@ -2209,7 +2209,7 @@ IR_X64_FILL_WORK: 64
 // `open_first` on for a `leading` one; an `open` one may have them all, any
 // other the rows before `wide`) whose register no range holds anywhere over
 // it. Bounded by IR_X64_FILL_WORK.
-ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], open: [Bool], leading: [Bool], wide: Int, open_first: Int, pool: [Int], regs: &[Int]) Never! {
+ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], open: [Bool], leading: [Bool], wide: Int, open_first: Int, pool: [Int], regs: ^[Int]) Never! {
     count: starts.len()
     pool_len: pool.len()
     heaviest := 0

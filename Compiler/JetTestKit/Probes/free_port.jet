@@ -47,7 +47,7 @@ free_port_ceiling: fn() -[FS.Read]> Int Err! {
 // Binds `count` loopback listeners on distinct ports drawn from [FREE_PORT_FIRST, ceiling) and returns
 // their ports. A port another socket holds is drawn again. Each listener stays in `listeners`, so no port
 // repeats before the caller drops them.
-free_port_reserve: fn(count: Int, ceiling: Int, listeners: &[net.TCPListener]) -[Net, Rand]> [Int] Err! {
+free_port_reserve: fn(count: Int, ceiling: Int, listeners: ^[net.TCPListener]) -[Net, Rand]> [Int] Err! {
     ports := [Int]{}
     loop _ in 0..<count {
         draws := 0

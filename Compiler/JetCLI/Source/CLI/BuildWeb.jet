@@ -38,7 +38,7 @@ JET_CLI_RUNTIME_WEB_RECEIPT_FILE: "jet_runtime.wasm.tsv"
 // every fault, a web selection finding among them, is one ICE row, all
 // reported at once with exit 101. Under `--explain-partition` the build's
 // stdout is the partition report (jet_cli_web_partition_report).
-jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Time, Exec.Args]> JetDriverVerbOutput Never! {
+jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: ^^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Time, Exec.Args]> JetDriverVerbOutput Never! {
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
     if jet_cli_build_option_gate_refusal(file, snapshot.roots[0].canonical_path, result, options, color) == .Val(refused) {

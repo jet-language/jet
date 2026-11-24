@@ -58,12 +58,12 @@ NarDirectoryEntry: struct {
 NarByteSource: struct {
     priv next: fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!,
 
-    file: fn(reader: &&FileReader) -> NarByteSource Never! {
+    file: fn(reader: ^^FileReader) -> NarByteSource Never! {
         file := reader.move()
         NarByteSource{next: fn(limit: Int) { file.read_bytes(limit) }}
     }
 
-    zstd: fn(reader: &&ZstdReader) -> NarByteSource Never! {
+    zstd: fn(reader: ^^ZstdReader) -> NarByteSource Never! {
         decoder := reader.move()
         NarByteSource{
             next: fn(limit: Int) {
@@ -75,11 +75,11 @@ NarByteSource: struct {
         }
     }
 
-    reader: fn(read: &&fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!) -> NarByteSource Never! {
+    reader: fn(read: ^^fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!) -> NarByteSource Never! {
         NarByteSource{next: read.move()}
     }
 
-    read: fn(&self, limit: Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError! { self.next(limit) }
+    read: fn(^self, limit: Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError! { self.next(limit) }
 }
 
 store_nar_invalid: fn(message: String) -> StoreError Never! { StoreError.InvalidData(message) }
@@ -140,7 +140,7 @@ store_decode_nar_with_mode: fn(bytes: [U8], allow_nix_store_symlinks: Bool) -> {
     Ok({node: node, stats: NarStats{digest: store_nar_digest_for(bytes), bytes: bytes.len(), nodes: reader.nodes}})
 }
 
-store_nar_encode_node: fn(path: String, root: String, out: &[U8], nodes: &Int, depth: Int) StoreError! {
+store_nar_encode_node: fn(path: String, root: String, out: ^[U8], nodes: ^Int, depth: Int) StoreError! {
     if depth > STORE_NAR_MAX_DEPTH -> return Err(store_nar_invalid("NAR tree is too deep"))
     nodes += 1
     if nodes > STORE_NAR_MAX_NODES -> return Err(store_nar_invalid("NAR contains too many nodes"))
@@ -210,11 +210,11 @@ store_nar_encode_node: fn(path: String, root: String, out: &[U8], nodes: &Int, d
     }
 }
 
-store_nar_put_text: fn(out: &[U8], value: String) StoreError! {
+store_nar_put_text: fn(out: ^[U8], value: String) StoreError! {
     store_nar_put_bytes(out, value.bytes())
 }
 
-store_nar_put_bytes: fn(out: &[U8], bytes: [U8]) StoreError! {
+store_nar_put_bytes: fn(out: ^[U8], bytes: [U8]) StoreError! {
     if bytes.len() > STORE_NAR_MAX_NODE_BYTES {
         return Err(store_nar_invalid("NAR field exceeds the 512 MiB limit"))
     }
@@ -235,7 +235,7 @@ NarReader: struct {
     nodes: Int,
     content_bytes: Int,
 
-    take_bytes: fn(&self, length: Int) -> [U8] StoreError! {
+    take_bytes: fn(^self, length: Int) -> [U8] StoreError! {
         if length < 0 || self.at + length > self.bytes.len() {
             return Err(store_nar_invalid("NAR is truncated"))
         }
@@ -244,7 +244,7 @@ NarReader: struct {
         Ok(value)
     }
 
-    field: fn(&self) -> [U8] StoreError! {
+    field: fn(^self) -> [U8] StoreError! {
         raw: self.take_bytes(8)
         length := 0
         loop index in 0..<8 -> length = (length) | (Int{raw[index]} << (8 * index))
@@ -259,7 +259,7 @@ NarReader: struct {
         Ok(value)
     }
 
-    string: fn(&self) -> String StoreError! {
+    string: fn(^self) -> String StoreError! {
         raw: self.field()
         text: String.from_bytes(raw) ?? return Err(store_nar_invalid("NAR string is not UTF-8"))
         Ok(text)
@@ -267,7 +267,7 @@ NarReader: struct {
 
     remaining: fn(self) -> Int Never! { self.bytes.len() - self.at }
 
-    node: fn(&self, depth: Int, relative_depth: Int) -> NarNode StoreError! {
+    node: fn(^self, depth: Int, relative_depth: Int) -> NarNode StoreError! {
         if depth > STORE_NAR_MAX_DEPTH -> return Err(store_nar_invalid("NAR tree is too deep"))
         if self.string() != "(" || self.string() != "type" {
             return Err(store_nar_invalid("NAR node has an invalid header"))
@@ -285,7 +285,7 @@ NarReader: struct {
         }
     }
 
-    directory: fn(&self, depth: Int, relative_depth: Int) -> NarNode StoreError! {
+    directory: fn(^self, depth: Int, relative_depth: Int) -> NarNode StoreError! {
         entries := [NarDirectoryEntry]{}
         names := [[U8]]{}
         loop {
@@ -320,7 +320,7 @@ NarReader: struct {
         }
     }
 
-    regular: fn(&self) -> NarNode StoreError! {
+    regular: fn(^self) -> NarNode StoreError! {
         field := self.string()
         executable := false
         if field == "executable" {
@@ -340,7 +340,7 @@ NarReader: struct {
         Ok(NarNode.Regular{executable: executable, bytes: bytes})
     }
 
-    symlink: fn(&self, relative_depth: Int) -> NarNode StoreError! {
+    symlink: fn(^self, relative_depth: Int) -> NarNode StoreError! {
         if self.string() != "target" -> return Err(store_nar_invalid("NAR symlink has no target"))
         target: self.field()
         store_nar_validate_symlink_target(target, self.allow_nix_store_symlinks)
@@ -362,13 +362,13 @@ store_nar_bytes_less: fn(left: [U8], right: [U8]) -> Bool Never! {
 // Decode a NAR directly from a bounded source into a fresh destination.
 // Metadata is bounded separately and regular-file contents are copied in
 // fixed-size chunks; the whole archive is never retained in memory.
-store_read_nar_stream: fn(source: &&NarByteSource, destination: String, expected_nar_size: Int) -> NarStats StoreError! {
+store_read_nar_stream: fn(source: ^^NarByteSource, destination: String, expected_nar_size: Int) -> NarStats StoreError! {
     store_read_nar_stream_with_mode(source, destination, expected_nar_size, false)
 }
 
 // Read a NAR with the POSIX-only allowances used by standard Nix cache
 // admission. Native ingest keeps the strict wrapper above.
-store_read_nar_stream_with_mode: fn(source: &&NarByteSource, destination: String, expected_nar_size: Int, allow_nix_store_symlinks: Bool) -> NarStats StoreError! {
+store_read_nar_stream_with_mode: fn(source: ^^NarByteSource, destination: String, expected_nar_size: Int, allow_nix_store_symlinks: Bool) -> NarStats StoreError! {
     if expected_nar_size <= 0 -> return Err(store_nar_invalid("NAR stream size must be nonzero"))
     if files.lexists(destination) {
         return Err(store_nar_invalid("NAR stream destination already exists"))
@@ -388,7 +388,7 @@ store_read_nar_stream_with_mode: fn(source: &&NarByteSource, destination: String
     Ok(stats)
 }
 
-store_nar_stream_decode: fn(reader: &NarStreamReader, destination: String, expected_nar_size: Int) -> NarStats StoreError! {
+store_nar_stream_decode: fn(reader: ^NarStreamReader, destination: String, expected_nar_size: Int) -> NarStats StoreError! {
     if reader.string() != STORE_NAR_MAGIC {
         return Err(store_nar_invalid("NAR stream has an invalid magic"))
     }
@@ -409,7 +409,7 @@ NarStreamReader: struct {
     nodes: Int,
 
     // Up to `wanted` bytes, never past the declared size plus one.
-    read_some: fn(&self, wanted: Int) -> [U8] StoreError! {
+    read_some: fn(^self, wanted: Int) -> [U8] StoreError! {
         allowed: self.limit - self.bytes
         if allowed <= 0 -> return Ok([U8]{})
         chunk: self.source.read(if wanted < allowed -> wanted else -> allowed)
@@ -418,7 +418,7 @@ NarStreamReader: struct {
         Ok(chunk)
     }
 
-    read_exact: fn(&self, length: Int) -> [U8] StoreError! {
+    read_exact: fn(^self, length: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < length {
             chunk: self.read_some(length - out.len())
@@ -428,14 +428,14 @@ NarStreamReader: struct {
         Ok(out)
     }
 
-    u64: fn(&self) -> Int StoreError! {
+    u64: fn(^self) -> Int StoreError! {
         raw: self.read_exact(8)
         value := 0
         loop index in 0..<8 -> value = (value) | (Int{raw[index]} << (8 * index))
         Ok(value)
     }
 
-    padding: fn(&self, length: Int) StoreError! {
+    padding: fn(^self, length: Int) StoreError! {
         padding: self.read_exact((8 - length % 8) % 8)
         loop byte in padding {
             if (Int{byte}) != 0 {
@@ -444,7 +444,7 @@ NarStreamReader: struct {
         }
     }
 
-    raw_bytes: fn(&self) -> [U8] StoreError! {
+    raw_bytes: fn(^self) -> [U8] StoreError! {
         length: self.u64()
         if length < 0 || length > STORE_NAR_MAX_NODE_BYTES {
             return Err(store_nar_invalid("NAR stream field exceeds the 512 MiB limit"))
@@ -459,13 +459,13 @@ NarStreamReader: struct {
         Ok(value)
     }
 
-    string: fn(&self) -> String StoreError! {
+    string: fn(^self) -> String StoreError! {
         raw: self.raw_bytes()
         text: String.from_bytes(raw) ?? return Err(store_nar_invalid("NAR stream string is not UTF-8"))
         Ok(text)
     }
 
-    file: fn(&self, path: String, length: Int) StoreError! {
+    file: fn(^self, path: String, length: Int) StoreError! {
         if length > STORE_NAR_MAX_NODE_BYTES {
             return Err(store_nar_invalid("NAR stream file exceeds the 512 MiB limit"))
         }
@@ -480,7 +480,7 @@ NarStreamReader: struct {
         writer.fsync()
     }
 
-    node: fn(&self, path: String, root: String, depth: Int, relative_depth: Int) StoreError! {
+    node: fn(^self, path: String, root: String, depth: Int, relative_depth: Int) StoreError! {
         if depth > STORE_NAR_MAX_DEPTH {
             return Err(store_nar_invalid("NAR stream tree is too deep"))
         }
@@ -500,7 +500,7 @@ NarStreamReader: struct {
         }
     }
 
-    directory: fn(&self, path: String, root: String, depth: Int, relative_depth: Int) StoreError! {
+    directory: fn(^self, path: String, root: String, depth: Int, relative_depth: Int) StoreError! {
         files.create_dir_all(path)
         names := [[U8]]{}
         folded := [[U8]]{}
@@ -546,7 +546,7 @@ NarStreamReader: struct {
         }
     }
 
-    regular: fn(&self, path: String) StoreError! {
+    regular: fn(^self, path: String) StoreError! {
         field := self.string()
         executable := false
         if field == "executable" {
@@ -568,7 +568,7 @@ NarStreamReader: struct {
         }
     }
 
-    symlink: fn(&self, path: String, root: String, relative_depth: Int) StoreError! {
+    symlink: fn(^self, path: String, root: String, relative_depth: Int) StoreError! {
         if self.string() != "target" {
             return Err(store_nar_invalid("NAR stream symlink has no target"))
         }

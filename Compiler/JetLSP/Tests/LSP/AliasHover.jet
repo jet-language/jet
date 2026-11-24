@@ -40,11 +40,11 @@ LSPAliasHoverChecker: struct {
             checked
         }
 
-        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+        stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
             LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
         }
 
-        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             LSPFixtureChecker{}.failure_marks(entry, overlays)
         }
 
@@ -54,7 +54,7 @@ LSPAliasHoverChecker: struct {
     }
 }
 
-lsp_alias_hover_text: fn(server: &LSPServer, line: Int, character: Int) -> String {
+lsp_alias_hover_text: fn(server: ^LSPServer, line: Int, character: Int) -> String {
     hover: lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_ALIAS_HOVER_URI, line, character))
     lsp_test_text(lsp_test_field(hover, "contents"), "value")
 }

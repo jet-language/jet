@@ -666,7 +666,7 @@ as_cased: fn(word: String, american: String) -> String Never! {
 
 // Which bytes of a Jet source line are code: outside a `//` comment and
 // outside string text, where an interpolation's braces hold code again.
-as_jet_code: fn(bytes: [U8], mask: &[Bool]) {
+as_jet_code: fn(bytes: [U8], mask: ^[Bool]) {
     in_string := false
     depth := 0
     at := 0
@@ -747,7 +747,7 @@ as_escape_letter: fn(code: Int) -> Bool Never! { code == 110 || code == 114 || c
 
 // The British words of `text`, line `line` of the file at `path`: whole
 // words, and in a code tree each British part of an identifier.
-as_line_hits: fn(path: String, line: String, text: String, words: [String:String], out: &[AmericanHit]) {
+as_line_hits: fn(path: String, line: String, text: String, words: [String:String], out: ^[AmericanHit]) {
     bytes: text.bytes()
     mask: as_code_mask(path, text)
     output: as_output_line(path, text)

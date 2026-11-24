@@ -5,7 +5,7 @@ use {
 }
 
 // PENDING-SEAM(package-tests): no runtime/reference proof claimed.
-engine_cache_ingest: fn(verification: &StoreVerification, roots: HangarRoots, name: String, reference: String, source: String, identity: CacheIdentity, refs: [String], provenance: String) -> StoreEntry {
+engine_cache_ingest: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, reference: String, source: String, identity: CacheIdentity, refs: [String], provenance: String) -> StoreEntry {
     result: store_ingest_tree(verification, roots, IngestRequest{name: name, version: "1", reference: reference, cache_identity: identity, references: refs, outputs: [String:String]{"out": source}, signature: "", provenance: provenance, platform_artifact_kind: ""}) ?? panic("real ingest")
     result.entry
 }
@@ -14,14 +14,14 @@ engine_cache_identity: fn(prefix: String) -> CacheIdentity {
     CacheIdentity{source_fingerprint: "sha256:{prefix}-source", recipe_fingerprint: "sha256:{prefix}-recipe", policy_fingerprint: "sha256:{prefix}-policy", platform: pkg_host_platform()}
 }
 
-engine_cache_verify_error: fn(verification: &StoreVerification, roots: HangarRoots, id: String) -> String {
+engine_cache_verify_error: fn(verification: ^StoreVerification, roots: HangarRoots, id: String) -> String {
     if store_verify_cache_transfer(verification, roots, id, "public") == {
         .Ok(_) -> panic("invalid cache transfer passed")
         .Err(error) -> error.message()
     }
 }
 
-engine_cache_substitute_rejected: fn(verification: &StoreVerification, roots: HangarRoots, id: String, destination: String) {
+engine_cache_substitute_rejected: fn(verification: ^StoreVerification, roots: HangarRoots, id: String, destination: String) {
     assert(store_substitute_cache_entry(verification, roots, id, "public", destination) == .Err(_))
     assert(!files.exists(destination))
 }

@@ -9,7 +9,7 @@ SemaLayoutProjectionRow: struct {
 
 // `module_index` is the row in `registration` of the module whose `items`
 // these are; it qualifies each layout field's TypeId.
-sema_checked_layout_items: fn(registration: SemaRegistrationGraph, module_index: Int, items: [Item], engine: TargetLayoutEngine, module_identity: String, rows: &[SemaLayoutProjectionRow]) {
+sema_checked_layout_items: fn(registration: SemaRegistrationGraph, module_index: Int, items: [Item], engine: TargetLayoutEngine, module_identity: String, rows: ^[SemaLayoutProjectionRow]) {
     loop item in items {
         if item == {
             .Struct(definition) -> {
@@ -66,7 +66,7 @@ sema_origin_unwrap: fn(expression: Expr) -> Expr Never! {
     }
 }
 
-sema_origin_prepared_projection: fn(expression: Expr, ty: Type, value: TComptimeValue, context: &SemaCheckContext) Never! {
+sema_origin_prepared_projection: fn(expression: Expr, ty: Type, value: TComptimeValue, context: ^SemaCheckContext) Never! {
     if ty != (Type.Option{inner: Type.Named{name: "OriginInfo"}}) {
         return
     }

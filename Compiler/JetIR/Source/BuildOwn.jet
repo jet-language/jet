@@ -5,7 +5,7 @@ use jet_foundation.[Span, Type, name_column_set, name_column_value]
 
 // The element row of a type row whose value is a List-shaped buffer header
 // (a List, a View, a Map's entries), None for any other.
-ir_buffer_element: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
+ir_buffer_element: fn(m: ^IRModule, p: IRProgram, row: Int) -> Int? Never! {
     if m.types[row].kind != .Aggregate -> return None
     ty: ir_untag(ir_row_ty(m, p, row))
     element: if ty == .List(element) -> Val(element.copy()) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
@@ -14,7 +14,7 @@ ir_buffer_element: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
 }
 
 // The inline members of a tuple or struct type row, None for any other.
-ir_inline_members: fn(m: &IRModule, p: IRProgram, row: Int) -> [IRMember]? Never! {
+ir_inline_members: fn(m: ^IRModule, p: IRProgram, row: Int) -> [IRMember]? Never! {
     if m.types[row].kind != .Aggregate -> return None
     ty: ir_untag(ir_row_ty(m, p, row))
     if ty == .Tuple(fields) -> return ir_tuple_members(m, p, fields)
@@ -31,7 +31,7 @@ ir_inline_members: fn(m: &IRModule, p: IRProgram, row: Int) -> [IRMember]? Never
 // with its source: a counted buffer (retained), a value with a runtime
 // clone, or a recursive edge's wrapper box, which is its holder's own. A
 // View windows its owner's buffer and shares it uncounted.
-ir_copy_needs: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_copy_needs: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.types[row].clone != "" -> return true
     // An Atomic<Int> word owns its exact Int (ir_atomic_row).
     if ir_atomic_scalar(ir_row_ty(m, p, row)) != None -> return m.types[row].drop != ""
@@ -49,14 +49,14 @@ ir_copy_needs: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // until a write makes it unique) and each value with a runtime clone is
 // cloned. A nested aggregate goes through its row's helper function, so every
 // row's copy is built once however often a type graph reaches it.
-ir_copy_fixup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
+ir_copy_fixup: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, at: Int) Never! {
     if !ir_copy_needs(m, p, row) {
         return
     }
     ir_copy_fixup_body(m, p, b, row, at)
 }
 
-ir_copy_fixup_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
+ir_copy_fixup_body: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, at: Int) Never! {
     if ir_atomic_scalar(ir_row_ty(m, p, row)) != None {
         // Sema keeps Atomic non-Clone; a byte copy the builder makes of a
         // moved holder publishes its own owner of the exact Int, so the
@@ -101,7 +101,7 @@ ir_copy_fixup_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: 
 // A struct's recursive edge (`member`, boxed) holds its value in a counted
 // wrapper box: the byte copy at `at` is one more owner of it, and a write
 // first makes it its holder's own (ir_wrapper_unique), as a List's buffer.
-ir_wrapper_copy: fn(m: &IRModule, b: &IRBuilder, at: Int, member: IRMember) Never! {
+ir_wrapper_copy: fn(m: ^IRModule, b: ^IRBuilder, at: Int, member: IRMember) Never! {
     pointer_row: ir_pointer_row(m)
     wrapper: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.Load, wrapper, at, member.offset, -1, b.line)
@@ -115,7 +115,7 @@ ir_wrapper_copy: fn(m: &IRModule, b: &IRBuilder, at: Int, member: IRMember) Neve
 // holder's own before a write through it: a sole owner's comes back as is;
 // a shared one (or a static one) is copied, the copy's value gaining an
 // owner, stored back, and the old wrapper loses an owner.
-ir_wrapper_unique: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember) -> Int Never! {
+ir_wrapper_unique: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, member: IRMember) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     holder: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.Load, holder, base, member.offset, -1, b.line)
@@ -138,7 +138,7 @@ ir_wrapper_unique: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, memb
 // wrapper loses an owner, and its last owner drops the value and frees it.
 // A static struct's wrapper carries an immortal count word, so it is never
 // freed.
-ir_wrapper_drop: fn(m: &IRModule, b: &IRBuilder, at: Int, member: IRMember) Never! {
+ir_wrapper_drop: fn(m: ^IRModule, b: ^IRBuilder, at: Int, member: IRMember) Never! {
     pointer_row: ir_pointer_row(m)
     wrapper: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.Load, wrapper, at, member.offset, -1, b.line)
@@ -168,7 +168,7 @@ ir_wrapper_drop: fn(m: &IRModule, b: &IRBuilder, at: Int, member: IRMember) Neve
 
 // The element row of a type row whose value is a counted buffer header,
 // None for any other (a View shares its owner's buffer uncounted).
-ir_counted_entry: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
+ir_counted_entry: fn(m: ^IRModule, p: IRProgram, row: Int) -> Int? Never! {
     if m.types[row].kind != .Aggregate -> return None
     ty: ir_untag(ir_row_ty(m, p, row))
     if ty == .List(element) -> return ir_value_type(m, p, element)
@@ -190,7 +190,7 @@ ir_drop_key: fn(m: IRModule, row: Int) -> String Never! { "#drop<{ir_row_key(m, 
 IR_LAST_OWNER: "last"
 
 // `row`, a counted buffer header's row, drops through its glue.
-ir_mark_counted: fn(m: &IRModule, row: Int) -> Int Never! {
+ir_mark_counted: fn(m: ^IRModule, row: Int) -> Int Never! {
     if m.types[row].drop != "" -> return row
     key: ir_drop_key(m, row)
     m.types[row].drop = key
@@ -209,7 +209,7 @@ ir_glue_drops: fn(m: IRModule, row: Int) -> Bool Never! {
 
 // `row`, a tuple or struct row, drops through its glue when an inline
 // member is dropped with it or a recursive edge's wrapper is its own.
-ir_mark_members: fn(m: &IRModule, row: Int, members: [IRMember]) -> Int Never! {
+ir_mark_members: fn(m: ^IRModule, row: Int, members: [IRMember]) -> Int Never! {
     if m.types[row].drop != "" -> return row
     loop member in members {
         if member.boxed || ir_glue_drops(m, member.ty) {
@@ -232,7 +232,7 @@ ir_mark_members: fn(m: &IRModule, row: Int, members: [IRMember]) -> Int Never! {
 ir_box_share: fn() -> String Never! { "#box.share" }
 
 // `row`, a box row, drops through its glue and copies by sharing.
-ir_mark_box: fn(m: &IRModule, row: Int) -> Int Never! {
+ir_mark_box: fn(m: ^IRModule, row: Int) -> Int Never! {
     if m.types[row].drop == "" {
         key: ir_drop_key(m, row)
         m.types[row].drop = key
@@ -253,7 +253,7 @@ IRBoxShape: struct {
 // The payload shapes of the box row `row` (Option: payload at 0; Result:
 // Ok 1 / Err 0 with the payload at 8; enum and union: each variant's
 // members); None when one does not lay out.
-ir_box_shapes: fn(m: &IRModule, p: IRProgram, row: Int) -> [IRBoxShape]? Never! {
+ir_box_shapes: fn(m: ^IRModule, p: IRProgram, row: Int) -> [IRBoxShape]? Never! {
     ty: ir_untag(ir_row_ty(m, p, row))
     shapes := [IRBoxShape]{}
     if ty == .Option(inner) {
@@ -302,7 +302,7 @@ ir_members_end: fn(m: IRModule, members: [IRMember]) -> Int Never! {
 // described yet (IRModule.debug_variants), for their DWARF types. A part's
 // build runs it once its functions are built and before their drop glue,
 // so a row it lays out gets its glue too.
-ir_debug_variants: fn(m: &IRModule, p: IRProgram) Never! {
+ir_debug_variants: fn(m: ^IRModule, p: IRProgram) Never! {
     row := 0
     loop row < m.types.len() {
         if m.debug_variants.get(row) == None {
@@ -319,7 +319,7 @@ ir_debug_variants: fn(m: &IRModule, p: IRProgram) Never! {
 // The variants of type row `row` as its layout holds them (ir_box_shapes,
 // ir_option_none_word); none when it is no enum, union, Option or Result,
 // or a payload does not lay out.
-ir_debug_variants_of: fn(m: &IRModule, p: IRProgram, row: Int) -> IRDebugVariants Never! {
+ir_debug_variants_of: fn(m: ^IRModule, p: IRProgram, row: Int) -> IRDebugVariants Never! {
     none: IRDebugVariants{selector: IRDebugSelector.Word, variants: [IRDebugVariant]{}}
     ty: ir_untag(ir_row_ty(m, p, row))
     if ty == .Option(inner) {
@@ -386,7 +386,7 @@ ir_debug_variants_of: fn(m: &IRModule, p: IRProgram, row: Int) -> IRDebugVariant
 // The bytes a box of row `row` was allocated with (ir_box_alloc sizes); for
 // an enum whose variants' boxes differ in size (ir_box_variant_sizes), the
 // widest variant's, which ir_box_size_slot narrows to a box's own.
-ir_box_bytes: fn(m: &IRModule, p: IRProgram, row: Int) -> Int Never! {
+ir_box_bytes: fn(m: ^IRModule, p: IRProgram, row: Int) -> Int Never! {
     ty: ir_untag(ir_row_ty(m, p, row))
     if ty == .Option(inner) -> return ir_align8(ir_type_size(m, p, inner))
     if ty == .Result(ok, err) {
@@ -402,7 +402,7 @@ ir_box_bytes: fn(m: &IRModule, p: IRProgram, row: Int) -> Int Never! {
 
 // The box size of each variant of the enum box row `row` when they differ
 // (ir_enum_variant_box_sizes), else none: ir_box_bytes sizes every box.
-ir_box_variant_sizes: fn(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
+ir_box_variant_sizes: fn(m: ^IRModule, p: IRProgram, row: Int) -> [Int] Never! {
     if ir_untag(ir_row_ty(m, p, row)) == {
         .Option(_) | .Result(_, _) -> return [Int]{}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -417,7 +417,7 @@ ir_box_variant_sizes: fn(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
 // boxes differ in size, its variant's from a read-only table of
 // ir_box_variant_sizes indexed by the box's discriminant. `sizes` is that
 // list.
-ir_box_size_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, boxed: Int, sizes: [Int]) -> Int Never! {
+ir_box_size_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, boxed: Int, sizes: [Int]) -> Int Never! {
     if sizes.len() == 0 {
         size: ir_box_bytes(m, p, row)
         return ir_word_const(m, b, size)
@@ -448,7 +448,7 @@ ir_box_member_drops: fn(m: IRModule, member: IRMember) -> Bool Never! {
 
 // Opens an If on the box `boxed` holding `shape` (its selector word); an
 // Option's single shape needs none (false).
-ir_box_shape_open: fn(m: &IRModule, b: &IRBuilder, boxed: Int, shape: IRBoxShape) -> Bool Never! {
+ir_box_shape_open: fn(m: ^IRModule, b: ^IRBuilder, boxed: Int, shape: IRBoxShape) -> Bool Never! {
     if shape.selector < 0 -> return false
     stored: ir_load_word(m, b, boxed, 0)
     selector: ir_word_const(m, b, shape.selector)
@@ -461,7 +461,7 @@ ir_box_shape_open: fn(m: &IRModule, b: &IRBuilder, boxed: Int, shape: IRBoxShape
 // last owner drops the active shape's members and frees it. A site keeps
 // only the release inline: a box with members to drop calls its one shared
 // last-owner routine (ir_box_last_helper).
-ir_box_drop_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
+ir_box_drop_body: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, at: Int) Never! {
     shapes: ir_box_shapes(m, p, row) ?? return ir_fail(b, Span{start: 0, end: 0}, "drop of {ir_type_name(ir_row_ty(m, p, row))}")
     present: ir_option_is_some(m, b, at)
     ir_open_if(b.f, present, b.line)
@@ -492,7 +492,7 @@ ir_box_shapes_drop: fn(m: IRModule, shapes: [IRBoxShape]) -> Bool Never! {
 // The routine the last owner of a box of row `row` calls: it drops the
 // active shape's members and frees the box. Built once per row and never
 // inlined (OptInline.jet), so the drop sites share one copy.
-ir_box_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shapes: [IRBoxShape]) -> Int Never! {
+ir_box_last_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, shapes: [IRBoxShape]) -> Int Never! {
     helper_key: "#box.last<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
@@ -532,7 +532,7 @@ ir_box_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shap
     ir_last_helper_finish(m, b, a, id, helper_key)
 }
 
-ir_box_free: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
+ir_box_free: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, at: Int) Never! {
     sizes: ir_box_variant_sizes(m, p, row)
     bytes: ir_box_size_slot(m, p, b, row, at, sizes)
     ir_free(m, b, at, bytes)
@@ -540,7 +540,7 @@ ir_box_free: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Ne
 
 // Stores the last-owner routine `a` built as function `id`; a build that
 // failed reports to the caller's builder `b` and leaves no routine (-1).
-ir_last_helper_finish: fn(m: &IRModule, b: &IRBuilder, a: &&IRBuilder, id: Int, helper_key: String) -> Int Never! {
+ir_last_helper_finish: fn(m: ^IRModule, b: ^IRBuilder, a: ^^IRBuilder, id: Int, helper_key: String) -> Int Never! {
     built := a.move()
     if built.error != "" {
         ir_emit(built.f, IROp.Unreachable, -1, -1, -1, -1, built.line)
@@ -556,7 +556,7 @@ ir_last_helper_finish: fn(m: &IRModule, b: &IRBuilder, a: &&IRBuilder, id: Int, 
 
 // Calls the last-owner routine `helper` with `values`; a routine whose build
 // failed (-1) has already reported to `b`.
-ir_last_owner_call: fn(b: &IRBuilder, helper: Int, values: [Int]) Never! {
+ir_last_owner_call: fn(b: ^IRBuilder, helper: Int, values: [Int]) Never! {
     if helper < 0 {
         return
     }
@@ -568,7 +568,7 @@ ir_last_owner_call: fn(b: &IRBuilder, helper: Int, values: [Int]) Never! {
 // caller's own before a write: a null box or a sole owner's comes back as is;
 // a shared one is copied, the copy's members gaining an owner, and the old
 // box loses one.
-ir_box_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
+ir_box_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int Never! {
     helper_key: "#box.unique<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
@@ -640,7 +640,7 @@ ir_box_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) ->
 
 // A zero of `slot`'s type (a null box; IR_OPTION_INT_NONE for an inline
 // Option).
-ir_null_like: fn(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
+ir_null_like: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) -> Int Never! {
     null: ir_temp_like(m, b, slot)
     ir_option_none(m, b, null)
     null
@@ -648,7 +648,7 @@ ir_null_like: fn(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
 
 // Makes the box in `slot` its holder's own before a write through it: the
 // slot then holds the box the unique helper hands back.
-ir_box_make_unique: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) Never! {
+ir_box_make_unique: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int) Never! {
     if slot < 0 || ir_failed(b) {
         return
     }
@@ -669,7 +669,7 @@ ir_box_make_unique: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) Nev
 // box's sole owner hands its payload over and frees the box; a shared box
 // keeps its payload, so the value is a copy, and the box loses an owner.
 // -1 for a Unit payload.
-ir_box_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, offset: Int, row: Int) -> Int Never! {
+ir_box_take: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, boxed: Int, offset: Int, row: Int) -> Int Never! {
     b.fresh[boxed] = false
     // An inline Option's payload is its word: the owner hands it over.
     if ir_option_inline(m, b.f.slot_type[boxed]) {
@@ -692,7 +692,7 @@ ir_box_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, offset: I
 // the box's sole owner hands it over and frees the box; a shared box keeps
 // its payload, so the value is a copy, and the box loses an owner. The caller
 // no longer holds the box.
-ir_box_hand_over: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, payload: Int, row: Int, size: Int) -> Int Never! {
+ir_box_hand_over: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, boxed: Int, payload: Int, row: Int, size: Int) -> Int Never! {
     kind: m.types[row].kind
     taken := payload
     if kind == .Aggregate {
@@ -720,7 +720,7 @@ ir_box_hand_over: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, payl
 // A new owner of the value in `slot` (type row `row`, which has a clone):
 // its runtime clone, or for a box, a trait value or a function value one
 // more owner of the same box (a null box stays null).
-ir_clone: fn(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never! {
+ir_clone: fn(m: ^IRModule, b: ^IRBuilder, slot: Int, row: Int) -> Int Never! {
     symbol: m.types[row].clone
     if ir_link_row(m, row) -> return ir_link_retain(m, b, slot, row)
     if !ir_clone_shares(symbol) -> return ir_runtime(m, b, symbol, [Int]{slot}, row)
@@ -741,7 +741,7 @@ ir_clone_shares: fn(symbol: String) -> Bool Never! {
 
 // Builds the glue of every aggregate row whose drop names one and that has
 // none yet (rows a glue reaches add theirs in the same pass).
-ir_drop_glues: fn(m: &IRModule, p: IRProgram) Never! {
+ir_drop_glues: fn(m: ^IRModule, p: IRProgram) Never! {
     row := 0
     loop row < m.types.len() {
         drop: m.types[row].drop
@@ -757,7 +757,7 @@ ir_drop_glues: fn(m: &IRModule, p: IRProgram) Never! {
 // dropped with it and each recursive edge's wrapper (ir_wrapper_drop); a
 // box's last owner drops its active payload and frees it (ir_box_drop_body),
 // as a trait value's does its concrete payload (ir_trait_drop_body).
-ir_drop_glue: fn(m: &IRModule, p: IRProgram, row: Int) Never! {
+ir_drop_glue: fn(m: ^IRModule, p: IRProgram, row: Int) Never! {
     key: ir_drop_key(m, row)
     id: m.functions.len()
     m.functions.push(ir_hashed_function("drop", key, "jet_ir_drop_", "", 0))
@@ -804,7 +804,7 @@ ir_drop_glue: fn(m: &IRModule, p: IRProgram, row: Int) Never! {
 
 // Drops `value`, a member read out of its holder: a handle that moved out
 // (ir_move_member) left a null word, which holds nothing to drop.
-ir_drop_part: fn(m: &IRModule, b: &IRBuilder, value: Int) Never! {
+ir_drop_part: fn(m: ^IRModule, b: ^IRBuilder, value: Int) Never! {
     if !ir_is_handle(m, b.f.slot_type[value]) {
         ir_emit(b.f, IROp.Drop, -1, value, -1, -1, b.line)
         return
@@ -820,7 +820,7 @@ ir_drop_part: fn(m: &IRModule, b: &IRBuilder, value: Int) Never! {
 // drops each element and frees the buffer. A site keeps only the release
 // inline: elements to drop go through the row's one shared last-owner
 // routine (ir_buffer_last_helper).
-ir_release_buffer: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: Int, data: Int, length: Int, capacity: Int) Never! {
+ir_release_buffer: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, entry: Int, data: Int, length: Int, capacity: Int) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     last: ir_runtime(m, b, "jet_rt_block_release", [Int]{data}, bool_row)
     ir_open_if(b.f, last, b.line)
@@ -838,7 +838,7 @@ ir_release_buffer: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry
 // calls with the buffer, its length and its capacity: it drops each element
 // (row `entry`) and frees the buffer. Built once per row and never inlined
 // (OptInline.jet), so the release sites share one copy.
-ir_buffer_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: Int) -> Int Never! {
+ir_buffer_last_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, entry: Int) -> Int Never! {
     helper_key: "#buffer.last<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
@@ -870,7 +870,7 @@ ir_buffer_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, e
 
 // Frees the counted buffer `data` of the header row `row` with `capacity`
 // slots of row `entry`.
-ir_buffer_free: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: Int, data: Int, capacity: Int) Never! {
+ir_buffer_free: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, entry: Int, data: Int, capacity: Int) Never! {
     stride: ir_list_stride(m, entry)
     bytes: ir_buffer_bytes(m, p, b, row, data, capacity, stride)
     ir_free(m, b, data, bytes)
@@ -879,7 +879,7 @@ ir_buffer_free: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: I
 // Gives up the buffer an in-place growth moved its elements out of into
 // `fresh`: the last owner frees it without dropping them (they live on in the
 // new one).
-ir_release_moved_buffer: fn(m: &IRModule, b: &IRBuilder, data: Int, fresh: Int, capacity: Int, stride: Int) Never! {
+ir_release_moved_buffer: fn(m: ^IRModule, b: ^IRBuilder, data: Int, fresh: Int, capacity: Int, stride: Int) Never! {
     zero: ir_word_const(m, b, 0)
     counted: ir_bool_op(m, b, IROp.Gt, capacity, zero)
     ir_open_if(b.f, counted, b.line)
@@ -897,7 +897,7 @@ ir_release_moved_buffer: fn(m: &IRModule, b: &IRBuilder, data: Int, fresh: Int, 
 // A byte buffer copied out of counted `data` into fresh `replica` keeps a
 // zero-at-free mark (Refcount.jet). Only byte Lists are ever marked:
 // crypto.wipe and Secret adoption take [U8].
-ir_inherit_zero_mark: fn(m: &IRModule, b: &IRBuilder, data: Int, replica: Int, stride: Int) Never! {
+ir_inherit_zero_mark: fn(m: ^IRModule, b: ^IRBuilder, data: Int, replica: Int, stride: Int) Never! {
     if stride != 1 {
         return
     }
@@ -906,7 +906,7 @@ ir_inherit_zero_mark: fn(m: &IRModule, b: &IRBuilder, data: Int, replica: Int, s
 
 // Makes the counted buffer of the header at `header` its own before a write;
 // a header of any other type is left as is.
-ir_make_unique: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, header: Int) Never! {
+ir_make_unique: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, header: Int) Never! {
     if header < 0 || ir_failed(b) {
         return
     }
@@ -927,7 +927,7 @@ ir_make_unique: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, header: Int) Never
 // an owner's range (capacity -1, BuildExpr.jet ir_write_window) writes in
 // place; any other buffer is replaced by a copy (capacity kept, or the length
 // when frozen) whose elements gain an owner, and the old buffer loses one.
-ir_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
+ir_unique_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int Never! {
     helper_key: "#unique<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
@@ -1031,7 +1031,7 @@ ir_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int
 // The value of type row `row` at byte `offset` of `base`: an aggregate gets
 // storage of its own in place through its row's helper, a value with a
 // runtime clone is cloned.
-ir_copy_fixup_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: Int, offset: Int) Never! {
+ir_copy_fixup_at: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, base: Int, offset: Int) Never! {
     if m.types[row].kind == .Aggregate {
         if !ir_copy_needs(m, p, row) {
             return
@@ -1057,7 +1057,7 @@ ir_copy_fixup_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: 
 // The IR function giving the byte copy at its parameter of a value of type
 // row `row` storage of its own (built on first use; -1 when its body cannot
 // be built, which a later use builds again to report the same failure).
-ir_copy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
+ir_copy_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int Never! {
     helper_key: "#copy<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
@@ -1158,7 +1158,7 @@ ir_close_handle: fn(m: IRModule, row: Int) -> Bool Never! {
 // payload, either side of a Result, or an inline member of an enum variant.
 // No holder's drop glue ends a handle (ir_glue_drops), so the holder's
 // variable closes it as one of its parts (ir_close_parts).
-ir_close_holds_handle: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_close_holds_handle: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     kind: m.types[row].kind
     ty: ir_untag(ir_row_ty(m, p, row))
     if kind == .Aggregate {
@@ -1197,7 +1197,7 @@ ir_close_holds_handle: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // The type rows a value of type row `row` holds directly: tuple and struct
 // members, buffer elements, an Option's payload, a Result's two sides and
 // every enum variant's payload members.
-ir_close_part_rows: fn(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
+ir_close_part_rows: fn(m: ^IRModule, p: IRProgram, row: Int) -> [Int] Never! {
     parts := [Int]{}
     kind: m.types[row].kind
     ty: ir_untag(ir_row_ty(m, p, row))
@@ -1238,7 +1238,7 @@ ir_close_part_rows: fn(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
 // `row`'s own method does not count. A walk that finds none from a row
 // without a method proves every row it visited free of Close at any depth
 // (m.close_free), and a later walk does not enter a free row again.
-ir_close_parts_reach: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_close_parts_reach: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.close_free.get(row) != None -> return false
     if ir_close_holds_handle(m, p, row) -> return true
     seen := [Int:Bool]{}
@@ -1265,7 +1265,7 @@ ir_close_parts_reach: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // each part that closes, in declaration order), or only its parts when
 // `members_only` (the receiver of the type's own close method); -1 when
 // nothing in the value closes or its glue cannot be built.
-ir_close_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_only: Bool, span: Span) -> Int Never! {
+ir_close_glue: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, members_only: Bool, span: Span) -> Int Never! {
     key: if members_only -> "#close.members<{ir_row_key(m, row)}>" else -> "#close<{ir_row_key(m, row)}>"
     known: name_column_value(m.close_glue_keys, m.close_glue, key) ?? -3
     if known == -2 {
@@ -1312,7 +1312,7 @@ ir_close_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_o
 // Closes each part of the value in `value` (type row `row`) that closes. A
 // part some of `parts` (moved parts whose paths pass this value, at `depth`)
 // lie under closes only what is left of it, by the bits of `armed`.
-ir_close_parts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, parts: [IRMovedPart], depth: Int, armed: Int, span: Span) Never! {
+ir_close_parts: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, value: Int, parts: [IRMovedPart], depth: Int, armed: Int, span: Span) Never! {
     kind: m.types[row].kind
     ty: ir_untag(ir_row_ty(m, p, row))
     if kind == .Aggregate {
@@ -1443,7 +1443,7 @@ ir_close_parts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: I
 
 // Closes the part `item` (type row `row`, closed whole by `glue`) of a
 // value at `depth`: only what is left of it when `parts` lie under it.
-ir_close_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, glue: Int, row: Int, item: Int, parts: [IRMovedPart], depth: Int, armed: Int, span: Span) Never! {
+ir_close_member: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, glue: Int, row: Int, item: Int, parts: [IRMovedPart], depth: Int, armed: Int, span: Span) Never! {
     if parts.len() == 0 -> return ir_close_call(b, glue, item)
     ir_close_partial(m, p, b, row, item, armed, parts, depth + 1, false, span)
 }
@@ -1451,14 +1451,14 @@ ir_close_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, glue: Int, row: I
 // Ends the move-only handle `member` of the tuple or struct at `value`
 // (ir_close_handle) unless it moved out: `parts` are its moves, by the bits
 // of `armed`.
-ir_close_handle_member: fn(m: &IRModule, b: &IRBuilder, value: Int, member: IRMember, parts: [IRMovedPart], armed: Int) Never! {
+ir_close_handle_member: fn(m: ^IRModule, b: ^IRBuilder, value: Int, member: IRMember, parts: [IRMovedPart], armed: Int) Never! {
     item: ir_member_value(m, b, value, member)
     ir_close_handle_drop(m, b, item, parts, armed)
 }
 
 // Ends the move-only handle in `item` (a part of a closing value) unless it
 // moved out: `parts` are its moves, by the bits of `armed`.
-ir_close_handle_drop: fn(m: &IRModule, b: &IRBuilder, item: Int, parts: [IRMovedPart], armed: Int) Never! {
+ir_close_handle_drop: fn(m: ^IRModule, b: ^IRBuilder, item: Int, parts: [IRMovedPart], armed: Int) Never! {
     moved := 0
     loop part in parts -> moved += ir_part_bit(part.bit)
     if moved != 0 {
@@ -1495,7 +1495,7 @@ ir_part_bit: fn(bit: Int) -> Int Never! { 1 << bit }
 // `armed`: nothing when the value itself moved; the whole value (only its
 // members when `members_only`) when no part under it did; else each part in
 // turn.
-ir_close_partial: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, armed: Int, parts: [IRMovedPart], depth: Int, members_only: Bool, span: Span) Never! {
+ir_close_partial: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, value: Int, armed: Int, parts: [IRMovedPart], depth: Int, members_only: Bool, span: Span) Never! {
     // The bits are distinct, so their sums are their unions.
     exact := 0
     below := 0
@@ -1530,7 +1530,7 @@ ir_close_partial: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value:
 // The IR function closing what is left of a value of type row `row` once
 // some of `parts` moved out of it: (value, armed) with its variable's
 // `armed` word (IRClose), only its members when `members_only`.
-ir_part_close_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_only: Bool, parts: [IRMovedPart]) -> Int Never! {
+ir_part_close_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, members_only: Bool, parts: [IRMovedPart]) -> Int Never! {
     span: Span{start: 0, end: 0}
     key := "#close.parts<{ir_row_key(m, row)}|{members_only}"
     loop part in parts {
@@ -1568,7 +1568,7 @@ ir_part_close_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, me
 
 // Builds the partial close each IRPartClose calls, now that every part
 // moved out of its variable is known.
-ir_resolve_part_closes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
+ir_resolve_part_closes: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder) Never! {
     loop index in 0..<b.part_closes.len() {
         call: b.part_closes[index]
         close: b.closes[ir_close_index(b, call.root)]
@@ -1582,7 +1582,7 @@ ir_resolve_part_closes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     }
 }
 
-ir_close_call: fn(b: &IRBuilder, glue: Int, value: Int) Never! {
+ir_close_call: fn(b: ^IRBuilder, glue: Int, value: Int) Never! {
     if value < 0 {
         return
     }
@@ -1594,7 +1594,7 @@ ir_close_call: fn(b: &IRBuilder, glue: Int, value: Int) Never! {
 // allocator view owns nothing: its allocator closes the value at reset or
 // close (ir_allocator_method). Nor does a lent value (ir_lent): its owner
 // closes it.
-ir_close_arm: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, members_only: Bool, span: Span) Never! {
+ir_close_arm: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, members_only: Bool, span: Span) Never! {
     if slot < 0 || b.views.get(slot) != None || ir_lent(b, slot) {
         return
     }
@@ -1615,7 +1615,7 @@ ir_close_arm: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, members_o
 // leaves it (ir_exit_statement_guards); one made in a branch or loop
 // condition of the statement, or outside any statement, closes now, and
 // its drop follows (ir_release). A lent value (ir_lent) closes nothing.
-ir_close_temporary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
+ir_close_temporary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, span: Span) Never! {
     if slot < 0 || !b.fresh[slot] || b.views.get(slot) != None || ir_lent(b, slot) {
         return
     }
@@ -1639,7 +1639,7 @@ ir_close_temporary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, spa
 // (ir_copy_value) and the temporary dropped now. A temporary that closes,
 // and a part with a drop and no clone, which a read moves out, are not
 // ended here.
-ir_end_read_base: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, read: Int, span: Span) -> Int Never! {
+ir_end_read_base: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, read: Int, span: Span) -> Int Never! {
     if read < 0 || !b.fresh[base] || !ir_has_drop(m, b, base) || b.views.get(base) != None || ir_lent(b, base) {
         return read
     }
@@ -1660,7 +1660,7 @@ ir_end_read_base: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, read:
 // (`make().keys()`, `make_set().has(x)`), and `subject` is a fresh Map or
 // Set that ends with the read: now when the result is a scalar or a value
 // of its own, else as a part read off it (ir_end_read_base).
-ir_end_builtin_receiver: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, result: Int, span: Span) -> Int Never! {
+ir_end_builtin_receiver: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: Int, result: Int, span: Span) -> Int Never! {
     if result >= 0 && !b.fresh[result] && ir_has_drop(m, b, result) {
         return ir_end_read_base(m, p, b, subject, result, span)
     }
@@ -1673,7 +1673,7 @@ ir_end_builtin_receiver: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: 
 // statement being built it is held until the statement ends (ir_stmt) or an
 // early exit leaves it (ir_exit_statement_guards); true when it is not, and
 // the walk drops it after its last step (ir_list_walk).
-ir_end_walked_temporary: fn(m: &IRModule, b: &IRBuilder, list: Int) -> Bool Never! {
+ir_end_walked_temporary: fn(m: ^IRModule, b: ^IRBuilder, list: Int) -> Bool Never! {
     if list < 0 || !b.fresh[list] || !ir_has_drop(m, b, list) || b.views.get(list) != None || ir_lent(b, list) {
         return false
     }
@@ -1689,7 +1689,7 @@ ir_end_walked_temporary: fn(m: &IRModule, b: &IRBuilder, list: Int) -> Bool Neve
 // or a write parameter's old value a write replaces: when its value closes
 // it closes now, once, before its drop. A lent value or an allocator view
 // closes nothing. False when the build failed.
-ir_close_fresh: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) -> Bool Never! {
+ir_close_fresh: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, span: Span) -> Bool Never! {
     if b.views.get(slot) != None || ir_lent(b, slot) -> return true
     glue: ir_close_glue(m, p, b, b.f.slot_type[slot], false, span)
     if ir_failed(b) -> return false
@@ -1702,7 +1702,7 @@ ir_close_fresh: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: S
 // the part is a move-only handle the value holds (a member, a payload; not a
 // list element, which moves out only with its list), a move out of `slot`
 // moves the part out of the variable (ir_close_disarm).
-ir_close_note: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, parent: Int, step: IRPartStep) Never! {
+ir_close_note: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, parent: Int, step: IRPartStep) Never! {
     // A part of a lent value is lent too.
     if slot >= 0 && ir_lent(b, parent) -> b.lent[slot] = true
     if slot < 0 || parent < 0 || b.closes.len() == 0 {
@@ -1724,7 +1724,7 @@ ir_close_note: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, parent: 
 ir_lent: fn(b: IRBuilder, slot: Int) -> Bool Never! { slot >= 0 && b.lent.get(slot) != None }
 
 // Records `slot` as lent (IRBuilder.lent) when `lent`; returns it.
-ir_note_lent: fn(b: &IRBuilder, slot: Int, lent: Bool) -> Int Never! {
+ir_note_lent: fn(b: ^IRBuilder, slot: Int, lent: Bool) -> Int Never! {
     if lent && slot >= 0 -> b.lent[slot] = true
     slot
 }
@@ -1777,7 +1777,7 @@ ir_path_starts: fn(path: [IRPartStep], prefix: [IRPartStep]) -> Bool Never! {
 // The bit of the part at `path` of the closing variable `root`'s value,
 // given one when it is the first move out of that part; -1 past
 // IR_CLOSE_PARTS.
-ir_moved_bit: fn(b: &IRBuilder, root: Int, path: [IRPartStep]) -> Int Never! {
+ir_moved_bit: fn(b: ^IRBuilder, root: Int, path: [IRPartStep]) -> Int Never! {
     count := 0
     loop part in b.moved {
         if part.root != root -> next
@@ -1806,7 +1806,7 @@ ir_close_index: fn(b: IRBuilder, slot: Int) -> Int Never! {
 // it. A part read out of a closing variable's value (ir_close_note) moves out
 // of that value, so its variable's scope closes only the rest: the part's
 // bit of `armed` is set while the variable is armed.
-ir_close_disarm: fn(b: &IRBuilder, slot: Int) Never! {
+ir_close_disarm: fn(b: ^IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 {
         return
     }
@@ -1842,7 +1842,7 @@ ir_close_disarm: fn(b: &IRBuilder, slot: Int) Never! {
 
 // Re-arms the variable in `slot` after a new value is stored into it: the
 // new value is whole.
-ir_close_rearm: fn(b: &IRBuilder, slot: Int) Never! {
+ir_close_rearm: fn(b: ^IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 {
         return
     }
@@ -1855,7 +1855,7 @@ ir_close_rearm: fn(b: &IRBuilder, slot: Int) Never! {
 // The member `member` of the aggregate at `base` is about to be replaced:
 // its old value closes, but for the parts of it that moved out, whose bits
 // the new value clears.
-ir_close_overwritten: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, span: Span) Never! {
+ir_close_overwritten: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, member: IRMember, span: Span) Never! {
     glue: ir_close_glue(m, p, b, member.ty, false, span)
     if glue < 0 {
         return
@@ -1882,7 +1882,7 @@ ir_close_overwritten: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, m
 // Closes the value of the variable in `slot` now if it still owns it (its
 // scope ends, or a new value replaces it): what is left of it once parts
 // moved out (ir_close_disarm).
-ir_close_now: fn(b: &IRBuilder, slot: Int) Never! {
+ir_close_now: fn(b: ^IRBuilder, slot: Int) Never! {
     if slot < 0 || b.closes.len() == 0 {
         return
     }
@@ -1920,7 +1920,7 @@ ir_closes: fn(b: IRBuilder, slot: Int) -> Bool Never! {
 // `defer close(x)` names the closing variable in `slot`: it closes before
 // the scope's automatic closes, after the defers that follow it. Its close
 // row moves last, so the deferred rows run latest first.
-ir_close_defer: fn(b: &IRBuilder, slot: Int) Never! {
+ir_close_defer: fn(b: ^IRBuilder, slot: Int) Never! {
     at: ir_close_index(b, slot)
     if at < 0 {
         return
@@ -1942,7 +1942,7 @@ ir_close_is_deferred: fn(b: IRBuilder, slot: Int) -> Bool Never! {
 
 // Runs the deferred closes of the variables among bindings[mark..], the
 // latest defer first.
-ir_close_deferred: fn(b: &IRBuilder, mark: Int) Never! {
+ir_close_deferred: fn(b: ^IRBuilder, mark: Int) Never! {
     index := b.closes.len() - 1
     loop index >= 0 {
         close: b.closes[index]

@@ -137,7 +137,7 @@ evidence_append_frame: fn(path: String, frame: [U8]) -[FS, Env]> EvidenceCodecEr
     result
 }
 
-evidence_append_locked: fn(path: String, writer: &evidence_files.FileWriter, frame: [U8]) -[FS]> EvidenceCodecError! {
+evidence_append_locked: fn(path: String, writer: ^evidence_files.FileWriter, frame: [U8]) -[FS]> EvidenceCodecError! {
     info: writer.stat() ?? return Err(evidence_codec_error("{err}"))
     if info.size == 0 {
         header := EVIDENCE_REPORT_MAGIC.bytes()

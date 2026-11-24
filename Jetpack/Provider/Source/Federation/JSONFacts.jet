@@ -6,19 +6,19 @@
 
 impl MetadataFacts {
     // Record one typed fact holding the compact JSON of `value`.
-    add_typed_json: fn(&self, key: String, value: Dyn) Never! {
+    add_typed_json: fn(^self, key: String, value: Dyn) Never! {
         self.typed[key] = [String]{pkg_json_render(value)}
     }
 
     // Keep every native top-level field in the typed projection under
     // `namespace`, beside the byte-for-byte native document.
-    add_json_projection: fn(&self, namespace: String, object: [String:Dyn]) Never! {
+    add_json_projection: fn(^self, namespace: String, object: [String:Dyn]) Never! {
         loop key in object.keys().to_list() -> self.add_typed_json("{namespace}.{key}", object[key])
     }
 
     // Record a typed JSON fact that may be declared more than once; a second,
     // different value is a conflict and both values are kept.
-    add_conflicting_typed_json: fn(&self, key: String, value: Dyn) Never! {
+    add_conflicting_typed_json: fn(^self, key: String, value: Dyn) Never! {
         rendered: pkg_json_render(value)
         existing: self.typed.get(key) ?? [String]{}
         loop previous in existing {

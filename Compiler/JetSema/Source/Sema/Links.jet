@@ -54,7 +54,7 @@ SemaLinkPlan: struct {
 // Classify one `@expr` creation site into brief vs kept storage, local vs
 // thread-safe sharing, and whether a dynamic exclusivity check is required.
 // `shared_pin`: `None` (auto), `Val(true)` (`#Shared`), `Val(false)` (`#Local`).
-sema_link_classify: fn(is_place: Bool, escapes: Bool, crosses_task: Bool, shared_pin: Bool?, static_exclusive: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaLinkPlan {
+sema_link_classify: fn(is_place: Bool, escapes: Bool, crosses_task: Bool, shared_pin: Bool?, static_exclusive: Bool, span: Span, diagnostics: ^[Diagnostic]) -> SemaLinkPlan {
     lifetime: if !is_place || escapes -> SemaLinkLifetime.Kept else -> SemaLinkLifetime.Brief
     sharing: if shared_pin == Val(true) || (shared_pin == None && crosses_task) -> SemaLinkSharing.Shared else -> SemaLinkSharing.Local
     if shared_pin == Val(false) && crosses_task {
@@ -84,7 +84,7 @@ sema_link_expr_is_place: fn(operand: Expr) -> Bool Never! {
 // point at an object item (`[@T]` / `[K: @V]`), never raw inline buffer slots
 // that move on growth. Brief checker-bounded links into `[T]` stay allowed as
 // views that pause growth until their last use.
-sema_link_check_container_item: fn(operand: Expr, container_ty: Type, escapes: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_link_check_container_item: fn(operand: Expr, container_ty: Type, escapes: Bool, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if !escapes -> return true
     if operand == .Index(_, _, _, _, _) {
         if container_ty == {
@@ -120,8 +120,8 @@ sema_link_root_ident: fn(expr: Expr) -> String? Never! {
 
 // Enforce transitive read-only access across `@T` links: an unmarked read
 // parameter or immutable `:` binding cannot write through any `@T` link it
-// reaches (E0205). Write access requires `:=` or an `&` parameter.
-sema_link_check_write_access: fn(target_base: Expr, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+// reaches (E0205). Write access requires `:=` or an `^` parameter.
+sema_link_check_write_access: fn(target_base: Expr, scopes: SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     root_name: sema_link_root_ident(target_base) ?? return true
     binding_index: sema_scope_resolve_index(scopes, root_name) ?? return true
     binding: scopes.bindings[binding_index]
@@ -143,7 +143,7 @@ sema_link_static_call: fn(result_ty: Type, op: String, inner_ty: Type, args: [TC
 }
 
 // Typecheck `@expr` / `@Struct{...}` (`Call{name: "__jet_link", args: [operand]}`).
-sema_link_check_creation: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_link_check_creation: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     operand: call.args[0].expr
     span: Span{start: call.name_span.start, end: expr_span(operand).end}
     inner_expected: if expected == .Val(exp) -> foundation_link_inner(exp) else -> None
@@ -175,7 +175,7 @@ sema_link_check_creation: fn(call: Call, expected: Type?, environment: SemaScope
 
 // Typecheck `a.same(b)` on `@T` live links: compares link identity (`Bool`),
 // whereas `a == b` compares target values.
-sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg], method_span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg], method_span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if args.len() != 1 {
         diagnostics.push(sema_error("E0104", method_span, "`.same(...)` expects 1 argument, got {args.len()}", "`.same(other)` compares whether two live links point at the same target", "call `a.same(b)` with one `@T` link"))
         return None
@@ -244,7 +244,7 @@ sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg],
 Player: struct {
     hp: Int,
     get_hp: fn(self) -> Int { self.hp }
-    damage: fn(&self, amount: Int) { self.hp -= amount }
+    damage: fn(^self, amount: Int) { self.hp -= amount }
 }
 
 read_hp: fn(p: @Player) -> Int { p.hp + p.get_hp() }
@@ -275,7 +275,7 @@ demo: fn() -> Bool {
     bad_source: `
 Player: struct {
     hp: Int,
-    damage: fn(&self, amount: Int) { self.hp -= amount }
+    damage: fn(^self, amount: Int) { self.hp -= amount }
 }
 
 bad_write_param: fn(p: @Player) {

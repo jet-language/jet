@@ -1395,7 +1395,7 @@ jet_cli_inspect_has_operator: fn(impls: [JetCLIOperatorImpl], left: String, trai
 // `validate_trait_impl` for an arithmetic hook of a checked program: a
 // duplicate (left, trait, rhs) or an orphan registers nothing; otherwise the
 // hook method's declared result is the row's result.
-jet_cli_inspect_register_trait: fn(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, local: [String], params: [String:[TypeParam]], impls: &[JetCLIOperatorImpl]) {
+jet_cli_inspect_register_trait: fn(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, local: [String], params: [String:[TypeParam]], impls: ^[JetCLIOperatorImpl]) {
     method_name: jet_cli_inspect_operator_method(trait_name)
     if method_name == "" {
         return
@@ -1421,7 +1421,7 @@ jet_cli_inspect_register_trait: fn(owner: String, trait_name: String, methods: [
 // `register_impl`: a field-delegated arithmetic hook results in its owner;
 // every other impl is validated as written. A top-level impl and a trait block
 // in a type body register the same way.
-jet_cli_inspect_register_impl: fn(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, delegation: String?, local: [String], params: [String:[TypeParam]], impls: &[JetCLIOperatorImpl]) {
+jet_cli_inspect_register_impl: fn(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, delegation: String?, local: [String], params: [String:[TypeParam]], impls: ^[JetCLIOperatorImpl]) {
     if delegation != None {
         if jet_cli_inspect_operator_method(trait_name) == "" {
             return
@@ -1436,7 +1436,7 @@ jet_cli_inspect_register_impl: fn(owner: String, trait_name: String, methods: [F
 
 // `register_synthetic_operators`: Core's typed vector/scalar hook rows unless
 // the module declares the same hook.
-jet_cli_inspect_synthetic_operator: fn(impls: &[JetCLIOperatorImpl], left: String, trait_name: String, rhs: String, result: String) {
+jet_cli_inspect_synthetic_operator: fn(impls: ^[JetCLIOperatorImpl], left: String, trait_name: String, rhs: String, result: String) {
     if jet_cli_inspect_has_operator(impls, left, trait_name, rhs) {
         return
     }
@@ -1746,7 +1746,7 @@ jet_cli_inspect_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 }
 
 // A job's output behind resolution's notices.
-jet_cli_inspect_noticed: fn(notice: String, output: &&JetDriverVerbOutput) -> JetDriverVerbOutput {
+jet_cli_inspect_noticed: fn(notice: String, output: ^^JetDriverVerbOutput) -> JetDriverVerbOutput {
     noticed := output.move()
     if notice != "" -> noticed.stderr = "{notice}{noticed.stderr}"
     noticed
@@ -1754,7 +1754,7 @@ jet_cli_inspect_noticed: fn(notice: String, output: &&JetDriverVerbOutput) -> Je
 
 // A job that holds a compile result ends the process with its noticed
 // output from inside the scope that owns the result (jet_cli_finish).
-jet_cli_inspect_finish: fn(job: JetCLIInspectJob, output: &&JetDriverVerbOutput) -> Never {
+jet_cli_inspect_finish: fn(job: JetCLIInspectJob, output: ^^JetDriverVerbOutput) -> Never {
     jet_cli_finish(jet_cli_inspect_noticed(job.notice, output))
 }
 

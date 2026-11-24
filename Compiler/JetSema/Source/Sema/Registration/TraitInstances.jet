@@ -47,7 +47,7 @@ SemaTraitMade: struct {
 }
 
 // Rewrites every module input that declares a parameterized trait in place.
-sema_trait_instances_rewrite_inputs: fn(inputs: &[SemaRegistrationModuleInput], diagnostics: &[Diagnostic]) Never! {
+sema_trait_instances_rewrite_inputs: fn(inputs: ^[SemaRegistrationModuleInput], diagnostics: ^[Diagnostic]) Never! {
     loop index in 0..<inputs.len() {
         if !sema_trait_instances_declares_template(inputs[index].program.items) -> next
         inputs[index].program.items = sema_trait_instances_rewrite_items(inputs[index].program.items.move(), diagnostics)
@@ -65,7 +65,7 @@ sema_trait_instances_declares_template: fn(items: [Item]) -> Bool Never! {
 
 // Each parameterized trait in `items` is replaced by the traits its uses
 // make, in the place it is declared.
-sema_trait_instances_rewrite_items: fn(items: &&[Item], diagnostics: &[Diagnostic]) -> [Item] Never! {
+sema_trait_instances_rewrite_items: fn(items: ^^[Item], diagnostics: ^[Diagnostic]) -> [Item] Never! {
     instances := SemaTraitInstances{names: name_table(), templates: [TraitDef]{}, made: [SemaTraitMade]{}, seen: name_table()}
     // The structs and enums the module declares: `owners` holds each name
     // once, and `owner_items[id - 1]` is the item named by id `id`.
@@ -158,7 +158,7 @@ sema_trait_instances_param_names: fn(params: [TypeParam]) -> [String] Never! {
 
 // Records that item `index` declares the struct or enum `name`; a later
 // declaration of the same name replaces it, as for templates.
-sema_trait_instances_owner: fn(owners: &NameTable, owner_items: &[Int], name: String, index: Int) Never! {
+sema_trait_instances_owner: fn(owners: ^NameTable, owner_items: ^[Int], name: String, index: Int) Never! {
     id: Int{name_intern(owners, name).id}
     if id > owner_items.len() -> owner_items.push(index) else if id > 0 {
         owner_items[id - 1] = index
@@ -178,13 +178,13 @@ sema_trait_instances_owner_params: fn(items: [Item], owners: NameTable, owner_it
     [String]{}
 }
 
-sema_trait_instances_function: fn(instances: &SemaTraitInstances, function: Func, outer: [String], diagnostics: &[Diagnostic]) Never! {
+sema_trait_instances_function: fn(instances: ^SemaTraitInstances, function: Func, outer: [String], diagnostics: ^[Diagnostic]) Never! {
     scope := outer
     scope.extend(sema_trait_instances_param_names(function.type_params))
     sema_trait_instances_params(instances, function.type_params, scope, diagnostics)
 }
 
-sema_trait_instances_params: fn(instances: &SemaTraitInstances, params: [TypeParam], scope: [String], diagnostics: &[Diagnostic]) Never! {
+sema_trait_instances_params: fn(instances: ^SemaTraitInstances, params: [TypeParam], scope: [String], diagnostics: ^[Diagnostic]) Never! {
     loop param in params {
         loop bound in param.bounds {
             sema_trait_instances_note(instances, bound, param.name_span, scope, diagnostics)
@@ -192,7 +192,7 @@ sema_trait_instances_params: fn(instances: &SemaTraitInstances, params: [TypePar
     }
 }
 
-sema_trait_instances_blocks: fn(instances: &SemaTraitInstances, blocks: [TraitImplBlock], scope: [String], diagnostics: &[Diagnostic]) Never! {
+sema_trait_instances_blocks: fn(instances: ^SemaTraitInstances, blocks: [TraitImplBlock], scope: [String], diagnostics: ^[Diagnostic]) Never! {
     loop block in blocks {
         sema_trait_instances_note(instances, block.trait_name, block.trait_span, scope, diagnostics)
         loop method in block.methods {
@@ -204,7 +204,7 @@ sema_trait_instances_blocks: fn(instances: &SemaTraitInstances, blocks: [TraitIm
 // One use of a trait, `written` as the parser keeps it. A use of a
 // parameterized trait the module declares makes its trait the first time;
 // any other name is left to registration.
-sema_trait_instances_note: fn(instances: &SemaTraitInstances, written: String, span: Span, scope: [String], diagnostics: &[Diagnostic]) Never! {
+sema_trait_instances_note: fn(instances: ^SemaTraitInstances, written: String, span: Span, scope: [String], diagnostics: ^[Diagnostic]) Never! {
     parts: written.partition("<")
     template_id: Int{(name_find(instances.names, parts.head) ?? return).id}
     if template_id == 0 {

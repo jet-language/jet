@@ -64,7 +64,7 @@ EnvCapture: struct {
 
 // Files one `env.<name>` capture: its environment-scoped facts under `path`,
 // then its module entry. The capture's parts move into both rows.
-envmodel_file_env_capture: fn(capture: &&EnvCapture, path: String, reads: &&[EnvironmentRead], services: &&[DevServicePlan], contributions: &[EnvironmentContribution], entries: &[ModuleEntry]) Never! {
+envmodel_file_env_capture: fn(capture: ^^EnvCapture, path: String, reads: ^^[EnvironmentRead], services: ^^[DevServicePlan], contributions: ^[EnvironmentContribution], entries: ^[ModuleEntry]) Never! {
     contributions.push(
         EnvironmentContribution{
             name: path,
@@ -144,7 +144,7 @@ envmodel_evaluate_env_contribution: fn(value: Expr, src: String, scope: ModuleEv
 // map, a lifecycle field's names) is walked, and the values in it are
 // generated. A headless record a field types (a prompt, a language, a
 // preset, a file) is passed through that type's `envmodel_expect_*`.
-envmodel_plan_env_fields: fn(plan: &EnvValueProgram, fields: [NamedExpr], globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_env_fields: fn(plan: ^EnvValueProgram, fields: [NamedExpr], globals: [String:CtValue]) EnvModelEvalError! {
     siblings := [String:String]{}
     loop field in fields {
         kind: EnvFieldKind.classify(field.name)
@@ -182,7 +182,7 @@ envmodel_plan_env_fields: fn(plan: &EnvValueProgram, fields: [NamedExpr], global
 }
 
 // envmodel_plan_env_fields for an `env.<name>: { … }` or `Env{ … }` value.
-envmodel_plan_env_contribution: fn(plan: &EnvValueProgram, value: Expr, globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_env_contribution: fn(plan: ^EnvValueProgram, value: Expr, globals: [String:CtValue]) EnvModelEvalError! {
     record: envmodel_record_literal(value) ?? value
     if record == .StructLit(type_name, _, _, _, fields, _, _, _) {
         if type_name != "" && type_name != TYPE_ENV {
@@ -311,7 +311,7 @@ envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope) -> CtV
 // envmodel_evaluate_lifecycle_value reads it: names stay references, the
 // records, enum cases, lists and maps around them are walked, and every
 // other value is generated.
-envmodel_plan_lifecycle_value: fn(plan: &EnvValueProgram, expr: Expr, globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_lifecycle_value: fn(plan: ^EnvValueProgram, expr: Expr, globals: [String:CtValue]) EnvModelEvalError! {
     if envmodel_record_literal(expr) == .Val(record) {
         envmodel_plan_lifecycle_value(plan, record, globals)
         return
@@ -350,7 +350,7 @@ envmodel_plan_lifecycle_value: fn(plan: &EnvValueProgram, expr: Expr, globals: [
 }
 
 // Overwrite the value stored under an existing `key`.
-envmodel_ct_map_replace: fn(entries: &[CtMapEntry], key: CtKey, value: CtValue) Never! {
+envmodel_ct_map_replace: fn(entries: ^[CtMapEntry], key: CtKey, value: CtValue) Never! {
     loop index in 0..<entries.len() {
         if ast_comptime_key_compare(entries[index].key, key) == 0 {
             entries[index] = CtMapEntry{key: key, value: value}
@@ -399,7 +399,7 @@ PromptField: enum {
 // `prompt: "label"` or a `Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`
 // record, headed or headless, which the compiler checked as a `Prompt`: each
 // written field is recorded as one environment-layer setting at its name.
-envmodel_capture_prompt_setting: fn(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, source: String) EnvModelEvalError! {
+envmodel_capture_prompt_setting: fn(entry: ^EntryContribution, value: Expr, scope: ModuleEvalScope, source: String) EnvModelEvalError! {
     evaluated: envmodel_value_of(value, scope)
     record: envmodel_unparen_record(value)
     if record == .StructLit(type_name, _, _, _, fields, _, _, _) && (type_name == "" || type_name == TYPE_PROMPT) {
@@ -431,7 +431,7 @@ envmodel_capture_prompt_setting: fn(entry: &EntryContribution, value: Expr, scop
 }
 
 // Record one environment-layer text fact written by `{source}.{key}`.
-envmodel_record_setting: fn(entry: &EntryContribution, key: String, value: String, span: Span, source: String) Never! {
+envmodel_record_setting: fn(entry: ^EntryContribution, key: String, value: String, span: Span, source: String) Never! {
     writers := entry.settings.get(key) ?? [FactContribution]{}
     writers.push(FactContribution.new(key, FactValue.Text{value: value}, SourceScope.Item, ContributionLayer.Environment, "{source}.{key}").at(span))
     entry.settings[key] = writers
@@ -447,7 +447,7 @@ envmodel_prompt_word: fn(value: CtValue) -> String? Never! {
 
 // Fold one contribution's lifecycle into the selected environment's.
 // Sequences concatenate; single-valued facts must agree across modules.
-envmodel_lifecycle_merge: fn(target: &EnvironmentLifecycle, incoming: EnvironmentLifecycle, module_name: String) EnvModelEvalError! {
+envmodel_lifecycle_merge: fn(target: ^EnvironmentLifecycle, incoming: EnvironmentLifecycle, module_name: String) EnvModelEvalError! {
     loop item in incoming.dotenv -> target.dotenv.push(item.copy())
     loop item in incoming.unset -> target.unset.push(item.copy())
     loop item in incoming.on_enter -> target.on_enter.push(item.copy())

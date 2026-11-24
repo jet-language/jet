@@ -129,17 +129,29 @@ lsp_symbol_for: fn(symbols: [SemSymbol], def: SemDef) -> SemSymbol? Never! {
     None
 }
 
+// Whether `name` is written at `span` of the document's text: the whole
+// span, or the last segment of a qualified path (`module.name`). A use or a
+// declaration the compiler made (a match subject it names, a derive's
+// method) has a span that spells something else, and names nothing there.
+lsp_written_at: fn(bytes: [U8], span: Span, name: String) -> Bool Never! {
+    width: name.count_bytes()
+    if span.end > bytes.len() || span.end - span.start < width -> return false
+    foundation_byte_text(bytes, span.end - width, span.end) == name
+}
+
 // The declaration at `offset` in the document: the resolved reference
-// covering it, else the definition whose name covers it. The narrowest span
-// wins.
+// covering it, else the definition whose name covers it, each written
+// there (lsp_written_at). The narrowest span wins.
 lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
     index: view.checked.index ?? return None
     module_path: view.module_path ?? return None
+    bytes: view.doc.text.bytes()
     best := LSPTarget?{None}
     width := -1
     loop reference in index.references {
         if reference.module_path != module_path || !lsp_span_holds(reference.span, offset) -> next
         anchor: reference.target ?? next
+        if !lsp_written_at(bytes, reference.span, reference.name) -> next
         if width < 0 || reference.span.end - reference.span.start < width {
             best = Val(LSPTarget{module_path: anchor.module_path, span: anchor.def_span})
             width = reference.span.end - reference.span.start
@@ -148,6 +160,7 @@ lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
     loop definition in index.definitions {
         def: definition.def
         if def.module_path != module_path || !lsp_span_holds(def.def_span, offset) -> next
+        if !lsp_written_at(bytes, def.def_span, def.name) -> next
         if width < 0 || def.def_span.end - def.def_span.start < width {
             best = Val(LSPTarget{module_path: def.module_path, span: def.def_span})
             width = def.def_span.end - def.def_span.start
@@ -187,7 +200,8 @@ LSPPlaced: struct {
 
 // Every occurrence of a declaration across the open documents' checks.
 // `errors` counts the errors of the other checks that found one, since a check
-// with errors may have missed a use.
+// with errors may have missed a use; an error of the `tolerated` code is not
+// counted.
 LSPOpenOccurrences: struct {
     placed: [LSPPlaced],
     errors: Int,
@@ -197,7 +211,7 @@ LSPOpenOccurrences: struct {
 // other open document's check that read the same text of the declaring module.
 // A module that imports the declaring one is checked from its own document,
 // so a search from the declaration reaches it only through that check.
-lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, declaration: Bool{false}) -> LSPOpenOccurrences {
+lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, declaration: Bool{false}, tolerated: String{""}) -> LSPOpenOccurrences {
     found := LSPOpenOccurrences{placed: [LSPPlaced]{}, errors: 0}
     seen := [String:Bool]{}
     _: lsp_place_occurrences(view.checked, target, seen, found, declaration: declaration)
@@ -212,7 +226,7 @@ lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, de
             if !lsp_source_paths_equal(module_ref.physical_path, declaring.physical_path) || module_ref.source != declaring.source -> next
             if lsp_place_occurrences(checked, LSPTarget{module_path: module_ref.path, span: target.span}, seen, found, declaration: declaration) {
                 loop diagnostic in checked.diagnostics {
-                    if !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> found.errors += 1
+                    if diagnostic.code != tolerated && !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> found.errors += 1
                 }
             }
             break
@@ -225,7 +239,7 @@ lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, de
 // placed any. A derive-written body (an enum's `equal` and `compare`) is
 // checked past the end of its module's text, so its uses have no place in
 // the file and are left out.
-lsp_place_occurrences: fn(checked: LSPChecked, target: LSPTarget, seen: &[String:Bool], found: &LSPOpenOccurrences, declaration: Bool{false}) -> Bool {
+lsp_place_occurrences: fn(checked: LSPChecked, target: LSPTarget, seen: ^[String:Bool], found: ^LSPOpenOccurrences, declaration: Bool{false}) -> Bool {
     index: checked.index ?? return false
     placed := false
     loop occurrence in lsp_occurrences(index, target, declaration: declaration) {

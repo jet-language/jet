@@ -48,7 +48,7 @@ ir_pool_id_carrier: fn() -> Type Never! {
     }
 }
 
-ir_pool_shape: fn(m: &IRModule, p: IRProgram, inner: Type) -> IRPoolShape? Never! {
+ir_pool_shape: fn(m: ^IRModule, p: IRProgram, inner: Type) -> IRPoolShape? Never! {
     entry: ir_value_type(m, p, ir_pool_entry_type(inner.copy())) ?? return None
     generation: ir_member_of_row(m, p, entry, "generation") ?? return None
     value: ir_member_of_row(m, p, entry, "value") ?? return None
@@ -60,13 +60,13 @@ ir_pool_shape: fn(m: &IRModule, p: IRProgram, inner: Type) -> IRPoolShape? Never
 }
 
 // `Pool<T>.new()`: no entries.
-ir_pool_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
+ir_pool_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     ir_list_empty(m, p, b, row)
 }
 
 // `pool.add(value)`, `pool.remove(id)` and `pool.ids()`.
-ir_pool_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
+ir_pool_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(m, p, b, receiver)
     inner: ir_pool_inner(receiver_ty) ?? return ir_fail_slot(b, span, "Pool method {method} on {ir_type_name(receiver_ty)}")
     shape: ir_pool_shape(m, p, inner) ?? return ir_type_fail(b, span, receiver_ty)
@@ -81,14 +81,14 @@ ir_pool_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 }
 
 // Fresh frame storage for a pool entry or an ID of type row `row`.
-ir_pool_record: fn(m: &IRModule, b: &IRBuilder, row: Int) -> Int Never! {
+ir_pool_record: fn(m: ^IRModule, b: ^IRBuilder, row: Int) -> Int Never! {
     storage: ir_fresh_temp(m, b, row)
     ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
     storage
 }
 
 // A new entry of generation 0 holding the value; its ID names the slot.
-ir_pool_add: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRPoolShape, receiver: Int, argument: Int, span: Span) -> Int Never! {
+ir_pool_add: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRPoolShape, receiver: Int, argument: Int, span: Span) -> Int Never! {
     pool: ir_expr(m, p, b, receiver)
     if ir_failed(b) || pool < 0 -> return -1
     value: ir_value_as(m, p, b, argument, shape.element, span)
@@ -115,7 +115,7 @@ IRPoolEntry: struct {
     entry: Int,
 }
 
-ir_pool_find: fn(m: &IRModule, b: &IRBuilder, shape: IRPoolShape, pool: Int, id: Int) -> IRPoolEntry Never! {
+ir_pool_find: fn(m: ^IRModule, b: ^IRBuilder, shape: IRPoolShape, pool: Int, id: Int) -> IRPoolEntry Never! {
     word_row: ir_word_row(m)
     index: ir_load_at(m, b, id, shape.id_index, word_row)
     generation: ir_load_at(m, b, id, shape.id_generation, word_row)
@@ -137,7 +137,7 @@ ir_pool_find: fn(m: &IRModule, b: &IRBuilder, shape: IRPoolShape, pool: Int, id:
 
 // `pool.remove(id)`: the live value `id` names, taken out of its slot (whose
 // generation moves on), or None for a stale ID.
-ir_pool_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRPoolShape, receiver: Int, argument: Int, span: Span) -> Int Never! {
+ir_pool_remove: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRPoolShape, receiver: Int, argument: Int, span: Span) -> Int Never! {
     pool: ir_expr(m, p, b, receiver)
     if ir_failed(b) || pool < 0 -> return -1
     id: ir_expr(m, p, b, argument)
@@ -162,7 +162,7 @@ ir_pool_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRPoolShape
 }
 
 // `pool.ids()`: the ID of every live entry, in slot order.
-ir_pool_ids: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRPoolShape, receiver: Int, span: Span) -> Int Never! {
+ir_pool_ids: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, shape: IRPoolShape, receiver: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     pool: ir_expr(m, p, b, receiver)
     if ir_failed(b) || pool < 0 -> return -1
@@ -196,7 +196,7 @@ ir_pool_ids: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRPo
 
 // `pool[id]`: the address of the live value `id` names; a stale ID stops at
 // the indexing line.
-ir_pool_slot_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pool_node: Int, id_node: Int, line: Int, source_line: String, span: Span) -> Int Never! {
+ir_pool_slot_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, pool_node: Int, id_node: Int, line: Int, source_line: String, span: Span) -> Int Never! {
     pool_ty: ir_ty(m, p, b, pool_node)
     inner: ir_pool_inner(pool_ty) ?? return ir_fail_slot(b, span, "Pool slot of {ir_type_name(pool_ty)}")
     shape: ir_pool_shape(m, p, inner) ?? return ir_type_fail(b, span, pool_ty)
@@ -224,7 +224,7 @@ ir_pool_slot_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pool_node: I
 }
 
 // `pool[id]` read in place.
-ir_pool_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, pool: Int, id: Int, line: Int, source_line: String, span: Span) -> Int Never! {
+ir_pool_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, pool: Int, id: Int, line: Int, source_line: String, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     address: ir_pool_slot_address(m, p, b, pool, id, line, source_line, span)
     if ir_failed(b) || address < 0 -> return -1

@@ -24,7 +24,7 @@ step: fn(state: Int, message: Int) -> Int {
 
 // A generic child calls a field of the plan it borrows; the plan's other
 // fields stay intact.
-through_plan: fn<S>(plan: &&Plan<S>, start: &&S) -> S {
+through_plan: fn<S>(plan: ^^Plan<S>, start: ^^S) -> S {
     current := start
     loop turn in 0..<4 {
         task.group group {
@@ -41,7 +41,7 @@ through_plan: fn<S>(plan: &&Plan<S>, start: &&S) -> S {
 
 // A child calls a function value held by an owned parameter, by a read
 // parameter, and by a local.
-through_owned: fn(handler: &&fn(Int) -> Int) -> Int {
+through_owned: fn(handler: ^^fn(Int) -> Int) -> Int {
     current := 0
     loop _ in 0..<4 {
         task.group group {
@@ -77,7 +77,7 @@ through_local: fn() -> Int {
 
 // A generic `task.any` branch calls the handler; a panicking turn keeps the
 // state it had.
-through_any: fn<S, M>(handler: &&fn(S, M) -> S, start: &&S, messages: [M]) -> S {
+through_any: fn<S, M>(handler: ^^fn(S, M) -> S, start: ^^S, messages: [M]) -> S {
     current := start
     loop message in messages -> current = task.any {handler(current, message)} ?? current
     current

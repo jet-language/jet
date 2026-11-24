@@ -119,7 +119,7 @@ BitPacker: struct {
     acc: Int,
     n: Int,
 
-    put: fn(&self, value: Int, count: Int) {
+    put: fn(^self, value: Int, count: Int) {
         loop k in 0..<count {
             self.acc = (self.acc) | ((((value >> k)) & 1) << self.n)
             self.n += 1
@@ -132,11 +132,11 @@ BitPacker: struct {
     }
 
     // Huffman codes are packed most-significant bit first.
-    code: fn(&self, value: Int, count: Int) {
+    code: fn(^self, value: Int, count: Int) {
         loop k in 0..<count -> self.put(((value >> (count - 1 - k))) & 1, 1)
     }
 
-    finish: fn(&self) {
+    finish: fn(^self) {
         if self.n > 0 -> self.out.push(byte(self.acc))
     }
 }
@@ -162,12 +162,12 @@ byte: fn(n: Int) -> U8 {
     U8{v}
 }
 
-push16: fn(out: &[U8], n: Int) {
+push16: fn(out: ^[U8], n: Int) {
     out.push(byte(n))
     out.push(byte(n >> 8))
 }
 
-push32: fn(out: &[U8], n: Int) {
+push32: fn(out: ^[U8], n: Int) {
     loop k in 0..<4 -> out.push(byte(n >> (8 * k)))
 }
 

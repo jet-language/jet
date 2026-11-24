@@ -30,7 +30,7 @@ use {
 
 // indexColumnIsBeingUpdated: whether column i_col of index ix uses a
 // column a_xref marks changed (>= 0), or the rowid when chng_rowid.
-index_column_is_being_updated: fn(db: conn.Conn, a: &ast.AST, ix: Int, i_col: Int, a_xref: [Int], chng_rowid: Bool) -> Bool Never! {
+index_column_is_being_updated: fn(db: conn.Conn, a: ^ast.AST, ix: Int, i_col: Int, a_xref: [Int], chng_rowid: Bool) -> Bool Never! {
     c: db.indexes[ix].ai_column[i_col]
     if c >= 0 -> return a_xref[c] >= 0
     e: ast.list_expr(a, db.indexes[ix].col_expr, i_col)
@@ -39,7 +39,7 @@ index_column_is_being_updated: fn(db: conn.Conn, a: &ast.AST, ix: Int, i_col: In
 
 // indexWhereClauseMightChange: whether index ix is partial and its WHERE
 // clause uses a changed column.
-index_where_clause_might_change: fn(db: conn.Conn, a: &ast.AST, ix: Int, a_xref: [Int], chng_rowid: Bool) -> Bool Never! {
+index_where_clause_might_change: fn(db: conn.Conn, a: ^ast.AST, ix: Int, a_xref: [Int], chng_rowid: Bool) -> Bool Never! {
     pw: db.indexes[ix].part_idx_where
     if pw < 0 -> return false
     ins.expr_references_updated_column(a, pw, a_xref, chng_rowid)
@@ -47,7 +47,7 @@ index_where_clause_might_change: fn(db: conn.Conn, a: &ast.AST, ix: Int, a_xref:
 
 // exprRowColumn: a TK_ROW expression the resolver turns into column i_col
 // of the first FROM item.
-expr_row_column: fn(a: &ast.AST, i_col: Int) -> Int Never! {
+expr_row_column: fn(a: ^ast.AST, i_col: Int) -> Int Never! {
     e: ast.pexpr(a, tk.TK_ROW, -1, -1)
     if e >= 0 -> a.exprs[e].icolumn = i_col + 1
     e
@@ -58,7 +58,7 @@ expr_row_column: fn(a: &ast.AST, i_col: Int) -> Int Never! {
 // into ephemeral table i_eph: the rowid as its key for a rowid table, the
 // PRIMARY KEY (pk) columns as an index key for a WITHOUT ROWID table.
 // changes, src and where_expr are copied, not consumed.
-update_from_select: fn(p: &cg.Parse, a: &ast.AST, i_eph: Int, pk: Int, changes: Int, src: Int, where_expr: Int) -[DB]> Never! {
+update_from_select: fn(p: ^cg.Parse, a: ^ast.AST, i_eph: Int, pk: Int, changes: Int, src: Int, where_expr: Int) -[DB]> Never! {
     t: a.items[ast.src_item(a, src, 0)].tab
     new_src: ast.src_list_dup(a, src, 0)
     where2: ast.expr_dup(a, where_expr, 0)
@@ -102,7 +102,7 @@ no_where_info: fn() -> we.WhereInfo? Never! { None }
 // (each item's ename is the column). upsert (an INSERT's ON CONFLICT DO
 // UPDATE, -1 for none) is not supported in this build. The statement owns
 // and deletes its arguments, upsert apart.
-update: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) -[DB]> Never! {
+update: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) -[DB]> Never! {
     if cg.n_err(a) == 0 {
         if upsert >= 0 {
             ast.error(a, "ON CONFLICT DO UPDATE (upsert) is not supported in this build")
@@ -122,7 +122,7 @@ update: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: Int, o
 
 // The body of sqlite3Update up to its update_cleanup label; nc is the
 // NameContext over src.
-update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, nc: Int) -[DB]> Never! {
+update_body: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, nc: Int) -[DB]> Never! {
     t: dl.src_list_lookup(p, a, src)
     if t < 0 {
         return

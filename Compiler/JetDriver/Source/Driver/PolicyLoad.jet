@@ -51,7 +51,7 @@ jet_driver_policy_outer: fn(scope: PolicyScope) -> Bool Never! {
     scope == PolicyScope.Organization || scope == PolicyScope.Package || scope == PolicyScope.Module
 }
 
-jet_driver_load_policy: fn(program: &Program, package_policy: [PolicyDeclaration], path: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+jet_driver_load_policy: fn(program: ^Program, package_policy: [PolicyDeclaration], path: String, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if program.policy_declarations.len() == 0 && package_policy.len() == 0 -> return true
     // Rewrite only source-authored declarations, then prepend the package
     // chain. Package declarations retain their absolute manifest/carrier path.

@@ -7,7 +7,7 @@ use jet_foundation.[BodyUnitRounding, Dimension, Span, TTypeDef, Type, measure_s
 // `UnitConvert`: the magnitude times `scale`, plus `offset` (each a checked
 // "numerator/denominator" ratio). The identity conversion is the value
 // itself. A fallible conversion is checked exactly (ir_unit_convert_checked).
-ir_unit_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, span: Span) -> Int Never! {
+ir_unit_convert: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, span: Span) -> Int Never! {
     if fallible {
         return ir_unit_convert_checked(m, p, b, ty, argument, scale, offset, rounding, span)
     }
@@ -40,7 +40,7 @@ ir_unit_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argumen
 // the Core function filling its jet_builtins role proves the converted value
 // exact with rational arithmetic, failing with the conversion's String
 // reason. Its `Float String!` result is this node's Result of the unit.
-ir_unit_convert_checked: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, span: Span) -> Int Never! {
+ir_unit_convert_checked: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, span: Span) -> Int Never! {
     row: ir_core_role_row(p, ir_unit_conversion_role(rounding != None)) ?? return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)} without core.math")
     value: ir_expr(m, p, b, argument)
     if ir_failed(b) -> return -1
@@ -76,7 +76,7 @@ ir_unit_conversion_role: fn(rounded: Bool) -> String Never! {
 }
 
 // A String constant of static `text`.
-ir_unit_const_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
+ir_unit_const_text: fn(m: ^IRModule, b: ^IRBuilder, text: String) -> Int Never! {
     string_row: ir_string_row(m)
     slot: ir_temp(m, b, string_row)
     ir_emit(b.f, IROp.ConstText, slot, ir_intern_text(m, text), -1, -1, b.line)
@@ -84,7 +84,7 @@ ir_unit_const_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! 
 }
 
 // `slot op constant`, in `slot`'s Float row.
-ir_unit_float_op: fn(m: &IRModule, b: &IRBuilder, op: IROp, slot: Int, constant: Float) -> Int Never! {
+ir_unit_float_op: fn(m: ^IRModule, b: ^IRBuilder, op: IROp, slot: Int, constant: Float) -> Int Never! {
     operand: ir_temp_like(m, b, slot)
     ir_emit(b.f, IROp.Const, operand, ir_float_constant_bits(constant, false), -1, -1, b.line)
     dst: ir_temp_like(m, b, slot)
@@ -110,7 +110,7 @@ ir_unit_ratio_part: fn(text: String) -> Float Never! {
 // The text a unit value shows: its magnitude (jet_fmt_quantity, which drops
 // only an incidental `.0`) and its unit label, or -1 when `ty` carries no
 // unit.
-ir_unit_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int) -> Int Never! {
+ir_unit_text: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, slot: Int) -> Int Never! {
     label: ir_unit_label(p, ty) ?? return -1
     string_row: ir_string_row(m)
     magnitude: ir_runtime(m, b, "jet_fmt_quantity", [Int]{slot}, string_row)

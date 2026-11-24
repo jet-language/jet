@@ -201,7 +201,7 @@ InlineConfigDecl: struct {
 
 impl PackageFacts {
     // Apply one top-level `field: value` of a Package (or Config) carrier.
-    apply_field: fn(&self, field: String, value: String, config: Bool) PackageParseError! {
+    apply_field: fn(^self, field: String, value: String, config: Bool) PackageParseError! {
         if config && pkg_package_only_field(field) {
             return Err(PackageParseError.UnknownField(field))
         }
@@ -281,7 +281,7 @@ impl PackageFacts {
         }
     }
 
-    apply_authority: fn(&self, authority: AuthorityBlock) Never! {
+    apply_authority: fn(^self, authority: AuthorityBlock) Never! {
         if authority.allow != None || authority.deny != None {
             self.effects_enabled = true
             self.effects_allow = authority.allow

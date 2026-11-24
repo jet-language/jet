@@ -59,7 +59,8 @@ SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
 LITERAL_KINDS: [String]{"core.regex.Regex", "core.process.Sh", "core.db.SQL", "core.text.html.HTML"}
 
 // The built-in scalar types. A user names each unqualified, and a Core module's
-// `impl Float.Roundable` gives it methods in that module (core.math.Float).
+// `impl Float.Roundable` gives it methods in that module (core.math.Float). A
+// scalar that several modules give methods has them all (with_scalar_owners).
 BUILTIN_SCALARS: [String]{"Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Float", "F32", "Bool", "String", "Char"}
 
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
@@ -619,7 +620,7 @@ signature_text: fn(raw: [U8]) -> String Never! {
 result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_types: [String:Bool]) -> String Never! {
     if start >= tokens.len() -> return ""
     at := start
-    loop token(tokens, at) == "&" -> at += 1
+    loop token(tokens, at) == "^" -> at += 1
     first: token(tokens, at)
     if {
         is_identifier(first) -> at = after_generics(tokens, chain(tokens, at).end)
@@ -914,6 +915,34 @@ with_family_sizes: fn(table: Table, prelude: String) -> Table Never! {
 
 first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() }
 
+// `table` with each method a module gives a built-in scalar also the method of
+// that scalar in every other module that gives it methods. A user names the
+// scalar unqualified, so `F32{2.5}.rounded(mode)` calls core.math.F32.rounded
+// even when the scalar's alias is core.encoding.F32, which `impl F32.Decode`
+// gives `decode`.
+with_scalar_owners: fn(table: Table) -> Table Never! {
+    owners := [String:[String]]{}
+    loop (owner, _) in table.types {
+        scalar: owner.rpartition(".").tail
+        if !BUILTIN_SCALARS.contains(scalar) -> next
+        known := owners.get(scalar) ?? [String]{}
+        known.push(owner.copy())
+        owners[scalar.copy()] = known
+    }
+    out := table.copy()
+    loop (id, index) in table.by_id {
+        split: id.rpartition(".")
+        known: owners.get(split.head.rpartition(".").tail) ?? [String]{}
+        if !known.contains(split.head) -> next
+        loop owner in known {
+            if !out.by_id.has_key("{owner}.{split.tail}") {
+                out.by_id["{owner}.{split.tail}"] = index
+            }
+        }
+    }
+    out
+}
+
 // The aliases a program starts with: `core`, `app`, every prelude function and
 // type, every typed-literal kind and every built-in scalar a Core module gives
 // methods (a user names them unqualified) and, for a doctest, the names of its
@@ -1004,13 +1033,13 @@ chained_type: fn(tokens: [Token], table: Table, typed: String, open: Int) -> Str
     }
 }
 
-bind: fn(map: &[String:String], undo: &[Undo], binding: Binding, key: String, value: String) {
+bind: fn(map: ^[String:String], undo: ^[Undo], binding: Binding, key: String, value: String) {
     undo.push(Undo{binding: binding, key: key.copy(), previous: map.get(key) ?? ""})
     map[key.copy()] = value.copy()
 }
 
 // Undo every binding made since `mark`.
-restore: fn(aliases: &[String:String], receivers: &[String:String], undo: &[Undo], mark: Int) {
+restore: fn(aliases: ^[String:String], receivers: ^[String:String], undo: ^[Undo], mark: Int) {
     loop undo.len() > mark {
         entry: undo.pop() ?? break
         if entry.binding == .Receiver {
@@ -1024,7 +1053,7 @@ restore: fn(aliases: &[String:String], receivers: &[String:String], undo: &[Undo
 // Bind the rows of the `use` whose first row starts at token `start`; the
 // index after the `use`. A row is `path`, `path.[a, b]` or `alias: path`;
 // `use { row row … }` holds several.
-read_use: fn(tokens: [Token], start: Int, aliases: &[String:String], undo: &[Undo]) -> Int Never! {
+read_use: fn(tokens: [Token], start: Int, aliases: ^[String:String], undo: ^[Undo]) -> Int Never! {
     at := start
     block: token(tokens, at) == "{{"
     if block -> at += 1
@@ -1129,7 +1158,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         listed: token(tokens, i - 1) == "(" || token(tokens, i - 1) == ","
         if is_identifier(value) && (follow == ":" || follow == ":=") {
             at := i + 2
-            loop token(tokens, at) == "&" || token(tokens, at) == "~" || token(tokens, at) == "comptime" {
+            loop token(tokens, at) == "^" || token(tokens, at) == "~" || token(tokens, at) == "comptime" {
                 at += 1
             }
             rhs: chain(tokens, at)
@@ -1256,7 +1285,7 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
 }
 
 // The fenced ```jet (or bare ```) programs of one doc block.
-fenced_programs: fn(block: String, programs: &[String]) {
+fenced_programs: fn(block: String, programs: ^[String]) {
     raw: block.bytes()
     at := 0
     loop at < raw.len() {
@@ -1415,13 +1444,13 @@ embedded_programs: fn(source: String) -> [String] Never! {
     programs
 }
 
-candidate: fn(program: String, programs: &[String]) {
+candidate: fn(program: String, programs: ^[String]) {
     if EMBEDDED_PROGRAM.is_match(program) -> programs.push(program.copy())
 }
 
 // Files under `path`, each directory's names in collation order; dot names,
 // `expected`, `node_modules`, `target` and symbolic links are skipped.
-files_under: fn(root: String, path: String, found: &[String]) -[FS]> CoverageError! {
+files_under: fn(root: String, path: String, found: ^[String]) -[FS]> CoverageError! {
     listed: files.list_dir("{root}/{path}") ?? return Err(fail("`{path}` cannot be listed: {err}"))
     names := [String]{}
     directories := [String:Bool]{}
@@ -1474,7 +1503,7 @@ part_paths: fn(root: String) -[FS]> [String:Bool] CoverageError! {
     Ok(paths)
 }
 
-record: fn(functions: &[Function], seen: &[String:Bool], table: Table, program: String, file: String, kind: Int, initial: [String:String]) {
+record: fn(functions: ^[Function], seen: ^[String:Bool], table: Table, program: String, file: String, kind: Int, initial: [String:String]) {
     lines: newlines(program.bytes())
     loop call in call_sites(program, table, initial) {
         evidence: "{file}:{line_of(lines, call.offset)}"
@@ -1491,7 +1520,7 @@ record: fn(functions: &[Function], seen: &[String:Bool], table: Table, program: 
 
 // Credits each ROUTES row's function with its witness. A tree without the
 // table (a fixture) routes nothing.
-routed: fn(root: String, functions: &[Function], table: Table) -[FS]> CoverageError! {
+routed: fn(root: String, functions: ^[Function], table: Table) -[FS]> CoverageError! {
     if !files.exists("{root}/{ROUTES}") -> return Ok()
     source: read_source(root, ROUTES) ?? return Err(err)
     loop line in source.split("\n") {
@@ -1593,7 +1622,7 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     loop index in 0..<paths.len() {
         if paths[index] == "Core/Prelude/Prelude.jet" -> prelude = sources[index].copy()
     }
-    table: with_family_sizes(inventory, prelude)
+    table: with_scalar_owners(with_family_sizes(inventory, prelude))
     bare: bare_spellings(root)
     seen := [String:Bool]{}
     loop index in 0..<paths.len() {
@@ -1841,7 +1870,7 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
     Decision{passes: previous.present && unlisted.len() == 0, unlisted: unlisted.copy(), removable: removable, next: next_entries.copy()}
 }
 
-keep_row: fn(kept_at: &[String:Int], kept: &[Untested], own: String, row: Untested) {
+keep_row: fn(kept_at: ^[String:Int], kept: ^[Untested], own: String, row: Untested) {
     slot: kept_at.get(own) ?? -1
     if {
         slot >= 0 -> kept[slot] = row.copy()
@@ -2048,7 +2077,7 @@ fixture_rows: fn() -> [Function] Never! {
     rows.extend(public_functions("Core/Math/Math.jet", "trim: fn() -> Int Never! {{ 1 }}\n    impl Float.Roundable {{ rounded: fn(self) -> Float Never! {{ self }} }}"))
     rows.extend(public_functions("Core/Crypto/Crypto.jet", "Hasher: struct {{\n    new: fn() -> Hasher Never! {{ {{}} }}\n    digest: fn(self) -> String Never! {{ \"\" }}\n  }}\n  new: fn() -> Hasher Never! {{ Hasher.new() }}"))
     rows.extend(public_functions("Core/Process/Process.jet", "Sh: struct {{\n    argv: [String],\n    ok: fn(self) -> Bool Never! {{ true }}\n  }}\n  block: fn() -> Block Never! {{ panic(\"none\") }}"))
-    rows.extend(public_functions("Core/Mem/Mem.jet", "Region: struct {{\n    claim: fn(&self) -> Block? Never! {{ None }}\n    next: fn(self) -> Region Never! {{ self }}\n    last: fn(self) -> Block Never! {{ Block{{}} }}\n  }}\n  Block: struct {{\n    address: fn(self) -> Int Never! {{ 0 }}\n    impl Display {{ display: fn(self) -> String {{ \"\" }} }}\n  }}\n  Window: struct<T> {{\n    len: fn(self) -> Int Never! {{ 0 }}\n  }}\n  reserve: fn() -> Region Never! {{ Region{{}} }}\n  window: fn<T>() -> Window<T> Never! {{ Window<T>{{}} }}"))
+    rows.extend(public_functions("Core/Mem/Mem.jet", "Region: struct {{\n    claim: fn(^self) -> Block? Never! {{ None }}\n    next: fn(self) -> Region Never! {{ self }}\n    last: fn(self) -> Block Never! {{ Block{{}} }}\n  }}\n  Block: struct {{\n    address: fn(self) -> Int Never! {{ 0 }}\n    impl Display {{ display: fn(self) -> String {{ \"\" }} }}\n  }}\n  Window: struct<T> {{\n    len: fn(self) -> Int Never! {{ 0 }}\n  }}\n  reserve: fn() -> Region Never! {{ Region{{}} }}\n  window: fn<T>() -> Window<T> Never! {{ Window<T>{{}} }}"))
     rows
 }
 
@@ -2113,18 +2142,18 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("a bare impl inside a type belongs to it, and operator overloads share one row") {
-    found: public_functions("Core/Demo/Demo.jet", "Kind: enum {{\n      One,\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    Vec: struct {{ impl Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }} }}\n    impl Vec.Mul {{ mul: fn(self, rhs: Vec) -> Vec Never! {{ rhs }} }}\n    impl Vec.Mul(Float) {{ mul: fn(self, rhs: Float) -> Vec Never! {{ self }} }}\n  ")
+    found: public_functions("Core/Demo/Demo.jet", "Kind: enum {{\n      One,\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    Vec: struct {{ impl Debug {{ debug: fn(^^self) -> String Never! {{ \"\" }} }} }}\n    impl Vec.Mul {{ mul: fn(self, rhs: Vec) -> Vec Never! {{ rhs }} }}\n    impl Vec.Mul(Float) {{ mul: fn(self, rhs: Float) -> Vec Never! {{ self }} }}\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.Kind.display", "core.demo.Vec.debug", "core.demo.Vec.mul"})
 }
 
 #Test("an impl of a reserved trait is named by that trait, outside the surface") {
-    found: public_functions("Core/Demo/Demo.jet", "Reader: struct {{\n      impl __Cursor {{ next: fn(&self) -> Bool Never! {{ true }} }}\n    }}\n    impl Reader {{ open: fn(&self) -> Bool Never! {{ true }} }}\n    impl Reader.__Source {{ skip: fn(&self) {{}} }}\n    impl Reader.Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n  ")
+    found: public_functions("Core/Demo/Demo.jet", "Reader: struct {{\n      impl __Cursor {{ next: fn(^self) -> Bool Never! {{ true }} }}\n    }}\n    impl Reader {{ open: fn(^self) -> Bool Never! {{ true }} }}\n    impl Reader.__Source {{ skip: fn(^self) {{}} }}\n    impl Reader.Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.Reader.__Cursor.next", "core.demo.Reader.open", "core.demo.Reader.__Source.skip", "core.demo.Reader.display"})
     assert_eq(found.map(fn(row) { outside_surface(row) }), [Bool]{true, false, true, false})
 }
 
 #Test("a priv type's methods, in its body and its impls, and a priv trait's impls are no surface") {
-    found: public_functions("Core/Demo/Demo.jet", "priv Cursor: struct {{\n      next: fn(&self) -> Bool Never! {{ true }}\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    impl Cursor {{ reset: fn(&self) {{}} }}\n    impl Cursor.Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }}\n    priv(package) Mode: enum {{\n      On,\n      flip: fn(self) -> Mode Never! {{ self }}\n    }}\n    Reader: struct {{ open: fn(&self) -> Cursor Never! {{ Cursor{{}} }} }}\n    priv Scalar: trait {{ twice: fn(self) -> Self Never! }}\n    impl Int.Scalar {{ twice: fn(self) -> Int Never! {{ self * 2 }} }}\n  ")
+    found: public_functions("Core/Demo/Demo.jet", "priv Cursor: struct {{\n      next: fn(^self) -> Bool Never! {{ true }}\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    impl Cursor {{ reset: fn(^self) {{}} }}\n    impl Cursor.Debug {{ debug: fn(^^self) -> String Never! {{ \"\" }} }}\n    priv(package) Mode: enum {{\n      On,\n      flip: fn(self) -> Mode Never! {{ self }}\n    }}\n    Reader: struct {{ open: fn(^self) -> Cursor Never! {{ Cursor{{}} }} }}\n    priv Scalar: trait {{ twice: fn(self) -> Self Never! }}\n    impl Int.Scalar {{ twice: fn(self) -> Int Never! {{ self * 2 }} }}\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.Reader.open"})
 }
 
@@ -2176,6 +2205,17 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 
 #Test("a built-in scalar that a Core impl gives methods is named unqualified") {
     assert_eq(ids("run: fn(x: Float) {{\n      Float{{2.5}}.rounded()\n      x.rounded()\n      Int{{2}}.rounded()\n    }}", ""), [String]{"core.math.Float.rounded", "core.math.Float.rounded"})
+}
+
+#Test("a built-in scalar that two modules give methods has the methods of both") {
+    rows := public_functions("Core/Encoding/Encoding.jet", "impl F32.Decode {{ decode: fn(tree: Dyn) -> F32 Never! {{ F32{{0.0}} }} }}")
+    rows.extend(public_functions("Core/Math/Math.jet", "impl F32.Roundable {{ rounded: fn(self) -> F32 Never! {{ self }} }}"))
+    table: with_scalar_owners(table_of(rows))
+    found := [String]{}
+    loop call in call_sites("run: fn(x: F32) {{\n      F32{{2.5}}.rounded()\n      x.rounded()\n      F32.decode(tree)\n    }}", table, initial_aliases(table, "")) {
+        found.push(table.ids[call.index].copy())
+    }
+    assert_eq(found, [String]{"core.math.F32.rounded", "core.encoding.F32.decode", "core.math.F32.rounded"})
 }
 
 #Test("a named argument binds nothing, so it cannot shadow a module alias") {
@@ -2335,8 +2375,8 @@ find_function: fn(report: Report, name: String) -> Function Never! {
 }
 
 #Test("signatures keep generics, parameters and the result type, without comments or layout") {
-    found: public_functions("Core/Demo/Demo.jet", "plain: fn() {{}}\n    pick: fn<T: [Encode, Decode]>(\n        items: [T], // the source\n        at: Int,\n    ) -> T? Never! {{ None }}\n    Box: struct {{ put: fn(&self, value: fn(Int) -> Int) -[FS]> Bool Never! {{ true }} }}\n    answer: fn(value: Int) -[Time.Wait]> {{ print(value) }}\n    pair: fn() -[IO]> {{x: Int}} {{ {{x: 1}} }}\n    send: fn(text: String) -[Net]> IOError! {{ print(text) }}\n  ")
-    assert_eq(found.map(fn(row) { row.signature.copy() }), [String]{"()", "<T: [Encode, Decode]>(items: [T], at: Int) -> T?", "(&self, value: fn(Int) -> Int) -> Bool", "(value: Int)", "() -> {{x: Int}}", "(text: String)"})
+    found: public_functions("Core/Demo/Demo.jet", "plain: fn() {{}}\n    pick: fn<T: [Encode, Decode]>(\n        items: [T], // the source\n        at: Int,\n    ) -> T? Never! {{ None }}\n    Box: struct {{ put: fn(^self, value: fn(Int) -> Int) -[FS]> Bool Never! {{ true }} }}\n    answer: fn(value: Int) -[Time.Wait]> {{ print(value) }}\n    pair: fn() -[IO]> {{x: Int}} {{ {{x: 1}} }}\n    send: fn(text: String) -[Net]> IOError! {{ print(text) }}\n  ")
+    assert_eq(found.map(fn(row) { row.signature.copy() }), [String]{"()", "<T: [Encode, Decode]>(items: [T], at: Int) -> T?", "(^self, value: fn(Int) -> Int) -> Bool", "(value: Int)", "() -> {{x: Int}}", "(text: String)"})
 }
 
 untested_row: fn(unit: String, name: String, signature: String) -> Untested Never! {

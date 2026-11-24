@@ -332,7 +332,7 @@ sema_app_caller_names: fn(graph: SemaRegistrationGraph, function: FnBody, caller
 }
 
 // Adds each symbol `function` calls or names to `callees`.
-sema_app_caller_scan_calls: fn(graph: SemaRegistrationGraph, function: FnBody, callees: &[U32:Bool]) Never! {
+sema_app_caller_scan_calls: fn(graph: SemaRegistrationGraph, function: FnBody, callees: ^[U32:Bool]) Never! {
     loop i in 0..<function.tree.nodes.len() {
         if sema_app_caller_callee(graph, function, function.tree.nodes[i].kind) == .Val(symbol) {
             callees[symbol] = true
@@ -342,7 +342,7 @@ sema_app_caller_scan_calls: fn(graph: SemaRegistrationGraph, function: FnBody, c
 
 // Walks a root: one where a caller is certain (a signed-in method) only for
 // the tasks it spawns, any other as where a path starts.
-sema_app_caller_root: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, row: Int, account: SemaAppCallerAccount, walk: &SemaAppCallerWalk) Never! {
+sema_app_caller_root: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, row: Int, account: SemaAppCallerAccount, walk: ^SemaAppCallerWalk) Never! {
     entry: program.functions[row]
     walk.root = "`{sema_app_caller_name(modules[entry.module_index].functions[entry.function_index])}`"
     sema_app_caller_function(graph, modules, program, row, account, walk)
@@ -350,7 +350,7 @@ sema_app_caller_root: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
 
 // Walks function `row`'s body once for each `account`, as the next step of
 // the walk's path.
-sema_app_caller_function: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, row: Int, account: SemaAppCallerAccount, walk: &SemaAppCallerWalk) Never! {
+sema_app_caller_function: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, row: Int, account: SemaAppCallerAccount, walk: ^SemaAppCallerWalk) Never! {
     entry: program.functions[row]
     if account == {
         .Certain -> {
@@ -376,7 +376,7 @@ sema_app_caller_function: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
 
 // One statement of a walked body. Its own function so the visitor closure
 // is the last use of the `walk` write parameter (as in PureRoot.jet).
-sema_app_caller_statement: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, statement: Int, account: SemaAppCallerAccount, walk: &SemaAppCallerWalk) Never! {
+sema_app_caller_statement: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, statement: Int, account: SemaAppCallerAccount, walk: ^SemaAppCallerWalk) Never! {
     body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_app_caller_expr(graph, modules, program, module_index, function, expression, account, walk) })
 }
 
@@ -385,7 +385,7 @@ sema_app_caller_statement: fn(graph: SemaRegistrationGraph, modules: [SemaGraphM
 // `task` starts a path, since it acts for no account. A call into another
 // function outside Core walks it, and a signed-in method as certain however
 // it is reached; a lambda's body is walked where it is written.
-sema_app_caller_expr: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, expression: Int, account: SemaAppCallerAccount, walk: &SemaAppCallerWalk) Never! {
+sema_app_caller_expr: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, expression: Int, account: SemaAppCallerAccount, walk: ^SemaAppCallerWalk) Never! {
     node: body_node(function.tree, expression)
     callee: sema_app_caller_callee(graph, function, node.kind) ?? U32{0}
     certain: account == .Certain
@@ -415,7 +415,7 @@ sema_app_caller_spawns: fn(kind: NodeKind) -> Bool Never! {
 }
 
 // A `task` spawned where a caller is certain: its body starts a path.
-sema_app_caller_spawn: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, expression: Int, walk: &SemaAppCallerWalk) Never! {
+sema_app_caller_spawn: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], program: SemaAppCallerProgram, module_index: Int, function: FnBody, expression: Int, walk: ^SemaAppCallerWalk) Never! {
     outer: "{walk.root}"
     walk.root = "a `task` spawned in `{sema_app_caller_name(function)}`"
     walk.path.push("task")

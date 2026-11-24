@@ -81,17 +81,17 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
 | `compiler.query(source, kind, at:, limit:)` | the one typed fact query of `core.compiler`: the `[Fact]` rows of one `FactKind` in an explicit immutable `FactSource` (`.Schema`, `.Program` or `.Run`), or a `MetadataError`, never a partial or empty stand-in; `jet inspect facts --store=… --kind=…` renders the same rows |
 | `fn(…) { … }` | lambda: a function binding's value without its name; a passed lambda leaves out the parameter types, effect row and result its expected callable type fixes (`xs.filter(fn(n) { n > 2 })`), a stored one writes them as a named function does (`square: fn(n: Int) -> Int { n * n }`); the body is always braced and its last value is the result |
-| `value.method` | bound method value: where a function type or an optional one is expected (an argument, a struct field, a list element, a return value), a method read without parentheses is the method with its receiver bound, the lambda `fn(a) { value.method(a) }` checked against that type; the receiver is evaluated once and kept as a closure keeps a capture, so a `&self` method over a copied receiver is refused; anywhere else, a union included, the read is a forgotten call, and a type with both a field and a method of the name makes it an error naming both |
+| `value.method` | bound method value: where a function type or an optional one is expected (an argument, a struct field, a list element, a return value), a method read without parentheses is the method with its receiver bound, the lambda `fn(a) { value.method(a) }` checked against that type; the receiver is evaluated once and kept as a closure keeps a capture, so a `^self` method over a copied receiver is refused; anywhere else, a union included, the read is a forgotten call, and a type with both a field and a method of the name makes it an error naming both |
 | `-[…]` | effect row on a callable; a signature has, after its parameters, nothing or exactly one arrow, `->` or `-[Effects]>`, then its optional result type, then its optional error contract (`load: fn(p: Path) -[FS.Read]> String IOError!`); a unit function that can fail writes the arrow and its contract alone (`save: fn(p: Path) -[FS.Write]> IOError!`), and a contract written before the arrow is not Jet syntax |
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row |
 | `?` | optional type mark after its type (`T?`) |
 | `??` | fallback |
 | `\|>` | pipe step: the expression after it runs on the value from the line above, which it reads as `<>`; each step is a hidden one-step binding |
 | `<>` | the value of the nearest enclosing `\|>` step, legal only inside a step, which must read it at least once; in an `if` table header, the hole each arm's candidate fills |
-| `x.move()` | an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self` |
-| `&&T / &&self` | take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked |
-| `fn(&T) / fn(&&T)` | a function type marks a written input `&` and a taken one `&&`, as a declaration does (`action: fn(&Mobj)`); a function or lambda fits it only when its marks match (E0227), and a stored one is called plainly (`st.action(m)`) |
-| `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
+| `x.move()` | an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `^^T` or `^^self` |
+| `^^T / &&self` | take mark in a signature, and `task ^^name` for a task capture; `^T` / `^self` is the write mark; calls stay unmarked |
+| `fn(^T) / fn(^^T)` | a function type marks a written input `^` and a taken one `^^`, as a declaration does (`action: fn(^Mobj)`); a function or lambda fits it only when its marks match (E0227), and a stored one is called plainly (`st.action(m)`) |
+| `^self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
 | `T{expr}` | field default |
 | `Name{"…"}` | checked text head |
 | `{ … }` | record, the unnamed struct: `{x: 1, y: 2}` as a value, `{min: Int, max: Int}` as a type, `{min, max}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{x}` is a block, `{x, y}` and `{x: x}` are records and `{}` is a block; where a struct type is expected the same braces build it; braces after a signature, a control head or a block marker hold code, and a paren tuple `(x: 1)` is not Jet syntax |
@@ -347,7 +347,7 @@ naming `!=`. `^=` is not Jet syntax: a power
 update is `x = x.pow(n)`. `String += piece`
 appends text (a String or a borrowed text view); ordinary text construction
 still uses interpolation, not binary `+`. The append preserves explicitly
-copied values. The place must be mutable or reached through an `&` parameter.
+copied values. The place must be mutable or reached through an `^` parameter.
 Fields, including fields reached through list elements, support text append;
 direct indexed compound updates remain E0164 (copy, update, then store), and a
 map slot with a starting value takes them in place: `counts[w, or: 0] += 1`.
@@ -519,7 +519,7 @@ flags and the retirement of `jet -e` are not yet built.
 **D-SCRIPT-HELPERS1=A — a script's functions use the script's locals** *(amends
 D-ENTRY-STATEMENTS1)*: a function declared in a file of top-level statements
 may use the file's locals. The checker gives it one label-only parameter per
-local it names, `&` when its body changes the local and a read otherwise, with
+local it names, `^` when its body changes the local and a read otherwise, with
 the local itself as the default: each call in the file passes the caller's
 binding, and a call from elsewhere, such as a `#Test`, passes it by name. The
 function's own parameter or top-level local of the same spelling hides the
@@ -628,7 +628,7 @@ deleted in this greenfield language. The surface reuses existing marker,
 member, and `=` grammar; no new token is added.
 
 **S27 — Methods**: `self` receiver with capability sigils (`^self`,
-`&self`; bare `self` = read, D-MEM1). Call `value.method(args)`. Methods live in the
+`^self`; bare `self` = read, D-MEM1). Call `value.method(args)`. Methods live in the
 type body, in `impl Type { }`, or top-level `Type.method: fn(self)`
 (**D-EXTMETH1** — `.` connector, orphan rule: same source module; `~~` retired
 → E0325). No-`self` fn in a type = static method (`Circle.unit()`).
@@ -678,9 +678,9 @@ See the executable [lambda interface example](../../Examples/Basics/Functions/La
 
 **S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
 parameter has plain read access (D-MEM-PARAM1). A parameter type marks a
-written input `&` or a taken input `&&`, as a declaration does: `fn(&[Int])`
-writes its argument in place and `fn(&&Map)` takes it. A lambda parameter
-marks its access the same way (`(buf: &[Int]) -> buf.push(1)`); an unmarked
+written input `^` or a taken input `^^`, as a declaration does: `fn(^[Int])`
+writes its argument in place and `fn(^^Map)` takes it. A lambda parameter
+marks its access the same way (`(buf: ^[Int]) -> buf.push(1)`); an unmarked
 lambda parameter takes the access of the function type it fills, and a marked
 one must match it (E0113). Named `fn`s coerce to function values only where
 the function type marks every parameter as the declaration does (E0227), and a
@@ -707,7 +707,7 @@ value, typed from the checked payload and the enum through the same function
 type, binder, S30 labels and effects as a lambda making the call. A single
 payload stays positional; a named payload's labels stay label-only
 (`fn(*, left: Int, right: Int) -> Message`). A payload the copy law can't copy
-out of a read parameter is taken (`fn(&&T)`), so that value fits only a
+out of a read parameter is taken (`fn(^^T)`), so that value fits only a
 function type marking the take (E0227); no label or take is erased to fit.
 Type arguments are written on the case or come from the expected function
 type's result. A unit case stays a value, leading-dot shorthand never infers a
@@ -752,8 +752,8 @@ parentheses is the method with its receiver bound: `each(ids, crew.tell)`
 passes `fn(id) { crew.tell(id) }`. Sema writes it as that lambda, checked
 against the expected type, so it adds no runtime path. The receiver is
 evaluated once at the read and kept as a closure keeps a capture; one it
-cannot keep is refused naming it. A `&self` method stored or passed on over
-a copy of its receiver, and a `&&self` method, are E0924. A union never
+cannot keep is refused naming it. A `^self` method stored or passed on over
+a copy of its receiver, and a `^^self` method, are E0924. A union never
 counts as a function slot: there, as anywhere else, the read is a forgotten
 call, E0924 with an edit that adds `()`. Where a function is expected and the
 type has both a field and a method of the name, the read is E0950, which
@@ -856,7 +856,7 @@ conversion. Does not reopen D-ANY-JAI1.
 its members is expected, at the places a member value already widens
 (argument, return, binding, struct field, assignment, list element). Each
 member keeps its own case of the wider union, and a union with a member the
-target lacks is E0112. Only the value converts: a `&` parameter takes exactly
+target lacks is E0112. Only the value converts: a `^` parameter takes exactly
 its union type, and containers of the smaller union are not containers of the
 larger. Declared enums keep their explicit conversion boundary.
 
@@ -1066,7 +1066,7 @@ still lower directly to jumps; no iterator object or allocation is added.
 Range arm heads and `distinct Int(0..10)` constraints stay literal-only.
 D-SHAPE-PLACE1's retired `.view(range)` method remains retired; bracket slicing
 is the one live range-place surface. A bare place projection such as
-`window: values[range]` is a no-copy `View`; `&values[range]` is a
+`window: values[range]` is a no-copy `View`; `^values[range]` is a
 write-through `ViewMut`. Write `values[range].copy()` when an independent list copy
 must outlive or detach from the owner.
 The parser keeps a retired `.view(range)` as an ordinary call for the E0214
@@ -1195,8 +1195,8 @@ fix writes `<>`. A header whose whole test, ignoring parentheses, is
 `subject OP <>` or `<> OP subject` is E0441, whose fix deletes the `<>` (and
 flips the operator when `<>` stood on the left). A pattern or range arm in a
 hole table is E0948, whose fix is `if subject == {`. A call in a hole header
-that has an effect, or that changes a value it is given (`&`) or is called on
-(`&self`), is E0442, whose fix names the value on the line above, as the
+that has an effect, or that changes a value it is given (`^`) or is called on
+(`^self`), is E0442, whose fix names the value on the line above, as the
 method's name or `value`, and reads the name in the header; it is applied when
 the table starts its statement and shown otherwise, and a call that holds the
 `<>` gets plain tests instead. A pure call stays. A hole table used as a value
@@ -1214,7 +1214,7 @@ model without a named subject, not a separate or lesser branching mechanism.
 It keeps `->` because each arrow selects one arm, including an arm yielding `()`. Each
 head is an arbitrary `Bool` expression evaluated in order; the first true head
 wins. A value table requires a final `else` and all result types unify. A
-pattern binding under `&&` reaches the rest of that head and its body;
+pattern binding under `^^` reaches the rest of that head and its body;
 a binding under `||` never reaches the body. A table whose every head starts
 with a pattern test of the same closed enum emits L0302 recommending exhaustive
 subject dispatch. Fmt keeps a fitting inline guard on one line, widens an
@@ -1239,7 +1239,7 @@ graph itself. Protocol transport arrows are retired.
 
 **S31 — Pattern tests**: `==` with a pattern RHS when the LHS is an enum or
 `?T` — `if s == .Rect(w, h)`, `x == .None` — yields Bool. Patterns nest to any
-depth (`r == .Ok(.Rect(w, h))`). Guards are plain `&&`: a pattern-bound name is
+depth (`r == .Ok(.Rect(w, h))`). Guards are plain `^^`: a pattern-bound name is
 in scope for the rest of the same condition. No `is`, no Rust `match`. Bare
 variant names without a leading `.` are E0367 (D-ENUMDOT1).
 
@@ -1299,7 +1299,7 @@ pattern (`loop shape in shapes { if shape == .Circle(r) -> … }`) or
 otherwise. A payload bound from a borrowed list is a loan of that list's
 element; a view of it may leave the function only under a `from` clause that
 names the list, and naming another owner is E2305. Moving the payload out
-takes the list (`&&[Shape]` or a consuming loop). A checked downcast of a
+takes the list (`^^[Shape]` or a consuming loop). A checked downcast of a
 foreign value is not Jet syntax: foreign values arrive through typed binders
 (`#Import module`, `extern rust`) whose declarations give them Jet types, and
 a value whose shape varies is declared as an enum and selected as above, or
@@ -1451,7 +1451,7 @@ power is `value.pow(exponent)`
 on Int and Float. It lowers through the existing numeric operations
 and shared Prelude, with the same integer-width, exactness, overflow-policy
 and D-EXPNEG1 negative-exponent rules. Shifts remain `<<` and `>>`. Prefix
-`&` and `^` retain their ownership meanings; copying is `.copy()` (D-COPY-WORD1),
+`^` and `^` retain their ownership meanings; copying is `.copy()` (D-COPY-WORD1),
 and `!` negates Bool only.
 A written negative Int exponent (including a parenthesized negative numeral)
 selects Fraction; positive literals and negative zero remain Int. An exponent
@@ -1823,7 +1823,7 @@ module reads but only its own module changes is a public computed field over a
 `priv` stored one, `priv stored_path: String` beside `path: String ->
 stored_path`. Nothing writes a computed field, not even its own module: an
 assignment or compound assignment (`lock.path = …`, `s.count += 1`), a write
-loan (`edit(lock.path)` to a `&` parameter, a method that writes its
+loan (`edit(lock.path)` to a `^` parameter, a method that writes its
 receiver) and a take (`lock.path.move()`) are each E0339, directly or through
 a field, element or range below it (`h.lock.path = …`, `s.items[0] = …`). The
 check runs before the owner's mutability, so a computed target reports E0339
@@ -2142,7 +2142,7 @@ one. Inside an enum table arm, the tested local is in the arm's case. State
 types erase to the plain type before registration, so struct states cost
 nothing at run time. A `#State(S)` or `#State(A -> B)` marker is retired: one
 E0175 per owner carries one `jet fix` edit that writes each marker's states
-into its signature (`self: &&Order.A`, `-> Order.B`) and its moves into the
+into its signature (`self: ^^Order.A`, `-> Order.B`) and its moves into the
 state list, and deletes the markers; a marker the edit cannot settle (no owner,
 a generic owner, no state list, or a signature not written with the owner's
 name) is reported without one. A marker in another shape is still E0930. Only
@@ -2217,8 +2217,8 @@ mutable binding insert or replace without creating missing containers.
 The map slot `m[k, or: start]` (D-MAP-SLOT1=A) looks `k` up once. As a value
 it reads the stored value, or `start` for a missing key, and adds no entry. As
 a place it adds `start` under a missing key first: `counts[w, or: 0] += 1`,
-`groups[w, or: [String]{}].push(w)` (`&groups[…].push(w)` under
-`#Policy(writes: .Explicit)`) and `slot: &m[k, or: start]` each insert at
+`groups[w, or: [String]{}].push(w)` (`^groups[…].push(w)` under
+`#Policy(writes: .Explicit)`) and `slot: ^m[k, or: start]` each insert at
 most once. `start` runs only for a missing key, and a plain
 `m[k, or: start] = v` sets `k` without running it. It is the one upsert
 spelling.
@@ -2666,7 +2666,7 @@ D-ERR-DECON1 owns the one bare-value-or-diverging-tail rule for fallback
 blocks.
 
 The consumer retains a direct call's carrier through parentheses and access
-marks (`&reader.next()`), without pre-propagating that call. A mixed carrier
+marks (`^reader.next()`), without pre-propagating that call. A mixed carrier
 that must preserve absence while mapping its report uses a three-state
 `.Val(value)` / `.None` / `.Err(error)` table (D-OUTCOME-SHAPE1=A), rather
 than naming `err` in the shared `??` fallback. Internal compiler-call report
@@ -3007,7 +3007,7 @@ the `#` plane (see Serde under Core library).
 user-facing — a single explicit method `display: fn(self) -> String`, no
 default (E0915, L0520). Bare `self` gives read access (D-MEM1), not ownership:
 printing and interpolation `{}` borrow the value and leave it available;
-`display(^self)` and `display(&self)` do not match this contract.
+`display(^self)` and `display(^self)` do not match this contract.
 `#Error` marks an error type; it does not synthesize `Display`. Source-owned
 Core errors register their explicit formatting implementations through the
 same trait registry as user types, without a duplicate builtin implementation.
@@ -3489,18 +3489,18 @@ enforced (no elevation, no inference tier):
 
 ```jet
 T     // read: default, enforced — never elevates
-&T    // write: exclusive write access
+^T    // write: exclusive write access
 ^T    // take: ownership moved/consumed
 ```
 
 ```jet
-write: fn(file: &File, data: Bytes)     // read is the default → no sigil
-equip: fn(player: &Player, item: ^Item)
+write: fn(file: ^File, data: Bytes)     // read is the default → no sigil
+equip: fn(player: ^Player, item: ^Item)
 ```
 
-Call sites mirror the type — `write(&file, data)`, `close(^file)`; receivers
-carry it on self (`write: fn(&self)`, `destroy: fn(^self)`, bare `self` =
-read). Capability sits on the type side (`name: &Type`, D-CAP3). `copy x`
+Call sites mirror the type — `write(^file, data)`, `close(^file)`; receivers
+carry it on self (`write: fn(^self)`, `destroy: fn(^self)`, bare `self` =
+read). Capability sits on the type side (`name: ^Type`, D-CAP3). `copy x`
 stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
 (composes: `p.*.field`); prefix `*x` is raw-pointer-of only, `#Unsafe`-gated
 (D-CAP9), and is not a parameter capability. `mut`/`take`/`view` are not
@@ -3511,8 +3511,8 @@ D-MEM1/S3).
 and `~x` are historical text in this frozen entry, not current syntax. The
 current copy form is `x.copy()`; the retired forms teach E0991 and E0941.
 
-*Supersession (D-CALLSITE-MARK2=A, D-MOVE-SIGIL1=A):* the take mark is `&&T`
-and `&&self`; `^T` and the mirrored call-site marks in this frozen entry are
+*Supersession (D-CALLSITE-MARK2=A, D-MOVE-SIGIL1=A):* the take mark is `^^T`
+and `^^self`; `^T` and the mirrored call-site marks in this frozen entry are
 historical text. Calls are written plain.
 
 *History:* D-CAP7's original text (pre-2026-07-03) had a third visible
@@ -3538,13 +3538,13 @@ humanized"** *(ratified 2026-07-03; unmarked-read law reconfirmed 2026-07-15,
 card #642)*: supersedes the D-CAP7
 spelling assignments and D-CAP8 when the migration lands. Three sigils:
 unmarked = read (enforced — no elevation, no freeze; no `api:` manifest field),
-`&T` = exclusive write, `^T` = take; `&`/`^` mirrored at call sites;
-`&self`/`^self` receivers. A `&` or `^` call-site marker inside a lambda body
+`^T` = exclusive write, `^T` = take; `^`/`^` mirrored at call sites;
+`^self`/`^self` receivers. A `^` or `^` call-site marker inside a lambda body
 keeps its write-lend or take meaning, so the lambda captures that binding by
 write lend or by take, never as a hidden consuming move (card #2758).
 Passing an unmarked parameter is allocation-free and
-never elevates; a body write requires `&`, while consuming ownership requires
-`^`. Copying is the method `.copy()` (D-COPY-WORD1). Raw `&T`
+never elevates; a body write requires `^`, while consuming ownership requires
+`^`. Copying is the method `.copy()` (D-COPY-WORD1). Raw `^T`
 reference returns and fields remain deleted (D-REF-SHORTHAND1/2 and
 E0207/E0427); safe stored and returned views use D-MEM-VIEWRET1's named
 `View<T>`/`ViewMut<T>` boundary instead. The silent-clone lint is
@@ -3552,20 +3552,20 @@ deleted — moves of named bindings are always written `^`; temporaries pass
 freely; `x.copy()` (D-COPY-WORD1) is the one copy spelling. Named escape hatches
 `Shared<T>`, `Pool<T>`/`Id<T>`; scoped memory facts now use `Mem.*` effect
 denials (the old `no_alloc` spelling is tombstoned).
-**S1 shipped (2026-07-04)**: `&` is the write sigil, `~` is gone from the
+**S1 shipped (2026-07-04)**: `^` is the write sigil, `~` is gone from the
 grammar, call sites/receivers/formatter speak v5 spelling. **S2 shipped
 (2026-07-04)**: unmarked param is `Read`, decided at parse time — `Infer` and
 body-usage elevation are gone; a body write or an escape/consume of an
-unmarked param is a hard error (fix-it: add `&`, or `^`/copy it); the silent-clone lint is
+unmarked param is a hard error (fix-it: add `^`, or `^`/copy it); the silent-clone lint is
 gone (E0209 hard error, no silent clone ever); `CapabilityFreeze`/E0912 are
 gone and the `api:` manifest field no longer exists (ordinary unknown-field
 error) — `ApiFreeze`'s snapshot mechanism remains, now unconditional pub-fn
 semver diffing (E1218/E2601), not a capability-tier freeze. **Card #642
 reconciliation shipped (2026-07-16)**: concrete, generic, callback, and
 receiver parameters now share the same unmarked-read lowering; no sema or
-codegen path may upgrade them to move or insert a hidden copy. Direct `&`
+codegen path may upgrade them to move or insert a hidden copy. Direct `^`
 calls write back identically in every build tier. **S3 shipped
-(2026-07-04)**: `-> &T` returns and `&T` fields are gone from the grammar
+(2026-07-04)**: `-> ^T` returns and `^T` fields are gone from the grammar
 (ordinary syntax errors); `#Ref`/E0207/E0427 deleted outright. **S4 shipped
 (2026-07-04)**: `copy x` (D-CAP2) is the one copy verb — a real prefix-verb
 expression (`Expr::Copy`), parses on any expression, formatter round-trips
@@ -3637,14 +3637,14 @@ non-cloneable type it is still E0211. The `copy` keyword is retired to a
 teaching error, E0991, pointing at `~`, mirroring how D-MEM1/S10 retired
 `mut`/`take` to E0056/E0057. This also reopens D-MEM1's "`~` is not part of
 the v5 grammar" decree for the copy sigil specifically — `~` still has no
-role as a parameter-position capability (that stays `&`/`^` only).
+role as a parameter-position capability (that stays `^`/`^^` only).
 D-SHAPE-LIFECYCLE's `^^` (never implemented — zero code hits) is superseded
 and retired outright, never shipping.
 
 **D-SHAPE-PLACE1=A — one rule for reading, editing, and copying a place**
 *(ratified 2026-07-15, card #613)*: a place is a name plus its maximal field,
 index, or range projection. Bare place access creates a checked read window,
-`&place` creates the exclusive write window, and `~place` creates independent
+`^place` creates the exclusive write window, and `~place` creates independent
 owned storage. Many read windows may overlap; a write window must be exclusive;
 moving or resizing an owner is rejected while it could invalidate a live
 window. Method calls are not part of a place, so calling a method on a copy
@@ -3652,20 +3652,20 @@ still needs `(~input).method()`. This supersedes D-SHAPE-VIEW1's `.view()`
 spelling and dissolves the separate D-SHAPE-VIEWMUT1 question.
 
 **D-CAP-RECEIVER1=D — mark the value, not the call** *(ratified 2026-09-27,
-card #3452; shipped 2026-09-28)*: `&` or `^` sits on the named place a call
+card #3452; shipped 2026-09-28)*: `^` or `^^` sits on the named place a call
 writes or takes, whether that place is a receiver or an argument:
-`&buf.append(" world")`, `^buf.seal()`, `&items[i].append("!")`,
-`edit(&buf)`. A mark binds the maximal place after it (a name plus fields,
-indexes, or ranges) and never a call result, so `inspect(&buf.grow())` writes
+`^buf.append(" world")`, `^buf.seal()`, `^items[i].append("!")`,
+`edit(^buf)`. A mark binds the maximal place after it (a name plus fields,
+indexes, or ranges) and never a call result, so `inspect(^buf.grow())` writes
 `buf` for `grow` and passes the fresh result unmarked, while
-`inspect(&buf.len())` is rejected because `len` reads. Fresh receivers take no
+`inspect(^buf.len())` is rejected because `len` reads. Fresh receivers take no
 mark, matching the fresh-argument rule; read calls stay unmarked. Sema checks
 each mark against the resolved receiver
 convention of user methods, trait dispatch, and builtin receivers: a missing,
 extra (E0225) or wrong mark is an error with a machine-applicable
-fix. A line that starts with `&name` or `^name` begins a new statement.
+fix. A line that starts with `^name` or `^name` begins a new statement.
 Integer bits use the sigils of D-BIT-SIGILS1=A and power uses `pow`
-(D-SIGIL-ALGEBRA1=B). `&place` window lifetimes are
+(D-SIGIL-ALGEBRA1=B). `^place` window lifetimes are
 unchanged; calls through a stored write window mark the window name. Lookup,
 evaluation order, one place evaluation, two-phase builtin borrowing, and move
 checks are unchanged. Rationale: one value-side mark position for receivers,
@@ -3688,7 +3688,7 @@ E0225 (the element stays in its collection), and on borrowed storage is E0201.
 `ys: xs` of a place stays a read view and `xs.copy()` stays an independent copy.
 A taking receiver call on a whole local at its last use needs no `^`
 (`ticket.redeem()`); a take on a field or on a local read again later still
-needs `^`, and a writing call always needs `&`. An unmarked use that
+needs `^`, and a writing call always needs `^`. An unmarked use that
 is not the last one shares the value: the source stays usable, and each holder
 has its own value (a use in `return`, or in a loop's `break` value, is the last
 use for the loops it leaves). Values that cannot be copied (resources,
@@ -3698,7 +3698,7 @@ site today; copy on first write and inferred kept parameters complete the
 model in later cards.
 
 *Supersession (D-CALLSITE-MARK2=A, D-MOVE-SIGIL1=A):* the `^place` value
-form and the call-site `&`/`^` marks above are historical text. An early move
+form and the call-site `^`/`^` marks above are historical text. An early move
 is `x.move()`, and a call that takes or writes is written plain.
 
 **D-CALLSITE-MARK2=A — marks live in signatures** *(ratified 2026-11-06, card
@@ -3706,9 +3706,9 @@ is `x.move()`, and a call that takes or writes is written plain.
 `^` value form of D-COPY-DEFAULT1=A)*: a signature says what a function does
 to each input, and every call is written plain: `bump(score)`,
 `items.push(3)`, `archive(title)`, `buf.seal()`. A mark stays only where no
-signature decides: a write window bound to a name (`edit: &values[2..3]`,
-`first := &counts[0]`), a match that writes into its subject
-(`if &shape == { … }`), and a task that takes a name (`task &&name { … }`).
+signature decides: a write window bound to a name (`edit: ^values[2..3]`,
+`first := ^counts[0]`), a match that writes into its subject
+(`if ^shape == { … }`), and a task that takes a name (`task ^^name { … }`).
 The checks read the signature: a call that edits a value needs it declared
 with `:=`, two overlapping inputs with one write stay E0204, a value passed to
 a take parameter and used again is an error at the later use naming the call, a
@@ -3720,10 +3720,10 @@ code teaches them (their old codes are deleted; a
 plain call that changes a `:` binding is E0111, and one that changes a read
 parameter or `self` is E0205, each quoting the callee's signature line).
 
-**D-MOVE-SIGIL1=A — `&&` marks a take** *(ratified 2026-11-06, card #6586)*:
-`&T` in a signature means the function may change the input; `&&T` means it
-takes the input for good: `c: &&T`, `seal: fn(&&self)`,
-`gzclose: fn(file: &&GzFile) -> Int = "gzclose"`, `task &&job { … }`. The
+**D-MOVE-SIGIL1=A — `^^` marks a take** *(ratified 2026-11-06, card #6586)*:
+`^T` in a signature means the function may change the input; `^^T` means it
+takes the input for good: `c: ^^T`, `seal: fn(^^self)`,
+`gzclose: fn(file: ^^GzFile) -> Int = "gzclose"`, `task ^^job { … }`. The
 take mark appears only in a parameter type, before `self`, and after `task`,
 so it never meets logical `&&`, which sits between two values. `^` has no
 grammar meaning left (no xor and no power; exclusive-or is `a ~ b` under
@@ -3752,16 +3752,16 @@ value during the call, and the promise cannot be cast away. `freeze(x)` stays
 the way to make a value immutable for good. Editor hover prints each
 parameter's promise in words (`xs: read: nobody changes this during the
 call`), and a write through a read parameter names the fix as the
-parameter's `&` mark (`xs: &[Int]`), never a `:=` binding.
+parameter's `^` mark (`xs: ^[Int]`), never a `:=` binding.
 
 **D-MEM-VIEWRET1=B — stored and returned safe views** *(ratified 2026-07-15,
 card #643)*: `View<T>` and `ViewMut<T>` may cross a return or field boundary.
 This explicitly supersedes D-MEM1/S3's blanket ban on returned and stored
-borrows; it does not revive raw `&T` returns or fields.
+borrows; it does not revive raw `^T` returns or fields.
 Each carries public, queryable source provenance in the API snapshot; changing
 that provenance is a breaking API change under E2601. Sema proves the owner
 outlives every view and keeps at most one mutable view live. Ordinary in-body
-place access remains D-SHAPE-PLACE1's bare/`&`/`~` rule; the named view types
+place access remains D-SHAPE-PLACE1's bare/`^`/`~` rule; the named view types
 appear only where the return or storage boundary needs to state the contract.
 No lifetime syntax is added.
 
@@ -3779,21 +3779,21 @@ bare source covers its field/index/range projections) and publishes the
 declared set to callers. Parameter-requirement clauses (`View<T> from corpus`)
 and aggregate per-slot `from (text: primary | fallback)` ship in the same ruling.
 
-**D-MUTSELF1 — Receiver mutation**: a `&self` method mutates in place —
+**D-MUTSELF1 — Receiver mutation**: a `^self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
 through the deref'd receiver; the same write in a read method is E0205 with a
-"write the receiver as `&self`" fix at the assignment.
+"write the receiver as `^self`" fix at the assignment.
 
 **D-METHOD-FOOTPRINT1=A — method field footprints** *(ratified 2026-10-06,
 card #3645)*: sema infers each method's receiver footprint, the record
 fields its body reads or changes through `self` (calls to sibling methods
 on `self` add their footprints; any other use of a whole `self` is the
 whole record). An expert may state the footprint on the receiver with the
-ratified member spread, `&self.log` or `&self.[log, hits]`; the stated set
+ratified member spread, `^self.log` or `^self.[log, hits]`; the stated set
 must name stored fields and cover the body (E0231), and callers see the
 stated set. Public methods publish the footprint in the API snapshot as
 `; footprint = self.[a, b]`, so a change is a reported API change. Letting
-a call `&s.m()` run beside a live view of a field outside `m`'s footprint
+a call `^s.m()` run beside a live view of a field outside `m`'s footprint
 waits on the native emitter keeping disjoint field borrows of one local
 across statements; until then calls still count as touching the whole
 receiver.
@@ -4758,22 +4758,22 @@ the same — only the spelling moves. Anywhere else, `uninit` is an ordinary
 identifier (or bare `:= uninit` is E0421).
 
 **D-REF-SHORTHAND1 — Stored-ref field shorthand (retired 2026-07-04 by
-D-MEM1/S3)**: originally, a stored-reference field spelled its type `&T` —
+D-MEM1/S3)**: originally, a stored-reference field spelled its type `^T` —
 the borrow sigil already used at call sites — instead of a bare `T` plus a
 separate marker; the owner was *inferred* at each construction site (one
 candidate → it, two or more → **E0207**), disambiguated with `#Ref(label)`
-when needed; the retired `#Ref(owner) name: T` form (plain type, no `&`) was
+when needed; the retired `#Ref(owner) name: T` form (plain type, no `^`) was
 a hard teaching error (**E0427**). D-MEM1/S3 deleted the whole mechanism
-outright — raw `&T` struct fields remain outside the grammar and E0207/E0427
+outright — raw `^T` struct fields remain outside the grammar and E0207/E0427
 remain retired. D-MEM-VIEWRET1=B later superseded only the blanket return/store
 ban: the selected safe boundary is a named, provenance-carrying `View<T>` or
-`ViewMut<T>`, while `#Ref` and raw `&T` storage remain retired. Owned fields,
+`ViewMut<T>`, while `#Ref` and raw `^T` storage remain retired. Owned fields,
 `Shared<T>`, and `Pool<T>`/`Id<T>` remain the non-view alternatives.
 
 **D-REF-SHORTHAND2 — `#Ref(label)` disambiguator (retired 2026-07-04 by
 D-MEM1/S3)**: originally the owner label stayed on the `#` directive plane,
 spelled `#Ref(label)` — *not* `#Ref`, resolving the sigil clash with
-D-MARKERMOVE1. Deleted along with D-REF-SHORTHAND1's `&T` fields; a
+D-MARKERMOVE1. Deleted along with D-REF-SHORTHAND1's `^T` fields; a
 `#Ref(label)` naming no candidate owner used to be **E2306** — also gone
 (retired stub row in Docs/Spec/diagnostics.md). `jet inspect expand --facts refs`
 (the lens that reported these owners) is gone with it.
@@ -4788,7 +4788,7 @@ terminal `free()` with universal `close(allocator)`. Arenas live flat in
 
 **D-FIXED-BACKING1=A — Fixed allocator backing**: `fixed:
 mem.Fixed.new(size: N)` requires a positive comptime `N` and synthesizes one
-inline `[Byte#N]` in that lexical frame; `mem.Fixed.over(&storage)` borrows one
+inline `[Byte#N]` in that lexical frame; `mem.Fixed.over(^storage)` borrows one
 mutable fixed-size byte array instead. Both constructors must directly
 initialize a lexical binding. Payload plus alignment grows from the buffer
 start, reverse-drop metadata reserves from its end, and allocation fails
@@ -4848,7 +4848,7 @@ and its synthetic cleanup do not materialize or destroy a second cell; an
 explicit consuming or copying operation keeps its separate ownership meaning.
 A task that reads a cell without taking it borrows that same cell. Only a
 lexical `task.group` child the cell outlives may do so (D-TASKBORROW1=A).
-Any other task must take the cell (`task &&cell`) or share it through
+Any other task must take the cell (`task ^^cell`) or share it through
 `Shared<T>`, and a borrow outside a group is E1102.
 
 **D-LAYOUT-ALIGN1=A — Portable and target alignment modes** *(ratified)*:
@@ -5079,7 +5079,7 @@ STABILITY test** (idempotence alone misses dropped tokens).
 
 **S50 — Rust FFI**: `extern rust "crate@version" { name: fn(args) T =
 "rust::path" }`. Version pins required; the by-value boundary is the default
-floor. D-FFI-CAP1 additionally permits checked `&T` exclusive call lends and
+floor. D-FFI-CAP1 additionally permits checked `^T` exclusive call lends and
 `^T` ownership transfers, with raw capability calls gated by **E0702** and
 returned handles attachable to `#Close(fn)`; callbacks and trait objects remain
 outside this tier.
@@ -5744,7 +5744,7 @@ index, not a substitute for that law.
 - **D-CORE-IO-BUF1=A** *(ratified 2026-09-30, card #3281)*: `core.io` stays
   retired; there are no `StringBuf`/`BytesBuf` buffers. The built-in `Bytes`
   is the one in-memory byte buffer: `Bytes.with_capacity(n)`, in-place
-  `&buf.write(bytes)` and typed writes, cursor reads through `position()`,
+  `^buf.write(bytes)` and typed writes, cursor reads through `position()`,
   `seek(n)`, `rewind()`, `read_bytes(n)`, `read_string(n)`, `read_byte()`, and
   `eof()`, and `to_string()`/`to_bytes()`/`lines()` conversion. Text is built
   with interpolation or a joined list of lines; `Cursor.over(text)` reads text
@@ -5773,8 +5773,8 @@ index, not a substitute for that law.
   JSON/JSONL/CSV/CBOR expose opaque non-`Codable`, non-`Copy`, non-`Clone`
   Reader/Writer types. Constructors consume `^files.FileReader` or
   `^files.FileWriter`, take shared `EncodingLimits.safe()`, and return
-  `EncodingError`; readers provide `next(&self)`, writers `write(&self)`,
-  `flush(&self)`, and required idempotent `finish(&self)`. Items are `DataEvent`
+  `EncodingError`; readers provide `next(^self)`, writers `write(^self)`,
+  `flush(^self)`, and required idempotent `finish(^self)`. Items are `DataEvent`
   for JSON/CBOR, `Dyn` for JSONL, `CSVRow` for CSV readers and `[String]`
   for CSV writers, and D-ENCXML1's exact
   tagged `Dyn` event algebra for XML. Blocking calls provide backpressure; no
@@ -6087,7 +6087,7 @@ hex/base64 + `core.uuid` v4/v7 (D-UUIDENC1).
 **D-CRYPTO-ENVELOPE2=A — recipient JETC v2 files** *(ratified by owner,
 card #302)*: safe file crypto is
 `core.files.sealed.seal([X25519PublicKey], Path, Path)` and
-`core.files.sealed.open(&X25519SecretKey, Path, Path)`. The identity is a shared/read
+`core.files.sealed.open(^X25519SecretKey, Path, Path)`. The identity is a shared/read
 borrow (a bare parameter in Jet); both APIs return unit success with
 `FileCryptoError!` in current D-TYPE-SUFFIX1 syntax. Both stream bounded,
 authenticated 1 MiB chunks through the canonical recipient JETC v2 format;
@@ -6267,7 +6267,7 @@ Compression
 map truth). **D-OPTGC1=A — scoped opt-in tracing GC** *(ratified 2026-07-15,
 card #646)*: GC is magic inside an opted scope, using D-MARK-SCOPE1 from
 package through module, function, and block. Heap-owning values gain traced
-identity without `Gc<T>` wrappers; a bare store creates a traced edge, `&`
+identity without `Gc<T>` wrappers; a bare store creates a traced edge, `^`
 still gates mutation, `^` transfers a root, and `~` deep-copies. An unproved
 escape into ownership-only code is rejected. `jet gc report` lists each
 allocation ownership could not prove, with source, reason, and a concrete path
@@ -6989,7 +6989,7 @@ command is `jet inspect expand --facts <lens> <file>`; bare `jet inspect expand 
 runs every lens, grouped (magic default). Lens floor: `inline`
 (D-METHODMACRO1); other ratified surfaces add lenses under the same flag,
 never new commands (I8). A `refs` lens (D-REF-SHORTHAND1) shipped alongside
-`inline` at c183expand; D-MEM1/S3 deleted it along with the `&T`
+`inline` at c183expand; D-MEM1/S3 deleted it along with the `^T`
 stored-ref-field mechanism it reported on (`--facts refs` is an
 unknown-lens usage error today).
 
@@ -7790,7 +7790,7 @@ The syntax registry owns all user-typeable tokens;
 `jet self devtools grammars` regenerates VS Code/TextMate,
 tree-sitter, and Zed generated sections, and the
 `grammar/editor_grammars_match_generated_sections` case fails on drift. LSP semantic tokens refine live editors for
-ownership (`copy`, `^`, `&`) and markers; retired/foreign spellings are not
+ownership (`copy`, `^`, `^`) and markers; retired/foreign spellings are not
 colored as live syntax.
 
 **D-RECONCILE-SCOPE1 / D-CANON-SOURCE1**: syntax reconciliation is a strict
@@ -8882,11 +8882,11 @@ seam.
 
 **D-MEM-SENTRY1=A — dev-tier sentries for `#Unsafe`** *(ratified 2026-08-12, card #1889)*: default `jet run` guards raw operations inside `#Unsafe` gates — released allocator storage is quarantined and poisoned, while a stack place registered by `mem.address_of` or raw-of is tied to the owning Jet frame token and expires when that frame/scope exits; writes are checked against allocation provenance the runtime already tracks (no new storage declaration exists or is added). Stack expiry marks the allocation dead without poisoning bytes. Heap, static, and foreign lifetime handling keeps its existing provenance and quarantine behavior, and an unframed stack address is never made process-global live. A violation is a located runtime fault (registered report family — registered and snapshot-tested by #1892 before any code ships, per I4) naming the gate and the unmet obligation, and it feeds the `jet audit memory` ledger. Interaction with D-UNSAFE-OBLIG1, stated precisely: required obligations keep their compile-time law — a runtime witness never substitutes for a required static discharge; sentries watch the operations whose obligations were asserted or `.Skip`-ped, and a fault is evidence the assertion was false on that run. **This decision is an owner-ratified I9 instrumentation carve-out, named here**: the dev and hardened tiers report a fault for operations whose release meaning is undefined behavior inside a gate; release without `harden` runs unwatched. Sentry logic lives in the Prelude; engines marshal (AGENTS.md I9). Refusal exit exists at both scopes: `#Policy(sentries: .Off)` and `policy: { sentries: .Off }` keep the dev tier but drop the instrumentation. The hardened shipping profile is D-HARDENED1 (card #1888), which reuses this kernel and keeps safe Jet unchanged.
 
-**D-FFI-CAP1=A — capability sigils across the FFI boundary** *(ratified 2026-08-12, card #1889)*: extern signatures may accept `&` and `^` and a returned foreign handle may declare `#Close(fn)`. Corrected per review — `&` keeps its exact D-MEM1 meaning: **exclusive access for exactly this call** (the foreign side may read and write through it, must not retain it; no copy). `^` gives: the foreign side owns and frees; the Jet name dies. `#Close(fn)` joins the `close(^)` protocol — the named function runs exactly once or the program does not compile (S63 handle precedent). The `extern c "lib" { … }` block is not part of the current surface; the tier uses the ratified D-FFI-UNIFY1 structure (`<lang>.<lib>` mounts, `#FFI` bodies, `extern rust "crate@version"` + `= "rust::path"`) rather than minting a parallel declaration form. Capability-tier functions are generated bindings, so the existing D-FFI-UNIFY1 rule stands: bindings are callable directly; raw symbols outside bindings still require `#Unsafe`. Tier behavior follows the existing FFI law (JIT/dev reports the native boundary; native build executes it); the web tier is out of scope for native FFI per that same law. Amends the D-FFI-UNIFY1 by-value-only rule; E0702 narrows from a ban to a gate; the by-value floor stays the default tier.
+**D-FFI-CAP1=A — capability sigils across the FFI boundary** *(ratified 2026-08-12, card #1889)*: extern signatures may accept `^` and `^` and a returned foreign handle may declare `#Close(fn)`. Corrected per review — `^` keeps its exact D-MEM1 meaning: **exclusive access for exactly this call** (the foreign side may read and write through it, must not retain it; no copy). `^` gives: the foreign side owns and frees; the Jet name dies. `#Close(fn)` joins the `close(^)` protocol — the named function runs exactly once or the program does not compile (S63 handle precedent). The `extern c "lib" { … }` block is not part of the current surface; the tier uses the ratified D-FFI-UNIFY1 structure (`<lang>.<lib>` mounts, `#FFI` bodies, `extern rust "crate@version"` + `= "rust::path"`) rather than minting a parallel declaration form. Capability-tier functions are generated bindings, so the existing D-FFI-UNIFY1 rule stands: bindings are callable directly; raw symbols outside bindings still require `#Unsafe`. Tier behavior follows the existing FFI law (JIT/dev reports the native boundary; native build executes it); the web tier is out of scope for native FFI per that same law. Amends the D-FFI-UNIFY1 by-value-only rule; E0702 narrows from a ban to a gate; the by-value floor stays the default tier.
 
 **D-MEM-GUARANTEE1=A — the guarantee dial** *(ratified 2026-08-12, card #1889)*: `package.jet` policy gains `contain: [deps]` — the named dependencies compile with tracked-handle pointers inside a fence, so a wild write there faults with a report instead of corrupting the program's heap, at a cost confined to the fence — and `harden: true`, which keeps D-MEM-SENTRY1's sentries in release **and contains every foreign dependency** (with `harden: true` no dependency may report TRUSTED). `jet inspect guarantees` () prints the per-component truth: proven, watched, fenced, or TRUSTED. **Named amendment to D-PACKAGE-POLICY-SCOPE1**: `contain` and `harden` are the first package-only policy keys — they govern dependencies and the build profile, not lexical source scopes, so they deliberately have no `#Policy` mirror; the mirror law continues to hold for every scope-governing key (`copies`, `sentries`). Both keys only tighten. Explicitly decoupled from gc (owner ruling): gc is a lifetime convenience and never a safety mechanism. R9 preserved: single files need no manifest and cannot use these keys; their guarantee line reads "your code: proven; externs: trusted". Freestanding targets report "prover + audit only" honestly.
 
-**D-HARDENED1=A — named hardened execution profile** *(ratified 2026-08-28, card #1888)*: `--profile=hardened` is a reserved profile for `jet build`, `jet test`, and `jet run`. It keeps release optimization while setting the same package hardening fact as `policy: { harden: true }`: every dependency is fenced and every reached `#Unsafe` sentry remains active. Ordinary `release` keeps its existing unwatched behavior unless package policy enables hardening. The profile adds no user syntax, dependency, or alternate memory mechanism. It reuses D-MEM-SENTRY1's shared Prelude kernel for raw-pointer range, liveness, and alignment checks; FFI `&` edges validate the call-only exclusive reference, and raw `Ptr<T>` edges retain strict provenance checks. Runtime-visible allocations crossing a foreign boundary use the same sentry and quarantine path. Hardened faults use the registered R08xx report with source file/line, gate reason, operation/obligation, and repair detail. Safe Jet-only programs omit sentry initialization and remain on the zero-overhead generated path. Native FFI remains subject to D-FFI-CAP1; web has no native FFI surface. The accepted residual is foreign code writing through an unseen pointer into safe storage; quarantine and boundary checks narrow but do not claim to detect that case.
+**D-HARDENED1=A — named hardened execution profile** *(ratified 2026-08-28, card #1888)*: `--profile=hardened` is a reserved profile for `jet build`, `jet test`, and `jet run`. It keeps release optimization while setting the same package hardening fact as `policy: { harden: true }`: every dependency is fenced and every reached `#Unsafe` sentry remains active. Ordinary `release` keeps its existing unwatched behavior unless package policy enables hardening. The profile adds no user syntax, dependency, or alternate memory mechanism. It reuses D-MEM-SENTRY1's shared Prelude kernel for raw-pointer range, liveness, and alignment checks; FFI `^` edges validate the call-only exclusive reference, and raw `Ptr<T>` edges retain strict provenance checks. Runtime-visible allocations crossing a foreign boundary use the same sentry and quarantine path. Hardened faults use the registered R08xx report with source file/line, gate reason, operation/obligation, and repair detail. Safe Jet-only programs omit sentry initialization and remain on the zero-overhead generated path. Native FFI remains subject to D-FFI-CAP1; web has no native FFI surface. The accepted residual is foreign code writing through an unseen pointer into safe storage; quarantine and boundary checks narrow but do not claim to detect that case.
 
 **D-TEAMPOLICY1=A — package team policy ceilings** *(ratified 2026-08-28, card #2329)*:
 `package.jet` may carry one normalized `policy:` record for the team's
@@ -9005,7 +9005,7 @@ defaults ride the type as `{…}`. Marker-scoped blocks retain their own braces.
 condition-only, bare infinite, and mutable state — accepts `-> statement`. The
 statement runs for its effect and its value is discarded. A non-unit value gets
 a lint that names the value form `name: loop … -> value` for collection, or
-the write-capability form `loop item in &values -> item *= 2` for in-place edits.
+the write-capability form `loop item in ^values -> item *= 2` for in-place edits.
 Value-position finite loops keep their collection arrow semantics. The
 formatter chooses the arrow when one simple body fits and braces otherwise.
 
@@ -10714,7 +10714,7 @@ Internal module identities never appear in a message.
 
 **2026-10-22 — D-PERSIST-BORROW1=A** *(card #5091)*: a module-level
 `#Persist name := value` binding is mutable module state, and a function that
-takes write access may be handed it with `&` (`bump(&total)`), like a local.
+takes write access may be handed it with `^` (`bump(^total)`), like a local.
 Other static cells (plain mutable module bindings, `#Static`) keep E0223.
 `#Persist` on a local binding keeps E0145. Example:
 `Tests/Run/DevLoop/PersistWriteBorrow.jet` (prints `1`).

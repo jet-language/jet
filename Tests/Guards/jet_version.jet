@@ -119,7 +119,7 @@ jv_names_retired_constant: fn(line: String) -> Bool Never! {
 }
 
 // The old self-version spellings on one line, as findings.
-jv_line_findings: fn(path: String, number: Int, line: String, out: &[String]) {
+jv_line_findings: fn(path: String, number: Int, line: String, out: ^[String]) {
     where: "{path}:{number}"
     if jv_names_retired_constant(line) {
         out.push("{where}: COMPILER_VERSION is retired; read JET_VERSION")
@@ -135,7 +135,7 @@ jv_line_findings: fn(path: String, number: Int, line: String, out: &[String]) {
 }
 
 // Every file a census reads: no build output, history or installed packages.
-jv_walk: fn(path: String, out: &[String]) {
+jv_walk: fn(path: String, out: ^[String]) {
     kind: jv_files.stat(path) ?? return
     if kind.is_symlink {
         return
@@ -154,7 +154,7 @@ jv_walk: fn(path: String, out: &[String]) {
 
 // One file into the census: its old spellings into `findings`, its count of
 // lines naming a release `a0_NNN` into `legacy`.
-jv_census_file: fn(path: String, text: String, findings: &[String], legacy: &[String:Int]) {
+jv_census_file: fn(path: String, text: String, findings: ^[String], legacy: ^[String:Int]) {
     count := 0
     number := 0
     loop line in text.lines() {
@@ -166,7 +166,7 @@ jv_census_file: fn(path: String, text: String, findings: &[String], legacy: &[St
 }
 
 // The `a0_NNN` counts against JV_LEGACY, then every finding in order.
-jv_census_close: fn(legacy: [String:Int], findings: &[String]) {
+jv_census_close: fn(legacy: [String:Int], findings: ^[String]) {
     loop path in legacy.keys() {
         count: legacy[path]
         allowed := -1

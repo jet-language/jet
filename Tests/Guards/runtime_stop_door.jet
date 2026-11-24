@@ -93,7 +93,7 @@ stop_door_word_byte: fn(byte: U8) -> Bool {
 
 // The calls of `line` in source order, comments and string literals skipped.
 // A raw exit_group syscall (first argument I64{231}) is "<exit_group>".
-stop_door_line_calls: fn(line: String, out: &[String]) {
+stop_door_line_calls: fn(line: String, out: ^[String]) {
     bytes: line.bytes()
     count: bytes.len()
     at := 0
@@ -139,7 +139,7 @@ stop_door_declared: fn(line: String) -> String {
 
 // The first stop or exit primitive `name` reaches before a trap_stop, as the
 // call path that reaches it, else "".
-stop_door_reach: fn(name: String, calls: [String:[String]], ends: [String], exempt: [String], memo: &[String:String]) -> String {
+stop_door_reach: fn(name: String, calls: [String:[String]], ends: [String], exempt: [String], memo: ^[String:String]) -> String {
     if stop_door_has(ends, name) -> return name.copy()
     if stop_door_has(exempt, name) -> return ""
     if memo.get(name) == .Val(known) -> return known.copy()

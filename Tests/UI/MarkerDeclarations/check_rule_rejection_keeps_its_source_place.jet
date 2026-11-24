@@ -1,0 +1,29 @@
+// A check rule's rejection keeps its call's place among the module's other
+// errors: the rejected call comes first in the source, so it prints first.
+Fraction: struct {
+    impl Diagnostic {
+        what: fn(self) -> String { "`scale` scales whole numbers" }
+
+        why: fn(self) -> String { "the scaling rule hears each argument's type" }
+
+        fix: fn(self) -> String { "pass an Int" }
+    }
+}
+
+Measured: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args[0].type.name != "Int" -> reject(Fraction{}, at: call.args[0])
+        }
+    }
+}
+
+#Measured scale: fn(value: Int) -> Int { value * 2 }
+
+run: fn() {
+    print(scale(2.5))
+    n: Int{3.7}
+    print(n)
+}

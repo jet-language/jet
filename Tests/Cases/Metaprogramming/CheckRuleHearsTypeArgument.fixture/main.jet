@@ -1,0 +1,37 @@
+// A rule hears a type name passed where a `Type` goes as that `Type` value:
+// its `type` is `Type` and its `value` the Text of the type's path.
+Unheard: struct {
+    index: Int,
+
+    impl Diagnostic {
+        code: "known.Unheard",
+
+        what: fn(self) -> String { "argument {self.index} is not heard as the type it names" }
+
+        why: fn(self) -> String { "a type name is a `Type` value the build knows" }
+
+        fix: fn(self) -> String { "hear the type's `Type` value" }
+    }
+}
+
+Checkout: struct {
+    _total: Int,
+}
+
+Form: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            heard: [Dyn?]{Val(Dyn.Text("main.Checkout")), Val(Dyn.Text("/pay"))}
+            loop (index, argument) in call.args {
+                if argument.value != heard[index] -> reject(Unheard{index: index}, at: argument)
+            }
+            if call.args[0].type.name != "Type" -> reject(Unheard{index: 0}, at: call.args[0])
+        }
+    }
+}
+
+#Form form: fn(model: Type, action: String) -> Bool { model == Checkout && action.len() == 4 }
+
+run: fn() { print(form(Checkout, "/pay")) }

@@ -337,7 +337,7 @@ native_dump_pad: fn(size: Int) -> Int Never! { (size + 7) & -8 }
 // The task rows of the section of `size` bytes at `at`: the stop's, and
 // each task's; a thread outside every task, or a row its thread never
 // wrote, has id 0.
-native_dump_tasks: fn(tasks: &[NativeDumpTask], bytes: [U8], at: Int, size: Int) Never! {
+native_dump_tasks: fn(tasks: ^[NativeDumpTask], bytes: [U8], at: Int, size: Int) Never! {
     row := at
     loop row + 8 * NATIVE_DUMP_TASK_WORDS <= at + size {
         id: native_dump_word(bytes, row)
@@ -387,7 +387,7 @@ native_dump_task_state: fn(task: NativeDumpTask, waits: [Int:String]) -> String 
 
 // Each loaded segment (PT_LOAD) of the ELF image `elf`, as a span at its
 // address plus `bias` of the backing that holds `elf` from `from` on.
-native_dump_loaded: fn(blocks: &[NativeBlock], elf: [U8], from: Int, bias: Int) Never! {
+native_dump_loaded: fn(blocks: ^[NativeBlock], elf: [U8], from: Int, bias: Int) Never! {
     length: elf.len()
     if length < 64 {
         return
@@ -422,7 +422,7 @@ native_dump_jet_frame: fn(frames: [NativeFrame], jet: Int) -> Int? Never! {
 // `locals` with each #Secret value shown as NATIVE_DUMP_REDACTED. The dump
 // was written with every live Secret's bytes zeroed (JetRuntime
 // PerfSamples.jet perf_flight_redacted); the readout says what they were.
-native_dump_redact: fn(locals: &[NativeLocal]) Never! {
+native_dump_redact: fn(locals: ^[NativeLocal]) Never! {
     loop index in 0..<locals.len() {
         if native_dump_secret(locals[index].type_name) -> locals[index].value = NATIVE_DUMP_REDACTED
     }
@@ -550,7 +550,7 @@ native_dump_where: fn(image: NativeImage, ring: [U8], at: Int, pc: Int, first: I
 // jet_cli_debug_directory), which holds the `.jet/dumps` the dump is in
 // (JetRuntime PerfSamples.jet perf_flight_dump_open). A dump kept elsewhere
 // leaves it relative to the working directory.
-native_dump_source: fn(path: String, source: &&String) -> String Never! {
+native_dump_source: fn(path: String, source: ^^String) -> String Never! {
     if source == "" || native_dump_files.is_absolute(source) -> return source
     dumps: native_dump_files.dirname(path)
     kept: native_dump_files.dirname(dumps)
@@ -616,7 +616,7 @@ native_dump_line_source: fn(image: NativeImage, name: String) -> String Never! {
 // it was refused: a run-control command, or one the dump's console doesn't
 // know. `events` are the flight ring's records (native_dump_events), and
 // `file` (with the text `lines`) the program's source.
-native_dump_command: fn(session: &NativeSession, line: String, events: [String], file: String, lines: [String]) -> NativeAnswer NativeDebugError! {
+native_dump_command: fn(session: ^NativeSession, line: String, events: [String], file: String, lines: [String]) -> NativeAnswer NativeDebugError! {
     command: line.trim()
     word: command.before(" ")
     operand: if command.contains(" ") -> command.after(" ").trim() else -> ""
@@ -707,7 +707,7 @@ native_dump_command: fn(session: &NativeSession, line: String, events: [String],
 }
 
 // The selected frame's locals, each #Secret one redacted.
-native_dump_locals: fn(session: &NativeSession) -> [NativeLocal] NativeDebugError! {
+native_dump_locals: fn(session: ^NativeSession) -> [NativeLocal] NativeDebugError! {
     locals := session.locals() ?? return Err(err)
     native_dump_redact(locals)
     Ok(locals)
@@ -729,7 +729,7 @@ native_dump_watch_path: fn(name: String) -> NativeWatchPath Never! {
 // running or parked, or the wait a deadlock held it in, its innermost Jet
 // frame, and, when that is not in the program's `file`, the innermost frame
 // that is.
-native_dump_task_list: fn(session: &NativeSession, file: String) -> String Never! {
+native_dump_task_list: fn(session: ^NativeSession, file: String) -> String Never! {
     tasks: if session.dump == .Val(dumped) -> dumped.tasks else -> [NativeDumpTask]{}
     waits: if session.dump == .Val(dumped) -> native_dump_waits(dumped.memory, dumped.registry) else -> [Int:String]{}
     chosen: session.task
@@ -774,7 +774,7 @@ native_dump_located: fn(frames: [NativeFrame], file: String) -> String Never! {
 
 // Frame `index` of `frames`: where it is, its Jet source line
 // (NativeSession.frame_source), and its locals.
-native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int, file: String, lines: [String]) -> String NativeDebugError! {
+native_dump_frame: fn(session: ^NativeSession, frames: [NativeFrame], index: Int, file: String, lines: [String]) -> String NativeDebugError! {
     if index >= frames.len() -> return Ok("No Jet frame in the dump\n")
     frame: frames[index]
     source: session.frame_source(frame, file, lines)

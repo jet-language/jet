@@ -2,12 +2,12 @@ Box: struct {
     n: Int,
 }
 
-consume: fn(b: &&Box) -> Int { b.n }
+consume: fn(b: ^^Box) -> Int { b.n }
 
 run: fn() {
     owned := Box{n: 3}
     task.group g {
-        child: task &&owned {
+        child: task ^^owned {
             first := consume(owned)
             owned.n
         }

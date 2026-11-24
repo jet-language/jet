@@ -112,12 +112,12 @@ direct_bind_program: fn(shape: Int, runtime: String) -> DirectBindProgram Never!
     DirectBindProgram{functions: functions.move(), debug: debug.move(), data: data}
 }
 
-direct_bind_module: fn(data: &&[X64Data]) -> X64ObjectModule Never! {
+direct_bind_module: fn(data: ^^[X64Data]) -> X64ObjectModule Never! {
     X64ObjectModule{data: data.move(), debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{}}
 }
 
 // The object route: the program's object, bound.
-direct_bind_by_object: fn(shape: Int, runtime: String, image: &&[U8], base: Int, gap_at: Int, gap: Int) -> X64BindResult {
+direct_bind_by_object: fn(shape: Int, runtime: String, image: ^^[U8], base: Int, gap_at: Int, gap: Int) -> X64BindResult {
     built := direct_bind_program(shape, runtime)
     exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
     object := x64_object_functions_threads(direct_bind_module(built.data.move()), built.functions.move(), built.debug.move(), exports, [X64DataExport]{}, compiler_threads_single(), false, false)
@@ -125,7 +125,7 @@ direct_bind_by_object: fn(shape: Int, runtime: String, image: &&[U8], base: Int,
     x64_bind_runtime_image_at("direct", object.bytes.move(), image.move(), base, gap_at, gap)
 }
 
-direct_bind_straight: fn(shape: Int, runtime: String, image: &&[U8], base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
+direct_bind_straight: fn(shape: Int, runtime: String, image: ^^[U8], base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
     built := direct_bind_program(shape, runtime)
     x64_bind_functions_at("direct", direct_bind_module(built.data.move()), built.functions.move(), built.debug.move(), compiler_threads_single(), image.move(), base, gap_at, gap)
 }
@@ -133,7 +133,7 @@ direct_bind_straight: fn(shape: Int, runtime: String, image: &&[U8], base: Int, 
 // Binds program `shape` both ways to `image` (read without its bytes
 // [gap_at, gap_at + gap)), `reference.bufs[1]` as read, and asserts the
 // executables are the same; returns the image, given back unchanged.
-direct_bind_compare: fn(shape: Int, runtime: String, image: &&[U8], reference: &LinkContext, gap_at: Int, gap: Int) -> [U8] {
+direct_bind_compare: fn(shape: Int, runtime: String, image: ^^[U8], reference: ^LinkContext, gap_at: Int, gap: Int) -> [U8] {
     view: link_image_view(reference, 1, gap_at, gap)
     assert(reference.errors.len() == 0, "the runtime image has a program base")
     // Two pages up, as a later batch's part goes.

@@ -146,7 +146,7 @@ jet_cli_receipt_context_identity: fn(verb: String, argv: [String], terminal: [U8
 
 // Checked root discovery is authoritative; the lexical floor retains changed
 // malformed authorities so they cannot make an old claim appear current.
-jet_cli_receipt_authority_roots: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> [String] Never! {
+jet_cli_receipt_authority_roots: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> [String] Never! {
     root := cli_files.realpath(start) ?? start
     if jet_cli_find_workspace_root_checked(cache, start) == .Ok(found) && found == .Val(found_root) {
         root = found_root
@@ -172,7 +172,7 @@ jet_cli_receipt_authority_roots: fn(cache: &WorkspaceDeclarationCache, start: St
     jet_cli_lock_canonical(roots)
 }
 
-jet_cli_receipt_generated_paths: fn(path: String, strict: Bool, paths: &[String]) -[FS]> JetCLIReadError! {
+jet_cli_receipt_generated_paths: fn(path: String, strict: Bool, paths: ^[String]) -[FS]> JetCLIReadError! {
     info: cli_files.stat(path) ?? {
         if jet_cli_rooted_missing(err) {
             return
@@ -205,7 +205,7 @@ jet_cli_receipt_generated_paths: fn(path: String, strict: Bool, paths: &[String]
     }
 }
 
-jet_cli_comparison_input_paths: fn(cache: &WorkspaceDeclarationCache, target: String) -[FS, Env]> [String] JetCLIReadError! {
+jet_cli_comparison_input_paths: fn(cache: ^WorkspaceDeclarationCache, target: String) -[FS, Env]> [String] JetCLIReadError! {
     absolute: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize input {target}: {jet_cli_io_error_text(err)}"))
     if !jet_cli_receipt_regular(target) {
         return Err(jet_cli_read_error("receipt input is not a regular file: {target}"))
@@ -280,7 +280,7 @@ jet_cli_receipt_secret_values: fn(argv: [String]) -[Env]> [String] Never! {
     unique
 }
 
-jet_cli_receipt_canonical_member: fn(input: JetDriverRunReceiptInput, cwd: String, members: &[JetDriverRunReceiptInput]) JetCLIReadError! {
+jet_cli_receipt_canonical_member: fn(input: JetDriverRunReceiptInput, cwd: String, members: ^[JetDriverRunReceiptInput]) JetCLIReadError! {
     path := input.path.replace("\\", "/")
     prefix: if cwd.ends_with("/") -> cwd else -> "{cwd}/"
     if path.starts_with(prefix) -> path = path.removeprefix(prefix)
@@ -312,7 +312,7 @@ JetCLICanonicalTargetIdentity: struct {
 // The canonical identity of `target` over `inputs`. Its member paths are
 // the working directory's, or, `rooted`, the authority root's: the same
 // target then has the same identity from any working directory.
-jet_cli_receipt_target_identity: fn(cache: &WorkspaceDeclarationCache, target: String, inputs: [JetDriverRunReceiptInput], rooted: Bool{false}) -[FS, Env, Time.Wait]> JetCLICanonicalTargetIdentity JetCLIReadError! {
+jet_cli_receipt_target_identity: fn(cache: ^WorkspaceDeclarationCache, target: String, inputs: [JetDriverRunReceiptInput], rooted: Bool{false}) -[FS, Env, Time.Wait]> JetCLICanonicalTargetIdentity JetCLIReadError! {
     target_info: cli_files.stat(target) ?? return Err(jet_cli_read_error("couldn't inspect canonical target `{target}`: {jet_cli_io_error_text(err)}"))
     if target_info.is_symlink {
         return Err(jet_cli_read_error("canonical target `{target}` must not be a symlink"))

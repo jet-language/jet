@@ -7,19 +7,19 @@ O0_STENCIL_BYTES: 3248
 
 O0_STENCIL_DIGEST: "79651f3e9438831f1a038b988f41e09fe4a8de4cc69de18187ffd6a9a95229d3"
 
-#Inline(Always) o0_patch_i32: fn(c: &[U8], at: Int, value: Int) Never! {
+#Inline(Always) o0_patch_i32: fn(c: ^[U8], at: Int, value: Int) Never! {
     c[at] = U8{value & 255}
     c[at + 1] = U8{(value >> 8) & 255}
     c[at + 2] = U8{(value >> 16) & 255}
     c[at + 3] = U8{(value >> 24) & 255}
 }
 
-#Inline(Always) o0_patch_i64: fn(c: &[U8], at: Int, value: Int) Never! {
+#Inline(Always) o0_patch_i64: fn(c: ^[U8], at: Int, value: Int) Never! {
     o0_patch_i32(c, at, value)
     o0_patch_i32(c, at + 4, value >> 32)
 }
 
-#Inline(Always) o0_st_prologue: fn(c: &[U8], p: Int, frame: Int) -> Int Never! {
+#Inline(Always) o0_st_prologue: fn(c: ^[U8], p: Int, frame: Int) -> Int Never! {
     c[p] = U8{0x55}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x89}
@@ -31,7 +31,7 @@ O0_STENCIL_DIGEST: "79651f3e9438831f1a038b988f41e09fe4a8de4cc69de18187ffd6a9a952
     p + 11
 }
 
-o0_st_stack_check_small: fn(c: &[U8], p: Int, limit: Int) -> Int Never! {
+o0_st_stack_check_small: fn(c: ^[U8], p: Int, limit: Int) -> Int Never! {
     c[p] = U8{0x65}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x3b}
@@ -47,7 +47,7 @@ o0_st_stack_check_small: fn(c: &[U8], p: Int, limit: Int) -> Int Never! {
     p + 15
 }
 
-o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int Never! {
+o0_st_stack_check_large: fn(c: ^[U8], p: Int, neg_frame: Int, limit: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x9c}
@@ -68,7 +68,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 23
 }
 
-#Inline(Always) o0_st_epilogue: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_epilogue: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x31}
     c[p + 1] = U8{0xd2}
     c[p + 2] = U8{0xc9}
@@ -76,7 +76,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_epilogue_sfence: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_epilogue_sfence: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x31}
     c[p + 1] = U8{0xd2}
     c[p + 2] = U8{0x0f}
@@ -87,7 +87,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_stop_exit: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_stop_exit: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xba}
     c[p + 1] = U8{0x01}
     c[p + 2] = U8{0x00}
@@ -98,7 +98,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_stop_exit_sfence: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_stop_exit_sfence: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xba}
     c[p + 1] = U8{0x01}
     c[p + 2] = U8{0x00}
@@ -112,30 +112,30 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 10
 }
 
-#Inline(Always) o0_st_leave: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_leave: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xc9}
     p + 1
 }
 
-#Inline(Always) o0_st_ret: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_ret: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xc3}
     p + 1
 }
 
-#Inline(Always) o0_st_ud2: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_ud2: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0x0b}
     p + 2
 }
 
-#Inline(Always) o0_st_sfence: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_sfence: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0xae}
     c[p + 2] = U8{0xf8}
     p + 3
 }
 
-#Inline(Always) o0_st_sub_rsp_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_sub_rsp_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x81}
     c[p + 2] = U8{0xec}
@@ -143,7 +143,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_add_rsp_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rsp_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x81}
     c[p + 2] = U8{0xc4}
@@ -151,19 +151,19 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_push_rax2: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_push_rax2: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x50}
     c[p + 1] = U8{0x50}
     p + 2
 }
 
-#Inline(Always) o0_st_pop_rax2: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_pop_rax2: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x58}
     c[p + 1] = U8{0x58}
     p + 2
 }
 
-#Inline(Always) o0_st_load_rax_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rax_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x45}
@@ -171,7 +171,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_rax_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rax_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x85}
@@ -179,7 +179,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_rax_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rax_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x45}
@@ -187,7 +187,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_rax_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rax_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x85}
@@ -195,7 +195,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rax_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rax_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x45}
@@ -203,7 +203,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_rax_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rax_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x85}
@@ -211,26 +211,26 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x31}
     c[p + 1] = U8{0xc0}
     p + 2
 }
 
-#Inline(Always) o0_st_mov32_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0xb8}
     o0_patch_i32(c, p + 1, imm)
     p + 5
 }
 
-#Inline(Always) o0_st_mov64_rax_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_rax_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xb8}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_load_rcx_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rcx_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x4d}
@@ -238,7 +238,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_rcx_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rcx_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x8d}
@@ -246,7 +246,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_rcx_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rcx_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x4d}
@@ -254,7 +254,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_rcx_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rcx_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x8d}
@@ -262,7 +262,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rcx_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rcx_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x4d}
@@ -270,7 +270,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_rcx_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rcx_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x8d}
@@ -278,26 +278,26 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x31}
     c[p + 1] = U8{0xc9}
     p + 2
 }
 
-#Inline(Always) o0_st_mov32_rcx_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_rcx_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0xb9}
     o0_patch_i32(c, p + 1, imm)
     p + 5
 }
 
-#Inline(Always) o0_st_mov64_rcx_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_rcx_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xb9}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_load_rdx_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rdx_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x55}
@@ -305,7 +305,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_rdx_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rdx_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x95}
@@ -313,7 +313,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_rdx_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rdx_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x55}
@@ -321,7 +321,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_rdx_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rdx_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x95}
@@ -329,7 +329,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rdx_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rdx_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x55}
@@ -337,7 +337,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_rdx_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rdx_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x95}
@@ -345,26 +345,26 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x31}
     c[p + 1] = U8{0xd2}
     p + 2
 }
 
-#Inline(Always) o0_st_mov32_rdx_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_rdx_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0xba}
     o0_patch_i32(c, p + 1, imm)
     p + 5
 }
 
-#Inline(Always) o0_st_mov64_rdx_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_rdx_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xba}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_load_rsi_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rsi_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x75}
@@ -372,7 +372,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_rsi_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rsi_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0xb5}
@@ -380,7 +380,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_rsi_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rsi_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x75}
@@ -388,7 +388,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_rsi_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rsi_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xb5}
@@ -396,7 +396,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rsi_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rsi_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x75}
@@ -404,7 +404,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_rsi_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rsi_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0xb5}
@@ -412,26 +412,26 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_rsi: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_rsi: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x31}
     c[p + 1] = U8{0xf6}
     p + 2
 }
 
-#Inline(Always) o0_st_mov32_rsi_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_rsi_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0xbe}
     o0_patch_i32(c, p + 1, imm)
     p + 5
 }
 
-#Inline(Always) o0_st_mov64_rsi_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_rsi_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xbe}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_load_rdi_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rdi_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x7d}
@@ -439,7 +439,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_rdi_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rdi_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0xbd}
@@ -447,7 +447,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_rdi_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rdi_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x7d}
@@ -455,7 +455,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_rdi_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rdi_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xbd}
@@ -463,7 +463,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rdi_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rdi_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x7d}
@@ -471,7 +471,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_rdi_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rdi_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0xbd}
@@ -479,26 +479,26 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_rdi: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_rdi: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x31}
     c[p + 1] = U8{0xff}
     p + 2
 }
 
-#Inline(Always) o0_st_mov32_rdi_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_rdi_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0xbf}
     o0_patch_i32(c, p + 1, imm)
     p + 5
 }
 
-#Inline(Always) o0_st_mov64_rdi_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_rdi_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xbf}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_load_r8_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_r8_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x45}
@@ -506,7 +506,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_r8_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_r8_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x85}
@@ -514,7 +514,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_r8_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_r8_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x45}
@@ -522,7 +522,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_r8_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_r8_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x85}
@@ -530,7 +530,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_r8_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_r8_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x45}
@@ -538,7 +538,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_r8_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_r8_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x85}
@@ -546,28 +546,28 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_r8: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_r8: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x45}
     c[p + 1] = U8{0x31}
     c[p + 2] = U8{0xc0}
     p + 3
 }
 
-#Inline(Always) o0_st_mov32_r8_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_r8_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x41}
     c[p + 1] = U8{0xb8}
     o0_patch_i32(c, p + 2, imm)
     p + 6
 }
 
-#Inline(Always) o0_st_mov64_r8_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_r8_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xb8}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_load_r9_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_r9_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x4d}
@@ -575,7 +575,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_r9_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_r9_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x8d}
@@ -583,7 +583,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_r9_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_r9_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x4d}
@@ -591,7 +591,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_r9_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_r9_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x8d}
@@ -599,7 +599,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_r9_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_r9_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x4d}
@@ -607,7 +607,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_r9_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_r9_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x8d}
@@ -615,28 +615,28 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_r9: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_r9: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x45}
     c[p + 1] = U8{0x31}
     c[p + 2] = U8{0xc9}
     p + 3
 }
 
-#Inline(Always) o0_st_mov32_r9_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_r9_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x41}
     c[p + 1] = U8{0xb9}
     o0_patch_i32(c, p + 2, imm)
     p + 6
 }
 
-#Inline(Always) o0_st_mov64_r9_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_r9_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xb9}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_load_r10_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_r10_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x55}
@@ -644,7 +644,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_r10_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_r10_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x95}
@@ -652,7 +652,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_r10_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_r10_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x55}
@@ -660,7 +660,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_r10_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_r10_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x95}
@@ -668,7 +668,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_r10_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_r10_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x55}
@@ -676,7 +676,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_r10_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_r10_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x95}
@@ -684,28 +684,28 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_r10: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_r10: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x45}
     c[p + 1] = U8{0x31}
     c[p + 2] = U8{0xd2}
     p + 3
 }
 
-#Inline(Always) o0_st_mov32_r10_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_r10_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x41}
     c[p + 1] = U8{0xba}
     o0_patch_i32(c, p + 2, imm)
     p + 6
 }
 
-#Inline(Always) o0_st_mov64_r10_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_r10_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xba}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_load_r11_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_r11_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x5d}
@@ -713,7 +713,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_r11_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_r11_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x9d}
@@ -721,7 +721,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_r11_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_r11_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x5d}
@@ -729,7 +729,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_r11_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_r11_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x9d}
@@ -737,7 +737,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_r11_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_r11_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x5d}
@@ -745,7 +745,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_lea_r11_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_r11_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x9d}
@@ -753,28 +753,28 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_zero_r11: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zero_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x45}
     c[p + 1] = U8{0x31}
     c[p + 2] = U8{0xdb}
     p + 3
 }
 
-#Inline(Always) o0_st_mov32_r11_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov32_r11_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x41}
     c[p + 1] = U8{0xbb}
     o0_patch_i32(c, p + 2, imm)
     p + 6
 }
 
-#Inline(Always) o0_st_mov64_r11_i64: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_mov64_r11_i64: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xbb}
     o0_patch_i64(c, p + 2, imm)
     p + 10
 }
 
-#Inline(Always) o0_st_store_rsp_rax_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rsp_rax_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x44}
@@ -783,7 +783,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_rsp_rax_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rsp_rax_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x84}
@@ -792,7 +792,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_rsp_xmm0_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rsp_xmm0_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -802,7 +802,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 6
 }
 
-#Inline(Always) o0_st_store_rsp_xmm0_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rsp_xmm0_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -812,7 +812,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 9
 }
 
-#Inline(Always) o0_st_store_rsp_xmm0_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rsp_xmm0_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -822,7 +822,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 6
 }
 
-#Inline(Always) o0_st_store_rsp_xmm0_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_rsp_xmm0_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -832,7 +832,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 9
 }
 
-#Inline(Always) o0_st_load_xmm0_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm0_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -841,7 +841,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm0_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm0_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -850,7 +850,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm0_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm0_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -859,7 +859,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm0_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm0_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -868,7 +868,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm0_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm0_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -877,7 +877,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm0_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm0_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -886,7 +886,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm0_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm0_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -895,7 +895,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm0_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm0_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -904,7 +904,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm1_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm1_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -913,7 +913,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm1_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm1_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -922,7 +922,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm1_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm1_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -931,7 +931,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm1_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm1_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -940,7 +940,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm1_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm1_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -949,7 +949,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm1_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm1_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -958,7 +958,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm1_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm1_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -967,7 +967,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm1_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm1_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -976,7 +976,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm2_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm2_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -985,7 +985,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm2_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm2_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -994,7 +994,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm2_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm2_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1003,7 +1003,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm2_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm2_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1012,7 +1012,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm2_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm2_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1021,7 +1021,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm2_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm2_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1030,7 +1030,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm2_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm2_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1039,7 +1039,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm2_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm2_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1048,7 +1048,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm3_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm3_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1057,7 +1057,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm3_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm3_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1066,7 +1066,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm3_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm3_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1075,7 +1075,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm3_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm3_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1084,7 +1084,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm3_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm3_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1093,7 +1093,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm3_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm3_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1102,7 +1102,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm3_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm3_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1111,7 +1111,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm3_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm3_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1120,7 +1120,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm4_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm4_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1129,7 +1129,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm4_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm4_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1138,7 +1138,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm4_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm4_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1147,7 +1147,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm4_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm4_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1156,7 +1156,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm4_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm4_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1165,7 +1165,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm4_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm4_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1174,7 +1174,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm4_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm4_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1183,7 +1183,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm4_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm4_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1192,7 +1192,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm5_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm5_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1201,7 +1201,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm5_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm5_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1210,7 +1210,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm5_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm5_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1219,7 +1219,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm5_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm5_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1228,7 +1228,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm5_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm5_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1237,7 +1237,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm5_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm5_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1246,7 +1246,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm5_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm5_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1255,7 +1255,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm5_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm5_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1264,7 +1264,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm6_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm6_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1273,7 +1273,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm6_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm6_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1282,7 +1282,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm6_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm6_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1291,7 +1291,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm6_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm6_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1300,7 +1300,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm6_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm6_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1309,7 +1309,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm6_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm6_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1318,7 +1318,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm6_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm6_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1327,7 +1327,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm6_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm6_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1336,7 +1336,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm7_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm7_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1345,7 +1345,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm7_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm7_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1354,7 +1354,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm7_f64_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm7_f64_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1363,7 +1363,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm7_f64_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm7_f64_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1372,7 +1372,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_xmm7_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm7_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1381,7 +1381,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_xmm7_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_xmm7_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -1390,7 +1390,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_xmm7_f32_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm7_f32_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1399,7 +1399,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_xmm7_f32_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_store_xmm7_f32_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -1408,70 +1408,70 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_mov_rax_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rax_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rcx_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rcx_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc1}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rdx_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rdx_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc2}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rdi_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rdi_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc7}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rsi_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rsi_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc6}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_r11_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_r11_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc3}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rax_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rax_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xd0}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rdi_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rdi_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xcf}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rsi_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rsi_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xce}
     p + 3
 }
 
-#Inline(Always) o0_st_const_i32_8: fn(c: &[U8], p: Int, dst: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_const_i32_8: fn(c: ^[U8], p: Int, dst: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc7}
     c[p + 2] = U8{0x45}
@@ -1480,7 +1480,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_const_i32_32: fn(c: &[U8], p: Int, dst: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_const_i32_32: fn(c: ^[U8], p: Int, dst: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc7}
     c[p + 2] = U8{0x85}
@@ -1489,7 +1489,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 11
 }
 
-#Inline(Always) o0_st_const_i64_8: fn(c: &[U8], p: Int, dst: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_const_i64_8: fn(c: ^[U8], p: Int, dst: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xb8}
     o0_patch_i64(c, p + 2, imm)
@@ -1500,7 +1500,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 14
 }
 
-#Inline(Always) o0_st_const_i64_32: fn(c: &[U8], p: Int, dst: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_const_i64_32: fn(c: ^[U8], p: Int, dst: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xb8}
     o0_patch_i64(c, p + 2, imm)
@@ -1511,7 +1511,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 17
 }
 
-#Inline(Always) o0_st_copy_8: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
+#Inline(Always) o0_st_copy_8: fn(c: ^[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x45}
@@ -1523,7 +1523,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_copy_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
+#Inline(Always) o0_st_copy_32: fn(c: ^[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x85}
@@ -1535,7 +1535,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 14
 }
 
-#Inline(Always) o0_st_lea_rip_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rip_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x05}
@@ -1546,7 +1546,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rip_rdi: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rip_rdi: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x3d}
@@ -1557,7 +1557,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rip_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rip_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x15}
@@ -1568,7 +1568,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rip_r11: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rip_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x1d}
@@ -1579,7 +1579,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_load_rip_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rip_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x05}
@@ -1590,7 +1590,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_load_rip_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rip_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x0d}
@@ -1601,7 +1601,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rip_slot_8: fn(c: &[U8], p: Int, dst: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rip_slot_8: fn(c: ^[U8], p: Int, dst: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x05}
@@ -1616,7 +1616,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 11
 }
 
-#Inline(Always) o0_st_static_int_8: fn(c: &[U8], p: Int, dst: Int) -> Int Never! {
+#Inline(Always) o0_st_static_int_8: fn(c: ^[U8], p: Int, dst: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x05}
@@ -1634,7 +1634,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 14
 }
 
-#Inline(Always) o0_st_add_rax_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rax_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x03}
     c[p + 2] = U8{0x45}
@@ -1642,7 +1642,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_add_rax_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rax_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x03}
     c[p + 2] = U8{0x85}
@@ -1650,14 +1650,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_add_rax_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rax_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x01}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_add_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xc0}
@@ -1665,7 +1665,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_add_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x81}
     c[p + 2] = U8{0xc0}
@@ -1673,7 +1673,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_sub_rax_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_sub_rax_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x2b}
     c[p + 2] = U8{0x45}
@@ -1681,7 +1681,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_sub_rax_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_sub_rax_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x2b}
     c[p + 2] = U8{0x85}
@@ -1689,14 +1689,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_sub_rax_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_sub_rax_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x29}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_sub_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_sub_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xe8}
@@ -1704,7 +1704,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_sub_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_sub_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x81}
     c[p + 2] = U8{0xe8}
@@ -1712,7 +1712,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_cmp_rax_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rax_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x3b}
     c[p + 2] = U8{0x45}
@@ -1720,7 +1720,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_cmp_rax_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rax_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x3b}
     c[p + 2] = U8{0x85}
@@ -1728,14 +1728,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_cmp_rax_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rax_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x39}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_cmp_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xf8}
@@ -1743,7 +1743,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_cmp_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x81}
     c[p + 2] = U8{0xf8}
@@ -1751,7 +1751,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_and_rax_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_and_rax_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x23}
     c[p + 2] = U8{0x45}
@@ -1759,7 +1759,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_and_rax_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_and_rax_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x23}
     c[p + 2] = U8{0x85}
@@ -1767,14 +1767,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_and_rax_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_and_rax_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x21}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_and_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_and_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xe0}
@@ -1782,7 +1782,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_and_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_and_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x81}
     c[p + 2] = U8{0xe0}
@@ -1790,7 +1790,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_or_rax_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_or_rax_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0b}
     c[p + 2] = U8{0x45}
@@ -1798,7 +1798,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_or_rax_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_or_rax_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0b}
     c[p + 2] = U8{0x85}
@@ -1806,14 +1806,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_or_rax_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_or_rax_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x09}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_or_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_or_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xc8}
@@ -1821,7 +1821,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_or_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_or_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x81}
     c[p + 2] = U8{0xc8}
@@ -1829,7 +1829,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_xor_rax_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_xor_rax_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x33}
     c[p + 2] = U8{0x45}
@@ -1837,7 +1837,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_xor_rax_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_xor_rax_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x33}
     c[p + 2] = U8{0x85}
@@ -1845,14 +1845,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_xor_rax_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_xor_rax_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x31}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_xor_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_xor_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xf0}
@@ -1860,7 +1860,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_xor_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_xor_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x81}
     c[p + 2] = U8{0xf0}
@@ -1868,7 +1868,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_imul_rax_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_imul_rax_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xaf}
@@ -1876,7 +1876,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_imul_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_imul_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x69}
     c[p + 2] = U8{0xc0}
@@ -1884,7 +1884,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_cqo_idiv_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cqo_idiv_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x99}
     c[p + 2] = U8{0x48}
@@ -1893,7 +1893,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_div_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_div_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x31}
     c[p + 1] = U8{0xd2}
     c[p + 2] = U8{0x48}
@@ -1902,49 +1902,49 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_mul_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mul_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xf7}
     c[p + 2] = U8{0xe1}
     p + 3
 }
 
-#Inline(Always) o0_st_imul_wide_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_imul_wide_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xf7}
     c[p + 2] = U8{0xe9}
     p + 3
 }
 
-#Inline(Always) o0_st_neg_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_neg_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xf7}
     c[p + 2] = U8{0xd8}
     p + 3
 }
 
-#Inline(Always) o0_st_shl_rax_cl: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_shl_rax_cl: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xd3}
     c[p + 2] = U8{0xe0}
     p + 3
 }
 
-#Inline(Always) o0_st_shr_rax_cl: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_shr_rax_cl: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xd3}
     c[p + 2] = U8{0xe8}
     p + 3
 }
 
-#Inline(Always) o0_st_sar_rax_cl: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_sar_rax_cl: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xd3}
     c[p + 2] = U8{0xf8}
     p + 3
 }
 
-#Inline(Always) o0_st_shl_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_shl_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe0}
@@ -1952,7 +1952,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_shr_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_shr_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe8}
@@ -1960,7 +1960,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_sar_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_sar_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xf8}
@@ -1968,21 +1968,21 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_test_rax_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_test_rax_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x85}
     c[p + 2] = U8{0xc0}
     p + 3
 }
 
-#Inline(Always) o0_st_test_rcx_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_test_rcx_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x85}
     c[p + 2] = U8{0xc9}
     p + 3
 }
 
-#Inline(Always) o0_st_stop_jne_edx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_stop_jne_edx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x85}
     c[p + 1] = U8{0xd2}
     c[p + 2] = U8{0x0f}
@@ -1994,7 +1994,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_setcc_rax: fn(c: &[U8], p: Int, cc: Int) -> Int Never! {
+#Inline(Always) o0_st_setcc_rax: fn(c: ^[U8], p: Int, cc: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0x90 + cc}
     c[p + 2] = U8{0xc0}
@@ -2004,7 +2004,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 6
 }
 
-#Inline(Always) o0_st_float_eq_flags: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_float_eq_flags: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0x94}
     c[p + 2] = U8{0xc0}
@@ -2019,7 +2019,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 11
 }
 
-#Inline(Always) o0_st_float_ne_flags: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_float_ne_flags: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0x95}
     c[p + 2] = U8{0xc0}
@@ -2034,7 +2034,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 11
 }
 
-#Inline(Always) o0_st_cmov_rax_rcx: fn(c: &[U8], p: Int, cc: Int) -> Int Never! {
+#Inline(Always) o0_st_cmov_rax_rcx: fn(c: ^[U8], p: Int, cc: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x40 + cc}
@@ -2042,7 +2042,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_test_inline_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_test_inline_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc2}
@@ -2058,7 +2058,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 12
 }
 
-#Inline(Always) o0_st_test_inline_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_test_inline_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xca}
@@ -2074,7 +2074,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 12
 }
 
-#Inline(Always) o0_st_f64_add: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_add: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x58}
@@ -2082,7 +2082,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f32_add: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_add: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x58}
@@ -2090,7 +2090,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f64_add_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_add_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x58}
@@ -2099,7 +2099,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_f64_add_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_add_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x58}
@@ -2108,7 +2108,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_f32_add_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_add_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x58}
@@ -2117,7 +2117,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_f32_add_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_add_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x58}
@@ -2126,7 +2126,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_f64_sub: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_sub: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5c}
@@ -2134,7 +2134,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f32_sub: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_sub: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5c}
@@ -2142,7 +2142,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f64_sub_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_sub_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5c}
@@ -2151,7 +2151,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_f64_sub_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_sub_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5c}
@@ -2160,7 +2160,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_f32_sub_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_sub_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5c}
@@ -2169,7 +2169,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_f32_sub_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_sub_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5c}
@@ -2178,7 +2178,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_f64_mul: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_mul: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x59}
@@ -2186,7 +2186,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f32_mul: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_mul: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x59}
@@ -2194,7 +2194,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f64_mul_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_mul_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x59}
@@ -2203,7 +2203,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_f64_mul_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_mul_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x59}
@@ -2212,7 +2212,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_f32_mul_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_mul_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x59}
@@ -2221,7 +2221,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_f32_mul_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_mul_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x59}
@@ -2230,7 +2230,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_f64_div: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_div: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5e}
@@ -2238,7 +2238,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f32_div: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_div: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5e}
@@ -2246,7 +2246,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f64_div_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_div_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5e}
@@ -2255,7 +2255,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_f64_div_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_div_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5e}
@@ -2264,7 +2264,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_f32_div_m8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_div_m8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5e}
@@ -2273,7 +2273,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_f32_div_m32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_div_m32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5e}
@@ -2282,7 +2282,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_f64_sqrt: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f64_sqrt: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x51}
@@ -2290,7 +2290,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_f32_sqrt: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_f32_sqrt: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x51}
@@ -2298,7 +2298,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_ucomisd_01: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_ucomisd_01: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x2e}
@@ -2306,7 +2306,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_ucomisd_10: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_ucomisd_10: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x2e}
@@ -2314,21 +2314,21 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_ucomiss_01: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_ucomiss_01: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0x2e}
     c[p + 2] = U8{0xc1}
     p + 3
 }
 
-#Inline(Always) o0_st_ucomiss_10: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_ucomiss_10: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0x2e}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_cvtsi2sd: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cvtsi2sd: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x0f}
@@ -2337,7 +2337,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_cvtsi2ss: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cvtsi2ss: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x0f}
@@ -2346,7 +2346,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_cvttsd2si: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cvttsd2si: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x0f}
@@ -2355,7 +2355,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_cvttss2si: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cvttss2si: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x0f}
@@ -2364,7 +2364,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_cvtss2sd: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cvtss2sd: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5a}
@@ -2372,7 +2372,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_cvtsd2ss: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cvtsd2ss: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x5a}
@@ -2380,7 +2380,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_movq_xmm0_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movq_xmm0_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x0f}
@@ -2389,7 +2389,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_movq_rax_xmm0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movq_rax_xmm0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x0f}
@@ -2398,7 +2398,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_movd_xmm0_eax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movd_xmm0_eax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x6e}
@@ -2406,7 +2406,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_movd_eax_xmm0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movd_eax_xmm0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x7e}
@@ -2414,7 +2414,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_vfmadd213sd: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_vfmadd213sd: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xc4}
     c[p + 1] = U8{0xe2}
     c[p + 2] = U8{0xf1}
@@ -2423,7 +2423,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_field_u8_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u8_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -2431,7 +2431,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_field_u8_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u8_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -2440,7 +2440,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_field_u8_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u8_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -2449,7 +2449,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_field_i8_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i8_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xbe}
@@ -2457,7 +2457,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_field_i8_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i8_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xbe}
@@ -2466,7 +2466,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_field_i8_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i8_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xbe}
@@ -2475,7 +2475,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_field_u16_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u16_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb7}
@@ -2483,7 +2483,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_field_u16_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u16_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb7}
@@ -2492,7 +2492,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_field_u16_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u16_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb7}
@@ -2501,7 +2501,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_field_i16_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i16_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xbf}
@@ -2509,7 +2509,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_field_i16_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i16_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xbf}
@@ -2518,7 +2518,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_field_i16_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i16_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xbf}
@@ -2527,34 +2527,34 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_field_u32_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u32_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x8b}
     c[p + 1] = U8{0x00}
     p + 2
 }
 
-#Inline(Always) o0_st_load_field_u32_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u32_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x8b}
     c[p + 1] = U8{0x40}
     c[p + 2] = U8{off & 255}
     p + 3
 }
 
-#Inline(Always) o0_st_load_field_u32_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_u32_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x8b}
     c[p + 1] = U8{0x80}
     o0_patch_i32(c, p + 2, off)
     p + 6
 }
 
-#Inline(Always) o0_st_load_field_i32_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i32_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x63}
     c[p + 2] = U8{0x00}
     p + 3
 }
 
-#Inline(Always) o0_st_load_field_i32_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i32_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x63}
     c[p + 2] = U8{0x40}
@@ -2562,7 +2562,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_field_i32_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i32_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x63}
     c[p + 2] = U8{0x80}
@@ -2570,14 +2570,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_load_field_i64_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i64_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x00}
     p + 3
 }
 
-#Inline(Always) o0_st_load_field_i64_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i64_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x40}
@@ -2585,7 +2585,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_field_i64_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_i64_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x80}
@@ -2593,14 +2593,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_field_1_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_1_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x40}
     c[p + 1] = U8{0x88}
     c[p + 2] = U8{0x08}
     p + 3
 }
 
-#Inline(Always) o0_st_store_field_1_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_1_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x40}
     c[p + 1] = U8{0x88}
     c[p + 2] = U8{0x48}
@@ -2608,7 +2608,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_field_1_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_1_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x40}
     c[p + 1] = U8{0x88}
     c[p + 2] = U8{0x88}
@@ -2616,14 +2616,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_field_2_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_2_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x08}
     p + 3
 }
 
-#Inline(Always) o0_st_store_field_2_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_2_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x48}
@@ -2631,7 +2631,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_field_2_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_2_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x66}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x88}
@@ -2639,34 +2639,34 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_store_field_4_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_4_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x89}
     c[p + 1] = U8{0x08}
     p + 2
 }
 
-#Inline(Always) o0_st_store_field_4_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_4_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x89}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{off & 255}
     p + 3
 }
 
-#Inline(Always) o0_st_store_field_4_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_4_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x89}
     c[p + 1] = U8{0x88}
     o0_patch_i32(c, p + 2, off)
     p + 6
 }
 
-#Inline(Always) o0_st_store_field_8_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_8_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x08}
     p + 3
 }
 
-#Inline(Always) o0_st_store_field_8_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_8_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x48}
@@ -2674,7 +2674,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_field_8_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_8_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x88}
@@ -2682,7 +2682,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-#Inline(Always) o0_st_load_field_f64_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_f64_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -2690,7 +2690,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_field_f64_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_f64_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -2699,7 +2699,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_field_f64_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_f64_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -2708,7 +2708,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_field_f64_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_f64_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -2716,7 +2716,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_field_f64_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_f64_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -2725,7 +2725,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_field_f64_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_f64_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0xf2}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -2734,7 +2734,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_load_field_f32_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_f32_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -2742,7 +2742,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_load_field_f32_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_f32_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -2751,7 +2751,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_load_field_f32_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_load_field_f32_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x10}
@@ -2760,7 +2760,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_store_field_f32_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_f32_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -2768,7 +2768,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 4
 }
 
-#Inline(Always) o0_st_store_field_f32_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_f32_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -2777,7 +2777,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_store_field_f32_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_store_field_f32_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0x11}
@@ -2786,20 +2786,20 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_rep_movsb: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_rep_movsb: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf3}
     c[p + 1] = U8{0xa4}
     p + 2
 }
 
-#Inline(Always) o0_st_xchg_rdi_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_xchg_rdi_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x87}
     c[p + 2] = U8{0x07}
     p + 3
 }
 
-#Inline(Always) o0_st_lock_xadd_rdi_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lock_xadd_rdi_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf0}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x0f}
@@ -2808,7 +2808,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_lock_cmpxchg_rdi_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lock_cmpxchg_rdi_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf0}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x0f}
@@ -2817,7 +2817,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_jmp_rel32: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_jmp_rel32: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xe9}
     c[p + 1] = U8{0}
     c[p + 2] = U8{0}
@@ -2826,7 +2826,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_jcc_rel32: fn(c: &[U8], p: Int, cc: Int) -> Int Never! {
+#Inline(Always) o0_st_jcc_rel32: fn(c: ^[U8], p: Int, cc: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0x80 + cc}
     c[p + 2] = U8{0}
@@ -2836,7 +2836,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 6
 }
 
-#Inline(Always) o0_st_call_rel32: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_call_rel32: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xe8}
     c[p + 1] = U8{0}
     c[p + 2] = U8{0}
@@ -2845,14 +2845,14 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_call_r11: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_call_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x41}
     c[p + 1] = U8{0xff}
     c[p + 2] = U8{0xd3}
     p + 3
 }
 
-#Inline(Always) o0_st_if_truth_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_if_truth_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0x7d}
@@ -2867,7 +2867,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 11
 }
 
-#Inline(Always) o0_st_if_truth_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_if_truth_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xbd}
@@ -2882,7 +2882,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 14
 }
 
-#Inline(Always) o0_st_brif_truth_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_brif_truth_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0x7d}
@@ -2897,7 +2897,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 11
 }
 
-#Inline(Always) o0_st_brif_truth_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_brif_truth_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xbd}
@@ -2912,7 +2912,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 14
 }
 
-#Inline(Always) o0_st_zone_site: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_zone_site: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xa9}
     c[p + 1] = U8{0}
     c[p + 2] = U8{0}
@@ -2921,7 +2921,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 5
 }
 
-#Inline(Always) o0_st_armed_poll: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_armed_poll: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x05}
@@ -2941,7 +2941,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 16
 }
 
-#Inline(Always) o0_st_step_spend: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_step_spend: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xff}
     c[p + 2] = U8{0x0d}
@@ -2958,7 +2958,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 13
 }
 
-#Inline(Always) o0_st_stop_quiet_gs: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_stop_quiet_gs: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x65}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x8b}
@@ -2971,7 +2971,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 9
 }
 
-#Inline(Always) o0_st_stop_quiet_turn: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_stop_quiet_turn: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x65}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0x83}
@@ -2985,7 +2985,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 10
 }
 
-#Inline(Always) o0_st_test_rax24_i32: fn(c: &[U8], p: Int, bits: Int) -> Int Never! {
+#Inline(Always) o0_st_test_rax24_i32: fn(c: ^[U8], p: Int, bits: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xf7}
     c[p + 2] = U8{0x40}
@@ -2994,7 +2994,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 8
 }
 
-#Inline(Always) o0_st_test_rax_i32: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_test_rax_i32: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xf7}
     c[p + 2] = U8{0xc0}
@@ -3002,7 +3002,7 @@ o0_st_stack_check_large: fn(c: &[U8], p: Int, neg_frame: Int, limit: Int) -> Int
     p + 7
 }
 
-o0_st_int_clone_8: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
+o0_st_int_clone_8: fn(c: ^[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x45}
@@ -3030,7 +3030,7 @@ o0_st_int_clone_8: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 24
 }
 
-#Inline(Always) o0_st_int_drop_8: fn(c: &[U8], p: Int, src: Int) -> Int Never! {
+#Inline(Always) o0_st_int_drop_8: fn(c: ^[U8], p: Int, src: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x7d}
@@ -3051,7 +3051,7 @@ o0_st_int_clone_8: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 17
 }
 
-o0_st_str_clone_head: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_str_clone_head: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x48}
@@ -3081,7 +3081,7 @@ o0_st_str_clone_head: fn(c: &[U8], p: Int) -> Int Never! {
     p + 26
 }
 
-#Inline(Always) o0_st_str_inc_mt: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_str_inc_mt: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf0}
     c[p + 1] = U8{0x48}
     c[p + 2] = U8{0xff}
@@ -3096,7 +3096,7 @@ o0_st_str_clone_head: fn(c: &[U8], p: Int) -> Int Never! {
     p + 11
 }
 
-#Inline(Always) o0_st_str_inc_st: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_str_inc_st: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xff}
     c[p + 2] = U8{0x40}
@@ -3110,7 +3110,7 @@ o0_st_str_clone_head: fn(c: &[U8], p: Int) -> Int Never! {
     p + 10
 }
 
-o0_st_str_drop_mt: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_str_drop_mt: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x85}
     c[p + 2] = U8{0xc0}
@@ -3159,7 +3159,7 @@ o0_st_str_drop_mt: fn(c: &[U8], p: Int) -> Int Never! {
     p + 45
 }
 
-o0_st_str_drop_st: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_str_drop_st: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x85}
     c[p + 2] = U8{0xc0}
@@ -3206,7 +3206,7 @@ o0_st_str_drop_st: fn(c: &[U8], p: Int) -> Int Never! {
     p + 43
 }
 
-o0_st_block_unique: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_block_unique: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x48}
@@ -3233,7 +3233,7 @@ o0_st_block_unique: fn(c: &[U8], p: Int) -> Int Never! {
     p + 23
 }
 
-o0_st_block_retain_mt: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_block_retain_mt: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x48}
@@ -3257,7 +3257,7 @@ o0_st_block_retain_mt: fn(c: &[U8], p: Int) -> Int Never! {
     p + 20
 }
 
-o0_st_block_retain_st: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_block_retain_st: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x48}
@@ -3280,7 +3280,7 @@ o0_st_block_retain_st: fn(c: &[U8], p: Int) -> Int Never! {
     p + 19
 }
 
-o0_st_unique_body: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_unique_body: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x48}
@@ -3314,7 +3314,7 @@ o0_st_unique_body: fn(c: &[U8], p: Int) -> Int Never! {
     p + 30
 }
 
-#Inline(Always) o0_st_lea_rip_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rip_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x0d}
@@ -3325,7 +3325,7 @@ o0_st_unique_body: fn(c: &[U8], p: Int) -> Int Never! {
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rip_r8: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rip_r8: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x05}
@@ -3336,7 +3336,7 @@ o0_st_unique_body: fn(c: &[U8], p: Int) -> Int Never! {
     p + 7
 }
 
-#Inline(Always) o0_st_load_rip_r11: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rip_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x1d}
@@ -3347,7 +3347,7 @@ o0_st_unique_body: fn(c: &[U8], p: Int) -> Int Never! {
     p + 7
 }
 
-#Inline(Always) o0_st_lea_rip_slot_32: fn(c: &[U8], p: Int, dst: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rip_slot_32: fn(c: ^[U8], p: Int, dst: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x05}
@@ -3362,7 +3362,7 @@ o0_st_unique_body: fn(c: &[U8], p: Int) -> Int Never! {
     p + 14
 }
 
-#Inline(Always) o0_st_static_int_32: fn(c: &[U8], p: Int, dst: Int) -> Int Never! {
+#Inline(Always) o0_st_static_int_32: fn(c: ^[U8], p: Int, dst: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x05}
@@ -3380,7 +3380,7 @@ o0_st_unique_body: fn(c: &[U8], p: Int) -> Int Never! {
     p + 17
 }
 
-o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
+o0_st_int_clone_32: fn(c: ^[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x85}
@@ -3408,7 +3408,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 30
 }
 
-#Inline(Always) o0_st_int_drop_32: fn(c: &[U8], p: Int, src: Int) -> Int Never! {
+#Inline(Always) o0_st_int_drop_32: fn(c: ^[U8], p: Int, src: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0xbd}
@@ -3429,26 +3429,26 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 20
 }
 
-#Inline(Always) o0_st_call_r10: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_call_r10: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x41}
     c[p + 1] = U8{0xff}
     c[p + 2] = U8{0xd2}
     p + 3
 }
 
-#Inline(Always) o0_st_push_r11: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_push_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x41}
     c[p + 1] = U8{0x53}
     p + 2
 }
 
-#Inline(Always) o0_st_pop_r11: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_pop_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x41}
     c[p + 1] = U8{0x5b}
     p + 2
 }
 
-#Inline(Always) o0_st_sub_rsp_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_sub_rsp_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xec}
@@ -3456,7 +3456,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_add_rsp_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rsp_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xc4}
@@ -3464,111 +3464,111 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_test_r11_r11: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_test_r11_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4d}
     c[p + 1] = U8{0x85}
     c[p + 2] = U8{0xdb}
     p + 3
 }
 
-#Inline(Always) o0_st_test_edx_edx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_test_edx_edx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x85}
     c[p + 1] = U8{0xd2}
     p + 2
 }
 
-#Inline(Always) o0_st_test_rdx_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_test_rdx_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x85}
     c[p + 2] = U8{0xd2}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rax_rsi: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rax_rsi: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xf0}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rax_rdi: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rax_rdi: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xf8}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rax_r8: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rax_r8: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc0}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rax_r9: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rax_r9: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xc8}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rax_r10: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rax_r10: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xd0}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rax_r11: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rax_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xd8}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rsi_rsp: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rsi_rsp: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xe6}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_r11_rbp: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_r11_rbp: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xeb}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_r11_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_r11_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xd3}
     p + 3
 }
 
-#Inline(Always) o0_st_mov_rsi_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_mov_rsi_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xd6}
     p + 3
 }
 
-#Inline(Always) o0_st_xor_r11_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_xor_r11_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x31}
     c[p + 2] = U8{0xcb}
     p + 3
 }
 
-#Inline(Always) o0_st_add_rdx_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rdx_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x01}
     c[p + 2] = U8{0xca}
     p + 3
 }
 
-#Inline(Always) o0_st_cmp_rcx_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rcx_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xf9}
@@ -3576,28 +3576,28 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_cmp_rdx_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rdx_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x39}
     c[p + 2] = U8{0xc2}
     p + 3
 }
 
-#Inline(Always) o0_st_cmp_rax_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rax_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x39}
     c[p + 2] = U8{0xd0}
     p + 3
 }
 
-#Inline(Always) o0_st_cmp_r11_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_r11_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x39}
     c[p + 2] = U8{0xc3}
     p + 3
 }
 
-#Inline(Always) o0_st_cmp_rdx_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_cmp_rdx_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xfa}
@@ -3605,7 +3605,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_add_rdx_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rdx_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x83}
     c[p + 2] = U8{0xc2}
@@ -3613,28 +3613,28 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_add_rdx_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_add_rdx_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x01}
     c[p + 2] = U8{0xd2}
     p + 3
 }
 
-#Inline(Always) o0_st_shl_rdx_cl: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_shl_rdx_cl: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xd3}
     c[p + 2] = U8{0xe2}
     p + 3
 }
 
-#Inline(Always) o0_st_sar_r11_cl: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_sar_r11_cl: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xd3}
     c[p + 2] = U8{0xfb}
     p + 3
 }
 
-#Inline(Always) o0_st_lea_rdx_rcx_1: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rdx_rcx_1: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x51}
@@ -3642,7 +3642,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_shl_rdx_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_shl_rdx_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe2}
@@ -3650,7 +3650,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_sar_rdx_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_sar_rdx_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xfa}
@@ -3658,7 +3658,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_shr_rdx_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_shr_rdx_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xea}
@@ -3666,7 +3666,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_imul_rax_i8: fn(c: &[U8], p: Int, imm: Int) -> Int Never! {
+#Inline(Always) o0_st_imul_rax_i8: fn(c: ^[U8], p: Int, imm: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x6b}
     c[p + 2] = U8{0xc0}
@@ -3674,14 +3674,14 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_movzx8_rax: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movzx8_rax: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0xb6}
     c[p + 2] = U8{0xc0}
     p + 3
 }
 
-#Inline(Always) o0_st_narrow_s_rax: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_s_rax: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe0}
@@ -3693,7 +3693,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_narrow_u_rax: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_u_rax: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe0}
@@ -3705,14 +3705,14 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_movzx8_rcx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movzx8_rcx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0xb6}
     c[p + 2] = U8{0xc9}
     p + 3
 }
 
-#Inline(Always) o0_st_narrow_s_rcx: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_s_rcx: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe1}
@@ -3724,7 +3724,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_narrow_u_rcx: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_u_rcx: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe1}
@@ -3736,14 +3736,14 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_movzx8_rdx: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movzx8_rdx: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0xb6}
     c[p + 2] = U8{0xd2}
     p + 3
 }
 
-#Inline(Always) o0_st_narrow_s_rdx: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_s_rdx: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe2}
@@ -3755,7 +3755,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_narrow_u_rdx: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_u_rdx: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe2}
@@ -3767,7 +3767,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_movzx8_rsi: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movzx8_rsi: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x40}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -3775,7 +3775,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_narrow_s_rsi: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_s_rsi: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe6}
@@ -3787,7 +3787,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_narrow_u_rsi: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_u_rsi: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe6}
@@ -3799,7 +3799,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_movzx8_rdi: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movzx8_rdi: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x40}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -3807,7 +3807,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_narrow_s_rdi: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_s_rdi: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe7}
@@ -3819,7 +3819,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_narrow_u_rdi: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_u_rdi: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe7}
@@ -3831,7 +3831,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_movzx8_r8: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movzx8_r8: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x45}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -3839,7 +3839,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_narrow_s_r8: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_s_r8: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe0}
@@ -3851,7 +3851,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_narrow_u_r8: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_u_r8: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe0}
@@ -3863,7 +3863,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_movzx8_r9: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movzx8_r9: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x45}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -3871,7 +3871,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_narrow_s_r9: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_s_r9: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe1}
@@ -3883,7 +3883,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_narrow_u_r9: fn(c: &[U8], p: Int, sh: Int) -> Int Never! {
+#Inline(Always) o0_st_narrow_u_r9: fn(c: ^[U8], p: Int, sh: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0xc1}
     c[p + 2] = U8{0xe1}
@@ -3895,7 +3895,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_load_rax_rax_8: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rax_rax_8: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x40}
@@ -3903,14 +3903,14 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_load_rcx_rax_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_load_rcx_rax_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x08}
     p + 3
 }
 
-#Inline(Always) o0_st_lea_rax_rax_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rax_rax_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x40}
@@ -3918,7 +3918,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_lea_rax_rax_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_lea_rax_rax_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8d}
     c[p + 2] = U8{0x80}
@@ -3926,7 +3926,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 7
 }
 
-#Inline(Always) o0_st_movnti_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movnti_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xc3}
@@ -3934,7 +3934,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_movnti_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_movnti_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xc3}
@@ -3943,7 +3943,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 5
 }
 
-#Inline(Always) o0_st_movnti_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_movnti_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xc3}
@@ -3952,14 +3952,14 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_movnti4_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_movnti4_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0xc3}
     c[p + 2] = U8{0x08}
     p + 3
 }
 
-#Inline(Always) o0_st_movnti4_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_movnti4_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0xc3}
     c[p + 2] = U8{0x48}
@@ -3967,7 +3967,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 4
 }
 
-#Inline(Always) o0_st_movnti4_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_movnti4_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x0f}
     c[p + 1] = U8{0xc3}
     c[p + 2] = U8{0x88}
@@ -3975,7 +3975,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 7
 }
 
-#Inline(Always) o0_st_copy8_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_copy8_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x1a}
@@ -3985,7 +3985,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 6
 }
 
-#Inline(Always) o0_st_copy8_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_copy8_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x5a}
@@ -3997,7 +3997,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 8
 }
 
-#Inline(Always) o0_st_copy8_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_copy8_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x9a}
@@ -4009,7 +4009,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 14
 }
 
-#Inline(Always) o0_st_copy1_0: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_copy1_0: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -4020,7 +4020,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 7
 }
 
-#Inline(Always) o0_st_copy1_8: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_copy1_8: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -4033,7 +4033,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 9
 }
 
-#Inline(Always) o0_st_copy1_32: fn(c: &[U8], p: Int, off: Int) -> Int Never! {
+#Inline(Always) o0_st_copy1_32: fn(c: ^[U8], p: Int, off: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x0f}
     c[p + 2] = U8{0xb6}
@@ -4046,28 +4046,28 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 15
 }
 
-#Inline(Always) o0_st_atomic_r10_init: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_atomic_r10_init: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x02}
     p + 3
 }
 
-#Inline(Always) o0_st_atomic_r10_load: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_atomic_r10_load: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x02}
     p + 3
 }
 
-#Inline(Always) o0_st_atomic_r10_store: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_atomic_r10_store: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x87}
     c[p + 2] = U8{0x02}
     p + 3
 }
 
-#Inline(Always) o0_st_atomic_r10_add: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_atomic_r10_add: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf0}
     c[p + 1] = U8{0x49}
     c[p + 2] = U8{0x0f}
@@ -4076,7 +4076,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 5
 }
 
-#Inline(Always) o0_st_atomic_r10_cas: fn(c: &[U8], p: Int) -> Int Never! {
+#Inline(Always) o0_st_atomic_r10_cas: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0xf0}
     c[p + 1] = U8{0x49}
     c[p + 2] = U8{0x0f}
@@ -4085,7 +4085,7 @@ o0_st_int_clone_32: fn(c: &[U8], p: Int, src: Int, dst: Int) -> Int Never! {
     p + 5
 }
 
-o0_st_block_release_mt: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_block_release_mt: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x48}
@@ -4149,7 +4149,7 @@ o0_st_block_release_mt: fn(c: &[U8], p: Int) -> Int Never! {
     p + 60
 }
 
-o0_st_block_release_st: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_block_release_st: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x48}
@@ -4212,7 +4212,7 @@ o0_st_block_release_st: fn(c: &[U8], p: Int) -> Int Never! {
     p + 59
 }
 
-o0_st_stack_save_rbp: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_stack_save_rbp: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x7d}
@@ -4289,7 +4289,7 @@ o0_st_stack_save_rbp: fn(c: &[U8], p: Int) -> Int Never! {
     p + 73
 }
 
-o0_st_stack_restore_rbp: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_stack_restore_rbp: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x7d}
@@ -4366,7 +4366,7 @@ o0_st_stack_restore_rbp: fn(c: &[U8], p: Int) -> Int Never! {
     p + 73
 }
 
-o0_st_stack_restore_r11: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_stack_restore_r11: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x7b}
@@ -4451,7 +4451,7 @@ o0_st_stack_restore_r11: fn(c: &[U8], p: Int) -> Int Never! {
     p + 81
 }
 
-o0_st_stack_bridge: fn(c: &[U8], p: Int, bridge: Int) -> Int Never! {
+o0_st_stack_bridge: fn(c: ^[U8], p: Int, bridge: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x5d}
@@ -4482,7 +4482,7 @@ o0_st_stack_bridge: fn(c: &[U8], p: Int, bridge: Int) -> Int Never! {
     p + 34
 }
 
-o0_st_store_rax_r11_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
+o0_st_store_rax_r11_32: fn(c: ^[U8], p: Int, disp: Int) -> Int Never! {
     c[p] = U8{0x4c}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0x98}
@@ -4490,7 +4490,7 @@ o0_st_store_rax_r11_32: fn(c: &[U8], p: Int, disp: Int) -> Int Never! {
     p + 7
 }
 
-o0_st_stack_switch: fn(c: &[U8], p: Int, neg_copied: Int) -> Int Never! {
+o0_st_stack_switch: fn(c: ^[U8], p: Int, neg_copied: Int) -> Int Never! {
     c[p] = U8{0x49}
     c[p + 1] = U8{0x89}
     c[p + 2] = U8{0xeb}
@@ -4505,7 +4505,7 @@ o0_st_stack_switch: fn(c: &[U8], p: Int, neg_copied: Int) -> Int Never! {
     p + 14
 }
 
-o0_st_stack_after: fn(c: &[U8], p: Int, off_rbp: Int, neg_saves: Int) -> Int Never! {
+o0_st_stack_after: fn(c: ^[U8], p: Int, off_rbp: Int, neg_saves: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0xac}
@@ -4539,7 +4539,7 @@ o0_st_stack_after: fn(c: &[U8], p: Int, off_rbp: Int, neg_saves: Int) -> Int Nev
     p + 36
 }
 
-o0_st_stack_tail: fn(c: &[U8], p: Int) -> Int Never! {
+o0_st_stack_tail: fn(c: ^[U8], p: Int) -> Int Never! {
     c[p] = U8{0x48}
     c[p + 1] = U8{0x8b}
     c[p + 2] = U8{0x04}

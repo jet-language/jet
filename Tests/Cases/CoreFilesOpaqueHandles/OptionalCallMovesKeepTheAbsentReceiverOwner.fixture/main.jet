@@ -16,12 +16,12 @@ lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {n
 Counter: struct {
     base: Int,
 
-    claim: fn(self, l: &&FileLock) -[FS]> Int { self.base + held() }
+    claim: fn(self, l: ^^FileLock) -[FS]> Int { self.base + held() }
 }
 
 // `c?.claim(…)` calls only on a present receiver: where `c` is absent the
 // argument's owner still holds the lock, which closes as this returns.
-optional_call: fn(l: &&FileLock, c: Counter?) -[FS]> Int {
+optional_call: fn(l: ^^FileLock, c: Counter?) -[FS]> Int {
     value: c?.claim(l.move())
     value ?? 0
 }

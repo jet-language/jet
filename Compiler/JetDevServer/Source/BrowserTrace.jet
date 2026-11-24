@@ -75,7 +75,7 @@ BrowserTraceRelay: struct {
 
     // Appends one beacon envelope `class=…&symbol=…&start_ns=…&duration_ns=…&clock_ns=…`,
     // rebasing the page clock onto the relay's monotonic clock.
-    record: fn(&self, body: [U8]) BrowserTraceRecordError! {
+    record: fn(^self, body: [U8]) BrowserTraceRecordError! {
         if body.len() > BROWSER_TRACE_ENVELOPE_LIMIT {
             return Err(BrowserTraceRecordError.Oversized)
         }
@@ -111,7 +111,7 @@ BrowserTraceRelay: struct {
         self.rows += 1
     }
 
-    append: fn(&self, line: String) BrowserTraceRecordError! {
+    append: fn(^self, line: String) BrowserTraceRecordError! {
         self.writer.write_bytes(line.bytes()) ?? return Err(BrowserTraceRecordError.Unavailable)
         self.writer.flush() ?? return Err(BrowserTraceRecordError.Unavailable)
     }

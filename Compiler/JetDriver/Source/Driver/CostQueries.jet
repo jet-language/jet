@@ -232,7 +232,7 @@ jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered],
 // back to this one, itself included, the turn poll that callee's entry
 // keeps (ir_entry_check, ir_recursion_checks), at the call's depth.
 // `callers` holds each covered function's direct callers, by position.
-jet_driver_cost_stop_polls: fn(function: FnBody, position: Int, name: String, nodes: [Int], depths: [Int:Int], callees: JetDriverCostCallees, callers: [Int:[Int]], sites: &[TCostSite]) Never! {
+jet_driver_cost_stop_polls: fn(function: FnBody, position: Int, name: String, nodes: [Int], depths: [Int:Int], callees: JetDriverCostCallees, callers: [Int:[Int]], sites: ^[TCostSite]) Never! {
     tree: function.tree
     loop statement in tree.stmts {
         span: jet_driver_cost_loop_span(statement) ?? next
@@ -288,7 +288,7 @@ jet_driver_cost_loop_span: fn(statement: StmtKind) -> Span? Never! {
 
 // Each site of `report` placed in its source file: the file's path and the
 // line its span starts on.
-jet_driver_cost_place: fn(load: JetDriverLoadResult, report: &TCostReport) {
+jet_driver_cost_place: fn(load: JetDriverLoadResult, report: ^TCostReport) {
     lines := JetDriverForeignLines{}
     loop index in 0..<report.sites.len() {
         location: jet_driver_source_location_for_load_module(load, report.sites[index].module_identity, report.sites[index].span) ?? next
@@ -368,7 +368,7 @@ jet_driver_cost_has_growth_candidate: fn(tree: BodyTree, interner: Interner, dep
 // functions with zero allocations, skips OutcomeConstruction/consumed tracking,
 // computes shared-edits and Int-growth maps lazily only when a loop-nested
 // candidate exists, and pushes only tidy SemanticRemainder sites.
-jet_driver_cost_tidy_function_sites: fn(function: FnBody, interner: Interner, sites: &[TCostSite]) Never! {
+jet_driver_cost_tidy_function_sites: fn(function: FnBody, interner: Interner, sites: ^[TCostSite]) Never! {
     if !jet_driver_cost_reports(function) {
         return
     }
@@ -580,21 +580,21 @@ jet_driver_cost_type_suffix: fn(type_args: [Type]) -> String Never! {
 
 // Pushes `expression` and every expression below it, statement blocks
 // entered, in pre-order onto `found`.
-jet_driver_cost_reach: fn(tree: BodyTree, expression: Int, found: &[Int]) Never! {
+jet_driver_cost_reach: fn(tree: BodyTree, expression: Int, found: ^[Int]) Never! {
     found.push(expression)
     body_each_expr_child(tree, tree.nodes[body_node_index(tree, expression)], fn(child: Int) { jet_driver_cost_reach(tree, child, found) })
 }
 
 // Pushes every expression of statement `statement` of `tree` in pre-order
 // onto `found`.
-jet_driver_cost_reach_statement: fn(tree: BodyTree, statement: Int, found: &[Int]) Never! {
+jet_driver_cost_reach_statement: fn(tree: BodyTree, statement: Int, found: ^[Int]) Never! {
     body_each_stmt_child(tree, tree.stmts[statement - tree.stmt_base], fn(child: Int) { jet_driver_cost_reach(tree, child, found) })
 }
 
 // Pushes onto `found` every expression a loop statement runs once per
 // iteration: its body, a `while`'s condition, a counted loop's condition and
 // step. A statement that is no loop pushes none.
-jet_driver_cost_iterated: fn(tree: BodyTree, statement: StmtKind, found: &[Int]) Never! {
+jet_driver_cost_iterated: fn(tree: BodyTree, statement: StmtKind, found: ^[Int]) Never! {
     if statement == .Loop(_, body, _) {
         loop row in body -> jet_driver_cost_reach_statement(tree, row, found)
     } else if statement == .While(_, condition, body, _) {
@@ -632,7 +632,7 @@ jet_driver_cost_loop_depths: fn(tree: BodyTree) -> [Int:Int] Never! {
 // lifted call or a drop), so no carrier outlives the expression; and in
 // `removed` each `??` operand, whose carrier the fallback's fast path
 // removes.
-jet_driver_cost_consumed: fn(tree: BodyTree, consumed: &[Int:Bool], removed: &[Int:Bool]) Never! {
+jet_driver_cost_consumed: fn(tree: BodyTree, consumed: ^[Int:Bool], removed: ^[Int:Bool]) Never! {
     loop statement in tree.stmts {
         if statement == .ExprStmt(value, _) -> consumed[value] = true else if statement == .RefutableBind(_, init, _, _) {
             consumed[init] = true
@@ -663,7 +663,7 @@ jet_driver_cost_consumed: fn(tree: BodyTree, consumed: &[Int:Bool], removed: &[I
 // each at its loop depth in `depths` (jet_driver_cost_loop_depths).
 // An Outcome a `??` takes apart is optimizer-removed; one the enclosing code
 // consumes otherwise is no site.
-jet_driver_cost_function_sites: fn(function: FnBody, interner: Interner, name: String, nodes: [Int], depths: [Int:Int], sites: &[TCostSite]) Never! {
+jet_driver_cost_function_sites: fn(function: FnBody, interner: Interner, name: String, nodes: [Int], depths: [Int:Int], sites: ^[TCostSite]) Never! {
     tree: function.tree
     consumed := [Int:Bool]{}
     removed := [Int:Bool]{}
@@ -724,7 +724,7 @@ jet_driver_cost_grown_shift: fn(grown: [Int:Bool], id: Int) -> TCostFact? Never!
 // condition compares the target against any Int (jet_driver_cost_caps)
 // stops below twice that Int, so it spills only if that Int already sits
 // near the rail's end.
-jet_driver_cost_growth: fn(tree: BodyTree, interner: Interner, nodes: &[Int:Bool], updates: &[Int:Bool]) Never! {
+jet_driver_cost_growth: fn(tree: BodyTree, interner: Interner, nodes: ^[Int:Bool], updates: ^[Int:Bool]) Never! {
     sizes := [Int:Int]{}
     conditions := [Int:Int]{}
     owners := [Int:Int]{}
@@ -902,7 +902,7 @@ jet_driver_cost_int_place: fn(tree: BodyTree, interner: Interner, place: BodyPla
 // Whether loop condition `condition` of `tree` caps the place `place` by
 // comparing it, or it plus, less, times or shifted by some Int, against any
 // Int: `place < cap`, `place * 2 <= cap`, `cap > place` or `cap >= place`,
-// alone or as one side of `&&`.
+// alone or as one side of `^^`.
 jet_driver_cost_caps: fn(tree: BodyTree, condition: Int, place: BodyPlace, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
     if body_node(tree, condition).kind == .Binary(op, _, _, left, right) {
         if op == TBinaryOp.And {

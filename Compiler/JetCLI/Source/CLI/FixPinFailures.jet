@@ -118,7 +118,7 @@ jet_cli_pin_apply: fn(before: String, facts: JetCLIPinFacts) -> JetCLIFixApply? 
 
 // Pin `function`, named `local` among the checked functions, whose
 // top-level declaration ends at `end`.
-jet_cli_pin_function: fn(function: Func, local: String, end: Int, tokens: [Token], facts: JetCLIPinFacts, declared: &[String:Bool], edits: &[TextEdit], tails: &[TextEdit]) {
+jet_cli_pin_function: fn(function: Func, local: String, end: Int, tokens: [Token], facts: JetCLIPinFacts, declared: ^[String:Bool], edits: ^[TextEdit], tails: ^[TextEdit]) {
     if !sema_failure_inference_candidate(function) {
         return
     }
@@ -158,7 +158,7 @@ jet_cli_pin_function: fn(function: Func, local: String, end: Int, tokens: [Token
 
 // Write the enum the checker minted as `name` after the top-level
 // declaration ending at `end`, once, unless the file declares `name`.
-jet_cli_pin_mint: fn(name: String, end: Int, facts: JetCLIPinFacts, declared: &[String:Bool], tails: &[TextEdit]) {
+jet_cli_pin_mint: fn(name: String, end: Int, facts: JetCLIPinFacts, declared: ^[String:Bool], tails: ^[TextEdit]) {
     if declared.has_key(name) {
         return
     }

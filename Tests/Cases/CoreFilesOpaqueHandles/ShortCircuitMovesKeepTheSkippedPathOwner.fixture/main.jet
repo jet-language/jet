@@ -13,17 +13,17 @@ held: fn() -[FS]> Int {
 
 lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
-consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
+consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 
 // The right side of `&&` runs only where `flag` holds: where it does not,
 // the parameter still owns the lock, which closes as this returns.
-and_move: fn(l: &&FileLock, flag: Bool) -[FS]> Int {
+and_move: fn(l: ^^FileLock, flag: Bool) -[FS]> Int {
     taken: flag && consume_lock(l.move()) > 0
     if taken -> 1 else -> 0
 }
 
 // The right side of `||` runs only where `flag` fails.
-or_move: fn(l: &&FileLock, flag: Bool) -[FS]> Int {
+or_move: fn(l: ^^FileLock, flag: Bool) -[FS]> Int {
     taken: flag || consume_lock(l.move()) > 0
     if taken -> 1 else -> 0
 }

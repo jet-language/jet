@@ -123,7 +123,7 @@ bit_sigils1_binding: fn(op: String) -> Int {
 }
 
 // Finds the calls of one token stream, then those of its interpolation holes.
-bit_sigils1_collect: fn(path: String, scan: &BitSigilsScan, tables: TokenTables, raw: [Token]) {
+bit_sigils1_collect: fn(path: String, scan: ^BitSigilsScan, tables: TokenTables, raw: [Token]) {
     tokens: lexer_without_comments(raw)
     stream: scan.streams.len()
     holes := [Int]{}
@@ -293,7 +293,7 @@ bit_sigils1_statement_start: fn(kind: Int) -> Bool {
 
 // A string literal's Jet, recorded when it holds bit calls and rewritten
 // when its place is rendered.
-bit_sigils1_quoted: fn(path: String, scan: &BitSigilsScan, token: Token) {
+bit_sigils1_quoted: fn(path: String, scan: ^BitSigilsScan, token: Token) {
     raw: lambda_shape1_text(scan.bytes, token.span.start, token.span.end)
     if !raw.contains(".bit_") {
         return

@@ -395,7 +395,7 @@ jet_config_export_wire_name: fn(definition: StructDef, field_index: Int, format:
     names.format_key(format) ?? names.text
 }
 
-jet_config_export_ct_struct_fields: fn(definition: StructDef, ct_fields: [NamedCtValue], items: [Item], format: String, out: &[JetCLIStatusField]) -> Bool Never! {
+jet_config_export_ct_struct_fields: fn(definition: StructDef, ct_fields: [NamedCtValue], items: [Item], format: String, out: ^[JetCLIStatusField]) -> Bool Never! {
     loop index in 0..<definition.fields.len() {
         field: definition.fields[index]
         if field.computed != None || codable_skips(field.serde_markers) -> next
@@ -638,7 +638,7 @@ jet_config_export_schema_named: fn(name: String, items: [Item], active: [String]
     jet_cli_status_object([JetCLIStatusField]{})
 }
 
-jet_config_export_append_struct_fields: fn(definition: StructDef, items: [Item], active: [String], props: &[JetCLIStatusField], required: &[String]) Never! {
+jet_config_export_append_struct_fields: fn(definition: StructDef, items: [Item], active: [String], props: ^[JetCLIStatusField], required: ^[String]) Never! {
     loop field in definition.fields {
         if field.computed != None || codable_skips(field.serde_markers) -> next
         if codable_flattens(field.serde_markers) {

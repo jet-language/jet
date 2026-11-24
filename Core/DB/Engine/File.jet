@@ -57,7 +57,7 @@ file_rc: fn(r: base.SQLError!) -> Int Never! {
 }
 
 // sqlite3OsOpen. The flags xOpen settled on are f.os.flags.
-file_open: fn(f: &SQLFile, path: String?, flags: Int, psow: Bool{true}, modeof: String?{None}, readonly_shm: Bool{false}) -[DB]> Int Never! {
+file_open: fn(f: ^SQLFile, path: String?, flags: Int, psow: Bool{true}, modeof: String?{None}, readonly_shm: Bool{false}) -[DB]> Int Never! {
     f.mem = false
     f.data = [U8]{}
     opened: os.os_open(path, flags, psow, modeof, readonly_shm) ?? {
@@ -71,7 +71,7 @@ file_open: fn(f: &SQLFile, path: String?, flags: Int, psow: Bool{true}, modeof: 
 // sqlite3JournalOpen: a journal held in memory until it outgrows nSpill
 // bytes; nSpill 0 opens the file at once and a negative nSpill never
 // spills.
-journal_open: fn(f: &SQLFile, name: String?, flags: Int, spill: Int) -[DB]> Int Never! {
+journal_open: fn(f: ^SQLFile, name: String?, flags: Int, spill: Int) -[DB]> Int Never! {
     if spill == 0 -> return file_open(f, name, flags)
     f.os = os.os_closed_file()
     f.mem = true
@@ -83,7 +83,7 @@ journal_open: fn(f: &SQLFile, name: String?, flags: Int, spill: Int) -[DB]> Int 
 }
 
 // sqlite3MemJournalOpen: an in-memory journal that never spills.
-mem_journal_open: fn(f: &SQLFile) Never! {
+mem_journal_open: fn(f: ^SQLFile) Never! {
     f.os = os.os_closed_file()
     f.mem = true
     f.data = [U8]{}
@@ -93,7 +93,7 @@ mem_journal_open: fn(f: &SQLFile) Never! {
 }
 
 // sqlite3OsClose; closing a closed handle does nothing.
-file_close: fn(f: &SQLFile) -[DB]> Never! {
+file_close: fn(f: ^SQLFile) -[DB]> Never! {
     if f.mem {
         f.mem = false
         f.data = [U8]{}
@@ -104,7 +104,7 @@ file_close: fn(f: &SQLFile) -[DB]> Never! {
 
 // memjrnlCreateFile: move the content to a real file. On failure the
 // handle stays the in-memory journal it was.
-mem_create_file: fn(f: &SQLFile) -[DB]> Int Never! {
+mem_create_file: fn(f: ^SQLFile) -[DB]> Int Never! {
     real := os.os_open(f.name, f.open_flags) ?? return err.code
     n: f.data.len()
     if n > 0 {
@@ -123,7 +123,7 @@ mem_create_file: fn(f: &SQLFile) -[DB]> Int Never! {
 // sqlite3OsRead into buf[0..<amt]. A read past the end of an in-memory
 // journal is IOERR_SHORT_READ and leaves buf alone (memjrnlRead); the unix
 // VFS zero-fills a short read.
-file_read: fn(f: &SQLFile, buf: &[U8], amt: Int, offset: Int) -[DB]> Int Never! {
+file_read: fn(f: ^SQLFile, buf: ^[U8], amt: Int, offset: Int) -[DB]> Int Never! {
     if f.mem {
         if amt + offset > f.data.len() -> return base.IOERR_SHORT_READ
         loop i in 0..<amt -> buf[i] = f.data[offset + i]
@@ -133,7 +133,7 @@ file_read: fn(f: &SQLFile, buf: &[U8], amt: Int, offset: Int) -[DB]> Int Never! 
 }
 
 // sqlite3OsWrite of data[0..<amt].
-file_write: fn(f: &SQLFile, data: [U8], amt: Int, offset: Int) -[DB]> Int Never! {
+file_write: fn(f: ^SQLFile, data: [U8], amt: Int, offset: Int) -[DB]> Int Never! {
     if !f.mem -> return file_rc(os.os_write(f.os, data, amt, offset))
     // memjrnlWrite.
     if f.spill > 0 && amt + offset > f.spill {
@@ -155,13 +155,13 @@ file_write: fn(f: &SQLFile, data: [U8], amt: Int, offset: Int) -[DB]> Int Never!
 }
 
 // memjrnlTruncate: only ever shortens.
-mem_truncate: fn(f: &SQLFile, size: Int) Never! {
+mem_truncate: fn(f: ^SQLFile, size: Int) Never! {
     if size == 0 -> f.data.clear()
     loop f.data.len() > size -> _: f.data.pop()
 }
 
 // sqlite3OsTruncate.
-file_truncate: fn(f: &SQLFile, size: Int) -[DB]> Int Never! {
+file_truncate: fn(f: ^SQLFile, size: Int) -[DB]> Int Never! {
     if f.mem {
         mem_truncate(f, size)
         return base.OK
@@ -170,13 +170,13 @@ file_truncate: fn(f: &SQLFile, size: Int) -[DB]> Int Never! {
 }
 
 // sqlite3OsSync; an in-memory journal has nothing to sync.
-file_sync: fn(f: &SQLFile, flags: Int) -[DB]> Int Never! {
+file_sync: fn(f: ^SQLFile, flags: Int) -[DB]> Int Never! {
     if f.mem -> return base.OK
     file_rc(os.os_sync(f.os, flags))
 }
 
 // sqlite3OsFileSize into size.
-file_size: fn(f: &SQLFile, size: &Int) -[DB]> Int Never! {
+file_size: fn(f: ^SQLFile, size: ^Int) -[DB]> Int Never! {
     if f.mem {
         size = f.data.len()
         return base.OK
@@ -187,19 +187,19 @@ file_size: fn(f: &SQLFile, size: &Int) -[DB]> Int Never! {
 }
 
 // sqlite3OsLock; an in-memory journal has no lock methods.
-file_lock: fn(f: &SQLFile, level: Int) -[DB]> Int Never! {
+file_lock: fn(f: ^SQLFile, level: Int) -[DB]> Int Never! {
     if f.mem -> return base.OK
     file_rc(os.os_lock(f.os, level))
 }
 
 // sqlite3OsUnlock.
-file_unlock: fn(f: &SQLFile, level: Int) -[DB]> Int Never! {
+file_unlock: fn(f: ^SQLFile, level: Int) -[DB]> Int Never! {
     if f.mem -> return base.OK
     file_rc(os.os_unlock(f.os, level))
 }
 
 // sqlite3OsCheckReservedLock into locked.
-file_check_reserved_lock: fn(f: &SQLFile, locked: &Bool) -[DB]> Int Never! {
+file_check_reserved_lock: fn(f: ^SQLFile, locked: ^Bool) -[DB]> Int Never! {
     locked = false
     if f.mem -> return base.OK
     got: os.os_check_reserved_lock(f.os) ?? return err.code
@@ -208,14 +208,14 @@ file_check_reserved_lock: fn(f: &SQLFile, locked: &Bool) -[DB]> Int Never! {
 }
 
 // sqlite3OsSectorSize.
-file_sector_size: fn(f: &SQLFile) -> Int Never! {
+file_sector_size: fn(f: ^SQLFile) -> Int Never! {
     if f.mem -> return 0
     os.os_sector_size(f.os)
 }
 
 // sqlite3SectorSize (pager.c): the sector size clamped to 512 below 32
 // and to MAX_SECTOR_SIZE above it.
-sector_size_of: fn(f: &SQLFile) -> Int Never! {
+sector_size_of: fn(f: ^SQLFile) -> Int Never! {
     r: file_sector_size(f)
     if r < 32 -> return 512
     if r > MAX_SECTOR_SIZE -> return MAX_SECTOR_SIZE
@@ -223,14 +223,14 @@ sector_size_of: fn(f: &SQLFile) -> Int Never! {
 }
 
 // sqlite3OsDeviceCharacteristics.
-file_device_characteristics: fn(f: &SQLFile) -> Int Never! {
+file_device_characteristics: fn(f: ^SQLFile) -> Int Never! {
     if f.mem || !os.os_is_open(f.os) -> return 0
     os.os_device_characteristics(f.os)
 }
 
 // sqlite3OsFileControl(SQLITE_FCNTL_SIZE_HINT); a hint, so its errors are
 // dropped (sqlite3OsFileControlHint).
-file_size_hint: fn(f: &SQLFile, size: Int) -[DB]> Never! {
+file_size_hint: fn(f: ^SQLFile, size: Int) -[DB]> Never! {
     if f.mem || !os.os_is_open(f.os) {
         return
     }
@@ -253,7 +253,7 @@ file_exists: fn(path: String) -[DB]> Bool Never! { os.os_access(path, os.ACCESS_
 
 // sqlite3OsFileControlHint(SQLITE_FCNTL_PERSIST_WAL) asking for the
 // setting: whether the -wal file outlives the last connection.
-file_persist_wal: fn(f: &SQLFile) -> Bool Never! {
+file_persist_wal: fn(f: ^SQLFile) -> Bool Never! {
     if f.mem || !os.os_is_open(f.os) -> return false
     os.os_persist_wal(f.os, -1) != 0
 }
@@ -261,7 +261,7 @@ file_persist_wal: fn(f: &SQLFile) -> Bool Never! {
 // sqlite3OsShmMap of wal-index region `region`, `sz_region` bytes; mapped
 // tells whether it exists. An in-memory journal has no xShmMap; the pager
 // never opens a log on one.
-file_shm_map: fn(f: &SQLFile, region: Int, sz_region: Int, extend: Bool, mapped: &Bool) -[DB]> Int Never! {
+file_shm_map: fn(f: ^SQLFile, region: Int, sz_region: Int, extend: Bool, mapped: ^Bool) -[DB]> Int Never! {
     mapped = false
     if f.mem -> return base.IOERR_SHMMAP
     os.os_shm_map(f.os, region, sz_region, extend, mapped)
@@ -269,23 +269,23 @@ file_shm_map: fn(f: &SQLFile, region: Int, sz_region: Int, extend: Bool, mapped:
 
 // Read n bytes of the shared memory at `offset` into buf[at..] (a load
 // from the mapping sqlite3OsShmMap returns).
-file_shm_read: fn(f: &SQLFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> Int Never! {
+file_shm_read: fn(f: ^SQLFile, offset: Int, buf: ^[U8], at: Int, n: Int) -[DB]> Int Never! {
     os.os_shm_read(f.os, offset, buf, at, n)
 }
 
 // Write data[at..<at+n] to the shared memory at `offset` (a store into the
 // mapping).
-file_shm_write: fn(f: &SQLFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Int Never! {
+file_shm_write: fn(f: ^SQLFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Int Never! {
     os.os_shm_write(f.os, offset, data, at, n)
 }
 
 // sqlite3OsShmLock.
-file_shm_lock: fn(f: &SQLFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! {
+file_shm_lock: fn(f: ^SQLFile, ofst: Int, n: Int, flags: Int) -[DB]> Int Never! {
     os.os_shm_lock(f.os, ofst, n, flags)
 }
 
 // sqlite3OsShmUnmap.
-file_shm_unmap: fn(f: &SQLFile, delete: Bool) -[DB]> Never! {
+file_shm_unmap: fn(f: ^SQLFile, delete: Bool) -[DB]> Never! {
     if f.mem {
         return
     }

@@ -63,15 +63,15 @@ sema_gate_ledger_collect: fn(modules: [SemaGateModule], names: NameLedger, gates
     ledger
 }
 
-sema_gate_invocation: fn(ledger: &GateLedger, kind: GateKind, scope: String) Never! {
+sema_gate_invocation: fn(ledger: ^GateLedger, kind: GateKind, scope: String) Never! {
     gate_ledger_push(ledger, GateEntry{kind: kind, domain: "security", scope: scope, source: "command line", span: None, subject: "invocation flags", reason: None, status: Val("recorded"), detail: "written invocation choice", provenance: ["command line"], operations: []})
 }
 
-sema_gate_append_structure: fn(ledger: &GateLedger, names: NameLedger) Never! {
+sema_gate_append_structure: fn(ledger: ^GateLedger, names: NameLedger) Never! {
     loop fact in names.facts.structure_facts -> sema_gate_push_structure(ledger, fact)
 }
 
-sema_gate_push_structure: fn(ledger: &GateLedger, fact: StructureFact) Never! {
+sema_gate_push_structure: fn(ledger: ^GateLedger, fact: StructureFact) Never! {
     reason: fact.gate ?? return
     scope: if fact.kind == {
         .Liveness -> "liveness"
@@ -81,7 +81,7 @@ sema_gate_push_structure: fn(ledger: &GateLedger, fact: StructureFact) Never! {
     gate_ledger_push(ledger, gate_source_entry(GateKind.Structure, "structure", scope, fact.source, fact.span, fact.subject, Val(reason), fact.detail, fact.status))
 }
 
-sema_gate_structure_name: fn(source: String, name: String, span: Span, ledger: &GateLedger) Never! {
+sema_gate_structure_name: fn(source: String, name: String, span: Span, ledger: ^GateLedger) Never! {
     if name.starts_with("_") && !name.starts_with("__jet_") {
         gate_ledger_push(ledger, gate_source_entry(GateKind.Structure, "structure", "liveness", source, span, name, None, "written underscore name suppresses unused-name guidance", "recorded"))
     }
@@ -102,7 +102,7 @@ sema_gate_checked_text_names: fn(programs: [Program]) -> NameTable Never! {
     names
 }
 
-sema_gate_checked_text_items: fn(items: [Item], distinct: &NameTable, implementations: &NameTable) Never! {
+sema_gate_checked_text_items: fn(items: [Item], distinct: ^NameTable, implementations: ^NameTable) Never! {
     loop item in items {
         if item == {
             .Distinct(definition) -> {
@@ -129,7 +129,7 @@ sema_gate_checked_text_items: fn(items: [Item], distinct: &NameTable, implementa
     }
 }
 
-sema_gate_items: fn(source: String, tables: ASTTables, items: [Item], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_items: fn(source: String, tables: ASTTables, items: [Item], ledger: ^GateLedger, context: Shared<SemaGateContext>) Never! {
     loop item in items {
         if item == {
             .Func(function) -> { sema_gate_function(source, tables, function, ledger, context) }
@@ -200,7 +200,7 @@ sema_gate_items: fn(source: String, tables: ASTTables, items: [Item], ledger: &G
     }
 }
 
-sema_gate_template: fn(source: String, tables: ASTTables, body: [DeriveBodyItem], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_template: fn(source: String, tables: ASTTables, body: [DeriveBodyItem], ledger: ^GateLedger, context: Shared<SemaGateContext>) Never! {
     loop body_item in body {
         if body_item == {
             .Stmt(statement) -> {
@@ -224,7 +224,7 @@ sema_gate_template: fn(source: String, tables: ASTTables, body: [DeriveBodyItem]
 
 // Each move a state list declares, `Pending -> Confirmed`, is one recorded
 // state transition.
-sema_gate_state_moves: fn(source: String, state: StateDecl, ledger: &GateLedger) Never! {
+sema_gate_state_moves: fn(source: String, state: StateDecl, ledger: ^GateLedger) Never! {
     loop arrow in state.arrows {
         loop target in arrow.to {
             spelling: "{arrow.from.name} -> {target.name}"
@@ -233,7 +233,7 @@ sema_gate_state_moves: fn(source: String, state: StateDecl, ledger: &GateLedger)
     }
 }
 
-sema_gate_function: fn(source: String, tables: ASTTables, function: Func, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_function: fn(source: String, tables: ASTTables, function: Func, ledger: ^GateLedger, context: Shared<SemaGateContext>) Never! {
     if !function.compiler_generated {
         sema_gate_structure_name(source, function.name, function.name_span, ledger)
     }
@@ -270,13 +270,13 @@ SemaGateVisitor: struct {
     ledger: GateLedger,
     context: Shared<SemaGateContext>,
 
-    visit: fn(&self, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
+    visit: fn(^self, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
         permit: self.context.guard_read()
         sema_gate_expression_value(self.source, ast_expr(self.tables, expression), self.ledger, permit.value)
     }
 }
 
-sema_gate_statements: fn(source: String, tables: ASTTables, body: [StmtNode], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_statements: fn(source: String, tables: ASTTables, body: [StmtNode], ledger: ^GateLedger, context: Shared<SemaGateContext>) Never! {
     visitor := SemaGateVisitor{source: source, tables: tables, ledger: GateLedger{rows: []}, context: context}
     loop statement in body {
         ast_visit_statement(tables, statement, fn(expression: ExprNode) { visitor.visit(expression) }, false)
@@ -289,7 +289,7 @@ sema_gate_statements: fn(source: String, tables: ASTTables, body: [StmtNode], le
     sema_gate_statement_gates(source, body, ledger)
 }
 
-sema_gate_expression: fn(source: String, tables: ASTTables, expression: ExprNode, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_expression: fn(source: String, tables: ASTTables, expression: ExprNode, ledger: ^GateLedger, context: Shared<SemaGateContext>) Never! {
     visitor := SemaGateVisitor{source: source, tables: tables, ledger: GateLedger{rows: []}, context: context}
     ast_visit_expr(tables, expression, fn(value: ExprNode) { visitor.visit(value) })
     visitor.ledger.rows.reverse()
@@ -299,7 +299,7 @@ sema_gate_expression: fn(source: String, tables: ASTTables, expression: ExprNode
     }
 }
 
-sema_gate_expression_value: fn(source: String, expression: Expr, ledger: &GateLedger, context: SemaGateContext) Never! {
+sema_gate_expression_value: fn(source: String, expression: Expr, ledger: ^GateLedger, context: SemaGateContext) Never! {
     if expression == {
         .Call(call, _) -> {
             if call.name == "approx" {
@@ -450,7 +450,7 @@ sema_gate_rule_site_name: fn(site: RuleSite) -> String Never! {
     }
 }
 
-sema_gate_statement_gates: fn(source: String, body: [Stmt], ledger: &GateLedger) Never! {
+sema_gate_statement_gates: fn(source: String, body: [Stmt], ledger: ^GateLedger) Never! {
     loop statement in body {
         if statement == {
             .Val(binding) -> {

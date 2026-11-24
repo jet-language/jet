@@ -287,7 +287,7 @@ cli_schema_fat_mach_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Re
     Ok([View<U8>]{canonical ?? return Err(RecordDecodeError.Missing)})
 }
 
-cli_schema_wasm_leb: fn(bytes: View<U8>, at: &Int, maximum: U64) -> Int RecordDecodeError! {
+cli_schema_wasm_leb: fn(bytes: View<U8>, at: ^Int, maximum: U64) -> Int RecordDecodeError! {
     value := U64{0}
     shift := 0
     bits: if maximum <= (U64{0xffffffff}) -> 32 else -> 64
@@ -331,7 +331,7 @@ cli_schema_wasm_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Record
     Ok(found)
 }
 
-cli_schema_put_wasm_leb: fn(out: &[U8], input: Int) Never! {
+cli_schema_put_wasm_leb: fn(out: ^[U8], input: Int) Never! {
     value := input
     loop {
         byte := value & 127
@@ -344,7 +344,7 @@ cli_schema_put_wasm_leb: fn(out: &[U8], input: Int) Never! {
 
 // Add the canonical Wasm custom section before the artifact is published; the
 // framing is checked before the artifact changes.
-cli_schema_embed_wasm_record: fn(wasm: &[U8], record: [U8], usize_max: U64) RecordDecodeError! {
+cli_schema_embed_wasm_record: fn(wasm: ^[U8], record: [U8], usize_max: U64) RecordDecodeError! {
     _: cli_schema_wasm_sections(wasm[0..<wasm.len()], usize_max)
     name: WASM_SECTION.bytes()
     payload := [U8]{}

@@ -53,7 +53,7 @@ store_malformed_objects: fn(hangar: String) -[FS, Env]> [MalformedObject] StoreE
 // Rust `quarantine_malformed_objects`: rename each malformed record into the
 // Hangar quarantine; the number moved. Permissions opened for the renames
 // are restored on every exit.
-store_quarantine_malformed_objects: fn(verification: &StoreVerification, roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
+store_quarantine_malformed_objects: fn(verification: ^StoreVerification, roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
     if objects.len() == 0 -> return Ok(0)
     permissions := MovePathPermissions.default()
     if store_quarantine_move_objects(verification, roots, objects, permissions) == {
@@ -68,7 +68,7 @@ store_quarantine_malformed_objects: fn(verification: &StoreVerification, roots: 
     }
 }
 
-store_quarantine_move_objects: fn(verification: &StoreVerification, roots: HangarRoots, objects: [MalformedObject], permissions: &MovePathPermissions) -[FS, Env, Time]> Int StoreError! {
+store_quarantine_move_objects: fn(verification: ^StoreVerification, roots: HangarRoots, objects: [MalformedObject], permissions: ^MovePathPermissions) -[FS, Env, Time]> Int StoreError! {
     hangar: roots.hangar_dir()
     quarantine: files.join(hangar, "quarantine")
     permissions.make_writable(hangar, hangar)

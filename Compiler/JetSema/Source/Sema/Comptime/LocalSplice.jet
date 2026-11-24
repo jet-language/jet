@@ -180,7 +180,7 @@ sema_local_splice_demand_snapshot: fn(graph: SemaRegistrationGraph) -> SemaLocal
 // Makes `next` the demand the graph's checks record into and returns the
 // one they recorded into before, so an owner check records all it demands,
 // the demand the finalization already met included.
-sema_local_splice_demand_swap: fn(graph: &SemaRegistrationGraph, next: &&SemaLocalSpliceDemand) -> SemaLocalSpliceDemand {
+sema_local_splice_demand_swap: fn(graph: ^SemaRegistrationGraph, next: ^^SemaLocalSpliceDemand) -> SemaLocalSpliceDemand {
     incoming := next.move()
     held: SemaLocalSpliceDemand{codecs: graph.codec_demand, derived: graph.derive_demand}
     graph.codec_demand = incoming.codecs.move()
@@ -229,7 +229,7 @@ sema_local_splice_same_names: fn(before: NameTable, after: NameTable) -> Bool Ne
 // The modules from the first index on move out of the list and back in once,
 // whatever the count of indexes, so no row is copied and no module moves
 // twice.
-sema_module_body_rows_take: fn(modules: &[SemaGraphModuleResult], indexes: [Int]) -> [SemaModuleBodyRows] Never! {
+sema_module_body_rows_take: fn(modules: ^[SemaGraphModuleResult], indexes: [Int]) -> [SemaModuleBodyRows] Never! {
     taken := [SemaModuleBodyRows]{}
     if indexes.len() == 0 -> return taken
     later := [SemaGraphModuleResult]{}
@@ -287,7 +287,7 @@ sema_module_body_rows_take: fn(modules: &[SemaGraphModuleResult], indexes: [Int]
 
 // Moves `rows`, one per module `indexes` names (ascending), back into those
 // modules, as sema_module_body_rows_take moved them out.
-sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], indexes: [Int], rows: &&[SemaModuleBodyRows]) Never! {
+sema_module_body_rows_put: fn(modules: ^[SemaGraphModuleResult], indexes: [Int], rows: ^^[SemaModuleBodyRows]) Never! {
     owned := rows.move()
     if owned.len() != indexes.len() -> panic("a local value splice lost its owner rows")
     if indexes.len() == 0 {
@@ -343,12 +343,12 @@ sema_local_splice_aside: fn() -> SemaLocalSpliceAside Never! {
 
 // Drops `aside` on a detached task when the compiler may use a second
 // thread, else here. The task owns the rows alone, and nothing reads them.
-sema_local_splice_release: fn(aside: &&SemaLocalSpliceAside, threads: CompilerThreads) {
+sema_local_splice_release: fn(aside: ^^SemaLocalSpliceAside, threads: CompilerThreads) {
     held: aside.move()
     if compiler_threads_admit(threads, 2, 2, 1, 0, 0) < 2 {
         return
     }
-    released: task &&held { held.rows.len() + held.functions.len() + held.sources.len() }
+    released: task ^^held { held.rows.len() + held.functions.len() + held.sources.len() }
     released.detach()
 }
 
@@ -402,7 +402,7 @@ sema_local_splice_texts_without: fn(texts: [String], taken: [String]) -> [String
 
 // Drops from `diagnostics` one diagnostic of each text of `dropped`
 // (sema_local_splice_diagnostic_texts), keeping the order of the rest.
-sema_local_splice_drop_diagnostics: fn(diagnostics: &[Diagnostic], dropped: [String]) Never! {
+sema_local_splice_drop_diagnostics: fn(diagnostics: ^[Diagnostic], dropped: [String]) Never! {
     if dropped.len() == 0 {
         return
     }
@@ -442,7 +442,7 @@ sema_local_splice_slots: fn(functions: [FnBody]) -> SemaComptimeKeyRows Never! {
 // (sema_web_partition_check). The fresh body's types are its finalized
 // check's, less those of the replaced initializers, so it carries a fixed tag
 // only when the finalized body did.
-sema_local_splice_settle: fn(interner: Interner, body: &FnBody, finalized: FnBody) Never! {
+sema_local_splice_settle: fn(interner: Interner, body: ^FnBody, finalized: FnBody) Never! {
     if finalized.ret == .Val(.Result(_, err)) {
         never: Type.Named{name: "Never"}
         if err == never && body.ret != finalized.ret -> sema_failure_reconcile_function(body)
@@ -459,7 +459,7 @@ sema_local_splice_settle: fn(interner: Interner, body: &FnBody, finalized: FnBod
 
 // Drops the landed sources from `sources` (`landed` holds their
 // `module\nkey`) into `aside`.
-sema_local_splice_unlanded: fn(sources: &[SemaComptimeBodySource], landed: NameTable, aside: &[SemaComptimeBodySource]) Never! {
+sema_local_splice_unlanded: fn(sources: ^[SemaComptimeBodySource], landed: NameTable, aside: ^[SemaComptimeBodySource]) Never! {
     held := compiler_take_rows<SemaComptimeBodySource>(sources)
     held.reverse()
     loop held.len() > 0 {
@@ -522,7 +522,7 @@ SemaLocalSpliceSites: struct {
 // rows compare on up to `threads` threads (sema_local_splice_hold); the
 // reasons are then taken here, owner modules last first, as one thread
 // would.
-sema_local_splice_holds: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, replayed: [String], earlier: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, dropped: &[[String]], aside: &[SemaModuleBodyRows], threads: CompilerThreads) -> String? Never! {
+sema_local_splice_holds: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, replayed: [String], earlier: ^^[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, dropped: ^[[String]], aside: ^[SemaModuleBodyRows], threads: CompilerThreads) -> String? Never! {
     holds := sema_local_splice_hold_all(interner, modules, owner_modules, sites, earlier.move(), after, into, threads)
     unclaimed := replayed.copy()
     settled_owners := 0
@@ -586,7 +586,7 @@ SEMA_LOCAL_SPLICE_HOLD_NODES_PER_THREAD: 32768
 // check's, which move in) against `after`, in owner module order: in
 // consecutive parts, one per admitted thread, weighed by the earlier rows'
 // body nodes.
-sema_local_splice_hold_all: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, before: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, threads: CompilerThreads) -> [SemaLocalSpliceHold] Never! {
+sema_local_splice_hold_all: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, before: ^^[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, threads: CompilerThreads) -> [SemaLocalSpliceHold] Never! {
     rows := before.move()
     weights := [Int]{}
     work := 0
@@ -620,7 +620,7 @@ sema_local_splice_hold_all: fn(interner: Interner, modules: [SemaGraphModuleResu
 // Compares `parts` (sema_local_splice_hold_part), in part order: the last
 // part on its own thread, the ones before it the same way, and the first on
 // this one.
-sema_local_splice_hold_parts: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, parts: &&[SemaLocalSpliceHoldPart]) -> [SemaLocalSpliceHoldPart] Never! {
+sema_local_splice_hold_parts: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, parts: ^^[SemaLocalSpliceHoldPart]) -> [SemaLocalSpliceHoldPart] Never! {
     rest := parts.move()
     last: rest.pop() ?? return rest
     if rest.len() == 0 {
@@ -638,7 +638,7 @@ sema_local_splice_hold_parts: fn(interner: Interner, modules: [SemaGraphModuleRe
 
 // One part's comparisons, its rows taken from the last (its first owner
 // module) on.
-sema_local_splice_hold_part: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, part: &&SemaLocalSpliceHoldPart) -> SemaLocalSpliceHoldPart Never! {
+sema_local_splice_hold_part: fn(interner: Interner, modules: [SemaGraphModuleResult], owner_modules: [Int], sites: SemaLocalSpliceSites, after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, part: ^^SemaLocalSpliceHoldPart) -> SemaLocalSpliceHoldPart Never! {
     pending := part.move()
     position := pending.first
     loop {
@@ -656,7 +656,7 @@ sema_local_splice_hold_part: fn(interner: Interner, modules: [SemaGraphModuleRes
 // weighs, then in order a call inside a computed site's initializer
 // (`inner_call`), the sites left (`sources`), and the bodies (`bodies`,
 // `finalized_bodies`).
-sema_local_splice_hold: fn(interner: Interner, owner: SemaGraphModuleResult, sites: SemaLocalSpliceSites, old: &&SemaModuleBodyRows, new: SemaModuleBodyRows, into: SemaLocalSpliceInto) -> SemaLocalSpliceHold Never! {
+sema_local_splice_hold: fn(interner: Interner, owner: SemaGraphModuleResult, sites: SemaLocalSpliceSites, old: ^^SemaModuleBodyRows, new: SemaModuleBodyRows, into: SemaLocalSpliceInto) -> SemaLocalSpliceHold Never! {
     rows := old.move()
     difference: sema_module_body_rows_difference(rows, new)
     differ: rows.diagnostics != new.diagnostics
@@ -677,7 +677,7 @@ sema_local_splice_hold: fn(interner: Interner, owner: SemaGraphModuleResult, sit
 // the pass check's `new` and the module's finalized bodies `finalized`
 // (sema_local_splice_hold), counting in `settled` the owner bodies that
 // stand.
-sema_local_splice_hold_bodies: fn(interner: Interner, finalized: [FnBody], sites: SemaLocalSpliceSites, rows: &SemaModuleBodyRows, new: SemaModuleBodyRows, into: SemaLocalSpliceInto, settled: &Int) -> String? Never! {
+sema_local_splice_hold_bodies: fn(interner: Interner, finalized: [FnBody], sites: SemaLocalSpliceSites, rows: ^SemaModuleBodyRows, new: SemaModuleBodyRows, into: SemaLocalSpliceInto, settled: ^Int) -> String? Never! {
     stamped: sema_local_splice_stamped(into)
     // A value keeps only the effects of the call at its own span. A
     // failure keeps the initializer as run-time code, calls and all.
@@ -806,7 +806,7 @@ SemaLocalValueSplice: struct {
 }
 
 // A splice that does not land: the graph comes back, no site valued.
-sema_local_splice_none: fn(graph: &&SemaRegistrationGraph) -> SemaLocalValueSplice {
+sema_local_splice_none: fn(graph: ^^SemaRegistrationGraph) -> SemaLocalValueSplice {
     SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: name_table()}
 }
 
@@ -857,9 +857,9 @@ sema_local_splice_holds_host_value: fn(values: [SemaComptimeItemValue], landed: 
 // its edits on `trail`, as sema_finalize_graph's do. `landed` are the pass's
 // sites; `values` and `comptime_functions` the pass's results.
 sema_local_value_splice: fn(
-    resolved: &&SemaRegistrationGraph,
-    trail: &SemaGraphTrail,
-    finalized: &SemaGraphResult,
+    resolved: ^^SemaRegistrationGraph,
+    trail: ^SemaGraphTrail,
+    finalized: ^SemaGraphResult,
     landed: [SemaComptimeItemSource],
     earlier_values: [SemaComptimeItemValue],
     earlier_functions: [SemaComptimeFunctionResult],
@@ -930,9 +930,9 @@ sema_local_values_blocked: fn(diagnostics: [Diagnostic]) -> Bool Never! {
 // empty, the first check computes them. The graph moves in and comes back
 // with its edits on `trail`; `landed` are the pass's sites.
 sema_local_value_land: fn(
-    resolved: &&SemaRegistrationGraph,
-    trail: &SemaGraphTrail,
-    modules: &[SemaGraphModuleResult],
+    resolved: ^^SemaRegistrationGraph,
+    trail: ^SemaGraphTrail,
+    modules: ^[SemaGraphModuleResult],
     into: SemaLocalSpliceInto,
     landed: [SemaComptimeItemSource],
     earlier_values: [SemaComptimeItemValue],
@@ -942,7 +942,7 @@ sema_local_value_land: fn(
     host_hooks: Shared<SemaRegistrationHostHooks>,
     threads: CompilerThreads,
     trace_sink: CompilerTraceSink?,
-    carried: &[SemaPassFacts],
+    carried: ^[SemaPassFacts],
 ) -> SemaLocalValueSplice {
     graph := resolved.move()
     if landed.len() == 0 -> return sema_local_splice_none(graph)
@@ -966,9 +966,9 @@ sema_local_value_land: fn(
 // `facts` gets the ones the first check computes. The graph moves in and
 // comes back with its edits on `trail`.
 sema_local_splice_owners: fn(
-    resolved: &&SemaRegistrationGraph,
-    trail: &SemaGraphTrail,
-    modules: &[SemaGraphModuleResult],
+    resolved: ^^SemaRegistrationGraph,
+    trail: ^SemaGraphTrail,
+    modules: ^[SemaGraphModuleResult],
     landed: NameTable,
     into: SemaLocalSpliceInto,
     earlier_values: [SemaComptimeItemValue],
@@ -978,7 +978,7 @@ sema_local_splice_owners: fn(
     host_hooks: Shared<SemaRegistrationHostHooks>,
     threads: CompilerThreads,
     trace_sink: CompilerTraceSink?,
-    facts: &[SemaPassFacts],
+    facts: ^[SemaPassFacts],
 ) -> SemaLocalValueSplice {
     graph := resolved.move()
     owners := name_table_sized(16)

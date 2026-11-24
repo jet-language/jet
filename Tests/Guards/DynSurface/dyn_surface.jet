@@ -40,7 +40,7 @@ dyn_surface_path_segment: fn(bytes: [U8], start: Int, end: Int) -> Bool {
     (start > 0 && Int{bytes[start - 1]} == 47) || (end < bytes.len() && Int{bytes[end]} == 47)
 }
 
-dyn_surface_collect: fn(bytes: [U8], tables: TokenTables, tokens: [Token], identifier: String, offsets: &[Int]) {
+dyn_surface_collect: fn(bytes: [U8], tables: TokenTables, tokens: [Token], identifier: String, offsets: ^[Int]) {
     loop token in tokens {
         if token.kind == TOKEN_IDENT && token_decoded(tables, token) == identifier && !dyn_surface_path_segment(bytes, token.span.start, token.span.end) {
             offsets.push(token.span.start)
@@ -121,7 +121,7 @@ dyn_surface_inline_code_has: fn(line: String, identifier: String) -> Bool {
     false
 }
 
-dyn_surface_fence_lines: fn(source: String, start_line: Int, source_lines: [String], identifier: String, out: &[DynSurfaceLine]) {
+dyn_surface_fence_lines: fn(source: String, start_line: Int, source_lines: [String], identifier: String, out: ^[DynSurfaceLine]) {
     loop offset in dyn_surface_source_offsets(source, identifier) {
         line_no: start_line + dyn_surface_line_of(source, offset) - 1
         seen := false

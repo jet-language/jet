@@ -18,7 +18,7 @@ cli_optional_text: fn(value: String?) -> Dyn Never! {
     }
 }
 
-cli_cmd_explain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_explain: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <NAME>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
     if query.starts_with("package-overlay:") {
@@ -73,7 +73,7 @@ cli_cmd_explain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIP
 
 // `package-overlay:<overlay>:<package>`: the semantic-lock fact the
 // reviewed workspace overlay policy produces.
-cli_cmd_explain_overlay: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, query: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_explain_overlay: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, query: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     dir: cli_current_dir()
     source: if pkg_resolve_workspace_source(cache, dir) == {
         .Ok(found) -> found ?? return cli_explain_error(theme, parsed, "E1274", "no overlay policy for `{query}`", "`package-overlay:*` explanations come from reviewed `workspace.jet` overlay policy.", "run `jetpack override draft <ref> --patch <file>` or add an `overlay` block to `workspace.jet`.")

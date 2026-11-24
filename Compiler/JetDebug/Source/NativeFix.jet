@@ -188,7 +188,7 @@ native_fix_symbols: fn(elf: [U8]) -> NativeFixSymbols Never! {
 }
 
 // Add `symbol`, named `name`, after the symbols of that name `symbols` has.
-native_fix_symbol_add: fn(symbols: &NativeFixSymbols, name: String, symbol: &&NativeFixSymbol) Never! {
+native_fix_symbol_add: fn(symbols: ^NativeFixSymbols, name: String, symbol: ^^NativeFixSymbol) Never! {
     if symbols.slots.get(name) == {
         .Val(slot) -> { symbols.named[slot].push(symbol) }
         .None -> {
@@ -298,7 +298,7 @@ native_fix_reached: fn(running: NativeFixRunning, at: Int) -> Int Never! {
 }
 
 // Record that `reloc`'s target lives at `address`.
-native_fix_learn: fn(targets: &NativeFixTargets, reloc: X64Reloc, runtime_symbols: [String], address: Int) Never! {
+native_fix_learn: fn(targets: ^NativeFixTargets, reloc: X64Reloc, runtime_symbols: [String], address: Int) Never! {
     key: native_fix_key(reloc, runtime_symbols)
     if targets.clashed.get(key) != None {
         return
@@ -740,7 +740,7 @@ native_fix_address: fn(plan: NativeFixPlan, symbols: NativeFixSymbols, runtime_s
 }
 
 // Write the little-endian `value` over `size` bytes of `bytes` at `at`.
-native_fix_put: fn(bytes: &[U8], at: Int, value: Int, size: Int) Never! {
+native_fix_put: fn(bytes: ^[U8], at: Int, value: Int, size: Int) Never! {
     loop k in 0..<size -> bytes[at + k] = U8{(value >> (8 * k)) & 255}
 }
 
@@ -792,7 +792,7 @@ native_fix_jump: fn(from: Int, to: Int) -> [U8] Never! {
 
 // Add the placed function `function` at `low` to the line table `lines`,
 // named, filed and declared as `like` says, its rows from `debug`.
-native_fix_lines: fn(lines: &X64Jetline, low: Int, size: Int, debug: X64FunctionDebug, name: String, file: String, dir: String, decl: Int) Never! {
+native_fix_lines: fn(lines: ^X64Jetline, low: Int, size: Int, debug: X64FunctionDebug, name: String, file: String, dir: String, decl: Int) Never! {
     rows: lines.table.len()
     x64_jetline_rows(lines.table, debug.lines)
     // A function placed below the table's last one leaves the table out of

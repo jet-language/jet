@@ -123,7 +123,7 @@ store_decode_diagnostics: fn(origins: [RecordValue], diagnostics: [RecordValue],
 }
 
 // One row per distinct origin value.
-store_diagnostic_origin_index: fn(origin: DiagnosticOrigin?, table: &[DiagnosticOrigin]) -> RecordValue Never! {
+store_diagnostic_origin_index: fn(origin: DiagnosticOrigin?, table: ^[DiagnosticOrigin]) -> RecordValue Never! {
     value: origin ?? return RecordValue.Null
     loop (index, existing) in table {
         if existing == value -> return RecordValue.Int{value: index}
@@ -368,7 +368,7 @@ store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue
     }
 }
 
-store_diagnostic_encode: fn(diagnostic: Diagnostic, origins: &[DiagnosticOrigin]) -> RecordValue StoreDiagnosticRecordError! {
+store_diagnostic_encode: fn(diagnostic: Diagnostic, origins: ^[DiagnosticOrigin]) -> RecordValue StoreDiagnosticRecordError! {
     labels := [RecordValue]{}
     loop label in diagnostic.labels {
         labels.push(RecordValue.List{values: [RecordValue]{RecordValue.Int{value: label.span.start}, RecordValue.Int{value: label.span.end}, RecordValue.Str{value: label.message}}})

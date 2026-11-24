@@ -18,13 +18,13 @@ Job: struct {
 
     submit: fn(id: Int) -> Job.Queued { Job{id: id, note: "queued"} }
 
-    start: fn(self: &&Job.Queued) -> Job.Running { Job{id: self.id, note: "running"} }
+    start: fn(self: ^^Job.Queued) -> Job.Running { Job{id: self.id, note: "running"} }
 
-    finish: fn(self: &&Job.Running) -> Job.Done { Job{id: self.id, note: "done"} }
+    finish: fn(self: ^^Job.Running) -> Job.Done { Job{id: self.id, note: "done"} }
 
-    fail: fn(self: &&Job.Running, reason: String) -> Job.Failed { Job{id: self.id, note: reason} }
+    fail: fn(self: ^^Job.Running, reason: String) -> Job.Failed { Job{id: self.id, note: reason} }
 
-    abort: fn(self: &&Job.Active, reason: String) -> Job.Failed { Job{id: self.id, note: reason} }
+    abort: fn(self: ^^Job.Active, reason: String) -> Job.Failed { Job{id: self.id, note: reason} }
 }
 
 // Parameters carry a single state, a state union, or a named state group.

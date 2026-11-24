@@ -13,7 +13,7 @@ JetDriverScopedImport: struct {
     exported: Bool,
 }
 
-jet_driver_scoped_imports: fn(imports: [ImportDecl], items: [Item], scope: String, exported: Bool, rows: &[JetDriverScopedImport]) Never! {
+jet_driver_scoped_imports: fn(imports: [ImportDecl], items: [Item], scope: String, exported: Bool, rows: ^[JetDriverScopedImport]) Never! {
     loop declaration in imports {
         rows.push(JetDriverScopedImport{declaration: declaration.copy(), scope: scope, exported: exported && declaration.is_pub})
     }
@@ -154,7 +154,7 @@ jet_driver_marker_group_items: fn(existing: [Item], parsed: [Item]) -> [Item] Ne
     items
 }
 
-jet_driver_marker_group_dependency_order: fn(identity: ModuleID, indices: [U32:Int], edges: [SemaRegistrationImportEdge], visited: &[Bool], order: &[Int]) Never! {
+jet_driver_marker_group_dependency_order: fn(identity: ModuleID, indices: [U32:Int], edges: [SemaRegistrationImportEdge], visited: ^[Bool], order: ^[Int]) Never! {
     index: indices.get(identity.id) ?? return
     if visited[index] {
         return
@@ -172,7 +172,7 @@ jet_driver_marker_group_dependency_order: fn(identity: ModuleID, indices: [U32:I
 // whole, and re-parsed when it applies one. Traced as `load.marker_groups.relex`
 // (items: the bytes lexed) and `load.marker_groups.reparse` (items: the
 // module's items), one span per module.
-jet_driver_expand_imported_marker_groups: fn(modules: &[JetDriverLoadedModule], edges: &[SemaRegistrationImportEdge], units: [JetDriverSourceUnit], source_files: [SourceFile], diagnostics: &[Diagnostic], trace_sink: CompilerTraceSink?) -> Bool {
+jet_driver_expand_imported_marker_groups: fn(modules: ^[JetDriverLoadedModule], edges: ^[SemaRegistrationImportEdge], units: [JetDriverSourceUnit], source_files: [SourceFile], diagnostics: ^[Diagnostic], trace_sink: CompilerTraceSink?) -> Bool {
     raw := [U32:[JetDriverMarkerGroup]]{}
     loop module_index in 0..<modules.len() {
         // Skip lexing files without group declarations.
@@ -316,7 +316,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: &[JetDriverLoadedModule], 
             loop index in 0..<prior_count {
                 previous: diagnostics[index]
                 if previous.source_path == replayed.source_path && previous.severity == replayed.severity && previous.code == replayed.code && previous.span == replayed.span && previous.what == replayed.what && previous.why == replayed.why && previous.fix == replayed.fix && previous.edit == replayed.edit {
-                    // copy: List.remove takes the value to match while `&diagnostics` is being
+                    // copy: List.remove takes the value to match while `^diagnostics` is being
                     // written. `previous` is a view into that same list, so it has to be detached
                     // first.
                     matched: previous.copy()

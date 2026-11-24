@@ -97,7 +97,7 @@ sema_single_use_is_task: fn(ty: Type) -> Bool Never! {
 // The duty transfers on `y: x`: the move marks `x` consumed and `y` owns it.
 // The binding is keyed by its symbol's id. A record or tuple that holds the
 // duty in its fields is also consumed once each of those fields is moved out.
-sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) {
+sema_single_use_note_binding: fn(state: ^SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) {
     ty: symbol.ty ?? return
     if !sema_single_use_type(ty, environment, program) {
         return
@@ -147,7 +147,7 @@ sema_single_use_duty_fields: fn(ty: Type, environment: SemaScopeEnvironment, pro
 // E0140 `_: value` skips the job of a `#SingleUse` value.
 // A discarded task skips its join instead (L1101), except inside a
 // `task.group` spawn, whose group joins it.
-sema_single_use_check_discard: fn(ty: Type, span: Span, in_taskgroup_spawn: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_single_use_check_discard: fn(ty: Type, span: Span, in_taskgroup_spawn: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     if sema_single_use_is_task(ty) && !in_taskgroup_spawn {
         diagnostics.push(sema_single_use_diag_unjoined("this task", "discarding it into `_` skips the join before the task finishes", span))
         return
@@ -192,9 +192,9 @@ sema_single_use_lendable: fn(ty: Type, environment: SemaScopeEnvironment, progra
     }
 }
 
-// E0142: only an owning (`&&`) parameter may receive a `#SingleUse` value.
+// E0142: only an owning (`^^`) parameter may receive a `#SingleUse` value.
 // A lendable holder (sema_single_use_lendable) may be lent.
-sema_single_use_check_argument: fn(state: SemaOwnershipState, callee: String, param_convention: AccessConvention, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+sema_single_use_check_argument: fn(state: SemaOwnershipState, callee: String, param_convention: AccessConvention, expr: Expr, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     if param_convention == AccessConvention.Move -> return true
     name: sema_single_use_argument(state, expr, scopes) ?? return true
     index: sema_scope_resolve_index_at(scopes, name, expr_span(expr)) ?? return true
@@ -233,7 +233,7 @@ sema_single_use_field_moved: fn(moved: [SemaOwnershipMovedPlace], id: SymbolID, 
 // Rust `check_single_use_consumed_in_current_scope`: E0140 for each
 // `#SingleUse` binding of the closing scope that is not consumed; an unjoined
 // task handle is L1101.
-sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
+sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
     loop row in sema_ownership_single_use_rows(state) {
         fact: state.declarations[row]
         if fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact) {
@@ -250,7 +250,7 @@ sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: &[Di
 // seen from a lambda, are not this return's. A task still owes `join` through
 // L1101 at scope end instead. A reported duty is cleared on this path, so the
 // scope end doesn't report it again.
-sema_single_use_check_return: fn(state: &SemaOwnershipState, frame_depth: Int, span: Span, diagnostics: &[Diagnostic]) {
+sema_single_use_check_return: fn(state: ^SemaOwnershipState, frame_depth: Int, span: Span, diagnostics: ^[Diagnostic]) {
     loop row in sema_ownership_single_use_rows(state) {
         if !state.declarations[row].active || state.declarations[row].owes_join || state.declarations[row].scope_depth < frame_depth {
             next
@@ -263,7 +263,7 @@ sema_single_use_check_return: fn(state: &SemaOwnershipState, frame_depth: Int, s
 }
 
 // Rust `pop_scope`: the scope-end duty check, then the lexical scope exit.
-sema_single_use_leave_scope: fn(scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
+sema_single_use_leave_scope: fn(scopes: ^SemaScopeTable, state: ^SemaOwnershipState, diagnostics: ^[Diagnostic]) {
     sema_single_use_check_scope_end(state, diagnostics)
     sema_scope_leave(scopes, state)
 }
@@ -274,7 +274,7 @@ sema_single_use_leave_scope: fn(scopes: &SemaScopeTable, state: &SemaOwnershipSt
 // `xs` is empty. Each popped element's duty passed to the binding that popped
 // it, so `xs` owes nothing. A body that refills `xs`, hands it elsewhere or
 // may break keeps the duty (E0140 at scope end).
-sema_single_use_note_drain: fn(tables: ASTTables, state: &SemaOwnershipState, condition: Expr, body: [Stmt], scopes: SemaScopeTable) {
+sema_single_use_note_drain: fn(tables: ASTTables, state: ^SemaOwnershipState, condition: Expr, body: [Stmt], scopes: SemaScopeTable) {
     receiver: sema_single_use_drained_receiver(condition) ?? return
     if receiver == .Ident(name, span, _) {
         if sema_stmt_refutable_loop_body_can_break(body) {
@@ -322,7 +322,7 @@ sema_single_use_query_receiver: fn(expression: Expr, query: String) -> Expr? Nev
     None
 }
 
-// The local a method receiver names, through any `&` place marker.
+// The local a method receiver names, through any `^` place marker.
 sema_single_use_receiver_name: fn(expression: Expr) -> String? Never! {
     if expression == {
         .Ident(name, _, _) -> Val(name)
@@ -340,7 +340,7 @@ SemaSingleUseDrain: struct {
     reads: Int,
     pops: Int,
 
-    visit: fn(&self, tables: ASTTables, expression: ExprNode) Never! {
+    visit: fn(^self, tables: ASTTables, expression: ExprNode) Never! {
         if ast_expr(tables, expression) == {
             .Ident(mentioned, _, _) -> {
                 if mentioned == self.name -> self.mentions += 1
@@ -375,7 +375,7 @@ sema_single_use_path_moves: fn(before: SemaOwnershipState, path: SemaOwnershipPa
 // scope that were unconsumed before the branch. `before` is the state of the
 // branch's fork (rolled back); `paths` holds sema_single_use_path_moves of
 // each path that reaches the merge, taken over that same state.
-sema_single_use_check_paths: fn(before: SemaOwnershipState, paths: [[Bool]], diagnostics: &[Diagnostic]) {
+sema_single_use_check_paths: fn(before: SemaOwnershipState, paths: [[Bool]], diagnostics: ^[Diagnostic]) {
     loop (index, row) in sema_ownership_single_use_rows(before) {
         fact: before.declarations[row]
         if !fact.active || fact.scope_depth != before.scope_depth -> next
@@ -396,7 +396,7 @@ sema_single_use_check_paths: fn(before: SemaOwnershipState, paths: [[Bool]], dia
 // Discarding a `#SingleUse` value this way is legal only in an audited
 // `#Unsafe("reason")` region or function (E0143). The value is consumed even
 // on the E0143 path, so no E0140 cascades at scope end.
-sema_single_use_check_consume: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_single_use_check_consume: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
         diagnostics.push(sema_error("E0103", call.name_span, "`consume` discards exactly one value", "`drop` throws a single value away, running its cleanup", "e.g. consume(x)"))
         loop argument_index in 0..<call.args.len() {
@@ -420,7 +420,7 @@ sema_single_use_check_consume: fn(call: Call, environment: SemaScopeEnvironment,
 // Every diagnostic about a value's debt has one shape: "`name` still owes
 // `consume`" (or `join`, or a use), then how this site falls short.
 sema_single_use_diag_unconsumed: fn(name: String, span: Span) -> Diagnostic {
-    sema_error("E0140", span, "`{name}` still owes `consume`", "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)", "consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe(\"reason\") {{ consume({name}) }}` to discard it deliberately")
+    sema_error("E0140", span, "`{name}` still owes `consume`", "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)", "consume it exactly once: pass it to a `^^` parameter, or `return` it — or write `#Unsafe(\"reason\") {{ consume({name}) }}` to discard it deliberately")
 }
 
 sema_single_use_diag_discarded: fn(span: Span) -> Diagnostic {
@@ -436,7 +436,7 @@ sema_single_use_diag_branch: fn(name: String, span: Span) -> Diagnostic {
 }
 
 sema_single_use_diag_aliased: fn(name: String, callee: String, span: Span) -> Diagnostic {
-    sema_error("E0142", span, "`{name}` still owes `consume`, so it can't be shared", "this value's type is `#SingleUse`, so it can only be moved (handed over for good); `{callee}` would borrow or copy it, and a `#SingleUse` value has no second use to give", "give it away with `{name}.move()`, or rework `{callee}` so it takes ownership with a `&&` parameter")
+    sema_error("E0142", span, "`{name}` still owes `consume`, so it can't be shared", "this value's type is `#SingleUse`, so it can only be moved (handed over for good); `{callee}` would borrow or copy it, and a `#SingleUse` value has no second use to give", "give it away with `{name}.move()`, or rework `{callee}` so it takes ownership with a `^^` parameter")
 }
 
 sema_single_use_diag_unaudited: fn(name: String, span: Span) -> Diagnostic {

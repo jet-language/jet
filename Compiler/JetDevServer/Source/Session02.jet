@@ -6,7 +6,7 @@ use {
 }
 
 impl ResidentDevSession {
-    publish_session_state: fn(&self, state_name: String, code: String, diagnostic: String) {
+    publish_session_state: fn(^self, state_name: String, code: String, diagnostic: String) {
         lifecycle: session_lifecycle_state(state_name)
         now: session_unix_ms()
         self.devtools.set_lifecycle(lifecycle)
@@ -19,7 +19,7 @@ impl ResidentDevSession {
 
     // Records `event` under the sequence the envelope assigns next, then
     // appends it; the live cursor follows the recording's tail.
-    push_devtools_event: fn(&self, event: &&JetDevtoolsEvent) -> Int Err! {
+    push_devtools_event: fn(^self, event: ^^JetDevtoolsEvent) -> Int Err! {
         sequence: self.devtools.next_sequence
         if self.recording == .Val(current) {
             state := current
@@ -32,7 +32,7 @@ impl ResidentDevSession {
         Ok(self.devtools.push(event.move()))
     }
 
-    mark_last_good: fn(&self, revision: String, program: String) {
+    mark_last_good: fn(^self, revision: String, program: String) {
         if revision == "" {
             return
         }
@@ -40,7 +40,7 @@ impl ResidentDevSession {
         self.last_good_program = program
     }
 
-    remember_last_good_view: fn(&self, kind: String, source_id: String, revision: String, payload: String) {
+    remember_last_good_view: fn(^self, kind: String, source_id: String, revision: String, payload: String) {
         if !(kind == "graph" || kind == "debugger" || kind == "runtime") || revision == "" || payload == "" || payload.bytes().len() > SESSION_MAX_RETAINED_VIEW_BYTES {
             return
         }
@@ -53,9 +53,9 @@ impl ResidentDevSession {
         Val({revision: view.revision, payload: view.payload})
     }
 
-    clear_last_good_view: fn(&self, kind: String) { _: self.last_good_views.remove(kind) }
+    clear_last_good_view: fn(^self, kind: String) { _: self.last_good_views.remove(kind) }
 
-    accept_transaction: fn(&self, request: String, revision: String) {
+    accept_transaction: fn(^self, request: String, revision: String) {
         kind: session_request_string(request, "op")
         self.select_project_source(session_request_string(request, "source_id"))
         self.observe_source(revision)
@@ -63,19 +63,19 @@ impl ResidentDevSession {
         self.push_receipt(Receipt{kind: if kind == "" -> "source" else -> kind, status: "accepted", before: session_request_string(request, "revision"), after: revision, client: session_request_string(request, "client_id"), output: session_request_string(request, "output"), live: None})
     }
 
-    refuse_transaction: fn(&self, request: String, current_revision: String) {
+    refuse_transaction: fn(^self, request: String, current_revision: String) {
         self.observe_source(current_revision)
         self.push_receipt(Receipt{kind: session_request_string(request, "op"), status: "refused", before: session_request_string(request, "revision"), after: current_revision, client: session_request_string(request, "client_id"), output: session_request_string(request, "output"), live: None})
     }
 
-    record_command: fn(&self, request: String) {
+    record_command: fn(^self, request: String) {
         action: session_request_string(request, "action_id")
         self.select_project_source(session_request_string(request, "source_id"))
         if action.contains("test") -> self.test_state = "requested"
         self.push_receipt(Receipt{kind: if action == "" -> "command" else -> action, status: "requested", before: "", after: self.current_revision_text, client: session_request_string(request, "client_id"), output: self.selected_output_name, live: None})
     }
 
-    record_debug: fn(&self, request: String) {
+    record_debug: fn(^self, request: String) {
         self.select_project_source(session_request_string(request, "source_id"))
         if session_request_bool(request, "stop") || session_request_string(request, "op") == "disconnect" {
             self.debugger = DebuggerSnapshot.idle()
@@ -93,7 +93,7 @@ impl ResidentDevSession {
         if tier != "" -> self.debugger.tier = tier
     }
 
-    record_debug_response: fn(&self, request: String, response: String) {
+    record_debug_response: fn(^self, request: String, response: String) {
         self.record_debug(request)
         if session_request_bool(request, "stop") {
             return
@@ -114,21 +114,21 @@ impl ResidentDevSession {
         self.remember_last_good_view("debugger", source_id, revision, response)
     }
 
-    select_project_source: fn(&self, source_id: String) {
+    select_project_source: fn(^self, source_id: String) {
         if source_id != "" -> self.selected_source_id = source_id
     }
 
-    select_project_source_from_payload: fn(&self, payload: String) {
+    select_project_source_from_payload: fn(^self, payload: String) {
         if session_json_string_any(payload, "source_id") == .Val(source_id) {
             self.select_project_source(source_id)
         }
     }
 
-    select_output: fn(&self, request: String) {
+    select_output: fn(^self, request: String) {
         self.select_output_values(session_optional_fact(session_request_string(request, "output")), session_optional_fact(session_request_string(request, "target")))
     }
 
-    select_output_values: fn(&self, output: String?, target: String?) {
+    select_output_values: fn(^self, output: String?, target: String?) {
         if output == .Val(selected) {
             if selected != "" -> self.selected_output_name = selected
         }
@@ -193,19 +193,19 @@ impl ResidentDevSession {
         "{{{identity},{revisions},{run},{hosts}}}"
     }
 
-    push_receipt: fn(&self, receipt: &&Receipt) {
+    push_receipt: fn(^self, receipt: ^^Receipt) {
         self.receipts.push(receipt.move())
         if self.receipts.len() > SESSION_MAX_RECEIPTS -> _: self.receipts.remove(0, .Slot)
     }
 
     // Session teardown: the queued commands, receipts and browser controls go
     // with the session.
-    clear_commands: fn(&self) {
+    clear_commands: fn(^self) {
         self.commands.clear()
         self.browser_game_controls = [JetDevtoolsGameControlRequest]{}
     }
 
-    scrub: fn(&self, sequence: Int) -> ReplayProjection Err! {
+    scrub: fn(^self, sequence: Int) -> ReplayProjection Err! {
         state := self.recording ?? return Err(session_recording_unavailable())
         projection: state.cursor.seek(state.recording, sequence) ?? return Err("{err}")
         self.recording = Val(state)
@@ -213,7 +213,7 @@ impl ResidentDevSession {
         Ok(projection)
     }
 
-    scrub_time: fn(&self, timestamp_ms: Int) -> ReplayProjection Err! {
+    scrub_time: fn(^self, timestamp_ms: Int) -> ReplayProjection Err! {
         state := self.recording ?? return Err(session_recording_unavailable())
         projection: state.cursor.seek_time(state.recording, timestamp_ms) ?? return Err("{err}")
         self.recording = Val(state)
@@ -222,7 +222,7 @@ impl ResidentDevSession {
     }
 
     // Replay steps forward only; a backward step is refused by the control.
-    step: fn(&self) -> ReplayProjection Err! {
+    step: fn(^self) -> ReplayProjection Err! {
         state := self.recording ?? return Err(session_recording_unavailable())
         projection: state.cursor.step(state.recording, .Forward) ?? return Err("{err}")
         self.recording = Val(state)
@@ -231,7 +231,7 @@ impl ResidentDevSession {
     }
 
     // Up to `count` forward steps; the tail stops the walk early.
-    skip: fn(&self, count: Int) -> ReplayProjection Err! {
+    skip: fn(^self, count: Int) -> ReplayProjection Err! {
         state := self.recording ?? return Err(session_recording_unavailable())
         loop _ in 0..<count {
             if state.cursor.step(state.recording, .Forward) == .Err(_) -> break
@@ -242,7 +242,7 @@ impl ResidentDevSession {
         Ok(projection)
     }
 
-    checkpoint: fn(&self, name: String) -> SessionCheckpoint Err! {
+    checkpoint: fn(^self, name: String) -> SessionCheckpoint Err! {
         session_validate_devtools_text(name, "checkpoint name")
         state := self.recording ?? return Err(session_recording_unavailable())
         checkpoint: state.recording.checkpoint(state.cursor) ?? return Err("{err}")
@@ -252,7 +252,7 @@ impl ResidentDevSession {
         Ok(saved)
     }
 
-    restore: fn(&self, name: String) -> ReplayProjection Err! {
+    restore: fn(^self, name: String) -> ReplayProjection Err! {
         session_validate_devtools_text(name, "checkpoint name")
         state := self.recording ?? return Err(session_recording_unavailable())
         checkpoint: state.checkpoints.get(name) ?? return Err("{RecordingError.CheckpointUnavailable}")
@@ -287,7 +287,7 @@ impl ResidentDevSession {
         Ok(DevtoolsRecordingDivergence{divergent: reason != None, reason: reason, identity: identity, expected_sequence: expected_sequence, actual_sequence: actual_sequence, retained_events: state.recording.events.len(), dropped_events: truncation.dropped_events, truncation: truncation})
     }
 
-    recording_control: fn(&self, payload: String) -> String Err! {
+    recording_control: fn(^self, payload: String) -> String Err! {
         root: foundation_parse_protocol_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return Err("recording control must be valid bounded JSON")
         object: recording_object_fields(root) ?? return Err("recording control must be a JSON object")
         operation := session_field_text(object, "op")
@@ -338,7 +338,7 @@ impl ResidentDevSession {
         session_recording_json_for_state(self.session_id, state, projection, divergence)
     }
 
-    set_devtools_source_identity: fn(&self, source_id: String?, build_id: String?, revision: String?, world_id: String?) Err! {
+    set_devtools_source_identity: fn(^self, source_id: String?, build_id: String?, revision: String?, world_id: String?) Err! {
         recording_identity := SessionRecordingIdentity?{None}
         if source_id == .Val(source) {
             if build_id == .Val(build) {
@@ -354,7 +354,7 @@ impl ResidentDevSession {
 
     // A new source/build identity starts a new recording; the same identity
     // keeps the one already running.
-    set_recording_identity: fn(&self, identity: SessionRecordingIdentity?, first_sequence: Int?) Err! {
+    set_recording_identity: fn(^self, identity: SessionRecordingIdentity?, first_sequence: Int?) Err! {
         wanted: identity ?? {
             self.recording = None
             return Ok()
@@ -367,7 +367,7 @@ impl ResidentDevSession {
         Ok()
     }
 
-    set_devtools_selection: fn(&self, request: String) Err! {
+    set_devtools_selection: fn(^self, request: String) Err! {
         root: foundation_parse_protocol_json(request) ?? return Err("devtools selection must be valid JSON")
         object: recording_object_fields(root) ?? return Err("devtools selection must be an object")
         nested := [{key: String, value: Dyn}]{}
@@ -420,7 +420,7 @@ impl ResidentDevSession {
         Ok()
     }
 
-    set_devtools_cursor: fn(&self, request: String) Err! {
+    set_devtools_cursor: fn(^self, request: String) Err! {
         root: foundation_parse_protocol_json(request) ?? return Err("devtools cursor must be valid JSON")
         object: recording_object_fields(root) ?? return Err("devtools cursor must be an object")
         origin: session_field_text(object, "origin") ?? "host"
@@ -449,14 +449,14 @@ impl ResidentDevSession.RecordIndexCaptureSink {
     Error: CaptureSinkError,
 
     // A skipped capture keeps its skip inside the start fact's eligibility.
-    record_capture_start: fn(&self, fact: &&CaptureStartFact) CaptureSinkError! {
+    record_capture_start: fn(^self, fact: ^^CaptureStartFact) CaptureSinkError! {
         self.validate_capture_identity(fact.identity)
         self.capture_fact_list.push(CaptureSessionFact.Start{fact: fact.move()})
         self.trim_capture_facts()
         Ok()
     }
 
-    record_capture_fault: fn(&self, fact: &&CaptureFaultFact) CaptureSinkError! {
+    record_capture_fault: fn(^self, fact: ^^CaptureFaultFact) CaptureSinkError! {
         self.validate_capture_identity(fact.identity)
         self.capture_fact_list.push(CaptureSessionFact.Fault{fact: fact.move()})
         self.trim_capture_facts()

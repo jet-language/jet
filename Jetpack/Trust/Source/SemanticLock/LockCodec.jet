@@ -103,7 +103,7 @@ PartialSemanticRecord: struct {
         PartialSemanticRecord{kind: None, key: None, exact: None, hash: None, platform: None, rationales: [LockRationale]{}, future_fields: [String:String]{}}
     }
 
-    set: fn(&self, key: String, value: String) Never! {
+    set: fn(^self, key: String, value: String) Never! {
         if key == {
             "kind" -> self.kind = Val(LockRecordKind.parse(value))
             "key" -> self.key = Val(value)
@@ -128,7 +128,7 @@ PartialLockInput: struct {
     url: String?,
     follows: String,
 
-    set: fn(&self, key: String, value: String) Never! {
+    set: fn(^self, key: String, value: String) Never! {
         if key == {
             "name" -> self.name = Val(value)
             "url" -> self.url = Val(value)
@@ -147,7 +147,7 @@ PartialSourceMap: struct {
     pattern: String?,
     sources: [String],
 
-    set: fn(&self, key: String, value: String) Never! {
+    set: fn(^self, key: String, value: String) Never! {
         if key == {
             "pattern" -> self.pattern = Val(value)
             "sources" -> self.sources = trust_lock_string_list(value)
@@ -189,13 +189,13 @@ SemanticLockReader: struct {
     }
 
     // An open rationale always closes; it attaches only to an open record.
-    flush_rationale: fn(&self) Never! {
+    flush_rationale: fn(^self) Never! {
         if self.in_record && self.in_rationale -> self.record.rationales.push(self.rationale)
         self.in_rationale = false
         self.rationale = LockRationale.empty()
     }
 
-    flush_blocks: fn(&self) Never! {
+    flush_blocks: fn(^self) Never! {
         self.flush_rationale()
         if self.in_record {
             if self.record.finish() == {
@@ -223,7 +223,7 @@ SemanticLockReader: struct {
         }
     }
 
-    open: fn(&self, section: SemanticLockSection) Never! {
+    open: fn(^self, section: SemanticLockSection) Never! {
         if section == {
             .Rationale -> {
                 self.flush_rationale()
@@ -246,7 +246,7 @@ SemanticLockReader: struct {
 
     // A field goes to the innermost open block: rationale, input, source
     // map, then record.
-    field: fn(&self, key: String, value: String) Never! {
+    field: fn(^self, key: String, value: String) Never! {
         if {
             self.in_rationale -> self.rationale.set_field(key, value)
             self.in_input -> self.input.set(key, value)

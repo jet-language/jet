@@ -187,23 +187,23 @@ mmio_replay: fn(_documented_address: Int, value: Int) -> Int {
     }
 }
 
-gpio_init: fn(registers: &RegisterBlock) {
+gpio_init: fn(registers: ^RegisterBlock) {
     registers.gpio.mode = U32{1}
     registers.gpio.output = U32{0}
     registers.gpio.input = U32{0}
 }
 
-gpio_write: fn(registers: &RegisterBlock, high: Bool) {
+gpio_write: fn(registers: ^RegisterBlock, high: Bool) {
     if high -> registers.gpio.output = U32{1} else { registers.gpio.output = U32{0} }
 }
 
-timer_init: fn(registers: &RegisterBlock, period: Int) {
+timer_init: fn(registers: ^RegisterBlock, period: Int) {
     registers.timer.counter = U32{0}
     registers.timer.compare = U32{period}
     registers.timer.status = U32{0}
 }
 
-timer_advance: fn(registers: &RegisterBlock) -> Bool {
+timer_advance: fn(registers: ^RegisterBlock) -> Bool {
     counter := registers.timer.counter
     counter += U32{1}
     registers.timer.counter = counter
@@ -216,18 +216,18 @@ timer_advance: fn(registers: &RegisterBlock) -> Bool {
     return false
 }
 
-uart_init: fn(registers: &RegisterBlock) {
+uart_init: fn(registers: ^RegisterBlock) {
     registers.uart.control = U32{1}
     registers.uart.data = U32{0}
 }
 
-uart_control_write: fn(registers: &RegisterBlock, value: Int) -> Int {
+uart_control_write: fn(registers: ^RegisterBlock, value: Int) -> Int {
     registers.uart.control = U32{value}
     registers.mmio_echo = mmio_replay(0x40004008, value)
     return registers.mmio_echo
 }
 
-dma_init: fn(registers: &RegisterBlock) {
+dma_init: fn(registers: ^RegisterBlock) {
     registers.dma.status = U32{0}
     registers.dma.clear = U32{0}
 }
@@ -253,7 +253,7 @@ interrupt_queue: fn() -> InterruptQueue {
 // The bounded handoff is reusable queue policy. The board surface still has
 // no vector-table/ISR registration seam, so this function is not claimed
 // to be a hardware interrupt handler.
-interrupt_enqueue: fn(queue: &InterruptQueue, event: Int) -> Bool {
+interrupt_enqueue: fn(queue: ^InterruptQueue, event: Int) -> Bool {
     if queue.count >= queue.slots.len() {
         queue.dropped += 1
         return false
@@ -264,7 +264,7 @@ interrupt_enqueue: fn(queue: &InterruptQueue, event: Int) -> Bool {
     return true
 }
 
-task_drain: fn(queue: &InterruptQueue) -> Int? {
+task_drain: fn(queue: ^InterruptQueue) -> Int? {
     if queue.count == 0 -> return None
     event: queue.slots[queue.head]
     queue.head = (queue.head + 1) % queue.slots.len()
@@ -292,7 +292,7 @@ dma_buffer: fn(words: [Int#4]) -> DMABuffer {
 
 // Pin establishes address stability for this read. It does not map memory
 // for a device and it does not complete a transfer.
-dma_checksum: fn(buffer: &DMABuffer) -> Int {
+dma_checksum: fn(buffer: ^DMABuffer) -> Int {
     pinned: mem.pin(buffer)
     return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
 }
@@ -300,7 +300,7 @@ dma_checksum: fn(buffer: &DMABuffer) -> Int {
 // Host replay uses the same ownership transitions that a target provider
 // must drive. Source/destination remain unmapped until the board surface
 // supplies the target DMA mapping boundary.
-dma_submit: fn(buffer: &DMABuffer, registers: &RegisterBlock) -> Bool {
+dma_submit: fn(buffer: ^DMABuffer, registers: ^RegisterBlock) -> Bool {
     if buffer.owner != 0 || buffer.submitted -> return false
     buffer.checksum = dma_checksum(buffer)
     registers.dma.status = U32{0}
@@ -311,7 +311,7 @@ dma_submit: fn(buffer: &DMABuffer, registers: &RegisterBlock) -> Bool {
     return true
 }
 
-dma_complete: fn(buffer: &DMABuffer, registers: &RegisterBlock) -> Bool {
+dma_complete: fn(buffer: ^DMABuffer, registers: ^RegisterBlock) -> Bool {
     if buffer.owner != 1 || !buffer.submitted -> return false
     registers.dma.status = U32{1}
     buffer.completed = true
@@ -321,7 +321,7 @@ dma_complete: fn(buffer: &DMABuffer, registers: &RegisterBlock) -> Bool {
 
 // A completed CPU-owned buffer may be reused. Reuse clears the transfer
 // markers; submitting while the device owns it is rejected above.
-dma_reuse: fn(buffer: &DMABuffer) -> Bool {
+dma_reuse: fn(buffer: ^DMABuffer) -> Bool {
     if buffer.owner != 0 || !buffer.submitted || !buffer.completed -> return false
     buffer.checksum = 0
     buffer.submitted = false
@@ -351,7 +351,7 @@ uart_ring: fn() -> UARTRing {
 
 // RX and TX use the same bounded ring policy. Enqueue reports full without
 // overwriting old bytes; dequeue returns None for empty, never a sentinel.
-uart_enqueue: fn(ring: &UARTRing, byte: U8) -> Bool {
+uart_enqueue: fn(ring: ^UARTRing, byte: U8) -> Bool {
     if ring.count >= ring.bytes.len() {
         ring.dropped += 1
         return false
@@ -362,7 +362,7 @@ uart_enqueue: fn(ring: &UARTRing, byte: U8) -> Bool {
     return true
 }
 
-uart_dequeue: fn(ring: &UARTRing) -> U8? {
+uart_dequeue: fn(ring: ^UARTRing) -> U8? {
     if ring.count == 0 -> return None
     byte: ring.bytes[ring.head]
     ring.head = (ring.head + 1) % ring.bytes.len()
@@ -394,7 +394,7 @@ control_state: fn(setpoint: Int, deadline_us: Int) -> ControlState {
 
 // Deterministic fixed-point control tick. The returned work value is a
 // measured/maintained library estimate, not compiler WCET proof.
-control_tick: fn(state: &ControlState, sample: Int) -> Int {
+control_tick: fn(state: ^ControlState, sample: Int) -> Int {
     error: state.setpoint - sample
     state.integrator += error
     if state.integrator > 8192 -> state.integrator = 8192
@@ -406,7 +406,7 @@ control_tick: fn(state: &ControlState, sample: Int) -> Int {
     return state.wcet_estimate_us
 }
 
-control_account: fn(state: &ControlState, work_us: Int) -> Bool {
+control_account: fn(state: ^ControlState, work_us: Int) -> Bool {
     if work_us > state.deadline_us {
         state.deadline_misses += 1
         return false
@@ -434,7 +434,7 @@ slot_policy: fn(active: Int) -> SlotPolicy {
 // Authentication is an input from the image verifier. Keeping this policy
 // separate from flash persistence avoids claiming a signer or bootloader
 // that the current Core API does not provide.
-stage_image: fn(slots: &SlotPolicy, image_digest: Int, authenticated: Bool) -> Bool {
+stage_image: fn(slots: ^SlotPolicy, image_digest: Int, authenticated: Bool) -> Bool {
     slots.staged = true
     slots.trial = image_digest
     slots.authenticated = authenticated
@@ -442,20 +442,20 @@ stage_image: fn(slots: &SlotPolicy, image_digest: Int, authenticated: Bool) -> B
     return authenticated
 }
 
-confirm_trial: fn(slots: &SlotPolicy) -> Bool {
+confirm_trial: fn(slots: ^SlotPolicy) -> Bool {
     if !slots.staged || !slots.authenticated || slots.confirmed -> return false
     slots.confirmed = true
     return true
 }
 
-slot_clear: fn(slots: &SlotPolicy) {
+slot_clear: fn(slots: ^SlotPolicy) {
     slots.staged = false
     slots.trial = 0
     slots.authenticated = false
     slots.confirmed = false
 }
 
-activate_confirmed: fn(slots: &SlotPolicy) -> Bool {
+activate_confirmed: fn(slots: ^SlotPolicy) -> Bool {
     if !slots.staged || !slots.confirmed -> return false
     slots.active = slots.trial
     slot_clear(slots)
@@ -463,14 +463,14 @@ activate_confirmed: fn(slots: &SlotPolicy) -> Bool {
 }
 
 // A pending or rejected image rolls back; a confirmed one only activates.
-rollback_trial: fn(slots: &SlotPolicy) -> Bool {
+rollback_trial: fn(slots: ^SlotPolicy) -> Bool {
     if !slots.staged || slots.confirmed -> return false
     slot_clear(slots)
     slots.rollback_count += 1
     return true
 }
 
-slot_state: fn(slots: &SlotPolicy) -> String {
+slot_state: fn(slots: ^SlotPolicy) -> String {
     if !slots.staged -> return "empty"
     if !slots.authenticated -> return "rejected"
     if slots.confirmed -> return "confirmed"

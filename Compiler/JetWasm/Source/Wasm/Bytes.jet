@@ -56,7 +56,7 @@ WasmReader: struct {
     at: Int,
     end: Int,
 
-    new: fn(bytes: &&[U8]) -> WasmReader Never! {
+    new: fn(bytes: ^^[U8]) -> WasmReader Never! {
         count: bytes.len()
         WasmReader{bytes: bytes, at: 0, end: count}
     }
@@ -65,7 +65,7 @@ WasmReader: struct {
 
     fail: fn(self, message: String) -> WasmError Never! { WasmError.new(message, self.at) }
 
-    byte: fn(&self) -> Int WasmError! {
+    byte: fn(^self) -> Int WasmError! {
         if self.at >= self.end {
             return Err(WasmError.new("unexpected end of section or function", self.at))
         }
@@ -80,7 +80,7 @@ WasmReader: struct {
     }
 
     // An unsigned LEB128 value of at most `bits` bits.
-    unsigned: fn(&self, bits: Int) -> Int WasmError! {
+    unsigned: fn(^self, bits: Int) -> Int WasmError! {
         start: self.at
         result := 0
         shift := 0
@@ -97,7 +97,7 @@ WasmReader: struct {
     }
 
     // A signed LEB128 value of at most `bits` bits.
-    signed: fn(&self, bits: Int) -> Int WasmError! {
+    signed: fn(^self, bits: Int) -> Int WasmError! {
         start: self.at
         result := 0
         shift := 0
@@ -118,10 +118,10 @@ WasmReader: struct {
         Err(WasmError.new("integer representation too long", start))
     }
 
-    u32: fn(&self) -> Int WasmError! { self.unsigned(32) }
+    u32: fn(^self) -> Int WasmError! { self.unsigned(32) }
 
     // A little-endian fixed-width unsigned pattern of `count` bytes.
-    fixed: fn(&self, count: Int) -> Int WasmError! {
+    fixed: fn(^self, count: Int) -> Int WasmError! {
         if self.end - self.at < count {
             return Err(WasmError.new("unexpected end of fixed-width value", self.at))
         }
@@ -131,7 +131,7 @@ WasmReader: struct {
         Ok(value)
     }
 
-    slice: fn(&self, count: Int) -> [U8] WasmError! {
+    slice: fn(^self, count: Int) -> [U8] WasmError! {
         if count < 0 || self.end - self.at < count {
             return Err(WasmError.new("length out of bounds", self.at))
         }
@@ -140,7 +140,7 @@ WasmReader: struct {
         Ok(slice)
     }
 
-    name: fn(&self) -> String WasmError! {
+    name: fn(^self) -> String WasmError! {
         start: self.at
         count: self.u32()
         raw: self.slice(count)
@@ -149,7 +149,7 @@ WasmReader: struct {
 }
 
 // Writing the binary format (the text reader's data segments and tests).
-wasm_put_unsigned: fn(out: &[U8], value: Int) Never! {
+wasm_put_unsigned: fn(out: ^[U8], value: Int) Never! {
     rest := value
     more := true
     loop more {
@@ -160,7 +160,7 @@ wasm_put_unsigned: fn(out: &[U8], value: Int) Never! {
     }
 }
 
-wasm_put_signed: fn(out: &[U8], value: Int) Never! {
+wasm_put_signed: fn(out: ^[U8], value: Int) Never! {
     rest := value
     more := true
     loop more {
@@ -171,7 +171,7 @@ wasm_put_signed: fn(out: &[U8], value: Int) Never! {
     }
 }
 
-wasm_put_fixed: fn(out: &[U8], value: Int, count: Int) Never! {
+wasm_put_fixed: fn(out: ^[U8], value: Int, count: Int) Never! {
     pattern: wasm_unsigned(value, 8 * count)
     loop k in 0..<count -> out.push(U8{(pattern >> (8 * k)) & 255})
 }

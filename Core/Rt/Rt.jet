@@ -13,6 +13,7 @@ package: {
 use {
     core: core
     time: core.time
+    realtime_rt: jet.runtime.rt
 }
 
 // Positional field order is the existing provider receipt schema.
@@ -88,9 +89,9 @@ callback: fn(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float]) -[]>) -
 impl RealtimeStream {
     next_deadline: fn(self) -> time.Instant Never! { core.rt.__next_deadline(self) }
 
-    receipt: fn(self) -> RealtimeReceipt Never! { core.rt.__receipt(self) }
+    receipt: fn(self) -> RealtimeReceipt Never! { realtime_rt.receipt(self) }
 
-    cancel: fn(&self) Never! { core.rt.__cancel(self) }
+    cancel: fn(^self) Never! { realtime_rt.cancel(self) }
 
-    is_canceled: fn(self) -> Bool Never! { core.rt.__is_canceled(self) }
+    is_canceled: fn(self) -> Bool Never! { realtime_rt.is_canceled(self) }
 }

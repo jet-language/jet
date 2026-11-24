@@ -72,7 +72,7 @@ JetDevtoolsSourceIdentityFact: struct {
     revision: String?,
     world_id: String?,
 
-    new: fn(source_id: &&String?, build_id: &&String?, revision: &&String?, world_id: &&String?) -> JetDevtoolsSourceIdentityFact Never! {
+    new: fn(source_id: ^^String?, build_id: ^^String?, revision: ^^String?, world_id: ^^String?) -> JetDevtoolsSourceIdentityFact Never! {
         JetDevtoolsSourceIdentityFact{source_id: source_id.move(), build_id: build_id.move(), revision: revision.move(), world_id: world_id.move()}
     }
 
@@ -121,7 +121,7 @@ JetDevtoolsField: struct {
     key: String,
     value: JetDevtoolsValue,
 
-    new: fn(key: &&String, value: &&JetDevtoolsValue) -> JetDevtoolsField Never! {
+    new: fn(key: ^^String, value: ^^JetDevtoolsValue) -> JetDevtoolsField Never! {
         JetDevtoolsField{key: key.move(), value: value.move()}
     }
 }
@@ -131,11 +131,11 @@ JetDevtoolsField: struct {
 JetDevtoolsPayload: struct {
     fields: [JetDevtoolsField],
 
-    new: fn(fields: &&[JetDevtoolsField]) -> JetDevtoolsPayload Never! {
+    new: fn(fields: ^^[JetDevtoolsField]) -> JetDevtoolsPayload Never! {
         JetDevtoolsPayload{fields: fields.move()}
     }
 
-    one: fn(key: &&String, value: &&JetDevtoolsValue) -> JetDevtoolsPayload Never! {
+    one: fn(key: ^^String, value: ^^JetDevtoolsValue) -> JetDevtoolsPayload Never! {
         JetDevtoolsPayload{fields: [JetDevtoolsField]{JetDevtoolsField.new(key, value)}}
     }
 
@@ -189,7 +189,7 @@ JetDevtoolsEvent: struct {
     payload: String?,
     body: JetDevtoolsEventBody?,
 
-    try_new: fn(timestamp_ms: Int, source: &&String, body: &&JetDevtoolsEventBody) -> JetDevtoolsEvent Err! {
+    try_new: fn(timestamp_ms: Int, source: ^^String, body: ^^JetDevtoolsEventBody) -> JetDevtoolsEvent Err! {
         fields: devtools_body_fields(body)
         event := JetDevtoolsEvent.from_parts(timestamp_ms, source, devtools_body_family(body), devtools_body_entity(body), fields)
         event.body = Val(body.move())
@@ -197,7 +197,7 @@ JetDevtoolsEvent: struct {
     }
 
     // A typed event rebuilt from its flat wire projection.
-    from_wire: fn(sequence: Int, timestamp_ms: Int, source: &&String, body: &&JetDevtoolsEventBody, fields_json: &&String, payload_json: &&String?) -> JetDevtoolsEvent Err! {
+    from_wire: fn(sequence: Int, timestamp_ms: Int, source: ^^String, body: ^^JetDevtoolsEventBody, fields_json: ^^String, payload_json: ^^String?) -> JetDevtoolsEvent Err! {
         if sequence <= 0 -> return Err("jet.devtools.v1 event sequence must be positive")
         event := JetDevtoolsEvent.try_new(timestamp_ms, source, body)
         devtools_validate_json_object(fields_json, "fields")
@@ -209,13 +209,13 @@ JetDevtoolsEvent: struct {
     }
 
     // A host-marshaled event; `fields_json` must be one JSON object.
-    from_parts: fn(timestamp_ms: Int, source: &&String, kind: &&String, entity: &&String, fields_json: &&String) -> JetDevtoolsEvent Err! {
+    from_parts: fn(timestamp_ms: Int, source: ^^String, kind: ^^String, entity: ^^String, fields_json: ^^String) -> JetDevtoolsEvent Err! {
         JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, source, kind, entity, fields_json, None)
     }
 
     // Game and package adapters attach their already-typed payload object
     // here; protocol and version stay outside it.
-    from_parts_with_payload: fn(timestamp_ms: Int, source: &&String, kind: &&String, entity: &&String, fields_json: &&String, payload_json: &&String?) -> JetDevtoolsEvent Err! {
+    from_parts_with_payload: fn(timestamp_ms: Int, source: ^^String, kind: ^^String, entity: ^^String, fields_json: ^^String, payload_json: ^^String?) -> JetDevtoolsEvent Err! {
         devtools_validate_text(source, "source")
         devtools_validate_text(kind, "kind")
         devtools_validate_text(entity, "entity")
@@ -225,7 +225,7 @@ JetDevtoolsEvent: struct {
     }
 
     // The only path that attaches values to an event.
-    publish: fn(&&self, payload: JetDevtoolsPayload) -> JetDevtoolsEvent Err! {
+    publish: fn(^^self, payload: JetDevtoolsPayload) -> JetDevtoolsEvent Err! {
         rendered: payload.json()
         published := self.move()
         published.payload = Val(rendered)
@@ -268,7 +268,7 @@ JetDevtoolsSelection: struct {
     panel_id: String,
     item_key: String?,
 
-    new: fn(panel_id: &&String, item_key: &&String?) -> JetDevtoolsSelection Never! {
+    new: fn(panel_id: ^^String, item_key: ^^String?) -> JetDevtoolsSelection Never! {
         JetDevtoolsSelection{panel_id: panel_id.move(), item_key: item_key.move()}
     }
 
@@ -289,15 +289,15 @@ JetDevtoolsViewState: struct {
     selection: JetDevtoolsSelection?,
     cursor: Int?,
 
-    new: fn(selection: &&JetDevtoolsSelection?, cursor: Int?) -> JetDevtoolsViewState Never! {
+    new: fn(selection: ^^JetDevtoolsSelection?, cursor: Int?) -> JetDevtoolsViewState Never! {
         JetDevtoolsViewState{selection: selection.move(), cursor: cursor}
     }
 
-    set_selection: fn(&self, selection: &&JetDevtoolsSelection?) Never! {
+    set_selection: fn(^self, selection: ^^JetDevtoolsSelection?) Never! {
         self.selection = selection.move()
     }
 
-    set_cursor: fn(&self, cursor: Int?) Never! { self.cursor = cursor }
+    set_cursor: fn(^self, cursor: Int?) Never! { self.cursor = cursor }
 }
 
 // The bounded event ring and the metadata every host reconnects against. It
@@ -316,7 +316,7 @@ JetDevtoolsEnvelope: struct {
     event_list: [JetDevtoolsEvent],
     next_sequence: Int,
 
-    new: fn(session_id: &&String, started_at_ms: Int) -> JetDevtoolsEnvelope Never! {
+    new: fn(session_id: ^^String, started_at_ms: Int) -> JetDevtoolsEnvelope Never! {
         JetDevtoolsEnvelope{
             session_id: session_id.move(),
             started_at_ms: started_at_ms,
@@ -333,7 +333,7 @@ JetDevtoolsEnvelope: struct {
     }
 
     // Appends one event and returns the sequence it assigned.
-    push: fn(&self, event: &&JetDevtoolsEvent) -> Int Never! {
+    push: fn(^self, event: ^^JetDevtoolsEvent) -> Int Never! {
         sequence: self.next_sequence
         self.next_sequence = sequence + 1
         stamped := event.move()
@@ -380,21 +380,21 @@ JetDevtoolsEnvelope: struct {
 
     cursor: fn(self) -> Int? Never! { self.view.cursor }
 
-    set_selection: fn(&self, selection: &&JetDevtoolsSelection?) Never! {
+    set_selection: fn(^self, selection: ^^JetDevtoolsSelection?) Never! {
         self.view.set_selection(selection)
     }
 
-    set_cursor: fn(&self, cursor: Int?) Never! { self.view.set_cursor(cursor) }
+    set_cursor: fn(^self, cursor: Int?) Never! { self.view.set_cursor(cursor) }
 
-    set_lifecycle: fn(&self, lifecycle: JetDevtoolsLifecycleState) Never! {
+    set_lifecycle: fn(^self, lifecycle: JetDevtoolsLifecycleState) Never! {
         self.lifecycle = lifecycle
     }
 
-    set_freshness: fn(&self, freshness: JetDevtoolsFreshnessFact) Never! {
+    set_freshness: fn(^self, freshness: JetDevtoolsFreshnessFact) Never! {
         self.freshness = freshness
     }
 
-    set_source_identity: fn(&self, identity: &&JetDevtoolsSourceIdentityFact?) Err! {
+    set_source_identity: fn(^self, identity: ^^JetDevtoolsSourceIdentityFact?) Err! {
         if identity == .Val(fact) -> fact.validate()
         self.source_identity = identity.move()
         Ok()

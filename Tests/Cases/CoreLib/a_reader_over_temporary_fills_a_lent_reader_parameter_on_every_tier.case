@@ -1,8 +1,8 @@
-# A `Reader.over(bytes)` temporary passed straight to a `&term.Reader`
+# A `Reader.over(bytes)` temporary passed straight to a `^term.Reader`
 # parameter gets a place to be lent from: the callee reads through it, and
 # the program prints the same at -O0, -O1 and -O2. The Prelude `Reader` is the
 # same type, so its temporary fills the parameter too.
-write: main.jet = "use core.term\n\nfirst_byte: fn(r: &term.Reader) -> U8 {\n    r.read_u8() ?? 0\n}\n\nrun: fn() {\n    print(first_byte(term.Reader.over([U8]{7, 8})))\n    print(first_byte(Reader.over([U8]{9})))\n}\n"
+write: main.jet = "use core.term\n\nfirst_byte: fn(r: ^term.Reader) -> U8 {\n    r.read_u8() ?? 0\n}\n\nrun: fn() {\n    print(first_byte(term.Reader.over([U8]{7, 8})))\n    print(first_byte(Reader.over([U8]{9})))\n}\n"
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step o0: jet run -O0 main.jet

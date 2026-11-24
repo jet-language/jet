@@ -384,7 +384,7 @@ native_test_toolchain_root: fn() -> String Never! {
 
 // A session over `program`, written to prog.jet and built in `root` with the
 // build flags `flags`.
-native_test_session: fn(root: String, program: String, flags: &&[String]) -> NativeSession {
+native_test_session: fn(root: String, program: String, flags: ^^[String]) -> NativeSession {
     jet: native_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
     source: native_test_files.join(root, "prog.jet")
     native_test_files.write(source, program) ?? panic("source: {err}")

@@ -2,8 +2,8 @@
 // package of the entry that changes or takes a named value, one row per site.
 // The sites are sema's call-mark rule: with `#Policy(writes: .Explicit)` laid
 // over each module of the entry's source root, each plain call that changes a
-// named value is an E0228 diagnostic with a Safe `&` edit, and each that takes
-// one a Safe `&&` edit, at the value. Nothing is written.
+// named value is an E0228 diagnostic with a Safe `^` edit, and each that takes
+// one a Safe `^^` edit, at the value. Nothing is written.
 use jet_driver.[
     JetDriverSourceDocument,
     JetDriverAuthorizedSourceFile,
@@ -19,7 +19,7 @@ JET_CLI_AUDIT_WRITES_POLICY: "#Policy(writes: .Explicit)\n"
 
 // One call that changes or takes a named value: `path` as the snapshot spells
 // it, the 1-based line and character column of `start`, the value's byte span,
-// and the mark the policy writes (`&` or `&&`).
+// and the mark the policy writes (`^` or `^^`).
 JetCLIWriteSite: struct {
     path: String,
     line: Int,
@@ -55,7 +55,7 @@ jet_cli_audit_writes: fn(file: String, source: String, color: Bool, json: Bool) 
 }
 
 jet_cli_audit_write_access: fn(mark: String) -> String Never! {
-    if mark == "&&" -> "take" else -> "write"
+    if mark == "^^" -> "take" else -> "write"
 }
 
 // The second compile, every module under the explicit-writes policy: each
@@ -70,7 +70,7 @@ jet_cli_audit_write_sites: fn(file: String, modules: [JetDriverAuthorizedSourceF
             if diagnostic.code != "E0228" -> next
             owner: diagnostic.origin ?? next
             edit: diagnostic.edit ?? next
-            if (edit.new_text != "&" && edit.new_text != "&&") || edit.span.start != edit.span.end {
+            if (edit.new_text != "^" && edit.new_text != "^^") || edit.span.start != edit.span.end {
                 next
             }
             span: diagnostic.span ?? next

@@ -82,7 +82,7 @@ diagnostic_repair_paths: fn(diagnostic: Diagnostic) -> [String] Never! {
     paths
 }
 
-diagnostic_repair_path_add: fn(paths: &[String], repair: TextEdit) Never! {
+diagnostic_repair_path_add: fn(paths: ^[String], repair: TextEdit) Never! {
     path: repair.path ?? return
     if !paths.contains(path) -> paths.push("{path}")
 }
@@ -93,7 +93,7 @@ diagnostic_repair_path_add: fn(paths: &[String], repair: TextEdit) Never! {
 // then the alternatives. A repair names its own file: `names[i]` for the path
 // `paths[i]` (diagnostic_repair_paths), else `file`. Every repair carries the
 // diagnostic's grade.
-diagnostic_record: fn(diagnostic: Diagnostic, file: String, origin: &&DiagnosticRecordOrigin?, paths: [String], names: [String]) -> DiagnosticRecord Never! {
+diagnostic_record: fn(diagnostic: Diagnostic, file: String, origin: ^^DiagnosticRecordOrigin?, paths: [String], names: [String]) -> DiagnosticRecord Never! {
     span := DiagnosticRecordSpan?{None}
     placed := DiagnosticRecordOrigin?{None}
     if diagnostic.span == .Val(found) {
@@ -129,7 +129,7 @@ diagnostic_record: fn(diagnostic: Diagnostic, file: String, origin: &&Diagnostic
     }
 }
 
-diagnostic_record_repair: fn(edits: &[DiagnosticRecordEdit], diagnostic: Diagnostic, repair: TextEdit, file: String, paths: [String], names: [String]) Never! {
+diagnostic_record_repair: fn(edits: ^[DiagnosticRecordEdit], diagnostic: Diagnostic, repair: TextEdit, file: String, paths: [String], names: [String]) Never! {
     safety: diagnostic.safety ?? panic("internal compiler error: diagnostic `{diagnostic.code}` has an edit without a safety grade")
     named := "{file}"
     if repair.path == .Val(path) {

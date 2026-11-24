@@ -12,7 +12,7 @@ STORE_PROJECT_NIX_CAS_DIR: "nix-cas"
 
 // Export the selected Hangar closure as a portable, unsigned CAS bundle and
 // its `sha256-<hex>` digest.
-store_export_nix_cas_bundle: fn(verification: &StoreVerification, roots: HangarRoots, target: String) -> {bytes: [U8], digest: String} StoreError! {
+store_export_nix_cas_bundle: fn(verification: ^StoreVerification, roots: HangarRoots, target: String) -> {bytes: [U8], digest: String} StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     archive: store_nix_cas_build_unlocked(verification, roots, target)
     bytes: archive.encode()
@@ -23,7 +23,7 @@ store_export_nix_cas_bundle: fn(verification: &StoreVerification, roots: HangarR
 // Persist a portable Nix CAS bundle below the project's managed directory.
 // An identical existing bundle is reused; different bytes under the same
 // digest fail closed.
-store_publish_nix_cas_bundle: fn(verification: &StoreVerification, project: String, roots: HangarRoots, target: String) -> String StoreError! {
+store_publish_nix_cas_bundle: fn(verification: ^StoreVerification, project: String, roots: HangarRoots, target: String) -> String StoreError! {
     exported: store_export_nix_cas_bundle(verification, roots, target)
     bytes: exported.bytes
     digest: exported.digest
@@ -62,7 +62,7 @@ store_publish_nix_cas_bundle: fn(verification: &StoreVerification, project: Stri
 
 // Import a project Nix CAS bundle only after checking its declared digest.
 // Returns the import report and the manifest's member keys.
-store_import_nix_cas_bundle: fn(verification: &StoreVerification, project: String, roots: HangarRoots, digest: String) -> {report: HangarArchiveReport, digests: [String]} StoreError! {
+store_import_nix_cas_bundle: fn(verification: ^StoreVerification, project: String, roots: HangarRoots, digest: String) -> {report: HangarArchiveReport, digests: [String]} StoreError! {
     store_nix_cas_import_with_expectation(verification, project, roots, digest, None)
 }
 
@@ -70,7 +70,7 @@ store_import_nix_cas_bundle: fn(verification: &StoreVerification, project: Strin
 // manifest is decoded and checked before any Hangar staging or publication,
 // so the lock identity is an admission precondition, not a post-import
 // observation.
-store_import_nix_cas_bundle_checked: fn(verification: &StoreVerification, project: String, roots: HangarRoots, digest: String, closure: NixClosureRecord, envelope: LockEnvelope) -> {report: HangarArchiveReport, digests: [String]} StoreError! {
+store_import_nix_cas_bundle_checked: fn(verification: ^StoreVerification, project: String, roots: HangarRoots, digest: String, closure: NixClosureRecord, envelope: LockEnvelope) -> {report: HangarArchiveReport, digests: [String]} StoreError! {
     closure.validate() ?? return Err(StoreError.Other(err.message()))
     if envelope.output_hash != closure.output || envelope.platform != closure.system {
         return Err(StoreError.InvalidData("locked Nix envelope identity disagrees with its closure record"))
@@ -85,7 +85,7 @@ store_import_nix_cas_bundle_checked: fn(verification: &StoreVerification, projec
     store_nix_cas_import_with_expectation(verification, project, roots, digest, Val(expectation))
 }
 
-store_nix_cas_import_with_expectation: fn(verification: &StoreVerification, project: String, roots: HangarRoots, digest: String, expectation: NixReplayExpectation?) -> {report: HangarArchiveReport, digests: [String]} StoreError! {
+store_nix_cas_import_with_expectation: fn(verification: ^StoreVerification, project: String, roots: HangarRoots, digest: String, expectation: NixReplayExpectation?) -> {report: HangarArchiveReport, digests: [String]} StoreError! {
     store_archive_validate_digest(digest)
     path: files.join(files.join(pkg_managed_dir(project), STORE_PROJECT_NIX_CAS_DIR), digest)
     bytes: files.read_bytes(path)
@@ -209,7 +209,7 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
 }
 
 // Depth-first reachability from `key`, refusing reference cycles.
-store_nix_cas_visit: fn(key: String, edges: [String:[String]], visiting: &[String:Bool], reachable: &[String:Bool]) StoreError! {
+store_nix_cas_visit: fn(key: String, edges: [String:[String]], visiting: ^[String:Bool], reachable: ^[String:Bool]) StoreError! {
     if reachable.get(key) != None {
         return
     }
@@ -267,7 +267,7 @@ store_nix_cas_validate_platform: fn(value: String) StoreError! {
 // Build the bundle for a Nix-produced entry: its metadata-free closure
 // objects, rooted at the output digest, with a manifest built from the
 // closure graph and the producer's locked index facts.
-store_nix_cas_build_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, target: String) -> HangarArchive StoreError! {
+store_nix_cas_build_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, target: String) -> HangarArchive StoreError! {
     entry: store_archive_select_entry_unlocked(verification, roots, target)
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("Nix CAS export has invalid producer record: {err.message()}"))
     if producer.provider != "nix" {

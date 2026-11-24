@@ -4,16 +4,16 @@ Error: Jet.MissingMoveMarker: `s` cannot be moved from borrowed storage
  20 | read_param: fn(s: Session) -> Int { consume(s) }
     |                                             ^
  Why: `s` is a read or write parameter, so its caller keeps the value; moving it here would copy it
- Fix: Write `s.copy()` when `consume` should receive a copy, or declare the parameter `s: &&Session` so the caller hands the value over
+ Fix: Write `s.copy()` when `consume` should receive a copy, or declare the parameter `s: ^^Session` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker
 
 Error: Jet.MissingMoveMarker: `s` cannot be moved from borrowed storage
   --> Tests/UI/move_from_borrowed_argument.jet:22:61
     |
- 22 | write_param: fn(s: &Session, slot: &[Session]) { sink(slot, s) }
+ 22 | write_param: fn(s: ^Session, slot: ^[Session]) { sink(slot, s) }
     |                                                             ^
  Why: `s` is a read or write parameter, so its caller keeps the value; moving it here would copy it
- Fix: Write `s.copy()` when `sink` should receive a copy, or declare the parameter `s: &&Session` so the caller hands the value over
+ Fix: Write `s.copy()` when `sink` should receive a copy, or declare the parameter `s: ^^Session` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker
 
 Error: Jet.MissingMoveMarker: `view` cannot be moved from borrowed storage

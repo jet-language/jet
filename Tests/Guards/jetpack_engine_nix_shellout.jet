@@ -38,7 +38,7 @@ jens_excluded: fn(path: String) -> Bool {
     false
 }
 
-jens_walk: fn(path: String, out: &[String]) {
+jens_walk: fn(path: String, out: ^[String]) {
     if jens_excluded(path) {
         return
     }
@@ -51,7 +51,7 @@ jens_walk: fn(path: String, out: &[String]) {
     }
 }
 
-jens_offenders: fn(path: String, source: String, offenders: &[String]) {
+jens_offenders: fn(path: String, source: String, offenders: ^[String]) {
     loop tool in JENS_TOOLS {
         needles: [String]{"cmd([String]{{\"{tool}\"", "which(\"{tool}\")"}
         loop needle in needles {

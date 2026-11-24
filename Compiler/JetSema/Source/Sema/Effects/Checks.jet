@@ -521,7 +521,7 @@ SemaEffectNodeRare: struct {
 SEMA_EFFECT_NODE_NO_RARE: SemaEffectNodeRare{}
 
 // Opens `node`'s rare rows (SemaEffectNode.rare) for a write.
-sema_effect_node_rare_open: fn(node: &SemaEffectNode) Never! {
+sema_effect_node_rare_open: fn(node: ^SemaEffectNode) Never! {
     if node.rare == None -> node.rare = Val(SemaEffectNodeRare{})
 }
 
@@ -565,7 +565,7 @@ sema_effect_body_facts: fn(body: [Stmt]) -> SemaEffectBodyFacts Never! {
 
 // The effect source of `func`, keyed `key`, its body facts `facts`: what its
 // header gives it, with no walk of its body.
-sema_effect_source_from_header: fn(func: Func, key: String, facts: &&SemaEffectBodyFacts) -> SemaEffectFunctionSource Never! {
+sema_effect_source_from_header: fn(func: Func, key: String, facts: ^^SemaEffectBodyFacts) -> SemaEffectFunctionSource Never! {
     owned := facts.move()
     SemaEffectFunctionSource{
         key: key,
@@ -614,7 +614,7 @@ sema_effect_memo_subject: fn(name: String) -> String Never! {
 // Gathers into `facts` the spans of the loops, the `assume_deterministic`
 // blocks and the authored `#Transact` blocks of `statements`. A `#Transact`
 // block inside another is left out: its calls are the outer block's.
-sema_effect_collect_statement_spans: fn(statements: [Stmt], facts: &SemaEffectBodyFacts) {
+sema_effect_collect_statement_spans: fn(statements: [Stmt], facts: ^SemaEffectBodyFacts) {
     loop statement in statements {
         if statement == {
             .While(_, body, span, _, _) | .For(_, _, _, _, body, span, _, _, _) | .Loop(body, span, _, _) | .CountedLoop(_, _, _, body, span, _, _) -> {
@@ -701,7 +701,7 @@ sema_effect_in_assume_det: fn(node: SemaEffectNode, span: Span) -> Bool Never! {
 // expiry read: the producer recorded a `Time` row under the operation's own
 // name (`Clock.system`), so a pure body reports E3403 with the pure denial and
 // records none of the site's effects. False when the site is not one.
-sema_effect_report_nondeterministic_intrinsic: fn(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_effect_report_nondeterministic_intrinsic: fn(nodes: ^[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, span: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if !nodes[node_index].is_pure || fact.callee != None -> return false
     detail: fact.detail ?? return false
     api: detail.intrinsic_api ?? return false
@@ -728,7 +728,7 @@ sema_effect_report_nondeterministic_intrinsic: fn(nodes: &[SemaEffectNode], node
 // randomness is refused by the API it calls (E3403), before evaluation
 // reaches the host clock or random source. An intrinsic (`time.now`) has no
 // declared callee and is named by its API.
-sema_effect_comptime_nondeterministic: fn(fact: SemaCallSiteFact, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_effect_comptime_nondeterministic: fn(fact: SemaCallSiteFact, program: SemaProgramTables, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
     detail: sema_call_site_detail(fact)
     api: if fact.callee == .Val(callee) -> sema_effect_decl_label(sema_symbol_key(program, context, callee)) else -> detail.intrinsic_api ?? return
     row: fact.facts.effect_bound ?? return
@@ -748,7 +748,7 @@ sema_effect_comptime_nondeterministic: fn(fact: SemaCallSiteFact, program: SemaP
 // so any other callee whose effect row carries `Net` is refused (E3412). A
 // pure `core.net` helper (`mime.extension`) has no `Net` and evaluates. True
 // when it was refused.
-sema_effect_comptime_net_unavailable: fn(fact: SemaCallSiteFact, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_comptime_net_unavailable: fn(fact: SemaCallSiteFact, program: SemaProgramTables, context: SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     callee: fact.callee ?? return false
     callee_key: sema_symbol_key(program, context, callee)
     owner: sema_effect_core_member_module(callee_key) ?? return false
@@ -806,7 +806,7 @@ sema_effect_memory_call_key: fn(callee: Int, span: Span) -> Int Never! {
     (callee << 32) | span.start
 }
 
-sema_effect_push_memory_event: fn(nodes: &[SemaEffectNode], node_index: Int, span: Span, operation: String, kind: String, bytes: Int?) {
+sema_effect_push_memory_event: fn(nodes: ^[SemaEffectNode], node_index: Int, span: Span, operation: String, kind: String, bytes: Int?) {
     executions: sema_effect_memory_executions(nodes[node_index], span)
     nodes[node_index].memory_events.push(SemaMemoryEvent{span: span, operation: operation, kind: kind, bytes: bytes, executions: executions})
 }
@@ -855,7 +855,7 @@ sema_effect_set_contains: fn(set: [String], value: String) -> Bool Never! {
     false
 }
 
-sema_effect_set_add: fn(set: &[String], value: String) -> Bool Never! {
+sema_effect_set_add: fn(set: ^[String], value: String) -> Bool Never! {
     if sema_effect_set_contains(set, value) -> return false
     set.push(value.copy())
     index := set.len() - 1
@@ -893,7 +893,7 @@ sema_effect_set_of: fn(values: [String]) -> [String] Never! {
     set
 }
 
-sema_effect_set_union: fn(target: &[String], values: [String]) -> Bool Never! {
+sema_effect_set_union: fn(target: ^[String], values: [String]) -> Bool Never! {
     changed := false
     loop value in values {
         if sema_effect_set_add(target, value) -> changed = true
@@ -1040,7 +1040,7 @@ sema_effect_transaction_wall_diagnostic: fn(api: String, effect_name: String, sp
 // Check a call's declared effect row at the authored-transaction wall. The
 // caller supplies the canonical API spelling because checked-tree call nodes may no
 // longer retain the registration module/member pair.
-sema_effect_check_transaction_wall: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool? {
+sema_effect_check_transaction_wall: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: ^[Diagnostic]) -> Bool? {
     if scopes.transaction_wall_depth <= 0 -> return Val(true)
     row: effect_row ?? return Val(true)
     loop entry in row {
@@ -1139,30 +1139,30 @@ sema_effect_positive_panic: fn(span: Span) -> Diagnostic {
 
 // A checked String argument that is not a literal (`#Unsafe(reason)`) is a
 // reason; the rule's signature check owns its type.
-sema_effect_check_unsafe_region: fn(reason: String?, has_reason_expr: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_unsafe_region: fn(reason: String?, has_reason_expr: Bool, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if (reason ?? "").len() > 0 || (reason == None && has_reason_expr) -> return true
     diagnostics.push(sema_error("E3112", span, "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`"))
     false
 }
 
-sema_effect_check_unsafe_function_reason: fn(reason: String?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_unsafe_function_reason: fn(reason: String?, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if (reason ?? "").len() > 0 -> return true
     diagnostics.push(sema_error("E3112", span, "an `#Unsafe` function needs a reason", "every unsafe function records why callers can rely on its unchecked contract", "write `#Unsafe(\"why this is safe\") name: fn …`"))
     false
 }
 
-sema_effect_check_unsafe_function: fn(source: SemaEffectFunctionSource, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_unsafe_function: fn(source: SemaEffectFunctionSource, diagnostics: ^[Diagnostic]) -> Bool {
     if !source.is_unsafe -> return true
     sema_effect_check_unsafe_function_reason(source.unsafe_reason, source.unsafe_span ?? source.span, diagnostics)
 }
 
-sema_effect_require_unsafe_call: fn(callee: String, callee_is_unsafe: Bool, audited: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_require_unsafe_call: fn(callee: String, callee_is_unsafe: Bool, audited: Bool, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if !callee_is_unsafe || audited -> return true
     diagnostics.push(sema_error("E3103", span, "`{callee}` is an `#Unsafe` function", "its contract can't be checked by the compiler, so the caller must vouch for it", "call it inside `#Unsafe(\"…\") {{ … }}`"))
     false
 }
 
-sema_effect_check_tfunc_unsafe: fn(function: FnBody, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_tfunc_unsafe: fn(function: FnBody, diagnostics: ^[Diagnostic]) -> Bool {
     if !function.is_unsafe -> return true
     sema_effect_check_unsafe_function_reason(function.unsafe_gate.map(fn(gate) { gate.reason }), function.source_span, diagnostics)
 }
@@ -1175,7 +1175,7 @@ sema_effect_via_not_callback: fn(function: FnBody, parameter: String, ty: Type, 
     sema_error("E0748", span, "`-[via {parameter}]>` on `{function.name}` names a parameter that isn't a callback", "`{parameter}` has type `{type_name(ty)}`, not a function type with an effect row", "point `via` at a function parameter, or remove the `via` annotation")
 }
 
-sema_effect_apply_via: fn(nodes: &[SemaEffectNode], node_index: Int, function: FnBody, diagnostics: &[Diagnostic]) {
+sema_effect_apply_via: fn(nodes: ^[SemaEffectNode], node_index: Int, function: FnBody, diagnostics: ^[Diagnostic]) {
     via: nodes[node_index].effect_via ?? return
     parameter_type := Type?{None}
     loop parameter_index in 0..<function.params.len() {
@@ -1358,7 +1358,7 @@ sema_effect_pure_state_diagnostic: fn(nodes: [SemaEffectNode], path: [Int]) -> D
     written: if write.held -> "a cell through `{write.name}`" else -> "module state `{write.name}`"
     if path.len() == 1 {
         why: if write.held -> "`{write.name}` may hold a module cell, and a write to it outlives the call so a later read sees it, but `{node.name}` declares `-[]>`" else -> "module state outlives the call, so a later call sees the write, but `{node.name}` declares `-[]>`"
-        instead: if write.held -> "take the cell as a `&` parameter so the caller lends it for writing, return the new value instead" else -> "pass the state in and return the new value"
+        instead: if write.held -> "take the cell as a `^` parameter so the caller lends it for writing, return the new value instead" else -> "pass the state in and return the new value"
         diagnostic: sema_error("E3401", write.span, "`{node.name}` writes {written}", why, "{instead}, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
         return diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
     }
@@ -1369,7 +1369,7 @@ sema_effect_pure_state_diagnostic: fn(nodes: [SemaEffectNode], path: [Int]) -> D
 
 // The call path from `index` to the first function reached depth-first that
 // writes module state, `index` first; empty when none does.
-sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], index: Int, seen: &[Bool], visited: &[Int]) -> [Int] Never! {
+sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[Bool], visited: ^[Int]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     visited.push(index)
@@ -1389,11 +1389,11 @@ sema_effect_state_writer_path: fn(nodes: [SemaEffectNode], index: Int, seen: &[B
 
 // A comptime input call (`embed_file`, `embed_bytes`, `find`, `net.fetch`)
 // at `node`, charged to `node_index` once per call span.
-sema_effect_record_comptime_input: fn(nodes: &[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
+sema_effect_record_comptime_input: fn(nodes: ^[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
     if node.kind == .HostCall(call) {
         if call == .ComptimeInput(builtin, _, _) {
             sema_effect_node_rare_open(nodes[node_index])
-            if &nodes[node_index].rare == .Val(rare) {
+            if ^nodes[node_index].rare == .Val(rare) {
                 loop seen in rare.comptime_inputs {
                     if seen.span.start == node.span.start && seen.span.end == node.span.end {
                         return
@@ -1413,7 +1413,7 @@ sema_effect_record_comptime_input: fn(nodes: &[SemaEffectNode], node_index: Int,
 // follow. `context.scratch` is no read: as an allocator guard, or as the
 // view of the task's arena a call allocates from, it names where values
 // are made, not what they are.
-sema_effect_record_context: fn(interner: Interner, nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode) Never! {
+sema_effect_record_context: fn(interner: Interner, nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode) Never! {
     if node.kind == .HostCall(call) {
         if call == {
             .ContextRead(field) -> {
@@ -1421,13 +1421,13 @@ sema_effect_record_context: fn(interner: Interner, nodes: &[SemaEffectNode], nod
                     return
                 }
                 sema_effect_node_rare_open(nodes[node_index])
-                if &nodes[node_index].rare == .Val(rare) {
+                if ^nodes[node_index].rare == .Val(rare) {
                     if !rare.context_reads.contains(field) -> rare.context_reads.push(field.copy())
                 }
             }
             .ContextGet(key, default, equatable) -> {
                 sema_effect_node_rare_open(nodes[node_index])
-                if &nodes[node_index].rare == .Val(rare) {
+                if ^nodes[node_index].rare == .Val(rare) {
                     sema_effect_add_context_key(rare.context_keys, TEffectContextKey{key: key.copy(), ty: body_type(interner, tree, default), equatable: equatable})
                 }
             }
@@ -1440,7 +1440,7 @@ sema_effect_record_context: fn(interner: Interner, nodes: &[SemaEffectNode], nod
     }
 }
 
-sema_effect_add_context_key: fn(keys: &[TEffectContextKey], read: TEffectContextKey) Never! {
+sema_effect_add_context_key: fn(keys: ^[TEffectContextKey], read: TEffectContextKey) Never! {
     loop known in keys {
         if known.key == read.key {
             return
@@ -1459,7 +1459,7 @@ sema_effect_add_context_key: fn(keys: &[TEffectContextKey], read: TEffectContext
 // the program reads it, and every key any body of the program reads. A
 // `#Memo` function's key holds each one beside its arguments (IR
 // BuildMemo.jet).
-sema_effect_context_reach: fn(nodes: [SemaEffectNode], root: Int, facts: &TEffectFacts) Never! {
+sema_effect_context_reach: fn(nodes: [SemaEffectNode], root: Int, facts: ^TEffectFacts) Never! {
     every: sema_context_read_fields()
     read := [String]{}
     keys := [TEffectContextKey]{}
@@ -1601,7 +1601,7 @@ sema_effect_runtime_input_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], i
 // names the hook and the call path to the launch. Build code that takes no
 // value, `#Impure` build code and declared steps (`b.run`, which the build
 // runs after its `build: fn` returns) are never held to this.
-sema_effect_check_compiler_hooks: fn(table: ModuleTable, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_compiler_hooks: fn(table: ModuleTable, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, solved: [[String]], diagnostics: ^[Diagnostic]) {
     launch: [String]{"Exec"}
     // A hook's own report covers the handlers it registers, whose calls are
     // its calls.
@@ -1682,7 +1682,7 @@ sema_effect_compiler_hook_param: fn(params: [Type]) -> String? Never! {
 // the functions it calls whose rows reach it, depth-first, up to the one
 // that launches directly or the Core function it calls to, both ends
 // included.
-sema_effect_launch_path: fn(nodes: [SemaEffectNode], solved: [[String]], index: Int, seen: &[Bool]) -> [Int] Never! {
+sema_effect_launch_path: fn(nodes: [SemaEffectNode], solved: [[String]], index: Int, seen: ^[Bool]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     launch: [String]{"Exec"}
@@ -1739,7 +1739,7 @@ SemaEffectTypeCap: struct {
 // may only narrow the cap, so a declared effect outside it is E0749 too, even
 // when the body doesn't use it. Names were validated once per cap
 // (sema_effect_module_cap_names).
-sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_index: Int, solved: [String], cap: SemaEffectModuleCap, notes: [SemaEffectInstanceNote], stack: &SemaStackWalk, frames: SemaStackFrames, diagnostics: &[Diagnostic]) {
+sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_index: Int, solved: [String], cap: SemaEffectModuleCap, notes: [SemaEffectInstanceNote], stack: ^SemaStackWalk, frames: SemaStackFrames, diagnostics: ^[Diagnostic]) {
     node: nodes[node_index]
     loop entry in cap.cap.entries {
         if !entry.name.starts_with("!") -> next
@@ -1896,7 +1896,7 @@ sema_effect_module_ceiling_diagnostic: fn(node: SemaEffectNode, over: [String], 
 // the cap, reported at the field (E0755). Its row runs wherever a method
 // calls the field, so each calling method is E0749 too; this names the
 // field path itself, called or not.
-sema_effect_check_field_rows: fn(module_row: SemaRegistrationModule, caps: [U32:SemaEffectTypeCap], diagnostics: &[Diagnostic]) {
+sema_effect_check_field_rows: fn(module_row: SemaRegistrationModule, caps: [U32:SemaEffectTypeCap], diagnostics: ^[Diagnostic]) {
     loop nominal in module_row.nominals {
         found: caps.get(nominal.symbol.id.id) ?? next
         cap: SemaEffectModuleCap{cap: found.cap.cap, site: None}
@@ -1942,7 +1942,7 @@ sema_effect_field_row_diagnostic: fn(name: String, span: Span, outside: [String]
 // declared in `items`, nested modules included, names known effects; a
 // positive `Panic` is rejected as in a row (E0749). Reported once per cap,
 // where it is written.
-sema_effect_module_cap_names: fn(items: [Item], diagnostics: &[Diagnostic]) {
+sema_effect_module_cap_names: fn(items: [Item], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == {
             .CodeModule(definition) -> {
@@ -1967,7 +1967,7 @@ sema_effect_module_cap_names: fn(items: [Item], diagnostics: &[Diagnostic]) {
     }
 }
 
-sema_effect_cap_entry_names: fn(cap: ModuleCap, diagnostics: &[Diagnostic]) {
+sema_effect_cap_entry_names: fn(cap: ModuleCap, diagnostics: ^[Diagnostic]) {
     loop index in 0..<cap.entries.len() {
         entry: cap.entries[index]
         raw: if entry.name.starts_with("!") -> entry.name.slice(1, entry.name.len()) else -> entry.name
@@ -2072,7 +2072,7 @@ sema_effect_nominal_cap: fn(nominal: SemaRegistrationNominal) -> ModuleCap? Neve
 // Binds the cap of the type `nominal_key` names to a method of it declared
 // in `module_identity`. A cap written in the method's own module is labeled
 // where it is written; one in another module is named by `file:line`.
-sema_effect_bind_type_cap: fn(source: &SemaEffectFunctionSource, caps: [U32:SemaEffectTypeCap], nominal: SymbolID?, module_identity: ModuleID) {
+sema_effect_bind_type_cap: fn(source: ^SemaEffectFunctionSource, caps: [U32:SemaEffectTypeCap], nominal: SymbolID?, module_identity: ModuleID) {
     id: nominal ?? return
     found: caps.get(id.id) ?? return
     site: if found.module_identity == module_identity -> None else -> found.cap.site
@@ -2189,7 +2189,7 @@ sema_effect_chain_name: fn(function: FnBody) -> String Never! {
 // functions from `index` to the first one reached depth-first that stops (a
 // maximal row, a direct Panic, or a stop sentinel), both ends included, so a
 // function that stops itself is its own one-step path. Empty when none stops.
-sema_effect_panic_path: fn(nodes: [SemaEffectNode], index: Int, seen: &[Bool]) -> [Int] Never! {
+sema_effect_panic_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[Bool]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     if nodes[index].maximal -> return [Int]{index}
@@ -2257,7 +2257,7 @@ sema_effect_unsafe_opens: fn(node: SemaEffectNode) -> Bool Never! {
 // brings the Unsafe fact in (sema_effect_unsafe_opens), both ends included,
 // so a function that opens a gate itself is its own one-step path. Empty
 // when none does.
-sema_effect_unsafe_path: fn(nodes: [SemaEffectNode], index: Int, seen: &[Bool]) -> [Int] Never! {
+sema_effect_unsafe_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[Bool]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
     if sema_effect_unsafe_opens(nodes[index]) -> return [Int]{index}
@@ -2303,7 +2303,7 @@ sema_effect_unsafe_gate_text: fn(gate: String) -> String Never! {
 // An `#Unsafe` gate a body opens (an `#Unsafe` block, an `#Unsafe` function,
 // a foreign function's gate) records the deny-only Unsafe fact at `span`;
 // callers inherit it through the solved rows. Core's gates record none.
-sema_effect_record_unsafe_gate: fn(nodes: &[SemaEffectNode], node_index: Int, gate: TUnsafeGate, span: Span) Never! {
+sema_effect_record_unsafe_gate: fn(nodes: ^[SemaEffectNode], node_index: Int, gate: TUnsafeGate, span: Span) Never! {
     if module_is_core(nodes[node_index].module_identity) {
         return
     }
@@ -2321,7 +2321,7 @@ sema_effect_unsafe_site: fn(gate: TUnsafeGate) -> String Never! {
 // collects for; a lambda's gate is its enclosing function's, as its loops
 // are (SemaEffectWalk.LambdaBody). A flat gate with no span of its own is
 // charged at the function.
-sema_effect_walk_unsafe_gate: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], gate: TUnsafeGate, span: Span?) Never! {
+sema_effect_walk_unsafe_gate: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], gate: TUnsafeGate, span: Span?) Never! {
     node_index: if walk == {
         .Collect(index) | .LambdaBody(index) -> index
         .Unsafe(_) | .Region(_, _) -> {
@@ -2360,7 +2360,7 @@ sema_effect_source_position: fn(function: FnBody, index: SemaEffectSourceIndex) 
     Val(position)
 }
 
-sema_effect_node_add_direct: fn(nodes: &[SemaEffectNode], node_index: Int, name: String, span: Span) Never! {
+sema_effect_node_add_direct: fn(nodes: ^[SemaEffectNode], node_index: Int, name: String, span: Span) Never! {
     if sema_effect_set_add(nodes[node_index].direct, name) {
         nodes[node_index].direct_spans.push(TEffectSpan{name: name, span: span})
     }
@@ -2371,7 +2371,7 @@ sema_effect_node_add_direct: fn(nodes: &[SemaEffectNode], node_index: Int, name:
 // once per call, quadratic in a body's calls. The walk that collects the
 // node orders and dedupes the row once it ends
 // (sema_effect_node_settle_edges), to the same set.
-sema_effect_node_add_edge: fn(nodes: &[SemaEffectNode], node_index: Int, edge: String) Never! {
+sema_effect_node_add_edge: fn(nodes: ^[SemaEffectNode], node_index: Int, edge: String) Never! {
     // copy: the node's row owns its key; the caller keeps its own.
     nodes[node_index].call_edges.push(edge.copy())
 }
@@ -2379,18 +2379,18 @@ sema_effect_node_add_edge: fn(nodes: &[SemaEffectNode], node_index: Int, edge: S
 // The call edges sema_effect_node_add_edge appended to `node`, as the
 // ordered set sema_effect_set_add builds: each once, by root rank, then by
 // name.
-sema_effect_node_settle_edges: fn(node: &SemaEffectNode) Never! {
+sema_effect_node_settle_edges: fn(node: ^SemaEffectNode) Never! {
     node.call_edges = sema_effect_set_of(node.call_edges)
 }
 
 // `callee` is taken as a value here and may run later through it; only a
 // function with a body in this program is an edge.
-sema_effect_node_add_value_edge: fn(nodes: &[SemaEffectNode], node_by_key: SemaEffectNodeKeys, node_index: Int, callee: String) Never! {
+sema_effect_node_add_value_edge: fn(nodes: ^[SemaEffectNode], node_by_key: SemaEffectNodeKeys, node_index: Int, callee: String) Never! {
     if sema_effect_node_index(node_by_key, callee) == None {
         return
     }
     sema_effect_node_rare_open(nodes[node_index])
-    if &nodes[node_index].rare == .Val(rare) -> sema_effect_set_add(rare.value_edges, callee)
+    if ^nodes[node_index].rare == .Val(rare) -> sema_effect_set_add(rare.value_edges, callee)
 }
 
 // Each node key's id in `names` and its first node at that id in `nodes`
@@ -2475,7 +2475,7 @@ SemaEffectNodeTargets: struct {
 // The lookups run on up to `threads` compiler threads, each over consecutive
 // nodes reading the graph in place; the caller then moves each node's indices
 // into it, so the result is the same for any thread count.
-sema_effect_resolve_edges: fn(nodes: &[SemaEffectNode], calls: SemaEffectCallIndex, threads: CompilerThreads) Never! {
+sema_effect_resolve_edges: fn(nodes: ^[SemaEffectNode], calls: SemaEffectCallIndex, threads: CompilerThreads) Never! {
     weights := [Int]{}
     work := 0
     loop node in nodes {
@@ -2541,9 +2541,9 @@ sema_effect_node_targets: fn(node: SemaEffectNode, calls: SemaEffectCallIndex) -
 }
 
 // Moves `targets` (sema_effect_node_targets of `node`) into `node`.
-sema_effect_place_targets: fn(node: &SemaEffectNode, targets: &&SemaEffectNodeTargets) Never! {
+sema_effect_place_targets: fn(node: ^SemaEffectNode, targets: ^^SemaEffectNodeTargets) Never! {
     node.call_targets = targets.calls.move()
-    if &node.rare == .Val(rare) {
+    if ^node.rare == .Val(rare) {
         rare.value_targets = targets.values.move()
         loop at in 0..<rare.instance_reaches.len() {
             rare.instance_reaches[at].target_node = targets.reaches[at]
@@ -2557,7 +2557,7 @@ sema_effect_place_targets: fn(node: &SemaEffectNode, targets: &&SemaEffectNodeTa
 
 // Each diagnostic of the batch moves into `all` (the batch is the caller's
 // own list), so locating it never copies it.
-sema_effect_publish_diagnostics: fn(all: &[Diagnostic], source_segments: [SemaSourceSegment], batch: &&[Diagnostic]) Never! {
+sema_effect_publish_diagnostics: fn(all: ^[Diagnostic], source_segments: [SemaSourceSegment], batch: ^^[Diagnostic]) Never! {
     loop diagnostic in batch.move() {
         located: if diagnostic.source_path != None -> diagnostic.move() else -> sema_diagnostic_with_source_location(diagnostic, source_segments)
         all.push(located)
@@ -2565,7 +2565,7 @@ sema_effect_publish_diagnostics: fn(all: &[Diagnostic], source_segments: [SemaSo
 }
 
 // The graph node of `function`.
-sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionSource], source_position: Int?, module_index: Int, library: [SemaLibraryEffectName], symbols: SymbolTable, diagnostics: &[Diagnostic]) -> SemaEffectNode {
+sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionSource], source_position: Int?, module_index: Int, library: [SemaLibraryEffectName], symbols: SymbolTable, diagnostics: ^[Diagnostic]) -> SemaEffectNode {
     node := SemaEffectNode{
         key: function.key,
         name: function.name,
@@ -2641,7 +2641,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.loop_spans = actual.loop_spans.copy()
     if actual.assume_det_spans.len() > 0 || actual.module_caps.len() > 0 {
         sema_effect_node_rare_open(node)
-        if &node.rare == .Val(rare) {
+        if ^node.rare == .Val(rare) {
             // copy: as above.
             rare.assume_det_spans = actual.assume_det_spans.copy()
             rare.module_caps = actual.module_caps.copy()
@@ -2685,14 +2685,14 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
                 }
                 if prohibited {
                     sema_effect_node_rare_open(node)
-                    if &node.rare == .Val(rare) {
+                    if ^node.rare == .Val(rare) {
                         rare.library_denials.push(SemaLibraryEffectDenial{name: library_name, span: entry.span})
                     }
                     next
                 }
                 loop listed in library_name.kernel -> sema_effect_set_add(node.declared, listed)
                 sema_effect_node_rare_open(node)
-                if &node.rare == .Val(rare) -> rare.library_rows.push(library_name)
+                if ^node.rare == .Val(rare) -> rare.library_rows.push(library_name)
                 next
             }
             if !prohibited && sema_effect_root(effect_name) == "Panic" {
@@ -2704,7 +2704,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
                 // events (E0921), not the ambient prohibition check.
                 prohibited && sema_effect_root(effect_name) == "Mem" -> {
                     sema_effect_node_rare_open(node)
-                    if &node.rare == .Val(rare) {
+                    if ^node.rare == .Val(rare) {
                         rare.memory_denials.push(EffectRowEntry{name: effect_name, span: entry.span})
                     }
                 }
@@ -2712,7 +2712,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
                 else -> {
                     _ := sema_effect_set_add(node.declared, effect_name)
                     sema_effect_node_rare_open(node)
-                    if &node.rare == .Val(rare) {
+                    if ^node.rare == .Val(rare) {
                         _ := sema_effect_set_add(rare.written_declared, effect_name)
                     }
                 }
@@ -2730,7 +2730,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
 // Intrinsic producers use the same fact carrier as checked calls. The effect
 // row is authoritative producer input: an empty present row means known-pure,
 // while an absent row remains unknown and is conservatively maximal downstream.
-sema_effect_record_intrinsic_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_effect_record_intrinsic_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: ^[Diagnostic]) -> Bool Never! {
     wall := sema_effect_check_transaction_wall(environment, program, scopes, facts.effect_bound, api, span, diagnostics)
     allowed: wall ?? return false
     if !allowed -> return false
@@ -2754,7 +2754,7 @@ sema_effect_record_intrinsic_fact: fn(environment: SemaScopeEnvironment, program
 
 // Convenience entry point for intrinsic operations whose only call metadata
 // is their canonical effect row. Use an empty row to record a known-pure site.
-sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: ^[Diagnostic]) -> Bool Never! {
     if effect_row.len() > 0 && scopes.transaction_wall_depth > 0 {
         wall := sema_effect_check_transaction_wall(environment, program, scopes, Val(effect_row), api, span, diagnostics)
         allowed: wall ?? return false
@@ -2778,7 +2778,7 @@ sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, prog
 
 // Fast path for in-place collection and value mutations whose sole effect is
 // deny-only `Mem`: omits the unused `SemaCallSiteDetail` payload.
-sema_effect_record_mem_intrinsic: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_effect_record_mem_intrinsic: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
     effect_row: [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
     if scopes.transaction_wall_depth > 0 {
         wall := sema_effect_check_transaction_wall(environment, program, scopes, Val(effect_row), api, span, diagnostics)
@@ -2801,7 +2801,7 @@ sema_effect_record_mem_intrinsic: fn(environment: SemaScopeEnvironment, program:
     true
 }
 
-sema_effect_record_fact: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, tree: BodyTree, node_index: Int, expression: BodyNode, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
+sema_effect_record_fact: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, tree: BodyTree, node_index: Int, expression: BodyNode, fact: SemaCallSiteFact, diagnostics: ^[Diagnostic]) {
     // A call through a `:` local bound to a lambda written in this body adds
     // nothing: that lambda's effects are already this function's where it is
     // written (sema_effect_merge_lambda). The call node itself skips its fact
@@ -2910,10 +2910,10 @@ sema_effect_core_db_callee: fn(callee_key: String) -> Bool Never! {
     callee_key.contains(":<corelib>/core.db.")
 }
 
-sema_effect_record_memory_open: fn(nodes: &[SemaEffectNode], node_index: Int, span: Span, reason: String) Never! {
+sema_effect_record_memory_open: fn(nodes: ^[SemaEffectNode], node_index: Int, span: Span, reason: String) Never! {
     source: nodes[node_index].source_display.copy()
     sema_effect_node_rare_open(nodes[node_index])
-    if &nodes[node_index].rare == .Val(rare) {
+    if ^nodes[node_index].rare == .Val(rare) {
         rare.memory_opens.push(SemaMemoryOpen{span: span, source: source, reason: reason})
     }
 }
@@ -3188,7 +3188,7 @@ sema_effect_is_compiler_intrinsic: fn(kind: NodeKind) -> Bool Never! {
     }
 }
 
-sema_effect_merge_lambda: fn(nodes: &[SemaEffectNode], node_index: Int, lambda: BodyLambda) Never! {
+sema_effect_merge_lambda: fn(nodes: ^[SemaEffectNode], node_index: Int, lambda: BodyLambda) Never! {
     loop effect_name in lambda.effects.direct {
         span := lambda.source_span
         loop entry in lambda.effects.direct_spans {
@@ -3232,7 +3232,7 @@ sema_effect_written_lambda: fn(tree: BodyTree, value: Int) -> Bool Never! {
     false
 }
 
-sema_effect_record_unresolved_call: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, tree: BodyTree, node_index: Int, expression: BodyNode) Never! {
+sema_effect_record_unresolved_call: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, tree: BodyTree, node_index: Int, expression: BodyNode) Never! {
     // A direct call and a shared global's initializer name their callee's
     // node through the callee's DeclID.
     if expression.kind == .Call(callee, _, _) {
@@ -3263,7 +3263,7 @@ sema_effect_record_unresolved_call: fn(nodes: &[SemaEffectNode], facts: SemaEffe
     }
 }
 
-sema_effect_record_decl_call: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, callee: DeclID, span: Span) Never! {
+sema_effect_record_decl_call: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, callee: DeclID, span: Span) Never! {
     target: sema_effect_decl_node(facts, callee)
     if target >= 0 -> sema_effect_node_add_edge(nodes, node_index, facts.node_keys[target]) else {
         sema_effect_record_memory_open(nodes, node_index, span, "callee body is unavailable and has no verified signed memory summary")
@@ -3273,7 +3273,7 @@ sema_effect_record_decl_call: fn(nodes: &[SemaEffectNode], facts: SemaEffectCall
 // `attribute_fn_arg`: a named function passed to a function-typed parameter
 // flows its effects through to this caller, and the callee may invoke it any
 // number of times.
-sema_effect_record_function_arguments: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, args: [BodyCallArg]) Never! {
+sema_effect_record_function_arguments: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, args: [BodyCallArg]) Never! {
     loop argument in args {
         if type_kind(facts.interner, body_type_id(tree, argument.value)) == TypeKind.Fn {
             value: body_node(tree, argument.value)
@@ -3321,13 +3321,13 @@ sema_effect_callback_row: fn(ty: Type) -> SemaEffectCallbackRow? {
 // that row against the function's node. A function read under its own
 // declared row passes trivially; one that took a callback slot's row is
 // the obligation sema_effect_check_callback_bounds settles.
-sema_effect_record_callback_bound: fn(nodes: &[SemaEffectNode], node_by_key: SemaEffectNodeKeys, node_index: Int, callee: String, ty: Type, span: Span) {
+sema_effect_record_callback_bound: fn(nodes: ^[SemaEffectNode], node_by_key: SemaEffectNodeKeys, node_index: Int, callee: String, ty: Type, span: Span) {
     row: sema_effect_callback_row(ty) ?? return
     if sema_effect_node_index(node_by_key, callee) == None {
         return
     }
     sema_effect_node_rare_open(nodes[node_index])
-    if &nodes[node_index].rare == .Val(rare) {
+    if ^nodes[node_index].rare == .Val(rare) {
         rare.callback_bounds.push(SemaEffectCallbackBound{callee: callee, row: row, span: span})
     }
 }
@@ -3338,7 +3338,7 @@ sema_effect_record_callback_bound: fn(nodes: &[SemaEffectNode], node_by_key: Sem
 // appended to `nodes` for the walk and removed again. A lambda handed the
 // root's `Compiler` value (a `meta.events` handler) records the same as a
 // compiler hook (sema_effect_check_compiler_hooks).
-sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda, ty: Type, span: Span) {
+sema_effect_record_lambda_bound: fn(nodes: ^[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda, ty: Type, span: Span) {
     row: sema_effect_callback_row(ty)
     hook: sema_effect_compiler_hook_param(if ty == .Fn(params, _, _, _, _, _) -> params else -> [Type]{})
     if row == None && hook == None {
@@ -3360,7 +3360,7 @@ sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, f
     lambda_node.call_edges = [String]{}
     lambda_node.maximal = false
     lambda_node.maximal_span = None
-    if &lambda_node.rare == .Val(rare) {
+    if ^lambda_node.rare == .Val(rare) {
         rare.callback_bounds = [SemaEffectCallbackBound]{}
         rare.lambda_bounds = [SemaEffectLambdaBound]{}
         rare.hook_lambdas = [SemaEffectHookLambda]{}
@@ -3373,7 +3373,7 @@ sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, f
     walked := nodes.pop() ?? panic("the lambda's row node left the graph")
     sema_effect_node_settle_edges(walked)
     sema_effect_node_rare_open(nodes[node_index])
-    if &nodes[node_index].rare == .Val(rare) {
+    if ^nodes[node_index].rare == .Val(rare) {
         if hook == .Val(taken) {
             rare.hook_lambdas.push(SemaEffectHookLambda{direct: walked.direct.copy(), call_edges: walked.call_edges.copy(), maximal: walked.maximal, taken: taken, span: span})
         }
@@ -3387,7 +3387,7 @@ sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, f
 // undeclared function is judged by its solved row. A denial is judged by the
 // solved row, which holds the deny-only rights (`Panic`, `Mem`); one the
 // function's own row already denies is its own E0749.
-sema_effect_check_callback_bounds: fn(nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, solved: [[String]], node_index: Int, diagnostics: &[Diagnostic]) {
+sema_effect_check_callback_bounds: fn(nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, solved: [[String]], node_index: Int, diagnostics: ^[Diagnostic]) {
     rare: nodes[node_index].rare ?? return
     loop obligation in rare.callback_bounds {
         target: sema_effect_node_index(node_by_key, obligation.callee) ?? next
@@ -3434,7 +3434,7 @@ sema_effect_check_callback_bounds: fn(nodes: [SemaEffectNode], node_by_key: Sema
 // takes the union of every implementation of the method in the program,
 // inherited defaults included. A trait with no implementation is the
 // open-world dispatch (E0743 under a ceiling).
-sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) Never! {
+sema_effect_record_dispatch: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) Never! {
     if fact.facts.effect_bound != None {
         return
     }
@@ -3476,7 +3476,7 @@ sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallI
 // named function read, a named function value, and every implementation the
 // program holds of a method called through a trait value (the value may be
 // any of them).
-sema_effect_record_value_reads: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: Int, node: BodyNode) Never! {
+sema_effect_record_value_reads: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: Int, node: BodyNode) Never! {
     if node.kind == {
         .ConstRef(symbol) -> {
             if type_kind(facts.interner, body_type_id(tree, expression)) == TypeKind.Fn {
@@ -3489,7 +3489,7 @@ sema_effect_record_value_reads: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
                     target: sema_effect_decl_node(facts, decl)
                     if target >= 0 {
                         sema_effect_node_rare_open(nodes[node_index])
-                        if &nodes[node_index].rare == .Val(rare) {
+                        if ^nodes[node_index].rare == .Val(rare) {
                             sema_effect_set_add(rare.value_edges, facts.node_keys[target])
                         }
                     }
@@ -3524,7 +3524,7 @@ sema_effect_record_value_reads: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
 // Any other receiver takes the union of every implementation's summary
 // (sema_effect_add_dispatch_union). Only a trait-object receiver is the
 // open-world dispatch that stays maximal for a row-less method.
-sema_effect_record_static_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) -> Bool Never! {
+sema_effect_record_static_dispatch: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) -> Bool Never! {
     if fact.facts.effect_bound != None -> return false
     if expression.kind == {
         .MethodCall(receiver, method, _, _) -> {
@@ -3543,7 +3543,7 @@ sema_effect_record_static_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffe
             impls_key: "{trait_module}|{trait_name}.{method.name}"
             if receiver_type == .Named(param) && nodes[node_index].type_params.contains(param) {
                 sema_effect_node_rare_open(nodes[node_index])
-                if &nodes[node_index].rare == .Val(rare) {
+                if ^nodes[node_index].rare == .Val(rare) {
                     rare.param_dispatches.push(SemaEffectParamDispatch{param: param, impls_key: impls_key})
                 }
                 return true
@@ -3560,7 +3560,7 @@ sema_effect_record_static_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffe
 // the method (a trait default body, an unloaded impl) is unresolved, and so
 // is a trait with no implementation: either forces the maximal row, as in
 // Rust.
-sema_effect_add_dispatch_union: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, impls_key: String, span: Span) Never! {
+sema_effect_add_dispatch_union: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, impls_key: String, span: Span) Never! {
     trait_key: impls_key.cut_last(".") ?? return
     unresolved := true
     if name_column_get(facts.trait_implementer_names, facts.trait_implementer_rows, trait_key.before) == .Val(impl_row) {
@@ -3580,7 +3580,7 @@ sema_effect_add_dispatch_union: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
 // A call that binds type parameters: a method of a generic type (`t.run()`
 // with `t: Traced<Loud>`, or `Traced<Loud>.new()`) or a generic function
 // with its type arguments.
-sema_effect_record_instantiation: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact, symbols: SymbolTable, interner: Interner) Never! {
+sema_effect_record_instantiation: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact, symbols: SymbolTable, interner: Interner) Never! {
     callee: fact.callee ?? return
     owner_args := [Type]{}
     type_args := [Type]{}
@@ -3675,7 +3675,7 @@ sema_effect_has_param_dispatch: fn(rows: [SemaEffectParamDispatch], wanted: Sema
 // binding the walk didn't see (a call recorded without its type arguments,
 // or a type with no implementation of its own) takes every implementation,
 // as an unbound generic dispatch does.
-sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectCallIndex) Never! {
+sema_effect_resolve_type_params: fn(nodes: ^[SemaEffectNode], calls: SemaEffectCallIndex) Never! {
     open := loop node in nodes -> if node.rare == .Val(rare) -> rare.param_dispatches.copy() else -> [SemaEffectParamDispatch]{}
     changed := true
     loop changed {
@@ -3713,7 +3713,7 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
                     if sema_effect_trait_impl_of(calls, "{dispatch.impls_key}#{owner}") == .Val(impl_key) {
                         sema_effect_node_add_edge(nodes, index, impl_key)
                         sema_effect_node_rare_open(nodes[index])
-                        if &nodes[index].rare == .Val(rare) {
+                        if ^nodes[index].rare == .Val(rare) {
                             rare.instance_reaches.push(SemaEffectInstanceReach{label: site.label, target: impl_key, span: site.span})
                         }
                         next
@@ -3745,7 +3745,7 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
     slot := 0
     loop rows in open.move() {
         if rows.len() > 0 -> sema_effect_node_rare_open(nodes[slot])
-        if &nodes[slot].rare == .Val(rare) -> rare.param_dispatches = rows
+        if ^nodes[slot].rare == .Val(rare) -> rare.param_dispatches = rows
         slot += 1
     }
 }
@@ -3755,7 +3755,7 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
 // leads back to that parameter, asks for a deeper instance each time one is
 // built, so building it never ends (E0909). Only what a non-generic function
 // reaches is built, so a cycle none reaches is not reported.
-sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], diagnostics: &[Diagnostic]) {
+sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], diagnostics: ^[Diagnostic]) {
     reached := (loop _ in nodes -> false)
     queue := [Int]{}
     loop index in 0..<nodes.len() {
@@ -3841,7 +3841,7 @@ sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], inputs: [Sema
 }
 
 // Queues node `target` the first time a walk reaches it; -1 is no node.
-sema_effect_queue_reached: fn(reached: &[Bool], queue: &[Int], target: Int) Never! {
+sema_effect_queue_reached: fn(reached: ^[Bool], queue: ^[Int], target: Int) Never! {
     if target < 0 || reached[target] {
         return
     }
@@ -3881,7 +3881,7 @@ sema_effect_with_instance_notes: fn(diagnostic: Diagnostic, notes: [SemaEffectIn
 // A Core call's effects from its record, as sema_call_core_record_effects
 // records them on a call-site fact. A CoreCall node is an adapter row's: a
 // source-owned row is checked as a call of its Core declaration.
-sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, record: CoreCallRecord, span: Span) Never! {
+sema_effect_record_core_row: fn(nodes: ^[SemaEffectNode], node_index: Int, record: CoreCallRecord, span: Span) Never! {
     loop name in record.effects {
         if sema_effect_parse_name(name) == .Val(effect) {
             sema_effect_node_add_direct(nodes, node_index, effect, span)
@@ -3893,7 +3893,7 @@ sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, recor
 // the scope its constant first argument names: `files.read("assets/a.png")`
 // needs `FS.Read("assets/a.png")`. A run-time argument names no scope, so
 // that call needs the bare effect (EffectScope.jet).
-sema_effect_record_scope: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, node: BodyNode, fact: SemaCallSiteFact) Never! {
+sema_effect_record_scope: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, node: BodyNode, fact: SemaCallSiteFact) Never! {
     callee: fact.callee ?? return
     callee_key: symbol_key(facts.symbols, tree.symbols, callee)
     // A publisher with no body here, such as `core.http.get`, publishes by key.
@@ -3902,7 +3902,7 @@ sema_effect_record_scope: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallInde
     }
     scope: sema_effect_call_scope(tree, node, published)
     sema_effect_node_rare_open(nodes[node_index])
-    if &nodes[node_index].rare == .Val(rare) {
+    if ^nodes[node_index].rare == .Val(rare) {
         if scope == .Val(name) {
             scoped: effect_scope_name(published, name)
             loop call in rare.scoped_calls {
@@ -3940,7 +3940,7 @@ sema_effect_call_scope: fn(tree: BodyTree, node: BodyNode, published: String) ->
 // function codegen calls for it. Methods are indexed by their owner type's
 // name, so a same-named type in another module adds its method too: the row
 // may only grow, never miss one.
-sema_effect_record_close: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, value_type: Type) Never! {
+sema_effect_record_close: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, value_type: Type) Never! {
     owner: if sema_expr_unwrap_tag(value_type) == {
         .Named(name) | .Apply(name, _) -> symbol_key_leaf(name)
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -3958,7 +3958,7 @@ sema_effect_record_close: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallInde
 // close methods found by owner name as for `close(value)`. A lambda's rows
 // come from its call facts, which hold no loop, so its loops charge the
 // enclosing function (SemaEffectWalk.LambdaBody).
-sema_effect_record_iterable_loop: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, iter_type: String, iter_symbol: String, next_symbol: String, span: Span) Never! {
+sema_effect_record_iterable_loop: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, iter_type: String, iter_symbol: String, next_symbol: String, span: Span) Never! {
     node_index: if walk == {
         .Collect(index) | .LambdaBody(index) -> index
         .Unsafe(_) -> {
@@ -3995,14 +3995,14 @@ sema_effect_core_member_module: fn(key: String) -> String? Never! {
     Val(parts.module_identity)
 }
 
-sema_effect_walk_expr: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller) {
+sema_effect_walk_expr: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) {
     node: body_node(tree, expression)
     if sema_effect_walk_expr_enter(nodes, node_index, tree, expression, node, facts, module_facts, diagnostics, caller) {
         sema_effect_walk_expr_children(SemaEffectWalk.Collect{node_index: node_index}, nodes, facts, module_facts, diagnostics, caller, tree, node)
     }
 }
 
-sema_effect_walk_record_call_node: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> Bool {
+sema_effect_walk_record_call_node: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) -> Bool {
     // Rust's `Clock.{method}` check runs before the declared method's
     // call is recorded: a pure body reports E3403 and records nothing.
     if sema_effect_clock_intrinsic_position(facts, module_facts, caller, node.span) == .Val(clock) && sema_effect_report_nondeterministic_intrinsic(nodes, node_index, module_facts[clock], node.span, diagnostics) {
@@ -4041,7 +4041,7 @@ sema_effect_walk_record_call_node: fn(nodes: &[SemaEffectNode], node_index: Int,
     false
 }
 
-sema_effect_walk_record_exact_fact: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller) {
+sema_effect_walk_record_exact_fact: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) {
     if caller.slot < 0 -> return
     if sema_effect_in_assume_det(nodes[node_index], node.span) -> return
     found: sema_effect_find_exact_fact(facts, module_facts, caller, node.span)
@@ -4057,7 +4057,7 @@ sema_effect_walk_record_exact_fact: fn(nodes: &[SemaEffectNode], node_index: Int
 // false when its children aren't walked. Fused into one NodeKind dispatch so
 // non-call leaf/expression nodes skip comptime-input, context, value-read, and
 // stop switches completely.
-sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> Bool {
+sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) -> Bool {
     if node.kind == {
         .Call(_, _, args) -> {
             if !sema_effect_in_assume_det(nodes[node_index], node.span) && sema_effect_walk_record_call_node(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller) {
@@ -4249,7 +4249,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
     true
 }
 
-sema_effect_collect_function: fn(nodes: &[SemaEffectNode], node_index: Int, function: FnBody, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], module_index: Int, diagnostics: &[Diagnostic]) {
+sema_effect_collect_function: fn(nodes: ^[SemaEffectNode], node_index: Int, function: FnBody, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], module_index: Int, diagnostics: ^[Diagnostic]) {
     caller: sema_effect_caller_slot(facts, module_index, function.key)
     loop statement in function.body {
         sema_effect_walk_stmt_children(SemaEffectWalk.Collect{node_index: node_index}, nodes, facts, module_facts, diagnostics, caller, function.tree, function.tree.stmts[statement])
@@ -4257,14 +4257,14 @@ sema_effect_collect_function: fn(nodes: &[SemaEffectNode], node_index: Int, func
     sema_effect_node_settle_edges(nodes[node_index])
 }
 
-sema_effect_check_unsafe_expr: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, expression: Int, audited: Bool, diagnostics: &[Diagnostic]) {
+sema_effect_check_unsafe_expr: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, expression: Int, audited: Bool, diagnostics: ^[Diagnostic]) {
     node: body_node(tree, expression)
     if sema_effect_check_unsafe_enter(nodes, facts, module_facts, caller, tree, node, audited, diagnostics) {
         sema_effect_walk_expr_children(SemaEffectWalk.Unsafe{audited: audited}, nodes, facts, module_facts, diagnostics, caller, tree, node)
     }
 }
 
-sema_effect_check_unsafe_call_site: fn(facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, span: Span, audited: Bool, diagnostics: &[Diagnostic]) {
+sema_effect_check_unsafe_call_site: fn(facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, span: Span, audited: Bool, diagnostics: ^[Diagnostic]) {
     found: sema_effect_find_fact(facts, module_facts, caller, span)
     if found == .Val(position) {
         // A `mem.<operation>(…)` call sema already reported as E3101
@@ -4293,7 +4293,7 @@ sema_effect_check_unsafe_call_site: fn(facts: SemaEffectCallIndex, module_facts:
 
 // sema_effect_check_unsafe_expr's own work on `node`; false when its
 // children aren't walked.
-sema_effect_check_unsafe_enter: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, node: BodyNode, audited: Bool, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_unsafe_enter: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, node: BodyNode, audited: Bool, diagnostics: ^[Diagnostic]) -> Bool {
     if node.kind == {
         .GlobalShared(_, _) -> {
             sema_effect_check_unsafe_call_site(facts, module_facts, caller, node.span, audited, diagnostics)
@@ -4321,7 +4321,7 @@ sema_effect_check_unsafe_enter: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
     true
 }
 
-sema_effect_check_unsafe_condition: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, condition: BodyIfCond, audited: Bool, diagnostics: &[Diagnostic]) {
+sema_effect_check_unsafe_condition: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, condition: BodyIfCond, audited: Bool, diagnostics: ^[Diagnostic]) {
     if condition == {
         .Plain(value) -> {
             sema_effect_check_unsafe_expr(nodes, facts, module_facts, caller, tree, value, audited, diagnostics)
@@ -4336,14 +4336,14 @@ sema_effect_check_unsafe_condition: fn(nodes: &[SemaEffectNode], facts: SemaEffe
     }
 }
 
-sema_effect_check_unsafe_contracts: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, contracts: [BodyContract], audited: Bool, diagnostics: &[Diagnostic]) {
+sema_effect_check_unsafe_contracts: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, contracts: [BodyContract], audited: Bool, diagnostics: ^[Diagnostic]) {
     loop contract in contracts {
         sema_effect_check_unsafe_expr(nodes, facts, module_facts, caller, tree, contract.condition, audited, diagnostics)
         sema_effect_check_unsafe_expr(nodes, facts, module_facts, caller, tree, contract.message, audited, diagnostics)
     }
 }
 
-sema_effect_check_unsafe_statements_tree: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, statements: [Int], audited: Bool, diagnostics: &[Diagnostic]) {
+sema_effect_check_unsafe_statements_tree: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], caller: SemaEffectCaller, tree: BodyTree, statements: [Int], audited: Bool, diagnostics: ^[Diagnostic]) {
     loop statement in statements {
         if tree.stmts[statement] == {
             .Contract(contract) -> {
@@ -4568,7 +4568,7 @@ sema_effect_callback_diagnostic: fn(over: [String], bounds: [String], span: Span
     diagnostic_with_rights(diagnostic, "invocation", [String]{}, [String]{}, None)
 }
 
-sema_effect_check_callback_bound: fn(callback_effects: [String], bounds: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_callback_bound: fn(callback_effects: [String], bounds: [String], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     parsed_bounds := [String]{}
     valid := true
     loop raw in bounds {
@@ -4635,7 +4635,7 @@ sema_effect_sealed_edge: fn(table: ModuleTable, core_db: ModuleID?, caller: Sema
 // program, and so are the direct effects the driver's walks sum along it.
 // The summaries take the graph's nodes, which are done with: each takes its
 // node's key.
-sema_effect_core_seal_rows: fn(nodes: &&[SemaEffectNode], solved: [[String]], table: ModuleTable) -> [SemaCoreSealEffects] Never! {
+sema_effect_core_seal_rows: fn(nodes: ^^[SemaEffectNode], solved: [[String]], table: ModuleTable) -> [SemaCoreSealEffects] Never! {
     core_db: module_find(table, "<corelib>/core.db")
     plain: loop node in nodes -> sema_effect_seal_plain(node)
     seen := loop _ in nodes -> false
@@ -4733,7 +4733,7 @@ SemaEffectBitOrder: struct {
     mask: Int,
 }
 
-sema_effect_intern_bit: fn(names: &NameTable, name: String) -> Int Never! {
+sema_effect_intern_bit: fn(names: ^NameTable, name: String) -> Int Never! {
     id: name_index(name_intern(names, name))
     if id >= 62 -> return -1
     id
@@ -4904,7 +4904,7 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
 // calls scope publishers: a publisher's bare effect arrives as each scope the
 // caller's constant arguments name, and bare too only when it also calls that
 // publisher with a run-time argument.
-sema_effect_solve_scoped: fn(solved: &[[String]], pending: &[SemaEffectPending], node: SemaEffectNode, caller: Int, callee_key: String, name: String) Never! {
+sema_effect_solve_scoped: fn(solved: ^[[String]], pending: ^[SemaEffectPending], node: SemaEffectNode, caller: Int, callee_key: String, name: String) Never! {
     rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
     renamed := false
     loop call in rare.scoped_calls {
@@ -5004,7 +5004,7 @@ sema_effect_dispatch_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bo
 // The first unbounded trait dispatch reachable from `index` through the call
 // graph, the function's own calls first. `reach` skips dispatch-free callees;
 // `visited` records the rows to clear before the next root.
-sema_effect_find_dispatch: fn(nodes: [SemaEffectNode], reach: [Bool], index: Int, seen: &[Bool], visited: &[Int]) -> SemaEffectDispatchSite? {
+sema_effect_find_dispatch: fn(nodes: [SemaEffectNode], reach: [Bool], index: Int, seen: ^[Bool], visited: ^[Int]) -> SemaEffectDispatchSite? {
     if seen[index] -> return None
     seen[index] = true
     visited.push(index)
@@ -5027,7 +5027,7 @@ sema_effect_trait_bound_diagnostic: fn(bound: SemaEffectTraitBound, over: [Strin
 }
 
 // Every impl of a bounded trait method stays within the trait's row.
-sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions: [FnBody], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions: [FnBody], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, symbols: SymbolTable, solved: [[String]], diagnostics: ^[Diagnostic]) {
     if module_row.trait_bounds.len() == 0 {
         return
     }
@@ -5188,7 +5188,7 @@ sema_effect_memory_found: fn(nodes: [SemaEffectNode], parents: [Int], owner: Int
 // program's call that leads to it, whose report names each step and the line
 // that allocates. An open dispatch is no allocation the proof finds: a
 // foreign body runs on the machine's own memory, not the program's heap.
-sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], own_modules: [Bool], calls: SemaEffectCallIndex, entries: [String], machine: String, diagnostics: &[Diagnostic]) Never! {
+sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], own_modules: [Bool], calls: SemaEffectCallIndex, entries: [String], machine: String, diagnostics: ^[Diagnostic]) Never! {
     reported := [String]{}
     loop key in entries {
         root: sema_effect_node_index(calls.node_by_key, key) ?? next
@@ -5244,7 +5244,7 @@ sema_effect_own_node: fn(node: SemaEffectNode, inputs: [SemaEffectModuleInput], 
 }
 
 // Rust `may_reach_arena` over the known call graph.
-sema_effect_may_reach_arena: fn(nodes: [SemaEffectNode], index: Int, visiting: &[Bool]) -> Bool {
+sema_effect_may_reach_arena: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool]) -> Bool {
     if visiting[index] -> return true
     visiting[index] = true
     found := false
@@ -5278,7 +5278,7 @@ sema_effect_unsized_alloc: fn(node: SemaEffectNode, event: SemaMemoryEvent) -> B
 
 // Rust `arena_bound`: the proven arena bytes `index` can reserve, with the
 // event that witnesses the total, or the finding that stops the proof.
-sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
+sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], path: [String]) -> SemaMemoryArena {
     if visiting[index] {
         return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[index].display_key, "recursive call multiplicity is not statically bounded for arena accounting", index, path, 0))
     }
@@ -5288,7 +5288,7 @@ sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: &[Boo
     result
 }
 
-sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
+sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], path: [String]) -> SemaMemoryArena {
     node: nodes[index]
     // copy: the arena failure owns its open site, while the site stays in `node`, a row of the
     // caller's read-only effect graph, which later searches read.
@@ -5362,14 +5362,14 @@ SemaHeapWalk: struct {
     next: [Int],
 }
 
-sema_effect_heap_open: fn(walk: &SemaHeapWalk, index: Int, why: String, next: Int) Never! {
+sema_effect_heap_open: fn(walk: ^SemaHeapWalk, index: Int, why: String, next: Int) Never! {
     walk.bytes[index] = -1
     walk.why[index] = why.copy()
     walk.next[index] = next
     walk.state[index] = 2
 }
 
-sema_effect_heap_visit: fn(walk: &SemaHeapWalk, nodes: [SemaEffectNode], index: Int) Never! {
+sema_effect_heap_visit: fn(walk: ^SemaHeapWalk, nodes: [SemaEffectNode], index: Int) Never! {
     walk.state[index] = 1
     node: nodes[index]
     if node.rare == .Val(rare) && rare.memory_opens.len() > 0 {
@@ -5601,7 +5601,7 @@ SEMA_EFFECT_STACK_MIN_BYTES_PER_THREAD: 65536
 // dynamically, each part into its own rows, reading the modules, the nodes
 // and the call index in place; the parts join in part order, so the rows are
 // the same for any thread count.
-sema_effect_stack_bodies: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, threads: CompilerThreads, bodies: &SemaStackBodies, closed: Bool{false}) {
+sema_effect_stack_bodies: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, threads: CompilerThreads, bodies: ^SemaStackBodies, closed: Bool{false}) {
     defs := [TTypeDef]{}
     loop graph in modules {
         loop definition in graph.declarations.type_defs -> defs.push(definition.copy())
@@ -5665,7 +5665,7 @@ SemaStackBodiesPart: struct {
 
 // Appends a part's rows (all but its nodes) to `bodies`, leaving the part
 // empty.
-sema_effect_stack_bodies_join: fn(bodies: &SemaStackBodies, part: &SemaStackBodies) {
+sema_effect_stack_bodies_join: fn(bodies: ^SemaStackBodies, part: ^SemaStackBodies) {
     compiler_transfer_rows<Int>(bodies.own, part.own)
     compiler_transfer_rows<String>(bodies.why, part.why)
     compiler_transfer_rows<SemaStackDynamicCall>(bodies.values.calls, part.values.calls)
@@ -5677,7 +5677,7 @@ sema_effect_stack_bodies_join: fn(bodies: &SemaStackBodies, part: &SemaStackBodi
 
 // Runs frame-sizing threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: SemaEffectCollectQueue, from: Int, workers: Int, parts: &[SemaStackBodies]) {
+sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: SemaEffectCollectQueue, from: Int, workers: Int, parts: ^[SemaStackBodies]) {
     if from >= workers {
         return
     }
@@ -5758,7 +5758,7 @@ sema_effect_stack_lambda: fn(node_index: Int, value: BodyLambda, node_by_key: Se
 // the reads of function-typed locals and fields, and, in an executable
 // build, the function values it makes. A lambda written in the same body
 // is a known body (sema_effect_local_lambda_call), not a dynamic call.
-sema_effect_stack_dynamic: fn(tree: BodyTree, node_index: Int, nodes: [SemaEffectNode], facts: SemaEffectCallIndex, closed: Bool, values: &SemaStackValues) Never! {
+sema_effect_stack_dynamic: fn(tree: BodyTree, node_index: Int, nodes: [SemaEffectNode], facts: SemaEffectCallIndex, closed: Bool, values: ^SemaStackValues) Never! {
     // A row's index is not its node id: ids run from the checker's own
     // (TEXPR_FIRST_LOCAL_ID and below), so each row names its node.
     loop node in tree.nodes {
@@ -5820,7 +5820,7 @@ sema_effect_stack_impls: fn(method: TMethodRef, facts: SemaEffectCallIndex) -> [
 // the program writes, a policy wrapper is a function it takes as a value,
 // and a named function with no checked body leaves the seal incomplete.
 // The other kinds wrap a value made elsewhere in the tree.
-sema_effect_stack_fn_value: fn(kind: BodyFnValueKind, node_index: Int, nodes: [SemaEffectNode], facts: SemaEffectCallIndex, values: &SemaStackValues) Never! {
+sema_effect_stack_fn_value: fn(kind: BodyFnValueKind, node_index: Int, nodes: [SemaEffectNode], facts: SemaEffectCallIndex, values: ^SemaStackValues) Never! {
     if kind == {
         .NamedFn(function, lambda) -> {
             if lambda == .Val(value) {
@@ -5868,7 +5868,7 @@ sema_effect_stack_value_read: fn(kind: NodeKind) -> Bool Never! {
 // already has every implementation as an edge (sema_effect_record_dispatch);
 // its set is only named here. A function value with no checked body that
 // reached code makes leaves every reached call through a function value open.
-sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], arity: [Int], values: SemaStackValues) Never! {
+sema_effect_stack_seal: fn(frames: ^SemaStackFrames, nodes: [SemaEffectNode], arity: [Int], values: SemaStackValues) Never! {
     calls_at := (loop _ in nodes -> [Int]{})
     loop (row, call) in values.calls -> calls_at[call.node].push(row)
     lambdas_at := (loop _ in nodes -> [Int]{})
@@ -5947,7 +5947,7 @@ SemaStackSeal: struct {
     names: [[Int]],
 }
 
-sema_effect_stack_reach: fn(seal: &SemaStackSeal, index: Int) Never! {
+sema_effect_stack_reach: fn(seal: ^SemaStackSeal, index: Int) Never! {
     if seal.reached[index] {
         return
     }
@@ -5957,7 +5957,7 @@ sema_effect_stack_reach: fn(seal: &SemaStackSeal, index: Int) Never! {
 
 // `target` is taken as a value by reached code: every reached call through
 // a function value may run it.
-sema_effect_stack_take: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, arity: [Int], values: SemaStackValues, target: Int) Never! {
+sema_effect_stack_take: fn(seal: ^SemaStackSeal, frames: ^SemaStackFrames, arity: [Int], values: SemaStackValues, target: Int) Never! {
     sema_effect_stack_reach(seal, target)
     if seal.taken[target] {
         return
@@ -5969,7 +5969,7 @@ sema_effect_stack_take: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, arity
     }
 }
 
-sema_effect_stack_run_taken: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, arity: [Int], call: SemaStackDynamicCall, target: Int) Never! {
+sema_effect_stack_run_taken: fn(seal: ^SemaStackSeal, frames: ^SemaStackFrames, arity: [Int], call: SemaStackDynamicCall, target: Int) Never! {
     if call.arity < 0 {
         return
     }
@@ -5981,7 +5981,7 @@ sema_effect_stack_run_taken: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, 
     sema_effect_stack_reach(seal, target)
 }
 
-sema_effect_stack_run_lambda: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, call: SemaStackDynamicCall, lambda: SemaStackLambda) Never! {
+sema_effect_stack_run_lambda: fn(seal: ^SemaStackSeal, frames: ^SemaStackFrames, call: SemaStackDynamicCall, lambda: SemaStackLambda) Never! {
     if lambda.arity != call.arity {
         return
     }
@@ -6010,7 +6010,7 @@ sema_effect_stack_named_lambda: fn(node: Int) -> Int Never! { 2 * node + 1 }
 // a binary search finds the slot. An id is an integer, so a pair of a call
 // and a value spells no name and compares no text; only the distinct ids
 // are spelled, once (sema_effect_stack_names_text).
-sema_effect_stack_name_add: fn(ids: &[Int], id: Int) Never! {
+sema_effect_stack_name_add: fn(ids: ^[Int], id: Int) Never! {
     low := 0
     high := ids.len()
     loop low < high {
@@ -6045,7 +6045,7 @@ sema_effect_stack_names_text: fn(nodes: [SemaEffectNode], ids: [Int]) -> String 
     distinct.join(", ")
 }
 
-sema_effect_stack_add_edge: fn(edges: &[Int], target: Int) Never! {
+sema_effect_stack_add_edge: fn(edges: ^[Int], target: Int) Never! {
     loop edge in edges {
         if edge == target {
             return
@@ -6056,7 +6056,7 @@ sema_effect_stack_add_edge: fn(edges: &[Int], target: Int) Never! {
 
 // One function's frame bytes, or why one of its values has no known size,
 // as the next row of `bodies`.
-sema_effect_stack_own: fn(interner: Interner, types: JetFrameTypes, function: FnBody, bodies: &SemaStackBodies) {
+sema_effect_stack_own: fn(interner: Interner, types: JetFrameTypes, function: FnBody, bodies: ^SemaStackBodies) {
     total := JET_FRAME_ALLOWANCE
     loop parameter in function.params {
         bytes: jet_frame_value_bytes(types, parameter.ty) ?? {
@@ -6143,7 +6143,7 @@ sema_effect_stack_walk: fn(nodes: [SemaEffectNode]) -> SemaStackWalk Never! {
 }
 
 // Mark every node `root` reaches, itself included, as guarded.
-sema_effect_stack_guard: fn(walk: &SemaStackWalk, frames: SemaStackFrames, root: Int) Never! {
+sema_effect_stack_guard: fn(walk: ^SemaStackWalk, frames: SemaStackFrames, root: Int) Never! {
     if walk.guarded[root] {
         return
     }
@@ -6200,7 +6200,7 @@ sema_effect_stack_frame: fn(frames: SemaStackFrames, index: Int) -> Int Never! {
     sema_effect_stack_saturate(frames.own[index] + frames.carried[index])
 }
 
-sema_effect_stack_visit: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], index: Int) Never! {
+sema_effect_stack_visit: fn(walk: ^SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], index: Int) Never! {
     walk.order[index] = walk.visited
     walk.low[index] = walk.visited
     walk.visited += 1
@@ -6222,7 +6222,7 @@ sema_effect_stack_visit: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes
 
 // Settle the part `root` was visited first in: every node visited after it
 // that is still pending.
-sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], root: Int) Never! {
+sema_effect_stack_settle: fn(walk: ^SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], root: Int) Never! {
     members := [Int]{}
     loop {
         member := walk.pending.pop() ?? {
@@ -6312,7 +6312,7 @@ sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
 // of unmarked functions closes, or -1. The path's next step replaces the
 // node's deepest outside callee in walk.next, and a call into a marked
 // function of the part stands in when the node has neither.
-sema_effect_stack_segment: fn(walk: &SemaStackWalk, frames: SemaStackFrames, root: Int, index: Int) -> Int Never! {
+sema_effect_stack_segment: fn(walk: ^SemaStackWalk, frames: SemaStackFrames, root: Int, index: Int) -> Int Never! {
     walk.segment[index] = -3
     deepest := 0
     marked := -1
@@ -6381,7 +6381,7 @@ sema_effect_stack_trail: fn(walk: SemaStackWalk, frames: SemaStackFrames, nodes:
 
 // The stack text of every node nothing calls (FnBody.stack), by node; ""
 // for the others.
-sema_effect_stack_bounds: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], called: [Bool]) -> [String] Never! {
+sema_effect_stack_bounds: fn(walk: ^SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], called: [Bool]) -> [String] Never! {
     texts := [String]{}
     loop index in 0..<nodes.len() {
         if called[index] {
@@ -6398,7 +6398,7 @@ sema_effect_stack_bounds: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
 
 // `!Mem.Stack(above: N)` on `root` (E0921): every call path from it takes at
 // most N bytes of stack by the frame model, so none may be unbounded.
-sema_effect_check_stack: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, provenance: String, diagnostics: &[Diagnostic]) {
+sema_effect_check_stack: fn(walk: ^SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, provenance: String, diagnostics: ^[Diagnostic]) {
     limit: sema_effect_stack_bound(denial.name) ?? return
     sema_effect_stack_guard(walk, frames, root)
     if walk.state[root] == 0 -> sema_effect_stack_visit(walk, frames, nodes, root)
@@ -6437,7 +6437,7 @@ sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: Eff
 // 2 (Rust `check_memory_facts`): a `-[!Mem.Alloc]>`,
 // `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial holds for every
 // function the root can reach (E0921).
-sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, diagnostics: &[Diagnostic]) -> SemaMemoryProjection {
+sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, diagnostics: ^[Diagnostic]) -> SemaMemoryProjection {
     fact: sema_effect_memory_fact(denial.name) ?? panic("invalid checked memory denial")
     limit: sema_effect_memory_bound(denial.name)
     if limit == .Val(bytes_limit) {
@@ -6462,7 +6462,7 @@ sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: Effec
 
 // `stack` and `frames` prove each `!Mem.Stack(above: N)`
 // (sema_effect_check_stack).
-sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], root: Int, stack: &SemaStackWalk, frames: SemaStackFrames, diagnostics: &[Diagnostic], facts: &SemaMemoryProjectionFacts) {
+sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], root: Int, stack: ^SemaStackWalk, frames: SemaStackFrames, diagnostics: ^[Diagnostic], facts: ^SemaMemoryProjectionFacts) {
     rare: nodes[root].rare ?? return
     loop denial in rare.memory_denials {
         if sema_effect_stack_bound(denial.name) != None {
@@ -6477,7 +6477,7 @@ sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], root: Int, stack: 
 
 // A pure body's reached effects go to `pure_reached`; E3401 is reported once
 // the solved rows are stamped, so it can name the call that reaches them.
-sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_steps: [String], unsafe_reach: SemaEffectUnsafeReach?, notes: [SemaEffectInstanceNote], pure_reached: &[String], diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_steps: [String], unsafe_reach: SemaEffectUnsafeReach?, notes: [SemaEffectInstanceNote], pure_reached: ^[String], diagnostics: ^[Diagnostic]) -> Bool {
     valid := true
     library_named: if node.rare == .Val(rare) -> rare.library_rows.len() > 0 else -> false
     // This rule with (Rust `check_inferred_memo`, E0938): a
@@ -6573,12 +6573,12 @@ sema_effect_row_has_no_outcome: fn(node: SemaEffectNode, solved: [String]) -> Bo
 // The callee as written stands in for the call text (the Rust reference's
 // span covers the callee name, so its call text is that name).
 sema_effect_discarded_result_diagnostic: fn(node: SemaEffectNode, span: Span) -> Diagnostic {
-    diagnostic: sema_lint("L0508", span, "the result of `{node.name}` is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `&`), so this line does nothing", "use the result, bind it with `result: {node.name}`, or write `.drop(\"reason\")` if dropping it is intended")
+    diagnostic: sema_lint("L0508", span, "the result of `{node.name}` is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `^`), so this line does nothing", "use the result, bind it with `result: {node.name}`, or write `.drop(\"reason\")` if dropping it is intended")
     diagnostic_with_source_derived_suggestion(diagnostic, Span{start: span.start, end: span.start}, "result: ")
 }
 
 // The part of `expression` inside `region` (a `#FX` block span).
-sema_effect_walk_region_expr: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, region: Span, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller) {
+sema_effect_walk_region_expr: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, region: Span, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) {
     node: body_node(tree, expression)
     next: sema_effect_walk_region_enter(nodes, node_index, tree, expression, node, region, facts, module_facts, diagnostics, caller) ?? return
     sema_effect_walk_expr_children(next, nodes, facts, module_facts, diagnostics, caller, tree, node)
@@ -6587,7 +6587,7 @@ sema_effect_walk_region_expr: fn(nodes: &[SemaEffectNode], node_index: Int, tree
 // sema_effect_walk_region_expr's own work on `node`: the walk its children
 // continue with, the whole walk (Collect) once the region holds the node; None
 // when they aren't walked.
-sema_effect_walk_region_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, region: Span, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> SemaEffectWalk? {
+sema_effect_walk_region_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, region: Span, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) -> SemaEffectWalk? {
     if sema_effect_span_contains(region, node.span) {
         if sema_effect_walk_expr_enter(nodes, node_index, tree, expression, node, facts, module_facts, diagnostics, caller) {
             return Val(SemaEffectWalk.Collect{node_index: node_index})
@@ -6618,7 +6618,7 @@ sema_effect_region_walk: fn(nodes: [SemaEffectNode], owner: Int, function: FnBod
     region_node.memory_events = [SemaMemoryEvent]{}
     region_node.memory_calls = [SemaMemoryCall]{}
     region_node.memory_call_rows = [Int:Bool]{}
-    if &region_node.rare == .Val(rare) {
+    if ^region_node.rare == .Val(rare) {
         rare.scoped_calls = [SemaEffectScopedCall]{}
         rare.bare_scope_callees = [String]{}
     }
@@ -6664,7 +6664,7 @@ sema_effect_region_inferred: fn(nodes: [SemaEffectNode], solved: [[String]], own
 // met the wall at its call, and its body is held to that row. A lambda's body
 // (a `tx.on_commit` hook) and a call through a function value are no call of
 // the block.
-sema_effect_check_transact_calls: fn(nodes: [SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, span: Span, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], module_index: Int, diagnostics: &[Diagnostic]) {
+sema_effect_check_transact_calls: fn(nodes: [SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, span: Span, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], module_index: Int, diagnostics: ^[Diagnostic]) {
     walked: sema_effect_region_walk(nodes, owner, function, span, "Transact", facts, module_facts, module_index)
     loop call in walked.memory_calls {
         target: sema_effect_node_index(facts.node_by_key, call.callee) ?? next
@@ -6696,7 +6696,7 @@ sema_effect_vocabulary_irreversible: fn(effect_name: String) -> Bool Never! {
 // scoped as each of the region's constant-argument calls to that publisher
 // names it, and bare too when the region also calls it with a run-time
 // argument or names no scope for it.
-sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffectScopedCall], bare_scope_callees: [String], callee_key: String, name: String) Never! {
+sema_effect_region_add_scoped: fn(inferred: ^[String], scoped_calls: [SemaEffectScopedCall], bare_scope_callees: [String], callee_key: String, name: String) Never! {
     renamed := false
     loop call in scoped_calls {
         if call.callee != callee_key || call.published != name -> next
@@ -6736,7 +6736,7 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // selected machine when it has no heap ("" when it has one), and `entries`
 // are the keys of the functions the program starts at, from which nothing
 // may allocate (sema_effect_check_heap_free).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, table: ModuleTable, prep_functions: NameTable, threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}, trace_sink: CompilerTraceSink?{None}) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: ^^SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, table: ModuleTable, prep_functions: NameTable, threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}, trace_sink: CompilerTraceSink?{None}) -> SemaEffectGraphResult {
     sema_effect_trace_step(trace_sink, "", "sema.effects.tables")
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
@@ -7181,7 +7181,7 @@ sema_effect_check_nodes_range: fn(nodes: [SemaEffectNode], inputs: [SemaEffectMo
     SemaEffectNodeCheckPart{diagnostics: diagnostics.move(), pure_nodes: pure_nodes.move(), pure_rows: pure_rows.move()}
 }
 
-sema_effect_check_nodes_spawn: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], solved: [[String]], secret_reach: [Bool], library_reach: SemaLibraryEffectReach, dispatch_reach: [Bool], part: Int, workers: Int, diagnostics: &[Diagnostic], pure_nodes: &[Int], pure_rows: &[[String]]) {
+sema_effect_check_nodes_spawn: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], solved: [[String]], secret_reach: [Bool], library_reach: SemaLibraryEffectReach, dispatch_reach: [Bool], part: Int, workers: Int, diagnostics: ^[Diagnostic], pure_nodes: ^[Int], pure_rows: ^[[String]]) {
     from: part * nodes.len() /% workers
     to: (part + 1) * nodes.len() /% workers
     if part + 1 >= workers {
@@ -7232,7 +7232,7 @@ sema_effect_solve_reaches: fn(nodes: [SemaEffectNode], callers: [[Int]], threads
     SemaEffectReaches{secret: secret, library: library, dispatch: dispatch}
 }
 
-sema_effect_check_nodes_parallel: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], solved: [[String]], secret_reach: [Bool], library_reach: SemaLibraryEffectReach, dispatch_reach: [Bool], threads: CompilerThreads, diagnostics: &[Diagnostic], pure_nodes: &[Int], pure_rows: &[[String]]) {
+sema_effect_check_nodes_parallel: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], solved: [[String]], secret_reach: [Bool], library_reach: SemaLibraryEffectReach, dispatch_reach: [Bool], threads: CompilerThreads, diagnostics: ^[Diagnostic], pure_nodes: ^[Int], pure_rows: ^[[String]]) {
     workers: compiler_threads_admit(threads, nodes.len(), nodes.len(), 512, 0, 0)
     if workers <= 1 {
         done := sema_effect_check_nodes_range(nodes, inputs, solved, secret_reach, library_reach, dispatch_reach, 0, nodes.len())
@@ -7257,7 +7257,7 @@ sema_effect_check_trait_bounds_range: fn(modules: [SemaGraphModuleResult], input
     out
 }
 
-sema_effect_check_trait_bounds_spawn: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], part: Int, workers: Int, diagnostics: &[Diagnostic]) {
+sema_effect_check_trait_bounds_spawn: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], part: Int, workers: Int, diagnostics: ^[Diagnostic]) {
     from: part * inputs.len() /% workers
     to: (part + 1) * inputs.len() /% workers
     if part + 1 >= workers {
@@ -7273,7 +7273,7 @@ sema_effect_check_trait_bounds_spawn: fn(modules: [SemaGraphModuleResult], input
     }
 }
 
-sema_effect_check_trait_bounds_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], threads: CompilerThreads, diagnostics: &[Diagnostic]) {
+sema_effect_check_trait_bounds_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], threads: CompilerThreads, diagnostics: ^[Diagnostic]) {
     workers: compiler_threads_admit(threads, inputs.len(), inputs.len(), 32, 0, 0)
     if workers <= 1 {
         diagnostics.extend(sema_effect_check_trait_bounds_range(modules, inputs, source_indices, nodes, calls, solved, 0, inputs.len()))
@@ -7299,7 +7299,7 @@ sema_effect_check_module_passes_range: fn(modules: [SemaGraphModuleResult], inpu
     SemaEffectModulePassPart{region_diags: region_diags.move(), call_diags: call_diags.move()}
 }
 
-sema_effect_check_module_passes_spawn: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], part: Int, workers: Int, region_diags: &[Diagnostic], call_diags: &[Diagnostic]) {
+sema_effect_check_module_passes_spawn: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], part: Int, workers: Int, region_diags: ^[Diagnostic], call_diags: ^[Diagnostic]) {
     from: part * inputs.len() /% workers
     to: (part + 1) * inputs.len() /% workers
     if part + 1 >= workers {
@@ -7321,7 +7321,7 @@ sema_effect_check_module_passes_spawn: fn(modules: [SemaGraphModuleResult], inpu
     }
 }
 
-sema_effect_check_module_passes_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], threads: CompilerThreads, diagnostics: &[Diagnostic]) {
+sema_effect_check_module_passes_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], threads: CompilerThreads, diagnostics: ^[Diagnostic]) {
     workers: compiler_threads_admit(threads, inputs.len(), inputs.len(), 32, 0, 0)
     if workers <= 1 {
         done := sema_effect_check_module_passes_range(modules, inputs, source_indices, solved, calls, nodes, 0, inputs.len())
@@ -7421,7 +7421,7 @@ sema_effect_prepare_modules: fn(modules: [SemaGraphModuleResult], inputs: [SemaE
 }
 
 // Appends the rows of the input module at `input_position`.
-sema_effect_prepare_module: fn(prepared: &SemaEffectPrepared, functions: [FnBody], call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, input_position: Int, decls: DeclTable, symbols: SymbolTable) {
+sema_effect_prepare_module: fn(prepared: ^SemaEffectPrepared, functions: [FnBody], call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, input_position: Int, decls: DeclTable, symbols: SymbolTable) {
     source_index := sema_effect_source_index(module_row.sources)
     sema_effect_add_module_nodes(functions, module_row, input_position, source_index, symbols, prepared.nodes, prepared.node_keys, prepared.diagnostics)
     loop function in functions {
@@ -7435,7 +7435,7 @@ sema_effect_prepare_module: fn(prepared: &SemaEffectPrepared, functions: [FnBody
 // Appends `part`, the rows of the next input modules, built with input
 // positions counted from 0; `inputs_before` is the number of input modules
 // whose rows `prepared` already holds.
-sema_effect_prepared_join: fn(prepared: &SemaEffectPrepared, part: &&SemaEffectPrepared, inputs_before: Int) {
+sema_effect_prepared_join: fn(prepared: ^SemaEffectPrepared, part: ^^SemaEffectPrepared, inputs_before: Int) {
     owned := part.move()
     loop index in 0..<owned.nodes.len() {
         owned.nodes[index].module_index = owned.nodes[index].module_index + inputs_before
@@ -7450,7 +7450,7 @@ sema_effect_prepared_join: fn(prepared: &SemaEffectPrepared, part: &&SemaEffectP
 
 // One graph node per function of the input module `module_index`, in order,
 // and its key in `node_keys` (node order).
-sema_effect_add_module_nodes: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, symbols: SymbolTable, nodes: &[SemaEffectNode], node_keys: &[String], diagnostics: &[Diagnostic]) {
+sema_effect_add_module_nodes: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, symbols: SymbolTable, nodes: ^[SemaEffectNode], node_keys: ^[String], diagnostics: ^[Diagnostic]) {
     loop function in functions {
         function_diagnostics := [Diagnostic]{}
         node_keys.push(function.key)
@@ -7491,7 +7491,7 @@ SemaEffectImplTables: struct {
 }
 
 // `owner` as an implementing type of trait `trait_key`, once.
-sema_effect_add_implementer: fn(tables: &SemaEffectImplTables, trait_key: String, owner: String) {
+sema_effect_add_implementer: fn(tables: ^SemaEffectImplTables, trait_key: String, owner: String) {
     seen_key: "{trait_key}.{owner}"
     if name_find(tables.implementer_seen, seen_key) != None {
         return
@@ -7511,7 +7511,7 @@ sema_effect_add_implementer: fn(tables: &SemaEffectImplTables, trait_key: String
 // place in its method's trait-value group. The trait is the one its source
 // resolved where the `impl` block is written, so an `impl Trait` block in a
 // struct or enum body and an impl of another module's trait count too.
-sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, symbols: SymbolTable, tables: &SemaEffectImplTables) {
+sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, symbols: SymbolTable, tables: ^SemaEffectImplTables) {
     loop function in functions {
         if function.kind == .TopLevel -> next
         trait_key := ""
@@ -7552,7 +7552,7 @@ sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModul
 // Collects every function's effect sites of input module `module_index` into
 // its node (`function_nodes`, sema_effect_function_nodes), and checks its
 // unsafe calls.
-sema_effect_collect_module: fn(functions: [FnBody], module_facts: [SemaCallSiteFact], function_nodes: [Int], module_row: SemaEffectModuleInput, module_index: Int, calls: SemaEffectCallIndex, has_unsafe: Bool, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
+sema_effect_collect_module: fn(functions: [FnBody], module_facts: [SemaCallSiteFact], function_nodes: [Int], module_row: SemaEffectModuleInput, module_index: Int, calls: SemaEffectCallIndex, has_unsafe: Bool, nodes: ^[SemaEffectNode], diagnostics: ^[Diagnostic]) {
     loop (function_index, function) in functions {
         node_index: function_nodes[function_index]
         if node_index < 0 -> next
@@ -7564,7 +7564,7 @@ sema_effect_collect_module: fn(functions: [FnBody], module_facts: [SemaCallSiteF
 
 // One function's effect sites into its node `node_index`, and its unsafe
 // calls; `module_index` is the function's input module (its call facts' row).
-sema_effect_collect_one: fn(nodes: &[SemaEffectNode], node_index: Int, function: FnBody, calls: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], module_index: Int, has_unsafe: Bool, diagnostics: &[Diagnostic]) {
+sema_effect_collect_one: fn(nodes: ^[SemaEffectNode], node_index: Int, function: FnBody, calls: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], module_index: Int, has_unsafe: Bool, diagnostics: ^[Diagnostic]) {
     sema_effect_collect_function(nodes, node_index, function, calls, module_facts, module_index, diagnostics)
     // A call needs an audited region only when its callee is an
     // `#Unsafe` function, an inline foreign function or a raw `extern rust`
@@ -7627,7 +7627,7 @@ SEMA_EFFECT_COLLECT_PARTS_PER_THREAD: 8
 // them; the caller then moves each unit's row back into the graph's nodes
 // and publishes every function's reports in module and function order,
 // exactly as one thread collecting the modules in order does.
-sema_effect_collect_threads: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: &[SemaEffectNode], calls: SemaEffectCallIndex, module_has_unsafe: [Bool], diagnostics: &[Diagnostic], threads: CompilerThreads) {
+sema_effect_collect_threads: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: ^[SemaEffectNode], calls: SemaEffectCallIndex, module_has_unsafe: [Bool], diagnostics: ^[Diagnostic], threads: CompilerThreads) {
     // One job per function with a node, in module and function order; a
     // unit's jobs chain through `job_next` from `unit_first`.
     job_input := [Int]{}
@@ -7722,7 +7722,7 @@ SemaEffectCollectedPart: struct {
 
 // Moves each unit's collected node row into the graph's nodes, then
 // publishes every function's reports in job (module and function) order.
-sema_effect_collect_place: fn(nodes: &[SemaEffectNode], jobs: SemaEffectCollectJobs, bounds: [Int], parts: &[[SemaEffectCollected]], inputs: [SemaEffectModuleInput], diagnostics: &[Diagnostic]) {
+sema_effect_collect_place: fn(nodes: ^[SemaEffectNode], jobs: SemaEffectCollectJobs, bounds: [Int], parts: ^[[SemaEffectCollected]], inputs: [SemaEffectModuleInput], diagnostics: ^[Diagnostic]) {
     reports := [SemaEffectCollectReport]{}
     loop part in 0..<bounds.len() - 1 {
         loop unit in bounds[part]..<bounds[part + 1] {
@@ -7742,7 +7742,7 @@ sema_effect_collect_place: fn(nodes: &[SemaEffectNode], jobs: SemaEffectCollectJ
 
 // Runs collecting threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: SemaEffectCollectQueue, from: Int, workers: Int, parts: &[[SemaEffectCollected]]) {
+sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: SemaEffectCollectQueue, from: Int, workers: Int, parts: ^[[SemaEffectCollected]]) {
     if from >= workers {
         return
     }
@@ -7803,7 +7803,7 @@ sema_effect_shared_facts: fn(call_facts: [SemaCallSiteFact]) -> [SemaCallSiteFac
 // Every `#FX(…)` region of the functions of input module `module_index` stays
 // within its caps, and every `#Transact` block's calls within the transaction
 // wall.
-sema_effect_check_module_regions: fn(functions: [FnBody], module_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], diagnostics: &[Diagnostic]) {
+sema_effect_check_module_regions: fn(functions: [FnBody], module_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], diagnostics: ^[Diagnostic]) {
     region_diagnostics := [Diagnostic]{}
     loop function in functions {
         at: sema_effect_source_position(function, source_index) ?? next
@@ -7824,7 +7824,7 @@ sema_effect_check_module_regions: fn(functions: [FnBody], module_facts: [SemaCal
 }
 
 // A discarded call result of a function whose row has no outcome (L0508).
-sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: SemaEffectNodeKeys, symbols: SymbolTable, solved: [[String]], diagnostics: ^[Diagnostic]) {
     discarded := [Diagnostic]{}
     loop fact in call_facts {
         if !fact.discarded -> next
@@ -7846,7 +7846,7 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
 // written call reports once, with the fix its check found
 // (sema_expr_hole_header_fix); a call already refused for a change it makes
 // is not refused again.
-sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]], diagnostics: ^[Diagnostic]) {
     reported := [Diagnostic]{}
     seen := [Span]{}
     loop fact in call_facts {
@@ -7884,18 +7884,18 @@ SemaEffectWalk: enum {
 // A lambda body: its Iterable loops, value reads and stops, none of which
 // its call facts hold, charged to the enclosing node.
 
-sema_effect_walk_visit: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int) {
+sema_effect_walk_visit: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int) {
     sema_effect_walk_visit_in(walk, nodes, facts, module_facts, diagnostics, caller, tree, expression, tree.nodes[body_node_index(tree, expression)])
 }
 
-sema_effect_walk_visit_in: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int, node: BodyNode) {
+sema_effect_walk_visit_in: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int, node: BodyNode) {
     next: sema_effect_walk_enter(walk, nodes, facts, module_facts, diagnostics, caller, tree, expression, node) ?? return
     sema_effect_walk_expr_children(next, nodes, facts, module_facts, diagnostics, caller, tree, node)
 }
 
 // A walker's own work on `node`, the node at `expression`, before its
 // children: the walk they continue with, or None when they aren't walked.
-sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int, node: BodyNode) -> SemaEffectWalk? {
+sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int, node: BodyNode) -> SemaEffectWalk? {
     if walk == {
         .Collect(node_index) -> if sema_effect_walk_expr_enter(nodes, node_index, tree, expression, node, facts, module_facts, diagnostics, caller) -> Val(walk) else -> None
         .Unsafe(audited) -> if sema_effect_check_unsafe_enter(nodes, facts, module_facts, caller, tree, node, audited, diagnostics) -> Val(walk) else -> None
@@ -7950,7 +7950,7 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
 // a slice keeps its runtime bounds or key check, which stops on a miss. A
 // fixed-list index proved by its interval (FixedListProof) can't stop, and a
 // user `Index` impl's own row arrives through its call.
-sema_effect_record_stop: fn(nodes: &[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
+sema_effect_record_stop: fn(nodes: ^[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
     if node.kind == {
         .RequireStop(_, _, _) | .Never(_, _) -> {
             sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
@@ -7975,7 +7975,7 @@ sema_effect_record_stop: fn(nodes: &[SemaEffectNode], node_index: Int, node: Bod
 // own work going down, the innermost left operand, then each level's right
 // operand, innermost first, under the walk its level continues with. That is
 // the order visiting level by level runs them.
-sema_effect_walk_binary: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, lhs: Int, rhs: Int) {
+sema_effect_walk_binary: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, lhs: Int, rhs: Int) {
     lhs_idx: body_node_index(tree, lhs)
     if !(tree.nodes[lhs_idx].kind == .Binary(_, _, _, _, _)) {
         sema_effect_walk_visit_in(walk, nodes, facts, module_facts, diagnostics, caller, tree, lhs, tree.nodes[lhs_idx])
@@ -8017,7 +8017,7 @@ sema_effect_walk_binary: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], fact
 // it here in the order Body.jet's child visitors give it. A lambda body is
 // walked under its own call-fact key (sema_effect_walk_lambda_children),
 // which the generic visitors cannot do.
-sema_effect_walk_expr_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, node: BodyNode) {
+sema_effect_walk_expr_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, node: BodyNode) {
     if node.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) -> {}
         .StrLit(parts) -> {
@@ -8335,7 +8335,7 @@ sema_effect_walk_expr_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode
 }
 
 // body_each_stmt_child's children (see sema_effect_walk_expr_children).
-sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, statement: StmtKind) {
+sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, statement: StmtKind) {
     if statement == {
         .Contract(contract) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, contract.condition)
@@ -8522,13 +8522,13 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode
     }
 }
 
-sema_effect_walk_stmt_list_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, statements: [Int]) {
+sema_effect_walk_stmt_list_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, statements: [Int]) {
     loop statement in statements {
         sema_effect_walk_stmt_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, tree.stmts[statement])
     }
 }
 
-sema_effect_walk_if_cond_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, condition: BodyIfCond) {
+sema_effect_walk_if_cond_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, condition: BodyIfCond) {
     if condition == {
         .Plain(value) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, value)
@@ -8546,7 +8546,7 @@ sema_effect_walk_if_cond_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectN
 
 // Visit the canonical body_each_pattern_child nodes, including nested
 // payloads and map keys, without materializing child lists.
-sema_effect_walk_pattern_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, shape: BodyPatternShape) {
+sema_effect_walk_pattern_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, shape: BodyPatternShape) {
     if shape == {
         .Or(alternatives, _) -> {
             loop alternative in alternatives {
@@ -8602,7 +8602,7 @@ sema_effect_walk_pattern_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectN
     }
 }
 
-sema_effect_walk_match_arm_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, arms: [BodyMatchArm]) {
+sema_effect_walk_match_arm_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, arms: [BodyMatchArm]) {
     loop arm in arms {
         sema_effect_walk_pattern_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, arm.pattern.shape)
         sema_effect_walk_stmt_list_children(walk, nodes, facts, module_facts, diagnostics, caller, tree, arm.body)
@@ -8617,7 +8617,7 @@ sema_effect_walk_match_arm_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffec
 // unknown callee (the maximal row). Rust records these bodies' effects on the
 // enclosing function as it checks them. A compiler-private loop carrier keeps
 // the enclosing key, so the lambda key applies only when it owns facts.
-sema_effect_walk_lambda_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda) {
+sema_effect_walk_lambda_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda) {
     // A structure-only walk (FailureLaw) builds its index with no modules; its
     // lambda bodies keep the enclosing caller, as for a lambda that owns no facts.
     lambda_caller: sema_effect_caller_slot(facts, caller.module_index, "lambda@{lambda.source_span.start}")
@@ -8632,7 +8632,7 @@ sema_effect_walk_lambda_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNo
     }
 }
 
-sema_effect_walk_place_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, place: BodyPlace) {
+sema_effect_walk_place_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, place: BodyPlace) {
     if place == {
         .Expr(value) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, value)
@@ -8641,7 +8641,7 @@ sema_effect_walk_place_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNod
     }
 }
 
-sema_effect_walk_require_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, requirement: BodyRequireKind) {
+sema_effect_walk_require_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, requirement: BodyRequireKind) {
     if requirement == {
         .Require(condition, message) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, condition)
@@ -8659,7 +8659,7 @@ sema_effect_walk_require_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectN
     }
 }
 
-sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, call: BodyHostCall) {
+sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, call: BodyHostCall) {
     if call == {
         .Method(receiver, _, args) -> {
             sema_effect_walk_visit(walk, nodes, facts, module_facts, diagnostics, caller, tree, receiver)
@@ -8692,7 +8692,7 @@ sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffec
     }
 }
 
-sema_effect_walk_core_closure_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, kind: BodyCoreClosureKind) {
+sema_effect_walk_core_closure_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, kind: BodyCoreClosureKind) {
     if kind == {
         .Spawn(group, _, _, executable) -> {
             if group == .Val(group_value) {

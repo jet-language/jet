@@ -151,7 +151,7 @@ uchar_in_range_if: fn(low: U8, high: U8, c: #Secret U8, t: #Secret U8) -> U8 Nev
 }
 
 /// Zero buf[off..<off+len] when c is true; leave it when false.
-zeroize_if: fn(c: CtCond, buf: &[#Secret U8], off: Int, len: Int) Never! {
+zeroize_if: fn(c: CtCond, buf: ^[#Secret U8], off: Int, len: Int) Never! {
     keep: low_byte(~c.mask)
     loop i in off..<(off + len) -> buf[i] = buf[i] & keep
 }
@@ -160,7 +160,7 @@ zeroize_if: fn(c: CtCond, buf: &[#Secret U8], off: Int, len: Int) Never! {
 /// and zero the vacated tail, touching every byte the same way whatever the
 /// offset: total passes, each a whole-window one-byte shift that the first
 /// total - offset passes discard.
-#Overflow(.Wrapping) memmove_left: fn(buf: &[#Secret U8], start: Int, total: Int, offset: #Secret U64) Never! {
+#Overflow(.Wrapping) memmove_left: fn(buf: ^[#Secret U8], start: Int, total: Int, offset: #Secret U64) Never! {
     if total == 0 {
         return
     }
@@ -179,7 +179,7 @@ zeroize_if: fn(c: CtCond, buf: &[#Secret U8], off: Int, len: Int) Never! {
 
 /// dest[doff..<doff+len] = src[soff..<soff+len] when c is true; unchanged
 /// otherwise (mbedtls_ct_memcpy_if with a NULL src2).
-memcpy_if: fn(c: CtCond, dest: &[#Secret U8], doff: Int, src: [#Secret U8], soff: Int, len: Int) Never! {
+memcpy_if: fn(c: CtCond, dest: ^[#Secret U8], doff: Int, src: [#Secret U8], soff: Int, len: Int) Never! {
     m: low_byte(c.mask)
     nm: ~m
     loop i in 0..<len -> dest[doff + i] = src[soff + i] & m | dest[doff + i] & nm
@@ -187,7 +187,7 @@ memcpy_if: fn(c: CtCond, dest: &[#Secret U8], doff: Int, src: [#Secret U8], soff
 
 /// dest[doff..<doff+len] = c ? src1[off1..] : src2[off2..], len bytes
 /// (mbedtls_ct_memcpy_if with both sources).
-memcpy_if_else: fn(c: CtCond, dest: &[#Secret U8], doff: Int, src1: [#Secret U8], off1: Int, src2: [#Secret U8], off2: Int, len: Int) Never! {
+memcpy_if_else: fn(c: CtCond, dest: ^[#Secret U8], doff: Int, src1: [#Secret U8], off1: Int, src2: [#Secret U8], off2: Int, len: Int) Never! {
     m: low_byte(c.mask)
     nm: ~m
     loop i in 0..<len -> dest[doff + i] = src1[off1 + i] & m | src2[off2 + i] & nm
@@ -196,7 +196,7 @@ memcpy_if_else: fn(c: CtCond, dest: &[#Secret U8], doff: Int, src1: [#Secret U8]
 /// dest[doff..<doff+len] = src[soff+offset..], for a secret offset (a word,
 /// compared under masks only) in offset_min..offset_max: every candidate
 /// offset is read (mbedtls_ct_memcpy_offset).
-memcpy_offset: fn(dest: &[#Secret U8], doff: Int, src: [#Secret U8], soff: Int, offset: #Secret U64, offset_min: Int, offset_max: Int, len: Int) Never! {
+memcpy_offset: fn(dest: ^[#Secret U8], doff: Int, src: [#Secret U8], soff: Int, offset: #Secret U64, offset_min: Int, offset_max: Int, len: Int) Never! {
     loop v in offset_min..offset_max {
         memcpy_if(uint_eq(U64{v}, offset), dest, doff, src, soff + v, len)
     }

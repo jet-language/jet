@@ -131,7 +131,7 @@ ir_licm_base_size: fn(m: IRModule, f: IRFunction, write_at: [Int], slot: Int) ->
 
 // Hoists loop-invariant Loads and pure ops out of loops in `f`, innermost first.
 // Returns the number of instructions hoisted.
-ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
+ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: ^IRFunction) -> Int Never! {
     count: f.op.len()
     if count < 4 -> return 0
     has_loop := false
@@ -147,7 +147,7 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
     ir_opt_licm_with(m, stop_keys, safe_routes, char_len_route, f)
 }
 
-ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_len_route: Int, f: &IRFunction) -> Int Never! {
+ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_len_route: Int, f: ^IRFunction) -> Int Never! {
     count: f.op.len()
     if count < 4 -> return 0
     has_loop := false

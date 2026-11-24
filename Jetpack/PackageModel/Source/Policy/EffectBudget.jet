@@ -266,7 +266,7 @@ pkg_effect_key_is_reachable: fn(key: String, reachable: [String:Bool]) -> Bool N
     reachable.has_key(parts[parts.len() - 1])
 }
 
-pkg_collect_effects_for_key: fn(key: String, reachable: [String:Bool], solved: [String:[String]], summaries: [String:PackageEffectSummary], owners: [String:String], aggregate: &PackageEffects) {
+pkg_collect_effects_for_key: fn(key: String, reachable: [String:Bool], solved: [String:[String]], summaries: [String:PackageEffectSummary], owners: [String:String], aggregate: ^PackageEffects) {
     if !pkg_effect_key_is_reachable(key, reachable) {
         return
     }
@@ -288,7 +288,7 @@ pkg_collect_effects_for_key: fn(key: String, reachable: [String:Bool], solved: [
 // Append to `chain` the static path from `key` down to the deepest function
 // of `key`'s package that directly performs (or maximally may perform)
 // `effect`.
-pkg_effect_chain: fn(key: String, effect_name: String, solved: [String:[String]], summaries: [String:PackageEffectSummary], owners: [String:String], seen: &[String:Bool], chain: &[String]) {
+pkg_effect_chain: fn(key: String, effect_name: String, solved: [String:[String]], summaries: [String:PackageEffectSummary], owners: [String:String], seen: ^[String:Bool], chain: ^[String]) {
     if seen.has_key(key) {
         return
     }
@@ -324,7 +324,7 @@ pkg_effect_any_covers: fn(candidates: [String], effect_name: String) -> Bool Nev
 
 // The first function on a static path from `key` where a deniable Panic stop
 // enters the graph.
-pkg_panic_site: fn(key: String, summaries: [String:PackageEffectSummary], seen: &[String:Bool]) -> String? Never! {
+pkg_panic_site: fn(key: String, summaries: [String:PackageEffectSummary], seen: ^[String:Bool]) -> String? Never! {
     if seen.has_key(key) -> return None
     seen[key] = true
     summary: summaries.get(key) ?? return None

@@ -34,7 +34,7 @@ query_ownership_request: fn() -> JetDriverCompileRequest Never! {
     }
 }
 
-query_ownership_case: fn(label: String, source: String, disk: Bool, parse_error: Bool, queries: &JetDriverCompilerQueries, failures: &[String]) {
+query_ownership_case: fn(label: String, source: String, disk: Bool, parse_error: Bool, queries: ^JetDriverCompilerQueries, failures: ^[String]) {
     parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source.copy())) ?? {
         failures.push("{label}: genuine parser did not return facts")
         return

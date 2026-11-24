@@ -124,7 +124,7 @@ Fake: struct {
     closing: Bool,
 }
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -164,13 +164,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -181,7 +181,7 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     f.out.clear()
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
 }
 
@@ -213,7 +213,7 @@ fake_format: fn(format: Int) -> String {
 
 // A configure of 400 x 300 in `states` (xdg_toplevel's: 1 maximized,
 // 2 fullscreen, 4 activated).
-fake_configure: fn(f: &Fake, states: [Int]) {
+fake_configure: fn(f: ^Fake, states: [Int]) {
     f.serial += 1
     serial: f.serial
     f.configures.push(serial)
@@ -240,7 +240,7 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
 }
 
 // The four bytes of pixel (x, y) of `buffer` as stored.
-fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
+fake_pixel: fn(f: ^Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
     if buffer.pool >= f.fds.len() || x < 0 || y < 0 || x >= buffer.width || y >= buffer.height {
         fake_fail(f, "pixel {x},{y} is outside buffer {buffer.id}")
         return [U8]{}
@@ -257,7 +257,7 @@ fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
 
 // The content's commit: an ack, the content's buffer, and the chrome its
 // own commit cached.
-fake_commit: fn(f: &Fake) {
+fake_commit: fn(f: ^Fake) {
     f.commits += 1
     acked: f.acked
     f.acked = -1
@@ -299,7 +299,7 @@ fake_commit: fn(f: &Fake) {
 }
 
 // What the window shows now.
-fake_report: fn(f: &Fake) {
+fake_report: fn(f: ^Fake) {
     buffer: fake_buffer(f, f.current) ?? {
         fake_fail(f, "no content buffer")
         return
@@ -334,14 +334,14 @@ fake_report: fn(f: &Fake) {
     }
 }
 
-fake_close: fn(f: &Fake) {
+fake_close: fn(f: ^Fake) {
     toplevel: f.toplevel
     fake_event(f, toplevel, 1, [U8]{})
 }
 
 // The pointer enters the chrome at window (x, y) logical units, title bar
 // included, with serial `serial`.
-fake_enter: fn(f: &Fake, serial: Int, x: Int, y: Int) {
+fake_enter: fn(f: ^Fake, serial: Int, x: Int, y: Int) {
     f.enter_serial = serial
     m: 0 - f.shown_x
     pointer: f.pointer
@@ -349,21 +349,21 @@ fake_enter: fn(f: &Fake, serial: Int, x: Int, y: Int) {
     fake_event(f, pointer, 0, fake_words([Int]{serial, chrome, (x + m) * 256, (y + m) * 256}))
 }
 
-fake_motion: fn(f: &Fake, time: Int, x: Int, y: Int) {
+fake_motion: fn(f: ^Fake, time: Int, x: Int, y: Int) {
     m: 0 - f.shown_x
     pointer: f.pointer
     fake_event(f, pointer, 2, fake_words([Int]{time, (x + m) * 256, (y + m) * 256}))
 }
 
 // A press and release of `button` (272 primary, 273 secondary).
-fake_click: fn(f: &Fake, serial: Int, time: Int, button: Int) {
+fake_click: fn(f: ^Fake, serial: Int, time: Int, button: Int) {
     pointer: f.pointer
     fake_event(f, pointer, 3, fake_words([Int]{serial, time, button, 1}))
     fake_event(f, pointer, 3, fake_words([Int]{serial + 1, time + 50, button, 0}))
 }
 
 // Each settled state: report it, then the next stimulus.
-fake_phase: fn(f: &Fake) {
+fake_phase: fn(f: ^Fake) {
     fake_report(f)
     phase: f.phase
     f.phase += 1
@@ -406,7 +406,7 @@ fake_phase: fn(f: &Fake) {
     fake_close(f)
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -606,7 +606,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
 }
 
 // Handles every complete request in the inbox.
-fake_dispatch: fn(f: &Fake) -[Env]> {
+fake_dispatch: fn(f: ^Fake) -[Env]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
@@ -722,7 +722,7 @@ fake_serve: fn(listener: net.UnixListener, mode: FakeMode) -[Env, Net, Time, IO]
 }
 
 // The window disconnected: after the close button only in the framed mode.
-fake_hung_up: fn(f: &Fake) {
+fake_hung_up: fn(f: ^Fake) {
     if f.closing -> f.report.push("the window closed by its close button")
 }
 

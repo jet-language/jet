@@ -268,7 +268,7 @@ jet_cli_test_profile_known: fn(profile: String, root: String) -> [String:String]
 // (`filter`, `cases`, `opt_in`, `shard`), the golden tiers (`optimize`), the
 // per-case time limit, the pool (`jobs`, `memory`), `list`, and
 // `diagnostic_coverage` (the ui suite's coverage entry instead of its rows).
-jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSetting], update: Bool, results: &[KitCaseResult]) -> JetDriverVerbOutput {
+jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSetting], update: Bool, results: ^[KitCaseResult]) -> JetDriverVerbOutput {
     done: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     site: "jet test: profile `{profile}`"
     manifest: jet_cli_rooted_join(root, JET_CLI_PACKAGE_FILE)
@@ -381,7 +381,7 @@ jet_cli_test_common_dir: fn(a: String, b: String) -> String Never! {
 // filtered run holds part of the rows, so it never records a baseline and
 // compares only the rows it holds. The summary goes to stderr after every
 // run's own output.
-jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, known: [String:String], results: &[KitCaseResult]) -> JetDriverVerbOutput {
+jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, known: [String:String], results: ^[KitCaseResult]) -> JetDriverVerbOutput {
     scratch: cli_files.temp_dir("jet-test-profile") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: profile `{profile}`: couldn't create a scratch directory: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     executable: test_settings_get(settings, "compiler") ?? cli_sys.executable()
     inherited: test_settings_lines(jet_cli_test_child_settings(settings))

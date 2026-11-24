@@ -96,7 +96,7 @@ arrow_surface_at_sign: fn(bytes: [U8], token: Token) -> Bool {
     token.span.start < bytes.len() && Int{bytes[token.span.start]} == 64
 }
 
-arrow_surface_scan: fn(bytes: [U8], tables: TokenTables, raw: [Token], hits: &[ArrowSurfaceHit]) {
+arrow_surface_scan: fn(bytes: [U8], tables: TokenTables, raw: [Token], hits: ^[ArrowSurfaceHit]) {
     tokens: lexer_without_comments(raw)
     fences := 0
     loop (index, token) in tokens {
@@ -254,7 +254,7 @@ arrow_surface_inline_hits: fn(line: String) -> [String] {
     found
 }
 
-arrow_surface_fence_lines: fn(fenced: [String], start_line: Int, out: &[ArrowSurfaceLine]) {
+arrow_surface_fence_lines: fn(fenced: [String], start_line: Int, out: ^[ArrowSurfaceLine]) {
     loop found in arrow_surface_source_lines("{fenced.join("\n")}\n") {
         out.push(ArrowSurfaceLine{line: start_line + found.line - 1, text: found.text, spelling: found.spelling})
     }
@@ -341,7 +341,7 @@ arrow_surface_markdown_path: fn(path: String) -> Bool {
     false
 }
 
-arrow_surface_paths: fn(root: String, out: &[String]) {
+arrow_surface_paths: fn(root: String, out: ^[String]) {
     entries: arrow_surface_files.list_dir(root) ?? return
     loop entry in entries {
         kind: arrow_surface_files.stat(entry.path) ?? next

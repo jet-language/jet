@@ -23,7 +23,7 @@ QueryEngine: struct<T> {
 
     new: fn() -> QueryEngine<T> { QueryEngine<T>{memos: [Key:Memo<T>]{}, revision: 0} }
 
-    put: fn(&self, key: Key, value: T, deps: [Key]) {
+    put: fn(^self, key: Key, value: T, deps: [Key]) {
         self.memos[key] = Memo<T>{_value: value, deps: deps, rev: self.revision}
     }
 
@@ -53,7 +53,7 @@ GCState: struct<O> {
 
     new: fn() -> GCState<O> { GCState<O>{entries: [U64:GCEntry<O>]{}} }
 
-    insert: fn(&self, id: U64, object: O) {
+    insert: fn(^self, id: U64, object: O) {
         self.entries[id] = GCEntry<O>{_object: object, _marked: false}
     }
 

@@ -224,11 +224,11 @@ jet_target_machine_bare_metal: fn(name: String, triple: String, package_version:
     )
 }
 
-jet_target_append_u64: fn(bytes: &[U8], value: Int) Never! {
+jet_target_append_u64: fn(bytes: ^[U8], value: Int) Never! {
     loop index in 0..<8 -> bytes.push(U8{((value >> (8 * index))) & 255})
 }
 
-jet_target_append_frame: fn(bytes: &[U8], label: String, value: String) Never! {
+jet_target_append_frame: fn(bytes: ^[U8], label: String, value: String) Never! {
     jet_target_append_u64(bytes, label.bytes().len())
     loop byte in label.bytes() -> bytes.push(byte)
     jet_target_append_u64(bytes, value.bytes().len())
@@ -799,7 +799,7 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
             if helper == "Atomic" || helper == "atomic" -> result.push(.Atomic64)
         }
         "core.term" -> {
-            reads: [String]{"", "__input_lines", "__input_edit", "readline", "read_until", "read_all_input", "take", "buffered", "stdin", "binread", "read_key", "confirm", "choose", "select"}
+            reads: [String]{"", "__input_lines", "__input_edit", "readline", "read_until", "read_all_input", "take", "take_within", "buffered", "stdin", "binread", "read_key", "confirm", "choose", "select"}
             writes: [String]{"", "__input_edit", "print", "eprint", "progress", "binwrite", "stdout", "stderr", "style", "style_force"}
             if reads.contains(helper) -> result.push(.IORead)
             if writes.contains(helper) -> result.push(.IOWrite)
@@ -980,17 +980,17 @@ jet_target_machine_provides_capability: fn(machine: TargetMachine, capability: T
 }
 
 // Rust push_unique / validate_provider_contract / validate_simple_capability.
-jet_target_push_unique: fn(errors: &[TargetMachineError], error: TargetMachineError) Never! {
+jet_target_push_unique: fn(errors: ^[TargetMachineError], error: TargetMachineError) Never! {
     if !errors.contains(error) -> errors.push(error.copy())
 }
 
-jet_target_validate_provider_contract: fn(capability: TargetCapability, provider: ProviderContract, errors: &[TargetMachineError]) Never! {
+jet_target_validate_provider_contract: fn(capability: TargetCapability, provider: ProviderContract, errors: ^[TargetMachineError]) Never! {
     if !jet_target_provider_valid(provider) {
         jet_target_push_unique(errors, .InvalidProviderContract{capability: jet_target_capability_name(capability), provider: provider.provider, sha256: provider.sha256})
     }
 }
 
-jet_target_validate_simple_capability: fn(machine: TargetMachine, capability: TargetCapability, declared: Bool, hosted_default: Bool, provider: ProviderContract?, errors: &[TargetMachineError]) Never! {
+jet_target_validate_simple_capability: fn(machine: TargetMachine, capability: TargetCapability, declared: Bool, hosted_default: Bool, provider: ProviderContract?, errors: ^[TargetMachineError]) Never! {
     if machine.no_os {
         if {
             hosted_default -> {
@@ -1008,7 +1008,7 @@ jet_target_validate_simple_capability: fn(machine: TargetMachine, capability: Ta
 }
 
 // Rust validate_memory_regions; sort indices, not copied region payloads.
-jet_target_validate_memory_regions: fn(regions: [MemoryRegion], errors: &[TargetMachineError]) Never! {
+jet_target_validate_memory_regions: fn(regions: [MemoryRegion], errors: ^[TargetMachineError]) Never! {
     names := [String:Bool]{}
     indices := [Int]{}
     loop index in 0..<regions.len() {
@@ -1035,7 +1035,7 @@ jet_target_validate_memory_regions: fn(regions: [MemoryRegion], errors: &[Target
 }
 
 // Rust validate_linker.
-jet_target_validate_linker: fn(linker: LinkerInput, no_os: Bool, errors: &[TargetMachineError]) Never! {
+jet_target_validate_linker: fn(linker: LinkerInput, no_os: Bool, errors: ^[TargetMachineError]) Never! {
     if linker == {
         .Unspecified -> {
             if no_os -> errors.push(.MissingLinkerInput)
@@ -1051,7 +1051,7 @@ jet_target_validate_linker: fn(linker: LinkerInput, no_os: Bool, errors: &[Targe
 }
 
 // Rust validate_allocator.
-jet_target_validate_allocator: fn(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
+jet_target_validate_allocator: fn(machine: TargetMachine, errors: ^[TargetMachineError]) Never! {
     if machine.allocator == {
         .Unspecified -> {
             if machine.no_os -> errors.push(.MissingAllocatorPolicy)
@@ -1081,7 +1081,7 @@ jet_target_validate_allocator: fn(machine: TargetMachine, errors: &[TargetMachin
 }
 
 // Rust validate_panic.
-jet_target_validate_panic: fn(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
+jet_target_validate_panic: fn(machine: TargetMachine, errors: ^[TargetMachineError]) Never! {
     if machine.no_os && (machine.panic == .Unspecified || machine.panic == .HostedDefault) {
         errors.push(.MissingPanicPolicy)
     }
@@ -1091,7 +1091,7 @@ jet_target_validate_panic: fn(machine: TargetMachine, errors: &[TargetMachineErr
 }
 
 // Rust validate_ram_budget.
-jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
+jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineUse, errors: ^[TargetMachineError]) Never! {
     if !machine.no_os {
         return
     }
@@ -1120,7 +1120,7 @@ jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineU
 }
 
 // Rust validate_core_usage.
-jet_target_validate_core_usage: fn(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
+jet_target_validate_core_usage: fn(machine: TargetMachine, usage: TargetMachineUse, errors: ^[TargetMachineError]) Never! {
     if usage.heap_required && !jet_target_machine_provides_capability(machine, .Allocator) {
         errors.push(.HeapRequiresAllocator)
     }
@@ -1133,7 +1133,7 @@ jet_target_validate_core_usage: fn(machine: TargetMachine, usage: TargetMachineU
 }
 
 // Rust validate_target_capabilities.
-jet_target_validate_target_capabilities: fn(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
+jet_target_validate_target_capabilities: fn(machine: TargetMachine, usage: TargetMachineUse, errors: ^[TargetMachineError]) Never! {
     mmio_provider: if machine.mmio == {
         .Provider(provider) -> Val(provider)
         .HostedDefault | .Unspecified | .NoMMIO -> None
@@ -1197,7 +1197,7 @@ jet_target_validate_target_capabilities: fn(machine: TargetMachine, usage: Targe
 }
 
 // Rust validate_startup_facts.
-jet_target_validate_startup_facts: fn(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
+jet_target_validate_startup_facts: fn(machine: TargetMachine, errors: ^[TargetMachineError]) Never! {
     if !machine.no_os {
         return
     }
@@ -1215,7 +1215,7 @@ jet_target_validate_startup_facts: fn(machine: TargetMachine, errors: &[TargetMa
 }
 
 // Rust validate_mmio.
-jet_target_validate_mmio: fn(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
+jet_target_validate_mmio: fn(machine: TargetMachine, usage: TargetMachineUse, errors: ^[TargetMachineError]) Never! {
     loop access in usage.mmio {
         inside := false
         loop region in machine.memory {
@@ -1238,7 +1238,7 @@ jet_target_validate_mmio: fn(machine: TargetMachine, usage: TargetMachineUse, er
 }
 
 // Rust TargetHardwareFacts.validate_into.
-jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [MemoryRegion], errors: &[TargetMachineError]) Never! {
+jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [MemoryRegion], errors: ^[TargetMachineError]) Never! {
     if hardware.svd == Val(svd) {
         digest: if svd.sha256.starts_with("sha256:") -> String.from_bytes(svd.sha256.bytes()[7..<svd.sha256.bytes().len()]) ?? "" else -> ""
         if svd.source.trim().is_empty() || digest.trim().is_empty() {

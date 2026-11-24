@@ -396,7 +396,7 @@ hot_text_snake: fn(segment: String) -> String Never! {
 
 // Adds what `text`, the source of a file the build names by `modules`,
 // declares.
-hot_text_declare: fn(declared: &HotTextDeclared, modules: [String], text: String) Never! {
+hot_text_declare: fn(declared: ^HotTextDeclared, modules: [String], text: String) Never! {
     loop prefix in modules -> declared.modules.add(prefix.copy())  // copy: the set owns its names
     loop line in text.lines() {
         if FN_DECL.match(line) == .Val(found) {

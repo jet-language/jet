@@ -33,7 +33,7 @@ SemaCoverageTable: struct {
 // The pattern shape's contribution to the covered set. A variant with a range
 // payload slot matches only part of that variant, so it covers nothing; an
 // S31 nested payload pattern is proved separately by `sema_coverage_keys`.
-sema_coverage_shape_keys: fn(shape: TPatternShape, keys: &[String], ranges: &[SemaIntegerRange]) {
+sema_coverage_shape_keys: fn(shape: TPatternShape, keys: ^[String], ranges: ^[SemaIntegerRange]) {
     if sema_coverage_nested_part(shape) != None {
         return
     }
@@ -97,7 +97,7 @@ sema_coverage_nested_part: fn(shape: TPatternShape) -> {key: String, field: Int,
     None
 }
 
-sema_coverage_collect_nested: fn(shape: TPatternShape, key: String, inner: &[TPatternShape], partial_keys: &[String]) {
+sema_coverage_collect_nested: fn(shape: TPatternShape, key: String, inner: ^[TPatternShape], partial_keys: ^[String]) {
     if shape == .Or(alternatives, _) {
         loop alternative in alternatives {
             sema_coverage_collect_nested(alternative, key, inner, partial_keys)
@@ -153,7 +153,7 @@ sema_coverage_is_closed: fn(ty: Type) -> Bool Never! {
 
 // The S31 nested payload shapes of the arms, grouped by head key and payload
 // field in one pass; `partial_keys` lists the keys in first-seen order.
-sema_coverage_group_nested: fn(shape: TPatternShape, groups: &[String:[{field: Int, inner: TPatternShape}]], partial_keys: &[String]) {
+sema_coverage_group_nested: fn(shape: TPatternShape, groups: ^[String:[{field: Int, inner: TPatternShape}]], partial_keys: ^[String]) {
     if shape == .Or(alternatives, _) {
         loop alternative in alternatives {
             sema_coverage_group_nested(alternative, groups, partial_keys)
@@ -171,7 +171,7 @@ sema_coverage_group_nested: fn(shape: TPatternShape, groups: &[String:[{field: I
 // S31: the covered keys of a set of arm shapes over `subject_ty`. A head key
 // with only nested payload arms is covered when the nested arms on one of
 // its payload fields jointly cover that field's type (to any depth).
-sema_coverage_keys: fn(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, program: SemaProgramTables, ranges: &[SemaIntegerRange]) -> [String] {
+sema_coverage_keys: fn(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, program: SemaProgramTables, ranges: ^[SemaIntegerRange]) -> [String] {
     keys := [String]{}
     partial_keys := [String]{}
     groups := [String:[{field: Int, inner: TPatternShape}]]{}
@@ -457,7 +457,7 @@ sema_coverage_case_has_payload: fn(ty: Type, name: String, environment: SemaScop
 
 // Reports E0307 for an else-less table whose checked pattern conditions leave a
 // case open.
-sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     table: sema_coverage_table(conditions) ?? return
     // (Rust `report_refutable_pattern_without_else`):
     // a text or byte arm can always fail to match, so the table needs `else`.
@@ -624,7 +624,7 @@ sema_coverage_missing_arms_edit: fn(patterns: [String], span: Span, environment:
 // group arm already covers is unreachable — E0365 over an anonymous union
 // subject, L0301 otherwise. The alternatives of one or-pattern arm are not
 // earlier arms: `.Values(n, _) | .Values(_, n)` is one reachable arm.
-sema_coverage_check_unreachable_arms: fn(conditions: [TExpr], multi_head: Bool, diagnostics: &[Diagnostic]) {
+sema_coverage_check_unreachable_arms: fn(conditions: [TExpr], multi_head: Bool, diagnostics: ^[Diagnostic]) {
     table: sema_coverage_table(conditions) ?? return
     union_subject: sema_pattern_unwrap_tags(table.subject.ty) == .Union(_)
     covered := [String]{}
@@ -667,7 +667,7 @@ sema_coverage_check_unreachable_arms: fn(conditions: [TExpr], multi_head: Bool, 
 // Rust `collect_covered_variant_names` / `collect_partial_variant_names`: the
 // heads one arm covers fully, and the heads it only tests with a nested
 // payload pattern (S31). A range payload slot covers no head.
-sema_coverage_arm_heads: fn(shape: TPatternShape, full: &[String], partial: &[String]) {
+sema_coverage_arm_heads: fn(shape: TPatternShape, full: ^[String], partial: ^[String]) {
     if shape == .Or(alternatives, _) {
         loop alternative in alternatives -> sema_coverage_arm_heads(alternative, full, partial)
         return
@@ -693,7 +693,7 @@ sema_coverage_arm_heads: fn(shape: TPatternShape, full: &[String], partial: &[St
     }
 }
 
-sema_coverage_push_head: fn(head: String, full_cover: Bool, full: &[String], partial: &[String]) {
+sema_coverage_push_head: fn(head: String, full_cover: Bool, full: ^[String], partial: ^[String]) {
     if full_cover -> full.push(head.copy()) else -> partial.push(head.copy())
 }
 
@@ -724,7 +724,7 @@ sema_coverage_noelse_chain_conditions: fn(head_condition: TExpr, else_value: TEx
     Val(conditions)
 }
 
-sema_coverage_noelse_chain_collect: fn(current: TExpr, span: Span, context: SemaCheckContext, conditions: &[TExpr]) -> Bool Never! {
+sema_coverage_noelse_chain_collect: fn(current: TExpr, span: Span, context: SemaCheckContext, conditions: ^[TExpr]) -> Bool Never! {
     if current.kind == {
         // The chain's `NoElse` end is a flat `Never` row (sema_node).
         .Flat(index) -> {
@@ -744,7 +744,7 @@ sema_coverage_noelse_chain_collect: fn(current: TExpr, span: Span, context: Sema
 
 // Appends the checked condition of one chain level; false for a form the
 // coverage proof does not read.
-sema_coverage_chain_condition: fn(cond: TIfCond, conditions: &[TExpr]) -> Bool Never! {
+sema_coverage_chain_condition: fn(cond: TIfCond, conditions: ^[TExpr]) -> Bool Never! {
     if cond == {
         // copy: the result owns each collected condition.
         .Plain(value) -> conditions.push(value.copy())
@@ -982,7 +982,7 @@ sema_coverage_else_chain_heads: fn(head_condition: TExpr, else_value: TExpr, spa
     Val(heads)
 }
 
-sema_coverage_else_chain_collect: fn(current: TExpr, span: Span, heads: &[SemaCoverageElseHead]) -> Bool {
+sema_coverage_else_chain_collect: fn(current: TExpr, span: Span, heads: ^[SemaCoverageElseHead]) -> Bool {
     if current.span != span -> return true
     if current.kind == .IfExpr(cond, _, _, _, next_value) {
         heads.push(sema_coverage_else_head_of_cond(cond) ?? return false)
@@ -1116,7 +1116,7 @@ sema_coverage_spelled_missing: fn(subject_ty: Type, missing: [String]) -> Bool N
 // cases it stands for as one or-pattern arm, so a case added later raises
 // E0307 instead of falling into the `else` silently. A table with a
 // non-pattern arm stays open and keeps its `else`.
-sema_coverage_check_closed_else: fn(heads: [SemaCoverageElseHead]?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_coverage_check_closed_else: fn(heads: [SemaCoverageElseHead]?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     arm: sema_coverage_else_arm(environment, program, span) ?? return
     table: heads ?? return
     if table.len() == 0 {
@@ -1194,7 +1194,7 @@ sema_coverage_closed_else_why: fn(shown: String, fixed_cases: Bool) -> String {
 // E0641's report for an `else` over the closed set `shown`, once the arm
 // heads it stands for are known: `patterns` holds one per remaining case, and
 // none means every case is handled and the `else` can never run.
-sema_coverage_report_closed_else: fn(arm: ElseArmSpan, shown: String, fixed_cases: Bool, patterns: [String], diagnostics: &[Diagnostic]) {
+sema_coverage_report_closed_else: fn(arm: ElseArmSpan, shown: String, fixed_cases: Bool, patterns: [String], diagnostics: ^[Diagnostic]) {
     why: sema_coverage_closed_else_why(shown, fixed_cases)
     if patterns.len() == 0 {
         diagnostic: sema_error("E0641", arm.arm, "this `else` can never run; every case of `{shown}` is already handled", why, "delete the `else` arm")
@@ -1513,7 +1513,7 @@ sema_pattern_collection_witness: fn(ty: Type, rows: [SemaPatternCoverageRow], en
 // Names each case `missing` lists by the first payload the matrix `rows`
 // leaves open (`Step(.Right, .Right)`), in place; a unit case, or one whose
 // payload no column names, stays as listed.
-sema_coverage_matrix_witnesses: fn(subject_ty: Type, missing: &[String], rows: [SemaPatternCoverageRow], environment: SemaScopeEnvironment, program: SemaProgramTables) Never! {
+sema_coverage_matrix_witnesses: fn(subject_ty: Type, missing: ^[String], rows: [SemaPatternCoverageRow], environment: SemaScopeEnvironment, program: SemaProgramTables) Never! {
     expanded: sema_pattern_matrix_expand(rows)
     constructors: sema_pattern_matrix_constructors(subject_ty, environment, program)
     loop index in 0..<missing.len() {

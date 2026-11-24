@@ -7,7 +7,7 @@ use jet_foundation.[AccessConvention, Diagnostic, Func, NamedType, OwnedMethod, 
 // `associated` the types the impl
 // binds, `sibling` those the `shares` trait's impl binds, `distinct_base` the
 // base of a `distinct` owner. Answers whether the impl meets the contract.
-sema_owned_check_impl: fn(owned: OwnedTrait, owner_type: Type, rhs: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], distinct_base: Type?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_owned_check_impl: fn(owned: OwnedTrait, owner_type: Type, rhs: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], distinct_base: Type?, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if owned.contract == {
         .Methods(declared, names, _) -> sema_owned_check_methods(owned.name, declared, names, owner_type, methods, associated, sibling, span, diagnostics)
         .Operator(hook, result) -> sema_owned_check_operator(owned.name, hook, result, rhs, methods, span, diagnostics)
@@ -65,7 +65,7 @@ sema_owned_render: fn(method: OwnedMethod, names: [String], types: [Type]) -> St
 
 // Whether the owned trait `trait_name` infers its associated type
 // `associated_name` from the failure of its method `method_name`: `next`
-// for `Iterator.Error`, from `next: fn(&self) -> Item? Error!`. An impl that
+// for `Iterator.Error`, from `next: fn(^self) -> Item? Error!`. An impl that
 // leaves that type unset binds it to the failure its method declares.
 sema_owned_failure_binds: fn(trait_name: String, associated_name: String, method_name: String) -> Bool Never! {
     owned: owned_trait(trait_name) ?? return false
@@ -101,7 +101,7 @@ sema_owned_failure_infers: fn(trait_name: String, associated_name: String) -> Bo
 // leaves unset and the trait infers from `method`'s failure to the failure
 // `method` declares (its written `T E!`, else `Never`), in the parallel
 // substitution lists `names` and `types`.
-sema_owned_bind_failure: fn(trait_name: String, method: Func, names: &[String], types: &[Type]) {
+sema_owned_bind_failure: fn(trait_name: String, method: Func, names: ^[String], types: ^[Type]) {
     owned: owned_trait(trait_name) ?? return
     if owned.contract == .Methods(_, associated_names, _) {
         loop name in associated_names {
@@ -137,7 +137,7 @@ sema_owned_returns_nothing: fn(returned: Type?) -> Bool Never! {
 
 // The receiver, the parameter types and the return type, with `Self` and
 // the associated names resolved on both sides. A parameter the trait takes
-// with Write or Move access (`buffer: &[U8]`) takes the same access in the
+// with Write or Move access (`buffer: ^[U8]`) takes the same access in the
 // impl, since a call through a bound passes it that way; a Read one admits
 // any written access.
 sema_owned_method_matches: fn(wanted: OwnedMethod, actual: Func, names: [String], types: [Type]) -> Bool Never! {
@@ -175,7 +175,7 @@ sema_owned_method_matches: fn(wanted: OwnedMethod, actual: Func, names: [String]
 // Every method appears (E0906) and every associated type is bound (E0913;
 // the signatures can't resolve without it, so nothing more is checked), then
 // each declared method matches (E0907). Other methods are the impl's own.
-sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associated_names: [String], owner_type: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associated_names: [String], owner_type: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     missing := [String]{}
     loop wanted in declared {
         present: loop method in methods {
@@ -255,7 +255,7 @@ sema_owned_operator_valid: fn(hook: String, result: Type?, rhs: Type, methods: [
 
 // E0906 when the hook method is missing (with E0907 at every other method),
 // E0907 at a hook of the wrong shape and at every extra method.
-sema_owned_check_operator: fn(trait_name: String, hook: String, result: Type?, rhs: Type, methods: [Func], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_owned_check_operator: fn(trait_name: String, hook: String, result: Type?, rhs: Type, methods: [Func], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     result_text: if result == .Val(expected) -> type_name(expected) else -> "a declared result type"
     expected: "`{hook}: fn(self, rhs: {type_name(rhs)}) -> {result_text}`"
     hook_index: loop index in 0..<methods.len() {
@@ -292,7 +292,7 @@ sema_owned_codec_data: fn(ty: Type) -> Bool Never! {
 
 // A hand codec is its one method: `encode: fn(self) -> Dyn`, or the static
 // `decode: fn(tree: Dyn) -> T [FieldError]!`.
-sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, methods: [Func], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, methods: [Func], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     owner: sema_owned_owner_name(owner_type)
     encode: verb == "encode"
     expected: if encode -> "`encode: fn(self) -> Dyn`" else -> "`decode: fn(tree: Dyn) -> {owner} [FieldError]!`"
@@ -342,7 +342,7 @@ sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, m
 
 // `#run from_literal: fn(value: Source) -> T`, once: the hook runs while
 // building, on the literal's Int or on a Float's written digits.
-sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type, methods: [Func], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type, methods: [Func], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     constructors: loop index in 0..<methods.len() if methods[index].name == "from_literal" -> index
     if constructors.len() == 0 {
         diagnostics.push(sema_owned_missing(trait_name, [String]{"from_literal"}, span))
@@ -375,7 +375,7 @@ sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type,
 // without a failure (E0906 when it is missing, E0907 at a hook of the wrong
 // shape and at every other method). Types compare by name, since a built-in
 // owner the impl names (`impl Float.From(Celsius)`) is a written name.
-sema_owned_check_conversion: fn(trait_name: String, hook: String, owner_type: Type, source: Type, methods: [Func], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_owned_check_conversion: fn(trait_name: String, hook: String, owner_type: Type, source: Type, methods: [Func], span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     owner: sema_owned_owner_name(owner_type)
     expected: "`{hook}: fn(value: {type_name(source)}) -> {owner}`"
     hooks: loop index in 0..<methods.len() if methods[index].name == hook -> index
@@ -430,7 +430,7 @@ sema_owned_pure: fn(method: Func) -> Bool Never! {
 // `build: fn(parts: [String], holes: [Hole]) -[]> T`; without `build` the owner
 // is a `distinct String`, every hole encodes to String and the literal is the
 // joined text.
-sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], distinct_base: Type?, owner_type: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], distinct_base: Type?, owner_type: Type, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     trait_name: "CheckedText"
     owner_name: sema_owned_owner_name(owner_type)
     errors: loop index in 0..<associated.len() if associated[index].name == "Error" -> index

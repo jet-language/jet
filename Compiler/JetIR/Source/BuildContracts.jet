@@ -19,7 +19,7 @@ IRContractFrame: struct {
 // caret under its span: the callee name of a `#Pre` call site, the clause of
 // a `#Post`. In a test image (IRProgram.contract_records) the clause first
 // reports whether it held, at its declared site.
-ir_contract: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract) Never! {
+ir_contract: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, contract: BodyContract) Never! {
     if contract.disposition != .Check {
         return
     }
@@ -76,7 +76,7 @@ ir_contract: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContrac
     b.line = site
 }
 
-ir_contract_scope: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pre: [BodyContract], body: [Int], post: [BodyContract], result: TContractResult, span: Span) Never! {
+ir_contract_scope: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, pre: [BodyContract], body: [Int], post: [BodyContract], result: TContractResult, span: Span) Never! {
     loop contract in pre {
         if ir_failed(b) {
             return
@@ -93,7 +93,7 @@ ir_contract_scope: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pre: [BodyContr
 // The `post` clauses of the innermost scope at a return of the carrier `slot`
 // (-1: Unit): `result` is the carrier itself, or its Ok/Val payload, and a
 // failed carrier returns unchecked.
-ir_contract_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
+ir_contract_return: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, span: Span) Never! {
     if b.contracts.len() == 0 {
         return
     }
@@ -141,7 +141,7 @@ ir_contract_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, spa
     b.contracts = open
 }
 
-ir_contract_posts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, post: [BodyContract]) Never! {
+ir_contract_posts: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, post: [BodyContract]) Never! {
     loop contract in post {
         if ir_failed(b) {
             return
@@ -152,7 +152,7 @@ ir_contract_posts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, post: [BodyCont
 
 // `result`'s carrier variable names the returned `slot` (not owned: the
 // return hands it on).
-ir_contract_bind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result: TContractResult, slot: Int, span: Span) Never! {
+ir_contract_bind: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result: TContractResult, slot: Int, span: Span) Never! {
     if slot < 0 {
         return
     }
@@ -162,7 +162,7 @@ ir_contract_bind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result: TContrac
     b.bindings.push(IRBinding{name: local.name, slot: slot, owned: false, symbol: symbol})
 }
 
-ir_contract_bind_payload: fn(b: &IRBuilder, result: TContractResult, payload: Int) Never! {
+ir_contract_bind_payload: fn(b: ^IRBuilder, result: TContractResult, payload: Int) Never! {
     if payload < 0 {
         return
     }

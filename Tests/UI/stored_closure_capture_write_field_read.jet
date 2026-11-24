@@ -1,10 +1,10 @@
-// E0204: a stored lambda that changes `tally` through a `&self` method
+// E0204: a stored lambda that changes `tally` through a `^self` method
 // holds its own copy of `tally`, so a later read of a field of `tally`
 // would never see those changes.
 Score: struct {
     count: Int,
 
-    bump: fn(&self) { self.count += 1 }
+    bump: fn(^self) { self.count += 1 }
 }
 
 Stash: struct {

@@ -403,7 +403,7 @@ IR_OWNED_ATTACH_ROUTES: #run { [String]{
 // a rooted main's.
 // `owned_observe` is set when it calls jet_rt_observe_link (an observed
 // build, Build.jet ir_observe_link).
-ir_entry_own: fn(m: &IRModule) -> String Never! {
+ir_entry_own: fn(m: ^IRModule) -> String Never! {
     need: ir_entry_root_need(m)
     if need != "" -> return need
     poll: ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
@@ -461,7 +461,7 @@ IRCleanupRoutes: struct {
 // cleanup scopes (an enter's saved word becomes the 0 it returns with no
 // control), and points each runtime call whose name row `redirect` maps
 // (-1: none) at the owned main's route.
-ir_entry_own_strip: fn(f: &IRFunction, poll: Int, trap: Int, turn: Int, entry_return: Int, redirect: [Int], cleanup: IRCleanupRoutes) Never! {
+ir_entry_own_strip: fn(f: ^IRFunction, poll: Int, trap: Int, turn: Int, entry_return: Int, redirect: [Int], cleanup: IRCleanupRoutes) Never! {
     removed := false
     at := 0
     loop at < f.op.len() {

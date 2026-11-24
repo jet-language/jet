@@ -189,7 +189,7 @@ live_orders: fn(path: String) -> WebQuery? {
     return Val(query.new("orders.list", WebQuerySeed{data: "count={count}", generation: 1, subscribers: 1}))
 }
 
-invalidate_orders: fn(orders: &WebQuery) -> Int { query.mark_stale(orders) }
+invalidate_orders: fn(orders: ^WebQuery) -> Int { query.mark_stale(orders) }
 
 query_report: fn(path: String) -> String {
     orders := live_orders(path) ?? return "orders unavailable"

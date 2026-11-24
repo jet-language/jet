@@ -16,7 +16,7 @@ UUIDError: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String Never! { self.reason }
+        debug: fn(^^self) -> String Never! { self.reason }
     }
 }
 
@@ -30,7 +30,7 @@ v4: fn() -[Rand]> String UUIDError! {
     Ok(value)
 }
 
-v7: fn(clock: &Clock) -[Rand, Time]> String UUIDError! {
+v7: fn(clock: ^Clock) -[Rand, Time]> String UUIDError! {
     timestamp: clock.now()
     if timestamp < 0 || timestamp > 281474976710655 {
         return Err(UUIDError{reason: "UUID v7 timestamp is outside the 48-bit range"})

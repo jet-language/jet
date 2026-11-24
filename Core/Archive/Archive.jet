@@ -356,7 +356,7 @@ tar_names_json: fn(archive: [U8]) -> String ArchiveError! {
 
 // The names JSON grows in one byte buffer: rebuilding a String per name made
 // listing an archive quadratic in the JSON size, minutes near C_MAX_JSON.
-names_json_push: fn(out: &[U8], escaped: String, first: Bool) Never! {
+names_json_push: fn(out: ^[U8], escaped: String, first: Bool) Never! {
     if !first -> out.push(U8{44})
     out.push(U8{34})
     loop b in escaped.bytes() -> out.push(b)
@@ -583,12 +583,12 @@ zip_central_valid: fn(data: [U8], start: Int, files: [ZipFile], offsets: [Int], 
     }
 }
 
-put16: fn(out: &[U8], n: Int) Never! {
+put16: fn(out: ^[U8], n: Int) Never! {
     out.push(wrapping(U8{n}))
     out.push(wrapping(U8{n >> 8}))
 }
 
-put32: fn(out: &[U8], n: Int) Never! {
+put32: fn(out: ^[U8], n: Int) Never! {
     out.push(wrapping(U8{n}))
     out.push(wrapping(U8{n >> 8}))
     out.push(wrapping(U8{n >> 16}))
@@ -641,7 +641,7 @@ tar_header_kind: fn(name: String, size: Int, kind: Int) -> [U8] Never! {
     hdr
 }
 
-append_tar_record: fn(out: &[U8], name: String, data: [U8], kind: Int) Never! {
+append_tar_record: fn(out: ^[U8], name: String, data: [U8], kind: Int) Never! {
     hdr: tar_header_kind(name, data.len(), kind)
     loop b in hdr -> out.push(b)
     loop b in data -> out.push(b)
@@ -650,7 +650,7 @@ append_tar_record: fn(out: &[U8], name: String, data: [U8], kind: Int) Never! {
     }
 }
 
-append_tar_end: fn(out: &[U8]) Never! {
+append_tar_end: fn(out: ^[U8]) Never! {
     loop _ in 0..<1024 -> out.push(U8{0})
 }
 
@@ -660,7 +660,7 @@ tar_record_size: fn(size: Int) -> Int Never! {
     512 + padded
 }
 
-write_octal: fn(hdr: &[U8], off: Int, width: Int, value: Int) Never! {
+write_octal: fn(hdr: ^[U8], off: Int, width: Int, value: Int) Never! {
     n := value
     i := off + width - 2
     hdr[off + width - 1] = (U8{0})

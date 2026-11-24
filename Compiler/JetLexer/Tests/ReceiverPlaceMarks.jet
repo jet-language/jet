@@ -1,8 +1,9 @@
-// Jet-pass port: a line that starts with `&name` or `name.move()` begins a new
-// statement, and a continued bitwise-and or power line keeps a space (or a parenthesis) after
-// its operator. The Rust test lexed each source and asserted whether the token right before
+// Jet-pass port: a line that starts with `^name` or `name.move()` begins a new
+// statement, a continued power line keeps a space (or a parenthesis) after its
+// operator, and a line that starts with `&` or `&&` continues the one above.
+// The Rust test lexed each source and asserted whether the token right before
 // the first mark is the statement terminator.
-use jet_lexer.[TOKEN_AMP, TOKEN_CARET, TOKEN_SEMI, lex]
+use jet_lexer.[TOKEN_AMP, TOKEN_AND_AND, TOKEN_CARET, TOKEN_CARET_CARET, TOKEN_EQ, TOKEN_IDENT, TOKEN_SEMI, lex]
 
 // Whether `lex` put a statement terminator right before the first `mark` token of `source`.
 place_mark_semi_before: fn(source: String, mark: Int) -> Bool Never! {
@@ -17,13 +18,28 @@ place_mark_semi_before: fn(source: String, mark: Int) -> Bool Never! {
 }
 
 #Test("line start place marks begin statements") {
-    assert(place_mark_semi_before("x\n&buf.push(1)\n", TOKEN_AMP))
-    assert(place_mark_semi_before("x\n^buf.seal()\n", TOKEN_CARET))
-    assert(place_mark_semi_before("x\n&self.items.push(1)\n", TOKEN_AMP))
+    assert(place_mark_semi_before("x\n^buf.push(1)\n", TOKEN_CARET))
+    assert(place_mark_semi_before("x\n^self.items.push(1)\n", TOKEN_CARET))
+    assert(place_mark_semi_before("x\n^^buf.seal()\n", TOKEN_CARET_CARET))
+}
+
+#Test("take marks lex as one token") {
+    taken: lex("^^xs".bytes())
+    assert(taken.diagnostics.is_empty())
+    assert(taken.tokens[0].kind == TOKEN_CARET_CARET)
+    assert(taken.tokens[1].kind == TOKEN_IDENT)
+    split: lex("^^=".bytes())
+    assert(split.tokens[0].kind == TOKEN_CARET_CARET)
+    assert(split.tokens[1].kind == TOKEN_EQ)
 }
 
 #Test("spaced operators continue the previous line") {
     assert(!place_mark_semi_before("x\n& mask\n", TOKEN_AMP))
     assert(!place_mark_semi_before("x\n^ 2\n", TOKEN_CARET))
     assert(!place_mark_semi_before("x\n&(mask)\n", TOKEN_AMP))
+}
+
+#Test("bitwise and logical and lines continue the previous line") {
+    assert(!place_mark_semi_before("x\n&mask\n", TOKEN_AMP))
+    assert(!place_mark_semi_before("x\n&&ready\n", TOKEN_AND_AND))
 }

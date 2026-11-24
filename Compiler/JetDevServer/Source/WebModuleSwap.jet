@@ -246,7 +246,7 @@ WebModuleSwapSnapshot: struct {
     }
 
     // Sorts modules by identity and state by (kind, key), then rejects empty or duplicate facts.
-    normalize: fn(&self) WebModuleSwapError! {
+    normalize: fn(^self) WebModuleSwapError! {
         if !self.identity.is_valid() {
             return Err(WebModuleSwapError.InvalidSnapshot{detail: "module and page identity must be non-empty"})
         }
@@ -529,7 +529,7 @@ WebModuleSwapState: struct {
 
     phase: fn(self) -> WebModuleSwapPhase { self.current_phase }
 
-    pause: fn(&self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
+    pause: fn(^self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.current_phase != WebModuleSwapPhase.Committed || self.pending_plan != None {
             return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Pause, phase: self.current_phase})
         }
@@ -545,7 +545,7 @@ WebModuleSwapState: struct {
         self.receipt_for_plan(plan, WebModuleSwapOperation.Pause, WebModuleSwapReceiptStatus.Paused)
     }
 
-    apply: fn(&self) -> WebModuleSwapReceipt WebModuleSwapError! {
+    apply: fn(^self) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.current_phase != WebModuleSwapPhase.Paused {
             return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Apply, phase: self.current_phase})
         }
@@ -559,7 +559,7 @@ WebModuleSwapState: struct {
         self.receipt_for_plan(plan, WebModuleSwapOperation.Apply, WebModuleSwapReceiptStatus.Applied)
     }
 
-    commit: fn(&self) -> WebModuleSwapReceipt WebModuleSwapError! {
+    commit: fn(^self) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.current_phase != WebModuleSwapPhase.Applied {
             return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Commit, phase: self.current_phase})
         }
@@ -575,7 +575,7 @@ WebModuleSwapState: struct {
     }
 
     // Rollback always restores the last committed page; with no pending plan it reports nothing to roll back.
-    rollback: fn(&self) -> WebModuleSwapReceipt {
+    rollback: fn(^self) -> WebModuleSwapReceipt {
         prior: self.pending_plan
         self.pending_plan = None
         self.active_snapshot = self.committed_snapshot
@@ -601,7 +601,7 @@ WebModuleSwapState: struct {
     }
 
     // Compatible plans pause, apply and commit as one transaction; any failure rolls back.
-    apply_decision: fn(&self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
+    apply_decision: fn(^self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if !plan.is_compatible() -> return self.restart(plan)
         self.pause(plan)
         _: self.apply() ?? {
@@ -615,7 +615,7 @@ WebModuleSwapState: struct {
         receipt
     }
 
-    restart: fn(&self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
+    restart: fn(^self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.current_phase != WebModuleSwapPhase.Committed || self.pending_plan != None {
             return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Restart, phase: self.current_phase})
         }
@@ -660,7 +660,7 @@ WebModuleSwapState: struct {
     }
 }
 
-web_swap_sort_state: fn(facts: &[WebModuleSwapStateFact]) {
+web_swap_sort_state: fn(facts: ^[WebModuleSwapStateFact]) {
     facts.sort_by(fn(left, right) { (left.kind().rank() <=> right.kind().rank()).then(left.key() <=> right.key()) })
 }
 

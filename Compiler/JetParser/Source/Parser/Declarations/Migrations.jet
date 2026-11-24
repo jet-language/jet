@@ -17,7 +17,7 @@ use {
     ]
 }
 
-parser_migration_arrow: fn(state: &JetParserState, context: String) {
+parser_migration_arrow: fn(state: ^JetParserState, context: String) {
     kind := parser_current_kind(state)
     if {
         kind == TOKEN_UNIFIED_ARROW -> { parser_bump(state) }
@@ -25,7 +25,7 @@ parser_migration_arrow: fn(state: &JetParserState, context: String) {
     }
 }
 
-parser_migration_recover_operation: fn(state: &JetParserState) Never! {
+parser_migration_recover_operation: fn(state: ^JetParserState) Never! {
     loop {
         kind := parser_current_kind(state)
         if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_EOF -> break
@@ -35,11 +35,11 @@ parser_migration_recover_operation: fn(state: &JetParserState) Never! {
 
 // `migration <TypeName> {` opens a migration block; `migration`
 // stays a contextual name everywhere else.
-parser_migration_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_migration_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "migration" && parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_LBRACE
 }
 
-parser_parse_migration: fn(state: &JetParserState) -> MigrationDecl {
+parser_parse_migration: fn(state: ^JetParserState) -> MigrationDecl {
     start: parser_bump(state)
     type_name: parser_expect_name(state, "as the migrated type name")
     parser_expect(state, TOKEN_LBRACE, "after the migration type name")

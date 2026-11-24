@@ -56,8 +56,12 @@ LSP_TEST_PROVIDERS: [String]{
     "signatureHelpProvider",
     "hoverProvider",
     "definitionProvider",
+    "declarationProvider",
+    "typeDefinitionProvider",
+    "implementationProvider",
     "referencesProvider",
     "documentHighlightProvider",
+    "linkedEditingRangeProvider",
     "renameProvider",
     "documentSymbolProvider",
     "workspaceSymbolProvider",
@@ -70,6 +74,7 @@ LSP_TEST_PROVIDERS: [String]{
     "inlayHintProvider",
     "typeHierarchyProvider",
     "callHierarchyProvider",
+    "diagnosticProvider",
     "workspace",
 }
 
@@ -93,12 +98,18 @@ LSP_TEST_PROVIDER_METHODS: [String]{
     "textDocument/rangeFormatting",
     "textDocument/onTypeFormatting",
     "textDocument/codeAction",
+    "codeAction/resolve",
     "textDocument/completion",
+    "completionItem/resolve",
     "textDocument/signatureHelp",
     "textDocument/hover",
     "textDocument/definition",
+    "textDocument/declaration",
+    "textDocument/typeDefinition",
+    "textDocument/implementation",
     "textDocument/references",
     "textDocument/documentHighlight",
+    "textDocument/linkedEditingRange",
     "textDocument/prepareRename",
     "textDocument/rename",
     "textDocument/documentSymbol",
@@ -112,12 +123,15 @@ LSP_TEST_PROVIDER_METHODS: [String]{
     "textDocument/semanticTokens/full/delta",
     "textDocument/semanticTokens/range",
     "textDocument/inlayHint",
+    "textDocument/diagnostic",
+    "workspace/diagnostic",
     "textDocument/prepareTypeHierarchy",
     "typeHierarchy/supertypes",
     "typeHierarchy/subtypes",
     "textDocument/prepareCallHierarchy",
     "callHierarchy/incomingCalls",
     "callHierarchy/outgoingCalls",
+    "workspace/willRenameFiles",
 }
 
 #Test("initialize speaks only LSP, and every advertised provider's request is answered") {
@@ -137,7 +151,6 @@ LSP_TEST_PROVIDER_METHODS: [String]{
 #Test("an unknown method is not found and shutdown is acknowledged") {
     server := lsp_test_server()
     assert_eq(lsp_test_error_code(server, "textDocument/moniker", "{{}}"), -32601)
-    assert_eq(lsp_test_error_code(server, "workspace/willRenameFiles", "{{}}"), -32601)
     assert(!server.shutdown, "no shutdown yet")
     assert(lsp_test_result(server, "shutdown", "{{}}") == .Null, "shutdown answers null")
     assert(server.shutdown, "shutdown is recorded")

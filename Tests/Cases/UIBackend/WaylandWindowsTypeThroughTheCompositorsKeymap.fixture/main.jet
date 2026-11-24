@@ -77,7 +77,7 @@ ENTER: 4
 
 CLOSE: 5
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -112,13 +112,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -130,7 +130,7 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("step {f.step}: {message}")
 }
 
@@ -139,7 +139,7 @@ fake_now: fn(f: Fake) -[Time]> Int { f.clock.elapsed_millis() }
 
 // The keymap rides with its wl_keyboard.keymap event in one message: the
 // text and its NUL in sealed shared memory, format 1 (XKB text v1).
-fake_keymap: fn(f: &Fake) -[Env, Net, Time]> {
+fake_keymap: fn(f: ^Fake) -[Env, Net, Time]> {
     fake_flush(f)
     bytes := KEYMAP.bytes().copy()
     bytes.push(U8{0})
@@ -170,7 +170,7 @@ fake_keymap: fn(f: &Fake) -[Env, Net, Time]> {
 }
 
 // Sends one scripted event.
-fake_send: fn(f: &Fake, words: [Int]) -[Env, Net, Time]> {
+fake_send: fn(f: ^Fake, words: [Int]) -[Env, Net, Time]> {
     keyboard: f.keyboard
     f.serial += 1
     kind: words[0]
@@ -194,7 +194,7 @@ fake_send: fn(f: &Fake, words: [Int]) -[Env, Net, Time]> {
 }
 
 // Runs the next step once its commit and time have come.
-fake_script: fn(f: &Fake) -[Env, Net, Time]> {
+fake_script: fn(f: ^Fake) -[Env, Net, Time]> {
     if f.step >= f.steps.len() || f.commits < f.due_commit || fake_now(f) < f.due_ms {
         return
     }
@@ -205,7 +205,7 @@ fake_script: fn(f: &Fake) -[Env, Net, Time]> {
     f.due_ms = fake_now(f) + step.wait_ms
 }
 
-fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
+fake_commit: fn(f: ^Fake) -[Env, Net, Time]> {
     f.commits += 1
     if f.attached != 0 {
         previous: f.current
@@ -219,7 +219,7 @@ fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
     if f.current != 0 -> fake_script(f)
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -300,7 +300,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
     }
 }
 
-fake_dispatch: fn(f: &Fake) -[Env, Net, Time]> {
+fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

@@ -144,7 +144,7 @@ jet_driver_compiler_source_path: fn(root: String) -> String Never! {
 // sources of that root (jet_driver_entry_root_sources), which it takes, so
 // its imports resolve to the texts the caller already read, never to a fresh
 // read of the disk.
-jet_driver_compiler_source_snapshot: fn(root: String, source: String, held: &&[JetDriverAuthorizedSourceFile]) -> JetDriverAuthorizedSourceSnapshot {
+jet_driver_compiler_source_snapshot: fn(root: String, source: String, held: ^^[JetDriverAuthorizedSourceFile]) -> JetDriverAuthorizedSourceSnapshot {
     path: jet_driver_compiler_source_path(root)
     files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_DRIVER_COMPILER_SOURCE_FILE, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, source: source}}
     files.extend(held.move())

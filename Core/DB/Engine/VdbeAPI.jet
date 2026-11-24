@@ -52,7 +52,7 @@ EXPLAIN_COL_NAMES: [String]{"addr", "opcode", "p1", "p2", "p3", "p4", "p5", "com
 
 // invokeProfileCallback (checkProfileCallback): report the run that began
 // at Vdbe.start_time to the profile callbacks.
-check_profile: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
+check_profile: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Never! {
     if v.start_time <= 0 {
         return
     }
@@ -63,7 +63,7 @@ check_profile: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
 
 // sqlite3_reset on a statement out of its slot: halt it, hand its error to
 // the connection and rewind it.
-reset_vdbe: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+reset_vdbe: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     check_profile<H>(h, db, v)
     rc: aux.reset<H>(h, db, v)
     aux.rewind(v)
@@ -71,7 +71,7 @@ reset_vdbe: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! 
 }
 
 // sqlite3_reset.
-stmt_reset: fn<H: Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
+stmt_reset: fn<H: Host>(h: ^H, db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     v := conn.vdbe_take(db, s)
     rc: reset_vdbe<H>(h, db, v)
     conn.vdbe_put(db, v)
@@ -81,7 +81,7 @@ stmt_reset: fn<H: Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
 // sqlite3_finalize: reset statement s if it ran and free it. The caller
 // then closes a connection sqlite3_close_v2 left a zombie
 // (sqlite3LeaveMutexAndCloseZombie).
-stmt_finalize: fn<H: Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
+stmt_finalize: fn<H: Host>(h: ^H, db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     v := conn.vdbe_take(db, s)
     check_profile<H>(h, db, v)
     rc: aux.finalize<H>(h, db, v)
@@ -90,7 +90,7 @@ stmt_finalize: fn<H: Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
 
 // sqlite3_clear_bindings: every parameter becomes NULL; a statement whose
 // plan used a bound value expires.
-clear_bindings: fn(db: &conn.Conn, s: Int) Never! {
+clear_bindings: fn(db: ^conn.Conn, s: Int) Never! {
     loop i in 0..<db.vdbes[s].n_var -> db.vdbes[s].vars[i] = base.mem_null()
     if db.vdbes[s].expmask != 0 -> db.vdbe_links[s].expired = conn.EXPIRED_NOW
 }
@@ -100,7 +100,7 @@ stmt_expired: fn(db: conn.Conn, s: Int) -> Bool Never! { db.vdbe_links[s].expire
 
 // doWalCallbacks: after a commit, give each log that grew to the
 // connection's commit callback; the first failure.
-wal_callbacks: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Int Never! {
+wal_callbacks: fn<H: Host>(h: ^H, db: ^conn.Conn) -[DB]> Int Never! {
     rc := base.OK
     loop i in 0..<db.dbs.len() {
         bt: db.dbs[i].bt
@@ -118,7 +118,7 @@ wal_callbacks: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Int Never! {
 
 // sqlite3WalDefaultHook: checkpoint a log that reached Conn.wal_arg
 // frames, its result ignored.
-wal_default_hook: fn(db: &conn.Conn, name: [U8], n_frame: Int) -[DB]> Never! {
+wal_default_hook: fn(db: ^conn.Conn, name: [U8], n_frame: Int) -[DB]> Never! {
     if n_frame < db.wal_arg {
         return
     }
@@ -130,7 +130,7 @@ wal_default_hook: fn(db: &conn.Conn, name: [U8], n_frame: Int) -[DB]> Never! {
 // sqlite3_wal_checkpoint_v2: checkpoint the database named `name`, or each
 // one for an empty name, in mode e_mode; n_log and n_ckpt get the log's
 // frame count and the frames checkpointed (-1 on error).
-wal_checkpoint_v2: fn(db: &conn.Conn, name: [U8], e_mode: Int, n_log: &Int, n_ckpt: &Int) -[DB]> Int Never! {
+wal_checkpoint_v2: fn(db: ^conn.Conn, name: [U8], e_mode: Int, n_log: ^Int, n_ckpt: ^Int) -[DB]> Int Never! {
     n_log = -1
     n_ckpt = -1
     if e_mode < wal.CHECKPOINT_PASSIVE || e_mode > wal.CHECKPOINT_TRUNCATE -> return base.MISUSE
@@ -159,7 +159,7 @@ wal_checkpoint_v2: fn(db: &conn.Conn, name: [U8], e_mode: Int, n_log: &Int, n_ck
 // SQLITE_ERROR, SQLITE_BUSY or SQLITE_MISUSE (SQLITE_PREPARE_SAVESQL
 // statements give the extended error code), masked by errMask; Vdbe.rc
 // SQLITE_SCHEMA with SQLITE_ERROR asks for a reprepare.
-vdbe_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+vdbe_step: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     savesql: v.prep_flags & conn.PREPARE_SAVESQL != 0
     if v.state == conn.VDBE_HALT_STATE -> _: reset_vdbe<H>(h, db, v)
     if v.state == conn.VDBE_READY_STATE {
@@ -206,7 +206,7 @@ vdbe_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
 // sqlite3_step: step statement s, recompiling it (at most
 // MAX_SCHEMA_RETRY times) while the schema it was compiled against has
 // changed.
-stmt_step: fn<H: Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
+stmt_step: fn<H: Host>(h: ^H, db: ^conn.Conn, s: Int) -[DB]> Int Never! {
     v := conn.vdbe_take(db, s)
     rc := base.OK
     cnt := 0
@@ -240,7 +240,7 @@ stmt_step: fn<H: Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
 // sqlite3_stmt_explain: switch statement s between a normal run (0),
 // EXPLAIN (1) and EXPLAIN QUERY PLAN (2), recompiling it when its program
 // lacks what the mode lists.
-stmt_explain: fn<H: Host>(h: &H, db: &conn.Conn, s: Int, e_mode: Int) -[DB]> Int Never! {
+stmt_explain: fn<H: Host>(h: ^H, db: ^conn.Conn, s: Int, e_mode: Int) -[DB]> Int Never! {
     v := conn.vdbe_take(db, s)
     rc := base.OK
     if v.explain == e_mode -> rc = base.OK else if e_mode < 0 || e_mode > 2 -> rc = base.ERROR else if v.prep_flags & conn.PREPARE_SAVESQL == 0 {
@@ -277,7 +277,7 @@ next_stmt: fn(db: conn.Conn, s: Int) -> Int Never! {
 // sqlite3_stmt_status: counter op (SQLITE_STMTSTATUS_*) of statement s,
 // zeroed after when `reset`. SQLITE_STMTSTATUS_MEMUSED, which measures C's
 // allocations, has none to measure.
-stmt_status: fn(db: &conn.Conn, s: Int, op: Int, reset: Bool) -> Int Never! {
+stmt_status: fn(db: ^conn.Conn, s: Int, op: Int, reset: Bool) -> Int Never! {
     if op == conn.STMTSTATUS_MEMUSED -> return 0
     if op < 0 || op >= db.vdbes[s].counters.len() -> return 0
     n: db.vdbes[s].counters[op]
@@ -302,7 +302,7 @@ data_count: fn(db: conn.Conn, s: Int) -> Int Never! {
 
 // columnMem: the register of column i of the current row, or -1 (a NULL)
 // with SQLITE_RANGE when there is no such column.
-column_mem: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
+column_mem: fn(db: ^conn.Conn, s: Int, i: Int) -> Int Never! {
     row: db.vdbes[s].result_row
     if row >= 0 && i >= 0 && i < db.vdbes[s].n_res_column -> return row + i
     aux.sql_error(db, base.RANGE)
@@ -311,14 +311,14 @@ column_mem: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
 
 // columnMallocFailure: a memory fault in a conversion becomes the
 // statement's SQLITE_NOMEM.
-column_malloc_failure: fn(db: &conn.Conn, s: Int) Never! {
+column_malloc_failure: fn(db: ^conn.Conn, s: Int) Never! {
     rc: db.vdbes[s].rc
     db.vdbes[s].rc = aux.api_exit(db, rc)
 }
 
 // sqlite3_column_blob: the bytes of column i (empty for an empty value or
 // a NULL).
-column_blob: fn(db: &conn.Conn, s: Int, i: Int) -> [U8] Never! {
+column_blob: fn(db: ^conn.Conn, s: Int, i: Int) -> [U8] Never! {
     k: column_mem(db, s, i)
     out := [U8]{}
     if k >= 0 && mem.value_blob(db.vdbes[s].mem[k]) -> out = db.vdbes[s].mem[k].z
@@ -327,7 +327,7 @@ column_blob: fn(db: &conn.Conn, s: Int, i: Int) -> [U8] Never! {
 }
 
 // sqlite3_column_bytes.
-column_bytes: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
+column_bytes: fn(db: ^conn.Conn, s: Int, i: Int) -> Int Never! {
     k: column_mem(db, s, i)
     n := 0
     if k >= 0 -> n = mem.value_bytes(db.vdbes[s].mem[k], base.UTF8)
@@ -336,7 +336,7 @@ column_bytes: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
 }
 
 // sqlite3_column_bytes16.
-column_bytes16: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
+column_bytes16: fn(db: ^conn.Conn, s: Int, i: Int) -> Int Never! {
     k: column_mem(db, s, i)
     n := 0
     if k >= 0 -> n = mem.value_bytes(db.vdbes[s].mem[k], base.UTF16NATIVE)
@@ -345,7 +345,7 @@ column_bytes16: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
 }
 
 // sqlite3_column_double.
-column_double: fn(db: &conn.Conn, s: Int, i: Int) -> Float Never! {
+column_double: fn(db: ^conn.Conn, s: Int, i: Int) -> Float Never! {
     k: column_mem(db, s, i)
     r := Float{0.0}
     if k >= 0 -> r = mem.real_value(db.vdbes[s].mem[k])
@@ -354,7 +354,7 @@ column_double: fn(db: &conn.Conn, s: Int, i: Int) -> Float Never! {
 }
 
 // sqlite3_column_int.
-column_int: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
+column_int: fn(db: ^conn.Conn, s: Int, i: Int) -> Int Never! {
     k: column_mem(db, s, i)
     n := 0
     if k >= 0 -> n = mem.value_int(db.vdbes[s].mem[k])
@@ -363,7 +363,7 @@ column_int: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
 }
 
 // sqlite3_column_int64.
-column_int64: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
+column_int64: fn(db: ^conn.Conn, s: Int, i: Int) -> Int Never! {
     k: column_mem(db, s, i)
     n := 0
     if k >= 0 -> n = mem.int_value(db.vdbes[s].mem[k])
@@ -373,7 +373,7 @@ column_int64: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
 
 // The text of column i in encoding enc (sqlite3_column_text,
 // sqlite3_column_text16); None for a NULL.
-column_text_enc: fn(db: &conn.Conn, s: Int, i: Int, enc: Int) -> [U8]? Never! {
+column_text_enc: fn(db: ^conn.Conn, s: Int, i: Int, enc: Int) -> [U8]? Never! {
     k: column_mem(db, s, i)
     out := [U8]?{None}
     if k >= 0 && mem.value_text(db.vdbes[s].mem[k], enc) -> out = Val(db.vdbes[s].mem[k].z)
@@ -382,17 +382,17 @@ column_text_enc: fn(db: &conn.Conn, s: Int, i: Int, enc: Int) -> [U8]? Never! {
 }
 
 // sqlite3_column_text.
-column_text: fn(db: &conn.Conn, s: Int, i: Int) -> [U8]? Never! {
+column_text: fn(db: ^conn.Conn, s: Int, i: Int) -> [U8]? Never! {
     column_text_enc(db, s, i, base.UTF8)
 }
 
 // sqlite3_column_text16.
-column_text16: fn(db: &conn.Conn, s: Int, i: Int) -> [U8]? Never! {
+column_text16: fn(db: ^conn.Conn, s: Int, i: Int) -> [U8]? Never! {
     column_text_enc(db, s, i, base.UTF16NATIVE)
 }
 
 // sqlite3_column_value: a copy of column i's value.
-column_value: fn(db: &conn.Conn, s: Int, i: Int) -> base.Mem Never! {
+column_value: fn(db: ^conn.Conn, s: Int, i: Int) -> base.Mem Never! {
     k: column_mem(db, s, i)
     out := base.mem_null()
     if k >= 0 -> out = mem.mem_copy(db.vdbes[s].mem[k])
@@ -402,7 +402,7 @@ column_value: fn(db: &conn.Conn, s: Int, i: Int) -> base.Mem Never! {
 
 // sqlite3_column_type (SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_TEXT,
 // SQLITE_BLOB or SQLITE_NULL).
-column_type: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
+column_type: fn(db: ^conn.Conn, s: Int, i: Int) -> Int Never! {
     k: column_mem(db, s, i)
     t := base.SQL_NULL
     if k >= 0 -> t = base.value_type(db.vdbes[s].mem[k])
@@ -412,7 +412,7 @@ column_type: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
 
 // columnName: name kind use_type (conn.COLNAME_*) of result column n in
 // encoding enc; None when there is none.
-column_name_of: fn(db: &conn.Conn, s: Int, n: Int, enc: Int, use_type: Int) -> [U8]? Never! {
+column_name_of: fn(db: ^conn.Conn, s: Int, n: Int, enc: Int, use_type: Int) -> [U8]? Never! {
     if n < 0 -> return None
     explain: db.vdbes[s].explain
     if explain != 0 {
@@ -431,52 +431,52 @@ column_name_of: fn(db: &conn.Conn, s: Int, n: Int, enc: Int, use_type: Int) -> [
 }
 
 // sqlite3_column_name.
-column_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_name: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF8, conn.COLNAME_NAME)
 }
 
 // sqlite3_column_name16.
-column_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_name16: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_NAME)
 }
 
 // sqlite3_column_decltype.
-column_decltype: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_decltype: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF8, conn.COLNAME_DECLTYPE)
 }
 
 // sqlite3_column_decltype16.
-column_decltype16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_decltype16: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_DECLTYPE)
 }
 
 // sqlite3_column_database_name.
-column_database_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_database_name: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF8, conn.COLNAME_DATABASE)
 }
 
 // sqlite3_column_database_name16.
-column_database_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_database_name16: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_DATABASE)
 }
 
 // sqlite3_column_table_name.
-column_table_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_table_name: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF8, conn.COLNAME_TABLE)
 }
 
 // sqlite3_column_table_name16.
-column_table_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_table_name16: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_TABLE)
 }
 
 // sqlite3_column_origin_name.
-column_origin_name: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_origin_name: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF8, conn.COLNAME_COLUMN)
 }
 
 // sqlite3_column_origin_name16.
-column_origin_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
+column_origin_name16: fn(db: ^conn.Conn, s: Int, n: Int) -> [U8]? Never! {
     column_name_of(db, s, n, base.UTF16NATIVE, conn.COLNAME_COLUMN)
 }
 
@@ -486,7 +486,7 @@ column_origin_name16: fn(db: &conn.Conn, s: Int, n: Int) -> [U8]? Never! {
 // vdbeUnbind: parameter i (from 0) of statement s becomes NULL, ready for
 // a new value; SQLITE_MISUSE while the statement runs, SQLITE_RANGE past
 // its parameters. A statement whose plan used the old value expires.
-unbind: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
+unbind: fn(db: ^conn.Conn, s: Int, i: Int) -> Int Never! {
     if db.vdbes[s].state != conn.VDBE_READY_STATE {
         aux.sql_error(db, base.MISUSE)
         return base.MISUSE
@@ -506,7 +506,7 @@ unbind: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
 // bindText: parameter i (from 1) becomes the text z of encoding enc, or a
 // blob for enc 0; n bytes of it, or to its terminator for n < 0. None
 // binds NULL.
-bind_text_enc: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int, enc: Int) -> Int Never! {
+bind_text_enc: fn(db: ^conn.Conn, s: Int, i: Int, z: [U8]?, n: Int, enc: Int) -> Int Never! {
     rc := unbind(db, s, i - 1)
     if rc != base.OK -> return rc
     if z == .Val(data) {
@@ -521,46 +521,46 @@ bind_text_enc: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int, enc: Int) ->
 }
 
 // sqlite3_bind_blob: n bytes of z; SQLITE_MISUSE for n < 0.
-bind_blob: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
+bind_blob: fn(db: ^conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
     if n < 0 -> return base.MISUSE
     bind_text_enc(db, s, i, z, n, 0)
 }
 
 // sqlite3_bind_blob64.
-bind_blob64: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
+bind_blob64: fn(db: ^conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
     bind_text_enc(db, s, i, z, n, 0)
 }
 
 // sqlite3_bind_double.
-bind_double: fn(db: &conn.Conn, s: Int, i: Int, r: Float) -> Int Never! {
+bind_double: fn(db: ^conn.Conn, s: Int, i: Int, r: Float) -> Int Never! {
     rc: unbind(db, s, i - 1)
     if rc == base.OK -> mem.set_double(db.vdbes[s].vars[i - 1], r)
     rc
 }
 
 // sqlite3_bind_int.
-bind_int: fn(db: &conn.Conn, s: Int, i: Int, value: Int) -> Int Never! {
+bind_int: fn(db: ^conn.Conn, s: Int, i: Int, value: Int) -> Int Never! {
     bind_int64(db, s, i, value)
 }
 
 // sqlite3_bind_int64.
-bind_int64: fn(db: &conn.Conn, s: Int, i: Int, value: Int) -> Int Never! {
+bind_int64: fn(db: ^conn.Conn, s: Int, i: Int, value: Int) -> Int Never! {
     rc: unbind(db, s, i - 1)
     if rc == base.OK -> mem.set_int64(db.vdbes[s].vars[i - 1], value)
     rc
 }
 
 // sqlite3_bind_null.
-bind_null: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! { unbind(db, s, i - 1) }
+bind_null: fn(db: ^conn.Conn, s: Int, i: Int) -> Int Never! { unbind(db, s, i - 1) }
 
 // sqlite3_bind_text.
-bind_text: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
+bind_text: fn(db: ^conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
     bind_text_enc(db, s, i, z, n, base.UTF8)
 }
 
 // sqlite3_bind_text64: text of encoding enc (SQLITE_UTF16 is the native
 // order); UTF-16 drops an odd last byte.
-bind_text64: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int, enc_in: Int) -> Int Never! {
+bind_text64: fn(db: ^conn.Conn, s: Int, i: Int, z: [U8]?, n: Int, enc_in: Int) -> Int Never! {
     enc := enc_in
     len := n
     if enc != base.UTF8 {
@@ -571,12 +571,12 @@ bind_text64: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int, enc_in: Int) -
 }
 
 // sqlite3_bind_text16.
-bind_text16: fn(db: &conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
+bind_text16: fn(db: ^conn.Conn, s: Int, i: Int, z: [U8]?, n: Int) -> Int Never! {
     bind_text_enc(db, s, i, z, util.clear_bits(n, 1), base.UTF16NATIVE)
 }
 
 // sqlite3_bind_value: a copy of value p, by its datatype.
-bind_value: fn(db: &conn.Conn, s: Int, i: Int, p: base.Mem) -> Int Never! {
+bind_value: fn(db: ^conn.Conn, s: Int, i: Int, p: base.Mem) -> Int Never! {
     t: base.value_type(p)
     if t == base.SQL_INTEGER -> return bind_int64(db, s, i, p.i)
     if t == base.SQL_FLOAT {
@@ -592,14 +592,14 @@ bind_value: fn(db: &conn.Conn, s: Int, i: Int, p: base.Mem) -> Int Never! {
 }
 
 // sqlite3_bind_zeroblob: a blob of n zero bytes.
-bind_zeroblob: fn(db: &conn.Conn, s: Int, i: Int, n: Int) -> Int Never! {
+bind_zeroblob: fn(db: ^conn.Conn, s: Int, i: Int, n: Int) -> Int Never! {
     rc: unbind(db, s, i - 1)
     if rc == base.OK -> mem.set_zero_blob(db.vdbes[s].vars[i - 1], n)
     rc
 }
 
 // sqlite3_bind_zeroblob64: SQLITE_TOOBIG past SQLITE_LIMIT_LENGTH.
-bind_zeroblob64: fn(db: &conn.Conn, s: Int, i: Int, n: Int) -> Int Never! {
+bind_zeroblob64: fn(db: ^conn.Conn, s: Int, i: Int, n: Int) -> Int Never! {
     rc := base.OK
     if n < 0 || n > db.limits[ast.LIMIT_LENGTH] -> rc = base.TOOBIG else {
         rc = bind_zeroblob(db, s, i, n)
@@ -629,7 +629,7 @@ bind_parameter_index: fn(db: conn.Conn, s: Int, name: [U8]) -> Int Never! {
 // sqlite3_transfer_bindings (sqlite3TransferBindings): move the values of
 // statement from's parameters to statement to's, which has as many;
 // SQLITE_ERROR when the counts differ. Plans that used them expire.
-transfer_bindings: fn(db: &conn.Conn, from: Int, to: Int) -> Int Never! {
+transfer_bindings: fn(db: ^conn.Conn, from: Int, to: Int) -> Int Never! {
     n: db.vdbes[from].n_var
     if n != db.vdbes[to].n_var -> return base.ERROR
     if db.vdbes[to].expmask != 0 -> db.vdbe_links[to].expired = conn.EXPIRED_NOW
@@ -649,7 +649,7 @@ transfer_bindings: fn(db: &conn.Conn, from: Int, to: Int) -> Int Never! {
 // setResultStrOrError: the result becomes z (n bytes of it, or to its
 // terminator for n < 0) of encoding enc, or a blob for enc 0, converted to
 // the connection's encoding; SQLITE_TOOBIG past SQLITE_LIMIT_LENGTH.
-result_str: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int, enc: Int) Never! {
+result_str: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int, enc: Int) Never! {
     o: v.fctx.out
     limit: db.limits[ast.LIMIT_LENGTH]
     rc: mem.set_str(v.mem[o], z, n, enc, limit)
@@ -662,7 +662,7 @@ result_str: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int, enc: Int) Never! 
 }
 
 // sqlite3_result_blob: n bytes of z; a negative n is SQLITE_TOOBIG.
-result_blob: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+result_blob: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     if n < 0 {
         result_error_toobig(v)
         return
@@ -671,7 +671,7 @@ result_blob: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
 }
 
 // sqlite3_result_blob64: past 0x7fffffff bytes, SQLITE_TOOBIG.
-result_blob64: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+result_blob64: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     if n < 0 || n > 2147483647 {
         result_error_toobig(v)
         return
@@ -680,33 +680,33 @@ result_blob64: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
 }
 
 // sqlite3_result_double.
-result_double: fn(v: &conn.Vdbe, r: Float) Never! { mem.set_double(v.mem[v.fctx.out], r) }
+result_double: fn(v: ^conn.Vdbe, r: Float) Never! { mem.set_double(v.mem[v.fctx.out], r) }
 
 // sqlite3_result_error: the call fails with message z (n bytes, or to its
 // terminator for n < 0) and SQLITE_ERROR.
-result_error: fn(db: conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+result_error: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     v.fctx.is_error = base.ERROR
     _: mem.set_str(v.mem[v.fctx.out], z, n, base.UTF8, db.limits[ast.LIMIT_LENGTH])
 }
 
 // sqlite3_result_error16.
-result_error16: fn(db: conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+result_error16: fn(db: conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     v.fctx.is_error = base.ERROR
     _: mem.set_str(v.mem[v.fctx.out], z, n, base.UTF16NATIVE, db.limits[ast.LIMIT_LENGTH])
 }
 
 // sqlite3_result_int.
-result_int: fn(v: &conn.Vdbe, value: Int) Never! { mem.set_int64(v.mem[v.fctx.out], value) }
+result_int: fn(v: ^conn.Vdbe, value: Int) Never! { mem.set_int64(v.mem[v.fctx.out], value) }
 
 // sqlite3_result_int64.
-result_int64: fn(v: &conn.Vdbe, value: Int) Never! { mem.set_int64(v.mem[v.fctx.out], value) }
+result_int64: fn(v: ^conn.Vdbe, value: Int) Never! { mem.set_int64(v.mem[v.fctx.out], value) }
 
 // sqlite3_result_null.
-result_null: fn(v: &conn.Vdbe) Never! { mem.set_null(v.mem[v.fctx.out]) }
+result_null: fn(v: ^conn.Vdbe) Never! { mem.set_null(v.mem[v.fctx.out]) }
 
 // sqlite3_result_pointer (sqlite3VdbeMemSetPointer): a NULL that carries
 // the Host's pointer handle `handle` of type ptype.
-result_pointer: fn(v: &conn.Vdbe, handle: Int, ptype: [U8]) Never! {
+result_pointer: fn(v: ^conn.Vdbe, handle: Int, ptype: [U8]) Never! {
     o: v.fctx.out
     run.release_dyn(v, o)
     m := base.mem_init(base.MEM_NULL | conn.MEM_DYN | base.MEM_SUBTYPE)
@@ -726,21 +726,21 @@ value_pointer: fn(m: base.Mem, ptype: [U8]) -> Int? Never! {
 }
 
 // sqlite3_result_subtype: the low 8 bits of e_subtype tag the result.
-result_subtype: fn(v: &conn.Vdbe, e_subtype: Int) Never! {
+result_subtype: fn(v: ^conn.Vdbe, e_subtype: Int) Never! {
     o: v.fctx.out
     v.mem[o].subtype = e_subtype & 255
     v.mem[o].flags = v.mem[o].flags | base.MEM_SUBTYPE
 }
 
 // sqlite3_result_text.
-result_text: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+result_text: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     result_str(db, v, z, n, base.UTF8)
 }
 
 // sqlite3_result_text64: text of encoding enc (SQLITE_UTF16 is the native
 // order); UTF-16 drops an odd last byte; past 0x7fffffff bytes,
 // SQLITE_TOOBIG.
-result_text64: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int, enc_in: Int) Never! {
+result_text64: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int, enc_in: Int) Never! {
     enc := enc_in
     len := n
     if enc != base.UTF8 {
@@ -755,22 +755,22 @@ result_text64: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int, enc_in: Int) N
 }
 
 // sqlite3_result_text16.
-result_text16: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+result_text16: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     result_str(db, v, z, util.clear_bits(n, 1), base.UTF16NATIVE)
 }
 
 // sqlite3_result_text16be.
-result_text16be: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+result_text16be: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     result_str(db, v, z, util.clear_bits(n, 1), base.UTF16BE)
 }
 
 // sqlite3_result_text16le.
-result_text16le: fn(db: &conn.Conn, v: &conn.Vdbe, z: [U8], n: Int) Never! {
+result_text16le: fn(db: ^conn.Conn, v: ^conn.Vdbe, z: [U8], n: Int) Never! {
     result_str(db, v, z, util.clear_bits(n, 1), base.UTF16LE)
 }
 
 // sqlite3_result_value: a copy of value p, in the connection's encoding.
-result_value: fn(db: conn.Conn, v: &conn.Vdbe, p: base.Mem) Never! {
+result_value: fn(db: conn.Conn, v: ^conn.Vdbe, p: base.Mem) Never! {
     o: v.fctx.out
     run.release_dyn(v, o)
     v.mem[o] = mem.mem_copy(p)
@@ -779,12 +779,12 @@ result_value: fn(db: conn.Conn, v: &conn.Vdbe, p: base.Mem) Never! {
 }
 
 // sqlite3_result_zeroblob.
-result_zeroblob: fn(db: conn.Conn, v: &conn.Vdbe, n: Int) Never! {
+result_zeroblob: fn(db: conn.Conn, v: ^conn.Vdbe, n: Int) Never! {
     _: result_zeroblob64(db, v, if n > 0 -> n else -> 0)
 }
 
 // sqlite3_result_zeroblob64: SQLITE_TOOBIG past SQLITE_LIMIT_LENGTH.
-result_zeroblob64: fn(db: conn.Conn, v: &conn.Vdbe, n: Int) -> Int Never! {
+result_zeroblob64: fn(db: conn.Conn, v: ^conn.Vdbe, n: Int) -> Int Never! {
     if n < 0 || n > db.limits[ast.LIMIT_LENGTH] {
         result_error_toobig(v)
         return base.TOOBIG
@@ -795,7 +795,7 @@ result_zeroblob64: fn(db: conn.Conn, v: &conn.Vdbe, n: Int) -> Int Never! {
 
 // sqlite3_result_error_code: the call fails with code err_code, its
 // message that code's text unless one is set.
-result_error_code: fn(db: &conn.Conn, v: &conn.Vdbe, err_code: Int) Never! {
+result_error_code: fn(db: ^conn.Conn, v: ^conn.Vdbe, err_code: Int) Never! {
     v.fctx.is_error = if err_code != 0 -> err_code else -> -1
     if v.mem[v.fctx.out].flags & base.MEM_NULL != 0 {
         result_str(db, v, base.error_string(err_code).bytes(), -1, base.UTF8)
@@ -803,21 +803,21 @@ result_error_code: fn(db: &conn.Conn, v: &conn.Vdbe, err_code: Int) Never! {
 }
 
 // sqlite3_result_error_toobig.
-result_error_toobig: fn(v: &conn.Vdbe) Never! {
+result_error_toobig: fn(v: ^conn.Vdbe) Never! {
     v.fctx.is_error = base.TOOBIG
     o: v.fctx.out
     v.mem[o] = base.mem_text("string or blob too big".bytes(), base.UTF8)
 }
 
 // sqlite3_result_error_nomem.
-result_error_nomem: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
+result_error_nomem: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! {
     mem.set_null(v.mem[v.fctx.out])
     v.fctx.is_error = base.NOMEM
     aux.oom_fault(db)
 }
 
 // sqlite3ResultIntReal: an integer result becomes an integer-valued REAL.
-result_int_real: fn(v: &conn.Vdbe) Never! {
+result_int_real: fn(v: ^conn.Vdbe) Never! {
     o: v.fctx.out
     f: v.mem[o].flags
     if f & base.MEM_INT != 0 {
@@ -836,7 +836,7 @@ vtab_nochange: fn(v: conn.Vdbe) -> Bool Never! { mem.value_nochange(v.mem[v.fctx
 // first (or next) value of the IN list of value `list` (OP_VInitIn's
 // ValueList) into `out`; SQLITE_DONE past the last, SQLITE_ERROR for a
 // value that is no ValueList.
-value_list_value: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.Mem, b_next: Bool) -[DB]> Int Never! {
+value_list_value: fn(db: ^conn.Conn, v: ^conn.Vdbe, list: base.Mem, out: ^base.Mem, b_next: Bool) -[DB]> Int Never! {
     is_list: list.flags & conn.MEM_DYN != 0 && list.subtype == conn.DYN_POINTER && list.z == "ValueList".bytes()
     if !is_list -> return base.ERROR
     o: v.ops[list.i]
@@ -865,18 +865,18 @@ value_list_value: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.M
 }
 
 // sqlite3_vtab_in_first.
-vtab_in_first: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.Mem) -[DB]> Int Never! {
+vtab_in_first: fn(db: ^conn.Conn, v: ^conn.Vdbe, list: base.Mem, out: ^base.Mem) -[DB]> Int Never! {
     value_list_value(db, v, list, out, false)
 }
 
 // sqlite3_vtab_in_next.
-vtab_in_next: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.Mem) -[DB]> Int Never! {
+vtab_in_next: fn(db: ^conn.Conn, v: ^conn.Vdbe, list: base.Mem, out: ^base.Mem) -[DB]> Int Never! {
     value_list_value(db, v, list, out, true)
 }
 
 // sqlite3StmtCurrentTime: the time of the statement's step in milliseconds
 // of the Julian day, the same for every call within the step.
-stmt_current_time: fn(v: &conn.Vdbe) -[DB]> Int Never! {
+stmt_current_time: fn(v: ^conn.Vdbe) -[DB]> Int Never! {
     if v.i_current_time == 0 -> v.i_current_time = os.os_current_time()
     v.i_current_time
 }
@@ -884,7 +884,7 @@ stmt_current_time: fn(v: &conn.Vdbe) -[DB]> Int Never! {
 // sqlite3_aggregate_context: the Vdbe.aggs slot of the call's aggregate
 // context, made at the first request with n_byte > 0; -1 (and a NULL
 // accumulator) for n_byte <= 0 before then.
-aggregate_context: fn(v: &conn.Vdbe, n_byte: Int) -> Int Never! {
+aggregate_context: fn(v: ^conn.Vdbe, n_byte: Int) -> Int Never! {
     a: v.fctx.agg
     if v.mem[a].flags & base.MEM_AGG != 0 -> return v.mem[a].i
     if n_byte <= 0 {
@@ -919,7 +919,7 @@ get_auxdata: fn(v: conn.Vdbe, i_arg: Int) -> base.Mem? Never! {
 
 // sqlite3_set_auxdata: keep `value` as argument i_arg's auxiliary data
 // for later calls of this op.
-set_auxdata: fn(v: &conn.Vdbe, i_arg: Int, value: base.Mem) Never! {
+set_auxdata: fn(v: ^conn.Vdbe, i_arg: Int, value: base.Mem) Never! {
     depth: v.frames.len()
     loop k in 0..<v.aux.len() {
         a: v.aux[k]
@@ -938,7 +938,7 @@ set_auxdata: fn(v: &conn.Vdbe, i_arg: Int, value: base.Mem) Never! {
 // A ready statement of the ops `ops` (no P4) after the OP_Init that
 // vdbe_create starts it with, over n_mem registers and n_var parameters, in
 // its slot with result columns named `names`.
-api_test_stmt: fn(db: &conn.Conn, ops: [{op: Int, p1: Int, p2: Int, p3: Int}], n_mem: Int, n_var: Int, names: [String]) -> Int Never! {
+api_test_stmt: fn(db: ^conn.Conn, ops: [{op: Int, p1: Int, p2: Int, p3: Int}], n_mem: Int, n_var: Int, names: [String]) -> Int Never! {
     v := aux.vdbe_create(db)
     loop o in ops -> _: aux.add_op3(db, v, o.op, o.p1, o.p2, o.p3)
     aux.set_num_cols(v, names.len())

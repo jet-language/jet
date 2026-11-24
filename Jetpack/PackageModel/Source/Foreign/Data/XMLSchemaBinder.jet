@@ -60,11 +60,11 @@ XMLParser: struct {
 
     at_space: fn(self) -> Bool Never! { pkg_data_xml_is_space(self.peek()) }
 
-    skip_space: fn(&self) Never! {
+    skip_space: fn(^self) Never! {
         loop self.at_space() -> self.pos += 1
     }
 
-    read_name: fn(&self) -> String DataBindError! {
+    read_name: fn(^self) -> String DataBindError! {
         if self.at_end() -> return Err(DataBindError{message: "XML name is missing"})
         first: self.peek()
         if !pkg_data_xml_name_start(first) {
@@ -80,7 +80,7 @@ XMLParser: struct {
         Ok(name)
     }
 
-    read_quoted_value: fn(&self, what: String) -> String DataBindError! {
+    read_quoted_value: fn(^self, what: String) -> String DataBindError! {
         quote: self.peek()
         if quote != "\"" && quote != "'" {
             return Err(DataBindError{message: "XML {what} is not quoted"})
@@ -95,7 +95,7 @@ XMLParser: struct {
         Ok(value)
     }
 
-    read_declaration_field: fn(&self, expected: String) -> String DataBindError! {
+    read_declaration_field: fn(^self, expected: String) -> String DataBindError! {
         name: self.read_name()
         if name != expected {
             return Err(DataBindError{message: "XML declaration expected {expected}"})
@@ -109,7 +109,7 @@ XMLParser: struct {
         self.read_quoted_value("declaration value")
     }
 
-    consume_processing_instruction: fn(&self) DataBindError! {
+    consume_processing_instruction: fn(^self) DataBindError! {
         self.pos += 2
         target: self.read_name()
         if pkg_data_eq_ignore_case(target, "xml") {
@@ -132,7 +132,7 @@ XMLParser: struct {
     }
 
     // `<?xml version="1.0" [encoding="UTF-8"] [standalone="yes|no"]?>`.
-    consume_xml_declaration: fn(&self) DataBindError! {
+    consume_xml_declaration: fn(^self) DataBindError! {
         self.pos += 5
         if !self.at_space() {
             return Err(DataBindError{message: "XML declaration needs a version field"})
@@ -173,7 +173,7 @@ XMLParser: struct {
         self.pos += 2
     }
 
-    parse_document: fn(&self) -> XMLNode DataBindError! {
+    parse_document: fn(^self) -> XMLNode DataBindError! {
         if self.peek() == pkg_data_scalar_of(0xFEFF) -> self.pos += 1
         declaration_allowed := true
         stack := [XMLNode]{}
@@ -323,7 +323,7 @@ XMLParser: struct {
 
 // Attach a closed element to its parent, or make it the root. Returns the
 // root after the attachment.
-pkg_data_xml_attach: fn(stack: &[XMLNode], root: XMLNode?, node: XMLNode) -> XMLNode? DataBindError! {
+pkg_data_xml_attach: fn(stack: ^[XMLNode], root: XMLNode?, node: XMLNode) -> XMLNode? DataBindError! {
     if stack.len() > 0 {
         stack[stack.len() - 1].content.push(XMLContent.Element(node))
         return Ok(root)
@@ -511,7 +511,7 @@ pkg_data_xml_is_simple: fn(node: XMLNode) -> Bool Never! {
 
 // One record over every element: sorted attributes, `$text` / `$content`,
 // then sorted child element names.
-pkg_data_add_xml_record: fn(builder: &SchemaBuilder, preferred: String, nodes: [XMLNode]) -> String Never! {
+pkg_data_add_xml_record: fn(builder: ^SchemaBuilder, preferred: String, nodes: [XMLNode]) -> String Never! {
     record: builder.begin_record(preferred)
     attr_names := [String]{}
     child_names := [String]{}

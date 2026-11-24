@@ -101,7 +101,7 @@ is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
     unicode.is_whitespace(scalar_at(source, index))
 }
 
-emit: fn(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never! {
+emit: fn(facts: ^[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never! {
     flag := 0
     if uppercase -> flag = 1
     facts.push(kind)
@@ -110,7 +110,7 @@ emit: fn(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never!
     facts.push(flag)
 }
 
-push_code: fn(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) -> Int Never! {
+push_code: fn(facts: ^[Int], kind: Int, start: Int, end: Int, uppercase: Bool) -> Int Never! {
     emit(facts, kind, start, end, uppercase)
     kind
 }
@@ -565,7 +565,7 @@ RawScanStop: struct {
 // before `from` (-1 at the start of the source); the `#!` launch line is
 // read at byte 0 only, and the EOF fact is emitted when the range reaches
 // the end of the source.
-raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int, previous_code: Int, facts: &[Int]) -> RawScanStop {
+raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int, previous_code: Int, facts: ^[Int]) -> RawScanStop {
     if facts.len() <= 4 && to - from > 16 -> facts.try_reserve((to - from) * 3 /% 4 + 8) ?? panic("reserve failed")
     last_code := previous_code
     fn_in_range := false
@@ -1073,12 +1073,19 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                 }
             }
             94 -> {
-                if byte_at(source, i + 1) == 61 {
-                    last_code = push_code(facts, TOKEN_CARET_EQ, start, start + 2, false)
-                    i += 2
-                } else {
-                    last_code = push_code(facts, TOKEN_CARET, start, start + 1, false)
-                    i += 1
+                if {
+                    byte_at(source, i + 1) == 94 -> {
+                        last_code = push_code(facts, TOKEN_CARET_CARET, start, start + 2, false)
+                        i += 2
+                    }
+                    byte_at(source, i + 1) == 61 -> {
+                        last_code = push_code(facts, TOKEN_CARET_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_CARET, start, start + 1, false)
+                        i += 1
+                    }
                 }
             }
             126 -> {

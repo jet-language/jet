@@ -1,7 +1,7 @@
 use jet_wasm.[wasm_decode_component, wasm_decode_module, wasm_validate_module]
 
 // "" when every core module of the component validates, else the first error.
-component_validation: fn(bytes: &&[U8]) -> String Never! {
+component_validation: fn(bytes: ^^[U8]) -> String Never! {
     if wasm_decode_component(bytes) == {
         .Ok(component) -> {
             loop core in component.modules {

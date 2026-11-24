@@ -98,7 +98,7 @@ disp_card_num: fn(card: Dyn) -> Int {
     }
 }
 
-disp_ingest: fn(board: Dyn, cards: &[Int:Bool], decisions: &[String:String]) {
+disp_ingest: fn(board: Dyn, cards: ^[Int:Bool], decisions: ^[String:String]) {
     if board.field("cards") == .Ok(field) {
         if field == .Array(entries) {
             loop card in entries -> cards[disp_card_num(card)] = true
@@ -133,7 +133,7 @@ disp_board: fn(path: String) -> DispBoard {
 
 // The problems of one report's table (parseReport); the count of its finding
 // rows, or -1 when it has no table.
-disp_report: fn(relative: String, text: String, board: DispBoard, problems: &[String]) -> Int {
+disp_report: fn(relative: String, text: String, board: DispBoard, problems: ^[String]) -> Int {
     opened: disp_parse.split(text, "<!-- audit-dispositions:v1 -->")
     if opened.len() < 2 {
         problems.push("{relative}: missing audit-dispositions:v1 table")

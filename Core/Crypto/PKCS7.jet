@@ -115,7 +115,7 @@ pkcs7_oid_is: fn(oid: [U8], data: [U8], at: Int, len: Int) -> Bool Never! {
 
 // pkcs7_get_next_content_len: the [0] EXPLICIT content, which must end at
 // `end`.
-pkcs7_get_next_content_len: fn(data: [U8], p: &Int, end: Int) -> Int PKCS7Error! {
+pkcs7_get_next_content_len: fn(data: [U8], p: ^Int, end: Int) -> Int PKCS7Error! {
     len: asn1.get_tag(data, p, end, PKCS7_CONTEXT_0) ?? return Err(.InvalidContentInfo(Val(err)))
     if end - p != len -> return Err(.InvalidContentInfo(Val(.LengthMismatch)))
     Ok(len)
@@ -124,7 +124,7 @@ pkcs7_get_next_content_len: fn(data: [U8], p: &Int, end: Int) -> Int PKCS7Error!
 // pkcs7_get_version: an INTEGER that must be 1. A version that does not
 // read leaves mbedtls's zeroed field, which is not 1 either, so both give
 // the bare code.
-pkcs7_get_version: fn(data: [U8], p: &Int, end: Int) -> Int PKCS7Error! {
+pkcs7_get_version: fn(data: [U8], p: ^Int, end: Int) -> Int PKCS7Error! {
     ver: asn1.get_int(data, p, end) ?? return Err(.InvalidVersion)
     if ver != PKCS7_SUPPORTED_VERSION -> return Err(.InvalidVersion)
     Ok(ver)
@@ -132,7 +132,7 @@ pkcs7_get_version: fn(data: [U8], p: &Int, end: Int) -> Int PKCS7Error! {
 
 // pkcs7_get_content_info_type: the contentType OID of a ContentInfo, and
 // where the ContentInfo ends.
-pkcs7_get_content_info_type: fn(data: [U8], p: &Int, end: Int) -> {seq_end: Int, content_type: asn1.ASN1Buf} PKCS7Error! {
+pkcs7_get_content_info_type: fn(data: [U8], p: ^Int, end: Int) -> {seq_end: Int, content_type: asn1.ASN1Buf} PKCS7Error! {
     len := asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidContentInfo(Val(err)))
     seq_end: p + len
     len = asn1.get_tag(data, p, seq_end, asn1.ASN1_OID) ?? return Err(.InvalidContentInfo(Val(err)))
@@ -143,14 +143,14 @@ pkcs7_get_content_info_type: fn(data: [U8], p: &Int, end: Int) -> {seq_end: Int,
 
 // pkcs7_get_digest_algorithm: an AlgorithmIdentifier with NULL or no
 // parameters.
-pkcs7_get_digest_algorithm: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf PKCS7Error! {
+pkcs7_get_digest_algorithm: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf PKCS7Error! {
     alg: asn1.get_alg_null(data, p, end) ?? return Err(.InvalidAlg(Val(err)))
     Ok(alg)
 }
 
 // pkcs7_get_digest_algorithm_set: the DigestAlgorithmIdentifiers SET,
 // which mbedtls reads with exactly one algorithm.
-pkcs7_get_digest_algorithm_set: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf PKCS7Error! {
+pkcs7_get_digest_algorithm_set: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf PKCS7Error! {
     len: asn1.get_tag(data, p, end, PKCS7_SET) ?? return Err(.InvalidAlg(Val(err)))
     set_end: p + len
     alg: asn1.get_alg_null(data, p, set_end) ?? return Err(.InvalidAlg(Val(err)))
@@ -160,7 +160,7 @@ pkcs7_get_digest_algorithm_set: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Bu
 
 // pkcs7_get_certificates: the optional [0] IMPLICIT certificates, which
 // mbedtls reads with one certificate at most; how many were added.
-pkcs7_get_certificates: fn(data: [U8], p: &Int, end: Int, certs: &[x509crt.X509Crt]) -> Int PKCS7Error! {
+pkcs7_get_certificates: fn(data: [U8], p: ^Int, end: Int, certs: ^[x509crt.X509Crt]) -> Int PKCS7Error! {
     len1: if asn1.get_tag(data, p, end, PKCS7_CONTEXT_0) == {
         .Ok(n) -> n
         .Err(e) -> {
@@ -184,7 +184,7 @@ pkcs7_get_certificates: fn(data: [U8], p: &Int, end: Int, certs: &[x509crt.X509C
 // SignedData's `alg`, with no authenticated or unauthenticated attributes.
 // Every failure is INVALID_SIGNER_INFO, with the ASN.1 failure only when a
 // SEQUENCE header itself does not read, as in mbedtls.
-pkcs7_get_signer_info: fn(data: [U8], p: &Int, end: Int, alg: asn1.ASN1Buf) -> PKCS7SignerInfo PKCS7Error! {
+pkcs7_get_signer_info: fn(data: [U8], p: ^Int, end: Int, alg: asn1.ASN1Buf) -> PKCS7SignerInfo PKCS7Error! {
     len := asn1.get_tag(data, p, end, PKCS7_SEQUENCE) ?? return Err(.InvalidSignerInfo(Val(err)))
     end_signer: p + len
     version: pkcs7_get_version(data, p, end_signer) ?? return Err(.InvalidSignerInfo(None))
@@ -223,7 +223,7 @@ pkcs7_get_signer_info: fn(data: [U8], p: &Int, end: Int, alg: asn1.ASN1Buf) -> P
 }
 
 // pkcs7_get_signers_info_set: the SignerInfos SET, which may be empty.
-pkcs7_get_signers_info_set: fn(data: [U8], p: &Int, end: Int, digest_alg: asn1.ASN1Buf) -> [PKCS7SignerInfo] PKCS7Error! {
+pkcs7_get_signers_info_set: fn(data: [U8], p: ^Int, end: Int, digest_alg: asn1.ASN1Buf) -> [PKCS7SignerInfo] PKCS7Error! {
     signers := [PKCS7SignerInfo]{}
     len: asn1.get_tag(data, p, end, PKCS7_SET) ?? return Err(.InvalidSignerInfo(Val(err)))
     if len == 0 -> return Ok(signers)
@@ -313,7 +313,7 @@ pkcs7_parse_der: fn(buf: [U8]) -> PKCS7 PKCS7Error! {
 // digest verifies with `cert`'s key. `given` is the data, or its digest
 // when `is_hash`. Without MBEDTLS_PKCS7_ALLOW_WEAK_SIGNATURES the digest and
 // the certificate's signature key type must pass the default profile.
-pkcs7_data_or_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, given: [U8], is_hash: Bool) -[Time]> PKCS7Error! {
+pkcs7_data_or_hash_verify: fn(msg: PKCS7, cert: ^x509crt.X509Crt, given: [U8], is_hash: Bool) -[Time]> PKCS7Error! {
     signers: msg.signed_data.signers
     if signers.len() == 0 -> return Err(.InvalidCert(None))
     if x509.x509_time_is_past(cert.valid_to) || x509.x509_time_is_future(cert.valid_from) {
@@ -344,14 +344,14 @@ pkcs7_data_or_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, given: [U8], i
 /// Checks that a signer of `msg` signed `data` with `cert`'s key
 /// (mbedtls_pkcs7_signed_data_verify): the certificate must be valid now,
 /// and the digest and key type allowed by the default profile.
-pkcs7_signed_data_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, data: [U8]) -[Time]> PKCS7Error! {
+pkcs7_signed_data_verify: fn(msg: PKCS7, cert: ^x509crt.X509Crt, data: [U8]) -[Time]> PKCS7Error! {
     pkcs7_data_or_hash_verify(msg, cert, data, false)
 }
 
 /// Checks that a signer of `msg` signed the digest `hash` with `cert`'s key
 /// (mbedtls_pkcs7_signed_hash_verify); `hash` must have the length of the
 /// message's digest algorithm.
-pkcs7_signed_hash_verify: fn(msg: PKCS7, cert: &x509crt.X509Crt, hash: [U8]) -[Time]> PKCS7Error! {
+pkcs7_signed_hash_verify: fn(msg: PKCS7, cert: ^x509crt.X509Crt, hash: [U8]) -[Time]> PKCS7Error! {
     pkcs7_data_or_hash_verify(msg, cert, hash, true)
 }
 

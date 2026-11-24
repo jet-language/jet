@@ -1,7 +1,7 @@
 // A script's functions may use the script's variables: each such function
 // takes the variables it reaches as extra parameters. Their types are the
 // types the script's own statements give them, which only a check of the
-// generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
+// generated `run: fn` (sema_script_entry) knows, and a parameter is `^` when
 // a check of the function's body finds it written.
 use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Interner, Item, ModuleID, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, TypeKind, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_tree_remap_types, body_type_id, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, delta_has_rows, diagnostic_with_label, interner_empty, interner_merge_delta, module_text, name_table_sized, symbol_is_local, symbol_key_text, symbol_local_keys_text, type_kind]
 
@@ -27,7 +27,7 @@ SemaScriptProbe: struct {
 // extra parameters aren't written yet is refused there, and the real check
 // reports it. A name whose binding didn't check has no row. `stage` is the
 // probe's own and is used up.
-sema_script_entry_local_types: fn(stage: &&SemaComptimeDeclarationStage, names: [String]) -> [String:SemaScriptVariable] {
+sema_script_entry_local_types: fn(stage: ^^SemaComptimeDeclarationStage, names: [String]) -> [String:SemaScriptVariable] {
     found := [String:SemaScriptVariable]{}
     probe := sema_script_probe_open(stage) ?? return found
     function: sema_script_probe_check(probe, "run") ?? return found
@@ -37,11 +37,11 @@ sema_script_entry_local_types: fn(stage: &&SemaComptimeDeclarationStage, names: 
 
 // For each function of the entry named in `candidates`, the extra parameters
 // among its candidates that its checked body writes itself. The declaration
-// pass `stage` registers each candidate as `&`, so a write checks; one the
+// pass `stage` registers each candidate as `^`, so a write checks; one the
 // body only reads becomes a read parameter. A parameter a call passes on to
 // another script function's parameter is not written here: the caller
 // chains the callee's writes. `stage` is used up.
-sema_script_helper_writes: fn(stage: &&SemaComptimeDeclarationStage, candidates: [String:[String]]) -> [String:[String]] {
+sema_script_helper_writes: fn(stage: ^^SemaComptimeDeclarationStage, candidates: [String:[String]]) -> [String:[String]] {
     written := [String:[String]]{}
     probe := sema_script_probe_open(stage) ?? return written
     loop (helper, names) in candidates {
@@ -60,7 +60,7 @@ sema_script_helper_writes: fn(stage: &&SemaComptimeDeclarationStage, candidates:
     written
 }
 
-sema_script_probe_open: fn(stage: &&SemaComptimeDeclarationStage) -> SemaScriptProbe? {
+sema_script_probe_open: fn(stage: ^^SemaComptimeDeclarationStage) -> SemaScriptProbe? {
     declarations := stage
     taken := declarations.graph.move()
     declarations.graph = None
@@ -72,7 +72,7 @@ sema_script_probe_open: fn(stage: &&SemaComptimeDeclarationStage) -> SemaScriptP
 // A probe of the module `module_identity` of `graph`. The program's types
 // come from `modules`, a declaration pass's or a check's. The probe takes
 // the graph and those rows.
-sema_script_probe_over: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGraphModuleResult], module_identity: ModuleID) -> SemaScriptProbe? {
+sema_script_probe_over: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], module_identity: ModuleID) -> SemaScriptProbe? {
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     types := [TTypeDef]{}
     loop row in 0..<modules.len() {
@@ -100,7 +100,7 @@ sema_script_probe_over: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGraphM
 
 // The probe moved to the module `module_identity`, whose scope its next
 // checks read: false when its graph has no such module.
-sema_script_probe_enter: fn(probe: &SemaScriptProbe, module_identity: ModuleID) -> Bool {
+sema_script_probe_enter: fn(probe: ^SemaScriptProbe, module_identity: ModuleID) -> Bool {
     found := Int?{None}
     if probe.program.registration_graph == .Val(graph) {
         found = sema_registration_module_index(graph, module_identity)
@@ -114,7 +114,7 @@ sema_script_probe_enter: fn(probe: &SemaScriptProbe, module_identity: ModuleID) 
 }
 
 // The checked body of the entry's top-level function `name`.
-sema_script_probe_check: fn(probe: &SemaScriptProbe, name: String) -> FnBody? {
+sema_script_probe_check: fn(probe: ^SemaScriptProbe, name: String) -> FnBody? {
     graph: probe.program.registration_graph ?? return None
     item_index: sema_script_entry_function_item(graph.modules[probe.module_index].program.items, name) ?? return None
     job: SemaBodyJob.TopLevel{item_index: item_index}
@@ -132,9 +132,9 @@ sema_script_probe_check: fn(probe: &SemaScriptProbe, name: String) -> FnBody? {
 // The type rows the probe's last check interned (its scopes' type delta,
 // sema_function_check_pass) merged into the held graph's interner, with
 // `function`, that check's body, renumbered to name them there.
-sema_script_probe_merge_types: fn(probe: &SemaScriptProbe, function: &FnBody) Never! {
+sema_script_probe_merge_types: fn(probe: ^SemaScriptProbe, function: ^FnBody) Never! {
     delta := probe.scopes.type_delta.pop() ?? return
-    if &probe.program.registration_graph == .Val(graph) {
+    if ^probe.program.registration_graph == .Val(graph) {
         if delta_has_rows(delta) {
             remap: interner_merge_delta(graph.interner, delta.move())
             body_tree_remap_types(function.tree, remap)
@@ -163,7 +163,7 @@ SemaScriptProbeChecked: struct {
 // kept. A name the module already binds is not checked. No effect pass runs
 // over it: its own effects and the functions it calls are gathered from its
 // calls, as a lambda's are (sema_expression_lambda_add_call_effects).
-sema_script_probe_check_func: fn(probe: &SemaScriptProbe, func: Func) -> SemaScriptProbeChecked {
+sema_script_probe_check_func: fn(probe: ^SemaScriptProbe, func: Func) -> SemaScriptProbeChecked {
     diagnostics := [Diagnostic]{}
     module_name: sema_scope_environment_module_text(probe.environment, probe.program)
     key: symbol_key_text(SymbolKind.Function, module_name, "", func.name)
@@ -197,19 +197,19 @@ sema_script_probe_check_func: fn(probe: &SemaScriptProbe, func: Func) -> SemaScr
 // the body its check reads. The answer of a node starting at `at`, else of
 // the statement it lies in; None when no function holds `at` or none
 // answers.
-sema_script_probe_answer: fn(probe: &SemaScriptProbe, plan: SemaFunctionMemoryPlan, at: Int, expression: &&Expr) -> SemaEvalProbeAnswer? {
+sema_script_probe_answer: fn(probe: ^SemaScriptProbe, plan: SemaFunctionMemoryPlan, at: Int, expression: ^^Expr) -> SemaEvalProbeAnswer? {
     module_index: probe.module_index
     found := SemaBodyJob?{None}
     if probe.program.registration_graph == .Val(graph) {
         found = sema_script_probe_job(graph, module_index, at)
     }
     job: found ?? return None
-    if &probe.program.registration_graph == .Val(graph) {
+    if ^probe.program.registration_graph == .Val(graph) {
         asked := SemaEvalProbe{module_identity: graph.modules[module_index].module_identity, offset: at, expressions: [Expr]{expression.move()}}
         graph.eval_probes = Val(sema_eval_probes([SemaEvalProbe]{asked.move()}))
     }
     checked := sema_script_probe_recheck(probe, plan, job)
-    if &probe.program.registration_graph == .Val(graph) -> graph.eval_probes = None
+    if ^probe.program.registration_graph == .Val(graph) -> graph.eval_probes = None
     chosen := SemaEvalProbeAnswer?{None}
     loop answer in checked.eval_answers.move() {
         if chosen == None || answer.exact -> chosen = Val(answer)
@@ -221,7 +221,7 @@ sema_script_probe_answer: fn(probe: &SemaScriptProbe, plan: SemaFunctionMemoryPl
 // (sema_script_probe_answer), its reports and facts dropped. A method
 // checks with its owner's generic parameters, as the program's check
 // prepares it (sema_check_registration_method).
-sema_script_probe_recheck: fn(probe: &SemaScriptProbe, plan: SemaFunctionMemoryPlan, job: SemaBodyJob) -> SemaFunctionResult {
+sema_script_probe_recheck: fn(probe: ^SemaScriptProbe, plan: SemaFunctionMemoryPlan, job: SemaBodyJob) -> SemaFunctionResult {
     module_index: probe.module_index
     owner_id: sema_check_registered_function_id(job, module_index, probe.environment, probe.program)
     position: sema_check_registered_memory_position(job, module_index, plan, probe.environment, probe.program)
@@ -292,7 +292,7 @@ sema_script_probe_symbol: fn(probe: SemaScriptProbe, func: Func, key: String) ->
 // The effects of `function`, a probe's check, from its calls `call_facts`:
 // no effect pass runs over it, so its own effects and the functions it
 // calls are gathered as a lambda's are (sema_expression_lambda_add_call_effects).
-sema_script_probe_call_effects: fn(program: SemaProgramTables, function: &FnBody, call_facts: [SemaCallSiteFact]) Never! {
+sema_script_probe_call_effects: fn(program: SemaProgramTables, function: ^FnBody, call_facts: [SemaCallSiteFact]) Never! {
     direct := [String]{}
     edges := [String]{}
     spans := [TEffectSpan]{}
@@ -329,7 +329,7 @@ SemaScriptProbeAppended: struct {
 // infallible (sema_eval_held_failure_settle). Each function it calls must
 // be held already: a call of one with no declaration, itself included,
 // doesn't check. Otherwise the module is left as it was, and None.
-sema_script_probe_append: fn(probe: &SemaScriptProbe, item: &&Item, functions: [FnBody], by_key: SemaEvalHeldRows) -> SemaScriptProbeAppended? {
+sema_script_probe_append: fn(probe: ^SemaScriptProbe, item: ^^Item, functions: [FnBody], by_key: SemaEvalHeldRows) -> SemaScriptProbeAppended? {
     module_index: probe.module_index
     taken := item.move()
     candidate := false
@@ -348,7 +348,7 @@ sema_script_probe_append: fn(probe: &SemaScriptProbe, item: &&Item, functions: [
     // union does (sema_failure_union_mint).
     mark := SemaGraphModuleMark?{None}
     item_index := -1
-    if &probe.program.registration_graph == .Val(graph) {
+    if ^probe.program.registration_graph == .Val(graph) {
         // A call names the declaration row its callable row shares
         // (sema_registration_index_callables).
         if graph.decls.rows.len() != graph.callables.len() -> return None
@@ -398,7 +398,7 @@ sema_script_probe_append: fn(probe: &SemaScriptProbe, item: &&Item, functions: [
         return sema_script_probe_unappend(probe, module_index, mark_at, scope_mark, name)
     }
     decl := DeclID?{None}
-    if &probe.program.registration_graph == .Val(held) {
+    if ^probe.program.registration_graph == .Val(held) {
         row: held.modules[module_index].functions.len() - 1
         decl = Val(decl_table_add(held.decls, held.modules[module_index].functions[row].symbol))
         decl_table_index(held.decls)
@@ -411,9 +411,9 @@ sema_script_probe_append: fn(probe: &SemaScriptProbe, item: &&Item, functions: [
 // Gives back the probe's module `module_index` as it was at `mark`, and its
 // scopes as they were at `scope_mark`, before an append of the function
 // `name` (sema_script_probe_append): None.
-sema_script_probe_unappend: fn(probe: &SemaScriptProbe, module_index: Int, mark: SemaGraphModuleMark, scope_mark: SemaScopeMark, name: String) -> SemaScriptProbeAppended? {
+sema_script_probe_unappend: fn(probe: ^SemaScriptProbe, module_index: Int, mark: SemaGraphModuleMark, scope_mark: SemaScopeMark, name: String) -> SemaScriptProbeAppended? {
     sema_scope_rollback(probe.scopes, scope_mark)
-    if &probe.program.registration_graph == .Val(graph) {
+    if ^probe.program.registration_graph == .Val(graph) {
         sema_graph_module_rollback(graph.modules[module_index], mark, name)
     }
     None
@@ -460,7 +460,7 @@ sema_script_entry_function_item: fn(items: [Item], name: String) -> Int? Never! 
 }
 
 // Each top-level binding of `function` named in `names`.
-sema_script_entry_bound_types: fn(function: FnBody, names: [String], found: &[String:SemaScriptVariable]) Never! {
+sema_script_entry_bound_types: fn(function: FnBody, names: [String], found: ^[String:SemaScriptVariable]) Never! {
     loop index in function.body {
         if body_stmt(function.tree, index) == .Let(local, _, _, _, _, _) {
             if names.contains(local.name) {
@@ -471,7 +471,7 @@ sema_script_entry_bound_types: fn(function: FnBody, names: [String], found: &[St
 }
 
 // Whether `tree` writes a place rooted at `parameter`: an assignment, or a
-// write borrow (a `&` argument, a changing method's receiver, a written
+// write borrow (a `^` argument, a changing method's receiver, a written
 // index), a changing built-in method's receiver (`words.push(…)`), lambdas
 // included. The reads in `passed` don't count.
 sema_script_body_writes: fn(tree: BodyTree, parameter: TLocal, passed: [Int]) -> Bool Never! {
@@ -578,7 +578,7 @@ sema_script_function_uses: fn(tables: ASTTables, function: Func, locals: [String
     uses
 }
 
-sema_script_note_use: fn(uses: &SemaScriptUses, locals: [String], functions: [String], function: Func, expression: Expr) Never! {
+sema_script_note_use: fn(uses: ^SemaScriptUses, locals: [String], functions: [String], function: Func, expression: Expr) Never! {
     if expression == .Ident(name, _, _) {
         // copy: the expression keeps its name; the list owns one per variable
         if locals.contains(name) && !uses.variables.contains(name) && !sema_script_function_hides(function, name) {
@@ -591,7 +591,7 @@ sema_script_note_use: fn(uses: &SemaScriptUses, locals: [String], functions: [St
     }
 }
 
-sema_script_note_function: fn(uses: &SemaScriptUses, functions: [String], function: Func, name: String) Never! {
+sema_script_note_function: fn(uses: ^SemaScriptUses, functions: [String], function: Func, name: String) Never! {
     if sema_script_function_hides(function, name) {
         return
     }
@@ -746,13 +746,13 @@ sema_script_lines_hold: fn(items: [Item], span: Span) -> Bool Never! {
 // E0227 for a script function that changes script variable `variable`, used
 // as a function value: the value has no place for the variable.
 sema_script_value_diagnostic: fn(helper: String, variable: String, span: Span) -> Diagnostic {
-    sema_error("E0227", span, "`{helper}` changes the script's `{variable}`, so it can't be used as a function value", "each call of `{helper}` passes the script's `{variable}` to its extra `&` parameter `{variable}:`, and a function value has no place for it", "call `{helper}` directly, or pass a lambda that makes that call")
+    sema_error("E0227", span, "`{helper}` changes the script's `{variable}`, so it can't be used as a function value", "each call of `{helper}` passes the script's `{variable}` to its extra `^` parameter `{variable}:`, and a function value has no place for it", "call `{helper}` directly, or pass a lambda that makes that call")
 }
 
 // E1101 for a call in a task to a script function that changes script
 // variable `variable`: the task would change it beside the script.
 sema_script_task_diagnostic: fn(helper: String, variable: String, span: Span) -> Diagnostic {
-    sema_error("E1101", span, "`{helper}` changes the script's `{variable}`, so it can't be called in a task", "each call of `{helper}` passes the script's `{variable}` to its extra `&` parameter `{variable}:`, and a task runs beside the script, so the change would race it", "call `{helper}` outside the task, or pass the task's own value by name: `{helper}(…, {variable}: …)`")
+    sema_error("E1101", span, "`{helper}` changes the script's `{variable}`, so it can't be called in a task", "each call of `{helper}` passes the script's `{variable}` to its extra `^` parameter `{variable}:`, and a task runs beside the script, so the change would race it", "call `{helper}` outside the task, or pass the task's own value by name: `{helper}(…, {variable}: …)`")
 }
 
 // E0204 for a call whose extra parameter for a script variable overlaps an
@@ -760,8 +760,8 @@ sema_script_task_diagnostic: fn(helper: String, variable: String, span: Span) ->
 sema_script_alias_diagnostic: fn(helper: String, parameter: SemaCallParam, active_write: Bool, span: Span) -> Diagnostic {
     variable: parameter.name
     writes: parameter.convention == AccessConvention.Write
-    through: if writes -> "change it through its extra `&` parameter `{variable}:`" else -> "read it through its extra parameter `{variable}:`"
-    passes: if writes -> "`{helper}` changes the script's `{variable}`, so each call passes it as an extra `&` parameter" else -> "`{helper}` reads the script's `{variable}`, so each call passes it as an extra parameter"
+    through: if writes -> "change it through its extra `^` parameter `{variable}:`" else -> "read it through its extra parameter `{variable}:`"
+    passes: if writes -> "`{helper}` changes the script's `{variable}`, so each call passes it as an extra `^` parameter" else -> "`{helper}` reads the script's `{variable}`, so each call passes it as an extra parameter"
     if active_write {
         return sema_error("E0204", span, "`{variable}` is being changed in this call, so `{helper}` can't also {through}", "{passes}, and while something is being changed through a write parameter, nobody else may be looking at it", "pass `{variable}` only once, or pass a copy of it")
     }

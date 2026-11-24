@@ -333,7 +333,7 @@ project_symbol_definitions: fn(context: ProjectQueryContext, symbol: String, by_
     hits
 }
 
-push_project_references: fn(results: &[String], seen: &[String:Bool], context: ProjectQueryContext, symbol: String, definitions: [ProjectDefinitionHit], projection: Projection) {
+push_project_references: fn(results: ^[String], seen: ^[String:Bool], context: ProjectQueryContext, symbol: String, definitions: [ProjectDefinitionHit], projection: Projection) {
     loop at in 0..<context.sources.len() {
         source: context.sources[at]
         loop reference in source.index.references {
@@ -368,7 +368,7 @@ reference_targets: fn(reference: SemRef, definitions: [ProjectDefinitionHit]) ->
 
 // One project result, kept once per kind, source, span and title; a result
 // in the selected source names its graph node.
-push_project_result: fn(results: &[String], seen: &[String:Bool], kind: String, title: String, module_path: String, span: Span, source: ProjectSourceIndex, projection: Projection?, selected_source_id: String) {
+push_project_result: fn(results: ^[String], seen: ^[String:Bool], kind: String, title: String, module_path: String, span: Span, source: ProjectSourceIndex, projection: Projection?, selected_source_id: String) {
     key: "{kind}|{source.source_id}|{span.start}|{span.end}|{title}"
     if seen.has_key(key) {
         return
@@ -383,7 +383,7 @@ push_project_result: fn(results: &[String], seen: &[String:Bool], kind: String, 
 }
 
 // The sorted results, cut to PROJECT_QUERY_RESULT_LIMIT of them.
-project_query_ok: fn(op: String, context: ProjectQueryContext, results: &[String], extra_fields: String) -> String Never! {
+project_query_ok: fn(op: String, context: ProjectQueryContext, results: ^[String], extra_fields: String) -> String Never! {
     results.sort()
     truncated: results.len() > PROJECT_QUERY_RESULT_LIMIT
     loop results.len() > PROJECT_QUERY_RESULT_LIMIT {

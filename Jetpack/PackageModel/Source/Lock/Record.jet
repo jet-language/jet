@@ -164,7 +164,7 @@ pkg_lock_record_envelope: fn(project_root: String, package_name: String, envelop
 }
 
 // Replace the first package matching `matches`, or append `entry`.
-pkg_lock_upsert_package: fn(lock: &LockFile, entry: LockedPackage, matches: fn(LockedPackage) -> Bool Never!) Never! {
+pkg_lock_upsert_package: fn(lock: ^LockFile, entry: LockedPackage, matches: fn(LockedPackage) -> Bool Never!) Never! {
     loop index in 0..<lock.packages.len() {
         if matches(lock.packages[index]) {
             lock.packages[index] = entry

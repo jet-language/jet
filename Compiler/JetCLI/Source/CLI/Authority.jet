@@ -179,7 +179,7 @@ jet_cli_policy_authority: fn(required: [String], authority_policy: JetDriverAuth
 // grantable right, `--allow` its rights, and `--deny` denies, which wins.
 // `--allow='FS.Read("<path>")'` grants `FS.Read` itself: the run it launches
 // can read only those paths (jet_cli_merged_read_scope).
-jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvocationAuthority?) Never! {
+jet_cli_with_invocation: fn(authority: ^JetCLIAuthority, invocation: JetCLIInvocationAuthority?) Never! {
     rows: invocation ?? return
     if !rows.all && rows.allow.len() == 0 && rows.deny.len() == 0 {
         return

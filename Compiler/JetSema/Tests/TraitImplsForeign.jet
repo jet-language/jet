@@ -10,7 +10,7 @@ use {
 
 TRAIT_IMPLS_LIB: "Retain: trait {{\n    saved: fn(self) -> Bool,\n    evictable: fn(self) -> Bool {{\n        !self.saved()\n    }}\n}}\n\ncount_evictable: fn<I: Retain>(items: [I]) -> Int {{\n    items.len()\n}}\n"
 
-trait_impls_input: fn(table: &ModuleTable, package: String, name: String, source: String) -> SemaRegistrationModuleInput {
+trait_impls_input: fn(table: ^ModuleTable, package: String, name: String, source: String) -> SemaRegistrationModuleInput {
     parsed := parse_source(source.bytes())
     assert(parsed.diagnostics.len() == 0, "{name}: {parsed.diagnostics:Debug}")
     identity: module_intern(table, "{package}.{name}")

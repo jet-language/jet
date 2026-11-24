@@ -66,7 +66,7 @@ SemaComputeValidationWork: struct {
     fact_queries: Int{0},
 }
 
-sema_compute_index: fn(modules: [SemaGraphModuleResult], work: &SemaComputeValidationWork) -> SemaComputeIndex {
+sema_compute_index: fn(modules: [SemaGraphModuleResult], work: ^SemaComputeValidationWork) -> SemaComputeIndex {
     index := SemaComputeIndex{functions: [String:SemaComputePosition]{}, facts: [String:SemaComputePosition]{}}
     loop (module_position, module_row) in modules {
         loop (row, function) in module_row.functions {
@@ -94,19 +94,19 @@ SemaComputePanicMemo: struct {
     safe: Bool,
 }
 
-sema_compute_record_core_call: fn(record: CoreCallRecord, span: Span, context: &SemaCheckContext) -> Bool Never! {
+sema_compute_record_core_call: fn(record: CoreCallRecord, span: Span, context: ^SemaCheckContext) -> Bool Never! {
     if record.module_name != "core.compute" -> return false
     context.compute_calls.push(SemaComputeCallFact{method: record.member, span: span})
     true
 }
 
-sema_compute_record_autodiff_obligation: fn(method: String, target: String, span: Span, context: &SemaCheckContext) Never! {
+sema_compute_record_autodiff_obligation: fn(method: String, target: String, span: Span, context: ^SemaCheckContext) Never! {
     context.autodiff_obligations.push(SemaAutodiffObligation{method: method, target: target, span: span})
 }
 
 // A panic is admissible under autodiff only when every reachable Panic edge is
 // the explicit fallback of a checked Tensor-returning Core compute operation.
-sema_compute_note_panic: fn(context: &SemaCheckContext, safe_compute_fallback: Bool) Never! {
+sema_compute_note_panic: fn(context: ^SemaCheckContext, safe_compute_fallback: Bool) Never! {
     if safe_compute_fallback -> context.autodiff_safe_panic = true else {
         context.autodiff_unsafe_panic = true
     }
@@ -126,12 +126,12 @@ sema_compute_effects_have_root: fn(effects: [String], root: String) -> Bool Neve
     false
 }
 
-sema_compute_function_position: fn(index: SemaComputeIndex, function_key: String, work: &SemaComputeValidationWork) -> SemaComputePosition? {
+sema_compute_function_position: fn(index: SemaComputeIndex, function_key: String, work: ^SemaComputeValidationWork) -> SemaComputePosition? {
     if work.counting -> work.function_queries += 1
     index.functions.get(function_key)
 }
 
-sema_compute_function_facts_position: fn(index: SemaComputeIndex, function_key: String, work: &SemaComputeValidationWork) -> SemaComputePosition? {
+sema_compute_function_facts_position: fn(index: SemaComputeIndex, function_key: String, work: ^SemaComputeValidationWork) -> SemaComputePosition? {
     if work.counting -> work.fact_queries += 1
     index.facts.get(function_key)
 }
@@ -143,7 +143,7 @@ sema_compute_panic_memo: fn(memo: [SemaComputePanicMemo], function_key: String) 
     None
 }
 
-sema_compute_panic_sites_are_compute_failures: fn(function_key: String, modules: [SemaGraphModuleResult], index: SemaComputeIndex, visiting: &[String], memo: &[SemaComputePanicMemo], work: &SemaComputeValidationWork) -> Bool Never! {
+sema_compute_panic_sites_are_compute_failures: fn(function_key: String, modules: [SemaGraphModuleResult], index: SemaComputeIndex, visiting: ^[String], memo: ^[SemaComputePanicMemo], work: ^SemaComputeValidationWork) -> Bool Never! {
     if function_key == "__jet_panic__" -> return false
     if sema_compute_panic_memo(memo, function_key) == .Val(value) -> return value
     loop active in visiting {
@@ -201,7 +201,7 @@ sema_compute_forbidden_effects: fn(effects: [String]) -> [String] Never! {
 // capability itself: its CPU oracle and the autodiff tape it records on
 // (the tape's lock and invariant stops) add no effect to the function it
 // differentiates.
-sema_compute_autodiff_reach: fn(index: SemaComputeIndex, modules: [SemaGraphModuleResult], function_key: String, solved: [String], work: &SemaComputeValidationWork) -> [String] Never! {
+sema_compute_autodiff_reach: fn(index: SemaComputeIndex, modules: [SemaGraphModuleResult], function_key: String, solved: [String], work: ^SemaComputeValidationWork) -> [String] Never! {
     reached := [String]{}
     panics := false
     visited := [String]{}
@@ -248,7 +248,7 @@ sema_compute_effect_names: fn(effects: [String]) -> String Never! { effects.join
 // Borrow the globally solved module products. Keys retain the same first match
 // as the old flattened lists, and diagnostics retain module/fact/obligation
 // order. The loan ends before the finalizer's next module mutation.
-sema_compute_validate_autodiff_purity: fn(modules: [SemaGraphModuleResult], work: &SemaComputeValidationWork) -> [Diagnostic] {
+sema_compute_validate_autodiff_purity: fn(modules: [SemaGraphModuleResult], work: ^SemaComputeValidationWork) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     has_obligations := false
     loop module_row in modules {

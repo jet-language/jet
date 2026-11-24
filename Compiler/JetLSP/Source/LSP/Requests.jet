@@ -8,11 +8,18 @@ use {
 
 // Each known method reaches its one feature provider; an unknown method
 // answers MethodNotFound.
-lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -> String {
+lsp_handle_request: fn(server: ^LSPServer, method: String, params: Dyn?, id: Dyn) -> String {
     if method == {
         "initialize" -> {
-            workspace: lsp_member(lsp_param(params, "capabilities") ?? Dyn.Null, "workspace") ?? Dyn.Null
+            capabilities: lsp_param(params, "capabilities") ?? Dyn.Null
+            workspace: lsp_member(capabilities, "workspace") ?? Dyn.Null
             server.document_changes = lsp_bool_member(lsp_member(workspace, "workspaceEdit") ?? Dyn.Null, "documentChanges")
+            text_document: lsp_member(capabilities, "textDocument") ?? Dyn.Null
+            resolve_support: lsp_member(lsp_member(text_document, "codeAction") ?? Dyn.Null, "resolveSupport") ?? Dyn.Null
+            server.code_action_resolve = loop property in lsp_member_rows(resolve_support, "properties") {
+                if property == .Text(name) && name == "edit" -> break true
+            } ?? false
+            server.pull_diagnostics = lsp_member(text_document, "diagnostic") != None
             lsp_initial_workspace_folders(server, params)
             lsp_initialize_response(id)
         }
@@ -21,15 +28,21 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
             lsp_response(id, "null")
         }
         "textDocument/codeAction" -> lsp_code_action_response(server, params, id)
+        "codeAction/resolve" -> lsp_code_action_resolve_response(server, params, id)
         "textDocument/formatting" -> lsp_format_response(server, params, id)
         "textDocument/rangeFormatting" -> lsp_range_format_response(server, params, id)
         "textDocument/onTypeFormatting" -> lsp_on_type_format_response(server, params, id)
         "textDocument/completion" -> lsp_completion_response(server, params, id)
+        "completionItem/resolve" -> lsp_completion_resolve_response(server, params, id)
         "textDocument/signatureHelp" -> lsp_signature_help_response(server, params, id)
         "textDocument/hover" -> lsp_hover_response(server, params, id)
         "textDocument/definition" -> lsp_definition_response(server, params, id)
+        "textDocument/declaration" -> lsp_definition_response(server, params, id)
+        "textDocument/typeDefinition" -> lsp_type_definition_response(server, params, id)
+        "textDocument/implementation" -> lsp_implementation_response(server, params, id)
         "textDocument/references" -> lsp_references_response(server, params, id)
         "textDocument/documentHighlight" -> lsp_document_highlight_response(server, params, id)
+        "textDocument/linkedEditingRange" -> lsp_linked_editing_range_response(server, params, id)
         "textDocument/prepareRename" -> lsp_prepare_rename_response(server, params, id)
         "textDocument/rename" -> lsp_rename_response(server, params, id)
         "textDocument/documentSymbol" -> lsp_document_symbol_response(server, params, id)
@@ -42,6 +55,8 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/semanticTokens/full" -> lsp_semantic_tokens_response(server, params, id)
         "textDocument/semanticTokens/full/delta" -> lsp_semantic_tokens_delta_response(server, params, id)
         "textDocument/semanticTokens/range" -> lsp_semantic_tokens_range_response(server, params, id)
+        "textDocument/diagnostic" -> lsp_document_diagnostic_response(server, params, id)
+        "workspace/diagnostic" -> lsp_workspace_diagnostic_response(server, params, id)
         "textDocument/inlayHint" -> lsp_inlay_hint_response(server, params, id)
         "textDocument/prepareTypeHierarchy" -> lsp_prepare_hierarchy_response(server, params, id, calls: false)
         "typeHierarchy/supertypes" -> lsp_type_supertypes_response(server, params, id)
@@ -49,6 +64,7 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/prepareCallHierarchy" -> lsp_prepare_hierarchy_response(server, params, id, calls: true)
         "callHierarchy/incomingCalls" -> lsp_incoming_calls_response(server, params, id)
         "callHierarchy/outgoingCalls" -> lsp_outgoing_calls_response(server, params, id)
+        "workspace/willRenameFiles" -> lsp_will_rename_files_response(server, params, id)
         "resources/list" -> lsp_resources_list_response(server, id)
         "resources/read" -> lsp_resources_read_response(server, params, id)
         else -> lsp_error_response(id, -32601, "method not found: {method}")
@@ -57,7 +73,7 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
 
 // Cancellation and tracing need no answer: the loop answers each request in
 // turn, so none is still running when its cancellation arrives.
-lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, stdout: &lsp_request_term.Stdout) IOError! {
+lsp_handle_notification: fn(server: ^LSPServer, method: String, params: Dyn?, stdout: ^lsp_request_term.Stdout) IOError! {
     if method == {
         "exit" -> server.exited = true
         "textDocument/didOpen" -> {
@@ -79,7 +95,7 @@ lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, st
 
 LSP_SEMANTIC_TOKEN_TYPES: [String]{"keyword", "type", "function", "variable", "parameter", "property", "enumMember", "string", "number", "comment", "operator", "namespace", "decorator"}
 
-LSP_SEMANTIC_TOKEN_MODIFIERS: [String]{"declaration", "readonly", "modification"}
+LSP_SEMANTIC_TOKEN_MODIFIERS: [String]{"declaration", "readonly", "modification", "macro"}
 
 lsp_json_strings: fn(values: [String]) -> String Never! {
     rows := [String]{}
@@ -94,13 +110,18 @@ lsp_initialize_response: fn(id: Dyn) -> String Never! {
         "\"documentFormattingProvider\":true",
         "\"documentRangeFormattingProvider\":true",
         "\"documentOnTypeFormattingProvider\":{{\"firstTriggerCharacter\":\"\\n\",\"moreTriggerCharacter\":[\"}}\"]}}",
-        "\"codeActionProvider\":{{\"codeActionKinds\":[\"quickfix\",\"refactor.rewrite\"]}}",
-        "\"completionProvider\":{{\"triggerCharacters\":[\".\"],\"resolveProvider\":false}}",
+        "\"codeActionProvider\":{{\"codeActionKinds\":[\"quickfix\",\"refactor.rewrite\",\"source.organizeImports\"],\"resolveProvider\":true}}",
+        "\"completionProvider\":{{\"triggerCharacters\":[\".\"],\"resolveProvider\":true}}",
         "\"signatureHelpProvider\":{{\"triggerCharacters\":[\"(\",\",\"]}}",
         "\"hoverProvider\":true",
         "\"definitionProvider\":true",
+        // A Jet name is declared where it is defined.
+        "\"declarationProvider\":true",
+        "\"typeDefinitionProvider\":true",
+        "\"implementationProvider\":true",
         "\"referencesProvider\":true",
         "\"documentHighlightProvider\":true",
+        "\"linkedEditingRangeProvider\":true",
         "\"renameProvider\":{{\"prepareProvider\":true}}",
         "\"documentSymbolProvider\":true",
         "\"workspaceSymbolProvider\":true",
@@ -113,7 +134,12 @@ lsp_initialize_response: fn(id: Dyn) -> String Never! {
         "\"inlayHintProvider\":true",
         "\"typeHierarchyProvider\":true",
         "\"callHierarchyProvider\":true",
-        "\"workspace\":{{\"workspaceFolders\":{{\"supported\":true,\"changeNotifications\":true}}}}",
+        // A document's diagnostics can come from the files it imports, so
+        // an edit to one open document asks for the others' again.
+        "\"diagnosticProvider\":{{\"identifier\":\"jet\",\"interFileDependencies\":true,\"workspaceDiagnostics\":true}}",
+        // A `.jet` file or a folder about to be renamed or moved: the file
+        // imports naming what moves follow it.
+        "\"workspace\":{{\"workspaceFolders\":{{\"supported\":true,\"changeNotifications\":true}},\"fileOperations\":{{\"willRename\":{{\"filters\":[{{\"pattern\":{{\"glob\":\"**/*.jet\",\"matches\":\"file\"}}}},{{\"pattern\":{{\"glob\":\"**\",\"matches\":\"folder\"}}}}]}}}}}}",
     }
     lsp_response(id, "{{\"capabilities\":{{{capabilities.join(",")}}},\"serverInfo\":{{\"name\":\"jet\"}}}}")
 }

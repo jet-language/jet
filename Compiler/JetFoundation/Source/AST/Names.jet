@@ -152,7 +152,7 @@ name_slot_text: fn(table: NameTable, hash: Int, text: String) -> Int Never! {
 
 // Gives `bytes[start..<end]` (hash `hash`), whose String is `text`, the
 // next id at the empty slot `slot`.
-name_insert: fn(table: &NameTable, slot: Int, hash: Int, bytes: [U8], start: Int, end: Int, text: &&String) -> Name Never! {
+name_insert: fn(table: ^NameTable, slot: Int, hash: Int, bytes: [U8], start: Int, end: Int, text: ^^String) -> Name Never! {
     id: table.texts.len()
     if end > start -> table.bytes.extend(bytes[start..<end])
     table.ends.push(table.bytes.len())
@@ -165,7 +165,7 @@ name_insert: fn(table: &NameTable, slot: Int, hash: Int, bytes: [U8], start: Int
 
 // The id of `bytes[start..<end]`, interning it when it is new. A spelling
 // that is not UTF-8 resolves to "" but keeps its own id.
-name_intern_bytes: fn(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
+name_intern_bytes: fn(table: ^NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
     hash: name_hash(bytes, start, end)
     slot: name_slot(table, hash, bytes, start, end)
     entry: table.slots[slot]
@@ -201,11 +201,11 @@ name_find_bytes: fn(table: NameTable, bytes: [U8], start: Int, end: Int) -> Name
     Val(Name{id: U32{(entry & 0xffffffff) - 1}})
 }
 
-name_intern: fn(table: &NameTable, text: String) -> Name Never! {
+name_intern: fn(table: ^NameTable, text: String) -> Name Never! {
     name_intern_hashed(table, text, name_text_hash(text))
 }
 
-name_intern_hashed: fn(table: &NameTable, text: String, hash: Int) -> Name Never! {
+name_intern_hashed: fn(table: ^NameTable, text: String, hash: Int) -> Name Never! {
     slot: name_slot_text(table, hash, text)
     entry: table.slots[slot]
     if entry != 0 -> return Name{id: U32{(entry & 0xffffffff) - 1}}
@@ -213,7 +213,7 @@ name_intern_hashed: fn(table: &NameTable, text: String, hash: Int) -> Name Never
     name_insert(table, slot, hash, bytes, 0, bytes.len(), String.from_bytes(bytes) ?? "")
 }
 
-name_table_grow: fn(table: &NameTable) Never! {
+name_table_grow: fn(table: ^NameTable) Never! {
     capacity: (table.mask + 1) * 2
     mask: capacity - 1
     slots := [Int]{}
@@ -240,7 +240,7 @@ name_table_grow: fn(table: &NameTable) Never! {
 
 // Points each spelling of `table` at the pool's String for it; a spelling
 // the pool lacks joins `own` with the table's String. Ids and bytes stay.
-name_pool_adopt: fn(table: &NameTable, shared: NameTable, own: &NameTable) Never! {
+name_pool_adopt: fn(table: ^NameTable, shared: NameTable, own: ^NameTable) Never! {
     loop id in 0..<table.texts.len() {
         start: name_start(table, id)
         end: table.ends[id]
@@ -261,7 +261,7 @@ name_pool_adopt: fn(table: &NameTable, shared: NameTable, own: &NameTable) Never
 
 // Adds each spelling of `own` that `shared` lacks, with its String, to
 // `shared`.
-name_pool_fold: fn(shared: &NameTable, own: NameTable) Never! {
+name_pool_fold: fn(shared: ^NameTable, own: NameTable) Never! {
     loop id in 0..<own.texts.len() {
         start: name_start(own, id)
         end: own.ends[id]
@@ -310,7 +310,7 @@ NAME_POINTER: Name{id: U32{8}}
 // Adds every spelling of `from` from id `first` on that `into` lacks, in
 // `from`'s id order, and returns each such id's id in `into`, by id - first:
 // the remap a merged source's rows are renumbered by.
-name_table_merge: fn(into: &NameTable, from: NameTable, first: Int) -> [Name] Never! {
+name_table_merge: fn(into: ^NameTable, from: NameTable, first: Int) -> [Name] Never! {
     ids := [Name]{}
     count: from.texts.len() - first
     if count > 0 -> ids.try_reserve(count) ?? panic("reserve failed")
@@ -399,7 +399,7 @@ module_id_of: fn(name: Name, text: String) -> ModuleID Never! {
 }
 
 // The id of identity `text`, interned when it is new.
-module_intern: fn(table: &ModuleTable, text: String) -> ModuleID Never! {
+module_intern: fn(table: ^ModuleTable, text: String) -> ModuleID Never! {
     module_id_of(name_intern(table.identities, text), text)
 }
 
@@ -463,19 +463,19 @@ name_column_value: fn(names: NameTable, rows: [Int], text: String) -> Int? Never
 }
 
 // Binds `text` to `row`, replacing any earlier value.
-name_column_set: fn(names: &NameTable, rows: &[Int], text: String, row: Int) Never! {
+name_column_set: fn(names: ^NameTable, rows: ^[Int], text: String, row: Int) Never! {
     name_column_set_hashed(names, rows, text, name_text_hash(text), row)
 }
 
 // name_column_set of a `text` whose name_text_hash is `hash`.
-name_column_set_hashed: fn(names: &NameTable, rows: &[Int], text: String, hash: Int, row: Int) Never! {
+name_column_set_hashed: fn(names: ^NameTable, rows: ^[Int], text: String, hash: Int, row: Int) Never! {
     id: name_index(name_intern_hashed(names, text, hash))
     loop rows.len() <= id -> rows.push(NAME_COLUMN_UNBOUND)
     rows[id] = row
 }
 
 // Binds `text` to `row` (>= 0) unless it is bound: a key's first row stands.
-name_column_set_first: fn(names: &NameTable, rows: &[Int], text: String, row: Int) Never! {
+name_column_set_first: fn(names: ^NameTable, rows: ^[Int], text: String, row: Int) Never! {
     id: name_index(name_intern(names, text))
     loop rows.len() <= id -> rows.push(NAME_COLUMN_UNBOUND)
     if rows[id] < 0 -> rows[id] = row

@@ -41,7 +41,7 @@ Keys: struct {
 
 fail: fn(reason: String) -> FormatError { FormatError{format: "msgpack", reason: reason} }
 
-write_value: fn(value: Dyn, out: &[U8]) FormatError! {
+write_value: fn(value: Dyn, out: ^[U8]) FormatError! {
     if value == {
         .Null -> out.push(U8{192})
         .Bool(flag) -> out.push(if flag -> U8{195} else -> U8{194})
@@ -88,14 +88,14 @@ Reader: struct {
     bytes: [U8],
     at: Int,
 
-    byte: fn(&self) -> Int FormatError! {
+    byte: fn(^self) -> Int FormatError! {
         if self.at >= self.bytes.len() -> return Err(fail("the bytes end inside a value"))
         value: Int{self.bytes[self.at]}
         self.at += 1
         Ok(value)
     }
 
-    value: fn(&self) -> Dyn FormatError! {
+    value: fn(^self) -> Dyn FormatError! {
         head: self.byte() ?? return Err(err)
         if head < 128 -> return Ok(Dyn.Int(head))
         if head == 192 -> return Ok(Dyn.Null)

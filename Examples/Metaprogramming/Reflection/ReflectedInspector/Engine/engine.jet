@@ -29,7 +29,7 @@ Since: struct {
 Edit: trait {
     // Sets `field` from `text`; false when no field has that name or the text
     // does not parse as the field's type.
-    set: fn(&self, field: String, text: String) -> Bool Never!,
+    set: fn(^self, field: String, text: String) -> Bool Never!,
 }
 
 Inspect: trait {
@@ -54,14 +54,14 @@ Patch: struct {
     changes: [Change],
 }
 
-redo: fn<T: Edit>(entity: &T, patch: Patch) -> Bool {
+redo: fn<T: Edit>(entity: ^T, patch: Patch) -> Bool {
     loop change in patch.changes {
         if !entity.set(change.field, change.after) -> return false
     }
     true
 }
 
-undo: fn<T: Edit>(entity: &T, patch: Patch) -> Bool {
+undo: fn<T: Edit>(entity: ^T, patch: Patch) -> Bool {
     loop change in patch.changes {
         if !entity.set(change.field, change.before) -> return false
     }
@@ -131,7 +131,7 @@ Entity: struct {
             }
 
             impl #{tname}.engine.Edit {
-                set: fn(&self, field: String, text: String) -> Bool Never! {
+                set: fn(^self, field: String, text: String) -> Bool Never! {
                     #loop f in target.fields {
                         if field == f.name {
                             #if f.type.name == "String" {

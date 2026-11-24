@@ -39,7 +39,7 @@ Label: struct {
 `
 
 // The item `prepareTypeHierarchy` answers at the start of `line`.
-lsp_test_hierarchy_item: fn(server: &LSPServer, line: Int) -> Dyn {
+lsp_test_hierarchy_item: fn(server: ^LSPServer, line: Int) -> Dyn {
     items: lsp_test_rows(lsp_test_result(server, "textDocument/prepareTypeHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, line, 0)))
     assert_eq(items.len(), 1)
     items[0]
@@ -76,6 +76,24 @@ lsp_test_hierarchy_params: fn(item: Dyn, identity: Bool{true}) -> String Never! 
     assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/subtypes", lsp_test_hierarchy_params(label))), [String]{})
     // A function is no type.
     assert(lsp_test_result(server, "textDocument/prepareTypeHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, 7, 8)) == .Null, "a method has no type hierarchy")
+}
+
+#Test("a type use prepares the type it names, and a built-in type stands at its name with no supertypes or subtypes") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_HIERARCHY_URI, LSP_TEST_HIERARCHY)
+    // `Renderable` in `impl Renderable` on line 6.
+    used: lsp_test_rows(lsp_test_result(server, "textDocument/prepareTypeHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, 6, 10)))
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/subtypes", lsp_test_hierarchy_params(used[0]))), [String]{"Button=23", "Panel=23"})
+    // `String` in `label: String` on line 5.
+    string: lsp_test_rows(lsp_test_result(server, "textDocument/prepareTypeHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, 5, 12)))
+    assert_eq(string.len(), 1)
+    assert_eq(lsp_test_text(string[0], "name"), "String")
+    assert_eq(lsp_test_int(string[0], "kind"), 5)
+    assert_eq(lsp_test_range(lsp_test_field(string[0], "range")), "5:11-5:17")
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/supertypes", lsp_test_hierarchy_params(string[0]))), [String]{})
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/subtypes", lsp_test_hierarchy_params(string[0]))), [String]{})
+    // Nor does a call hierarchy start at a type.
+    assert(lsp_test_result(server, "textDocument/prepareCallHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, 5, 12)) == .Null, "a type has no call hierarchy")
 }
 
 LSP_TEST_CALLS_URI: "file:///w/calls.jet"

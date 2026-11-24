@@ -94,7 +94,7 @@ priv chacha20_core: module {
     }
 
     /// The twenty ChaCha rounds of `state` into `w`, before the final addition.
-    chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
+    chacha20_rounds: fn(state: [U32], w: ^[U32]) Never! {
         loop i in 0..<16 -> w[i] = state[i]
         loop _ in 0..<10 {
             qr(w, 0, 4, 8, 12)
@@ -118,7 +118,7 @@ priv chacha20_core: module {
     out
 }
 
-#Overflow(.Wrapping) qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+#Overflow(.Wrapping) qr: fn(s: ^[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     a := s[ia]
     b := s[ib]
     c := s[ic]
@@ -145,7 +145,7 @@ u32le: fn(bytes: [U8], off: Int) -> U32 Never! {
 // The little-endian byte push behind the ChaCha20 block output, not part of
 // the expert surface.
 priv u32_words: module {
-    push_u32le: fn(out: &[U8], value: U32) Never! {
+    push_u32le: fn(out: ^[U8], value: U32) Never! {
         loop k in 0..<4 -> out.push(wrapping(U8{value >> (8 * k)}))
     }
 }
@@ -421,7 +421,7 @@ aes_gcm_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
 
 // Whether the 16 tag bytes of `sealed` at `at` match `expect`, in one pass
 // over all of them: the verdict of the tag check.
-__gcm_tag_matches: fn(expect: [U8], sealed: [U8], at: Int) -> Bool Never! {
+priv __gcm_tag_matches: fn(expect: [U8], sealed: [U8], at: Int) -> Bool Never! {
     different := U8{0}
     loop i in 0..<16 -> different |= expect[i] ~ sealed[at + i]
     different == U8{0}
@@ -433,7 +433,7 @@ zeros16: fn() -> [U8] Never! {
     out
 }
 
-inc32: fn(block: &[U8]) Never! {
+inc32: fn(block: ^[U8]) Never! {
     // Four fixed steps; carry depends only on the public counter.
     carry := U64{1}
     loop i in 0..<4 {
@@ -443,7 +443,7 @@ inc32: fn(block: &[U8]) Never! {
     }
 }
 
-aes_ctr: fn(rk: [U8], j0: [U8], data: [U8], count: Int, state: &[U8], work: &[U64]) -> [U8] Never! {
+aes_ctr: fn(rk: [U8], j0: [U8], data: [U8], count: Int, state: ^[U8], work: ^[U64]) -> [U8] Never! {
     out := [U8]{}
     ctr := copy_bytes(j0)
     i := 0
@@ -485,7 +485,7 @@ aes_load_be64: fn(bytes: [U8], off: Int) -> U64 Never! {
     word
 }
 
-ghash_blocks: fn(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! {
+ghash_blocks: fn(y: ^[U64], high: U64, low: U64, data: [U8], count: Int) Never! {
     off := 0
     loop off < count {
         a := U64{0}
@@ -503,7 +503,7 @@ ghash_blocks: fn(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! 
 }
 
 // Masks are explicitly wrapping fixed-width subtraction.
-#Overflow(.Wrapping) gf128_mul: fn(x: &[U64], high: U64, low: U64) Never! {
+#Overflow(.Wrapping) gf128_mul: fn(x: ^[U64], high: U64, low: U64) Never! {
     a := x[0]
     b := x[1]
     vh := high
@@ -531,12 +531,12 @@ aes_workspace: fn() -> [U64] Never! {
     work
 }
 
-aes_workspace_clear: fn(work: &[U64]) Never! {
+aes_workspace_clear: fn(work: ^[U64]) Never! {
     // Best-effort source stores: the byte buffers use `crypto.wipe`.
     loop i in 0..<48 -> work[i] = U64{0}
 }
 
-aes256_expand: fn(key: [U8], state: &[U8], work: &[U64]) -> [U8] Never! {
+aes256_expand: fn(key: [U8], state: ^[U8], work: ^[U64]) -> [U8] Never! {
     w := [U8]{}
     loop b in key -> w.push(b)
     loop i in 8..<60 {
@@ -556,7 +556,7 @@ aes256_expand: fn(key: [U8], state: &[U8], work: &[U64]) -> [U8] Never! {
     w
 }
 
-aes256_encrypt_block: fn(rk: [U8], block: [U8], s: &[U8], work: &[U64]) Never! {
+aes256_encrypt_block: fn(rk: [U8], block: [U8], s: ^[U8], work: ^[U64]) Never! {
     loop i in 0..<16 -> s[i] = block[i]
     add_round(s, rk, 0)
     loop round in 1..<14 {
@@ -570,13 +570,13 @@ aes256_encrypt_block: fn(rk: [U8], block: [U8], s: &[U8], work: &[U64]) Never! {
     add_round(s, rk, 14)
 }
 
-add_round: fn(s: &[U8], rk: [U8], round: Int) Never! {
+add_round: fn(s: ^[U8], rk: [U8], round: Int) Never! {
     loop i in 0..<16 -> s[i] = s[i] ~ rk[round * 16 + i]
 }
 
 // Bitsliced AES inverse followed by the FIPS-197 affine transform.
 // All addresses and shifts depend only on public lane/plane indices.
-sub_bytes: fn(s: &[U8], w: &[U64]) Never! {
+sub_bytes: fn(s: ^[U8], w: ^[U64]) Never! {
     loop p in 0..<8 {
         w[p] = U64{0}
         loop lane in 0..<16 -> w[p] = w[p] | (((U64{s[lane]} >> p) & U64{1}) << lane)
@@ -606,7 +606,7 @@ sub_bytes: fn(s: &[U8], w: &[U64]) Never! {
 }
 
 // Linear square modulo x^8+x^4+x^3+x+1, with locals permitting aliasing.
-aes_square: fn(w: &[U64], src: Int, dst: Int) Never! {
+aes_square: fn(w: ^[U64], src: Int, dst: Int) Never! {
     a0: w[src].copy()
     a1: w[src + 1].copy()
     a2: w[src + 2].copy()
@@ -626,7 +626,7 @@ aes_square: fn(w: &[U64], src: Int, dst: Int) Never! {
 }
 
 // dst is distinct from a/b; bank 40 is the fixed multiply-by-x scratch.
-aes_multiply: fn(w: &[U64], a: Int, b: Int, dst: Int) Never! {
+aes_multiply: fn(w: ^[U64], a: Int, b: Int, dst: Int) Never! {
     loop p in 0..<8 {
         w[40 + p] = w[a + p]
         w[dst + p] = U64{0}
@@ -642,7 +642,7 @@ aes_multiply: fn(w: &[U64], a: Int, b: Int, dst: Int) Never! {
     }
 }
 
-shift_rows: fn(s: &[U8]) Never! {
+shift_rows: fn(s: ^[U8]) Never! {
     t1 := s[1]
     t5 := s[5]
     t9 := s[9]
@@ -669,7 +669,7 @@ shift_rows: fn(s: &[U8]) Never! {
     s[3] = t15
 }
 
-mix_columns: fn(s: &[U8]) Never! {
+mix_columns: fn(s: ^[U8]) Never! {
     loop c in 0..<4 {
         i: 4 * c
         a0: s[i].copy()
@@ -864,7 +864,7 @@ argon2_random_word: fn(memory: [U64], address_block: [U64], data_independent: Bo
 /// first pass), its low half J1 the block of the reference area. From the
 /// second half of the first pass on, the word is a previous block's: the
 /// data-dependent addressing of Argon2id.
-__argon2_reference_block: fn(memory: [U64], block: &[U64], random_word: U64, pass: Int, slice: Int, index: Int, lane: Int, lanes: Int, segment_length: Int, lane_length: Int) Never! {
+priv __argon2_reference_block: fn(memory: [U64], block: ^[U64], random_word: U64, pass: Int, slice: Int, index: Int, lane: Int, lanes: Int, segment_length: Int, lane_length: Int) Never! {
     reference_lane: if pass == 0 && slice == 0 -> lane else -> (Int{(random_word >> 32) %% U64{lanes}})
     same_lane: reference_lane == lane
     area: if {
@@ -889,7 +889,7 @@ argon2_mapping: fn(j1: U64, area: Int) -> Int Never! {
 
 /// Next 128 data-independent addresses, G(0, G(0, input)), after bumping the
 /// input block's counter word.
-argon2_next_addresses: fn(address_block: &[U64], input_block: &[U64], saved: &[U64]) Never! {
+argon2_next_addresses: fn(address_block: ^[U64], input_block: ^[U64], saved: ^[U64]) Never! {
     input_block[6] = input_block[6] + U64{1}
     loop i in 0..<128 {
         address_block[i] = input_block[i]
@@ -907,7 +907,7 @@ argon2_next_addresses: fn(address_block: &[U64], input_block: &[U64], saved: &[U
 
 /// Compress block `previous` of `memory` with the reference block into
 /// block `next` (word offsets); later passes XOR into the existing block.
-__argon2_fill_block: fn(memory: &[U64], work: &[U64], saved: &[U64], reference: [U64], previous: Int, next: Int, with_xor: Bool) Never! {
+priv __argon2_fill_block: fn(memory: ^[U64], work: ^[U64], saved: ^[U64], reference: [U64], previous: Int, next: Int, with_xor: Bool) Never! {
     loop i in 0..<128 {
         mixed: (memory[previous + i]) ~ reference[i]
         work[i] = mixed
@@ -919,7 +919,7 @@ __argon2_fill_block: fn(memory: &[U64], work: &[U64], saved: &[U64], reference: 
 
 /// Argon2 permutation P over a 128-word block, in place: eight row rounds of
 /// sixteen consecutive words, then eight column rounds of word pairs.
-argon2_permute: fn(block: &[U64]) Never! {
+argon2_permute: fn(block: ^[U64]) Never! {
     loop i in 0..<8 {
         b: i * 16
         argon2_round(block, b, b + 1, b + 2, b + 3, b + 4, b + 5, b + 6, b + 7, b + 8, b + 9, b + 10, b + 11, b + 12, b + 13, b + 14, b + 15)
@@ -930,7 +930,7 @@ argon2_permute: fn(block: &[U64]) Never! {
     }
 }
 
-argon2_round: fn(v: &[U64], i0: Int, i1: Int, i2: Int, i3: Int, i4: Int, i5: Int, i6: Int, i7: Int, i8: Int, i9: Int, i10: Int, i11: Int, i12: Int, i13: Int, i14: Int, i15: Int) Never! {
+argon2_round: fn(v: ^[U64], i0: Int, i1: Int, i2: Int, i3: Int, i4: Int, i5: Int, i6: Int, i7: Int, i8: Int, i9: Int, i10: Int, i11: Int, i12: Int, i13: Int, i14: Int, i15: Int) Never! {
     argon2_g(v, i0, i4, i8, i12)
     argon2_g(v, i1, i5, i9, i13)
     argon2_g(v, i2, i6, i10, i14)
@@ -943,7 +943,7 @@ argon2_round: fn(v: &[U64], i0: Int, i1: Int, i2: Int, i3: Int, i4: Int, i5: Int
 
 /// BlaMka G: BLAKE2b G with each x + y replaced by
 /// x + y + 2 * lo32(x) * lo32(y), all modulo 2^64.
-#Overflow(.Wrapping) argon2_g: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+#Overflow(.Wrapping) argon2_g: fn(v: ^[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     lo: U64{0xffffffff}
     a := v[ia]
     b := v[ib]
@@ -1183,7 +1183,7 @@ C_BLAKE2B_SIGMA: [Int]{
 
 /// Compress `data[start..<end]`, zero-padded to 128 bytes; `end` is also the
 /// byte counter. `v` and `m` are the caller's 16-word scratch buffers.
-blake2b_compress: fn(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, end: Int, last: Bool) Never! {
+blake2b_compress: fn(h: ^[U64], v: ^[U64], m: ^[U64], data: [U8], start: Int, end: Int, last: Bool) Never! {
     loop i in 0..<16 -> m[i] = load_le64(data, start + i * 8, end)
     loop i in 0..<8 {
         v[i] = h[i]
@@ -1206,7 +1206,7 @@ blake2b_compress: fn(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, en
 }
 
 /// BLAKE2b G (RFC 7693 3.1): right rotations by 32, 24, 16 and 63.
-#Overflow(.Wrapping) blake2b_mix: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int, x: U64, y: U64) Never! {
+#Overflow(.Wrapping) blake2b_mix: fn(v: ^[U64], ia: Int, ib: Int, ic: Int, id: Int, x: U64, y: U64) Never! {
     a := v[ia]
     b := v[ib]
     c := v[ic]

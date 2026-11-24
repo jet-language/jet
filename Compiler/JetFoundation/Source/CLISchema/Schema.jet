@@ -229,7 +229,7 @@ cli_schema_job_index: fn(jobs: [JobFact]) -> [String:Int] Never! {
     index.move()
 }
 
-cli_schema_job_enter: fn(jobs: [JobFact], index: [String:Int], name: String, state: &[Int], stack: &[CLIJobVisit]) CLIJobGraphError! {
+cli_schema_job_enter: fn(jobs: [JobFact], index: [String:Int], name: String, state: ^[Int], stack: ^[CLIJobVisit]) CLIJobGraphError! {
     row: index.get(name) ?? return Err(CLIJobGraphError{message: "job graph references unknown job `{name}`"})
     if row < 0 -> return Err(CLIJobGraphError{message: "job `{name}` has an ambiguous declaration"})
     if state[row] == 2 -> return Ok()
@@ -251,7 +251,7 @@ cli_schema_job_enter: fn(jobs: [JobFact], index: [String:Int], name: String, sta
     Ok()
 }
 
-cli_schema_job_finish: fn(jobs: [JobFact], index: [String:Int], state: &[Int], stack: &[CLIJobVisit]) -> Int? CLIJobGraphError! {
+cli_schema_job_finish: fn(jobs: [JobFact], index: [String:Int], state: ^[Int], stack: ^[CLIJobVisit]) -> Int? CLIJobGraphError! {
     loop stack.len() > 0 {
         last: stack.len() - 1
         row: stack[last].row

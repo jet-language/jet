@@ -67,7 +67,7 @@ compiler_task_graph: fn(count: Int) -> CompilerTaskGraph Never! {
 }
 
 // Node `node` waits on node `on`. An edge added twice counts once.
-compiler_task_graph_wait: fn(graph: &CompilerTaskGraph, node: Int, on: Int) Never! {
+compiler_task_graph_wait: fn(graph: ^CompilerTaskGraph, node: Int, on: Int) Never! {
     if graph.dependents[on].contains(node) {
         return
     }
@@ -76,7 +76,7 @@ compiler_task_graph_wait: fn(graph: &CompilerTaskGraph, node: Int, on: Int) Neve
 }
 
 // Node `node` is expected to hold `weight` units of work (at least 1).
-compiler_task_graph_weigh: fn(graph: &CompilerTaskGraph, node: Int, weight: Int) Never! {
+compiler_task_graph_weigh: fn(graph: ^CompilerTaskGraph, node: Int, weight: Int) Never! {
     graph.weights[node] = if weight < 1 -> 1 else -> weight
 }
 
@@ -99,7 +99,7 @@ CompilerTaskStart: struct {
 
 // The run of `graph`, which it takes, on as many slots as `threads` admits,
 // and never more slots than nodes.
-compiler_task_schedule: fn(graph: &&CompilerTaskGraph, threads: CompilerThreads) -> CompilerTaskSchedule Never! {
+compiler_task_schedule: fn(graph: ^^CompilerTaskGraph, threads: CompilerThreads) -> CompilerTaskSchedule Never! {
     count: graph.waits.len()
     workers := compiler_threads_limit(threads)
     if workers > count -> workers = count
@@ -116,7 +116,7 @@ compiler_task_schedule: fn(graph: &&CompilerTaskGraph, threads: CompilerThreads)
 
 // The heaviest ready node (the lower node on a tie) and an idle slot, which
 // it now holds. None when no node is ready or no slot is idle.
-compiler_task_schedule_next: fn(schedule: &CompilerTaskSchedule) -> CompilerTaskStart? Never! {
+compiler_task_schedule_next: fn(schedule: ^CompilerTaskSchedule) -> CompilerTaskStart? Never! {
     if schedule.ready.len() == 0 || schedule.idle.len() == 0 -> return None
     node: compiler_task_heap_pop(schedule.ready, schedule.graph.weights)
     slot: schedule.idle.pop() ?? panic("a compiler task schedule lost an idle slot")
@@ -125,7 +125,7 @@ compiler_task_schedule_next: fn(schedule: &CompilerTaskSchedule) -> CompilerTask
 
 // The node `start` started has finished. Its slot is idle again, and each
 // node that waited on it alone is ready.
-compiler_task_schedule_finish: fn(schedule: &CompilerTaskSchedule, start: CompilerTaskStart) Never! {
+compiler_task_schedule_finish: fn(schedule: ^CompilerTaskSchedule, start: CompilerTaskStart) Never! {
     schedule.idle.push(start.slot)
     schedule.finished += 1
     loop dependent in schedule.graph.dependents[start.node] {
@@ -200,7 +200,7 @@ compiler_task_before: fn(weights: [Int], a: Int, b: Int) -> Bool Never! {
 }
 
 // Adds `node` to the binary heap `heap`, ordered by compiler_task_before.
-compiler_task_heap_push: fn(heap: &[Int], weights: [Int], node: Int) Never! {
+compiler_task_heap_push: fn(heap: ^[Int], weights: [Int], node: Int) Never! {
     heap.push(node)
     at := heap.len() - 1
     loop at > 0 {
@@ -214,7 +214,7 @@ compiler_task_heap_push: fn(heap: &[Int], weights: [Int], node: Int) Never! {
 }
 
 // Takes the first node of the non-empty heap `heap`.
-compiler_task_heap_pop: fn(heap: &[Int], weights: [Int]) -> Int Never! {
+compiler_task_heap_pop: fn(heap: ^[Int], weights: [Int]) -> Int Never! {
     first: heap[0]
     last: heap.pop() ?? panic("a compiler task heap was empty")
     if heap.len() == 0 -> return first

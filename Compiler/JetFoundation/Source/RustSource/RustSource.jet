@@ -136,7 +136,7 @@ rust_code_mask: fn(source: String) -> String Never! {
     String.from_bytes(out) ?? panic("Rust source mask preserves UTF-8 bytes")
 }
 
-rust_source_push_spaces: fn(out: &[U8], count: Int) Never! {
+rust_source_push_spaces: fn(out: ^[U8], count: Int) Never! {
     loop _ in 0..<count -> out.push(U8{32})
 }
 
@@ -296,7 +296,7 @@ rust_source_leading_item_start: fn(leading: [RustSourceLeading], line_start: Int
 // Memoize the result for every outer attribute visited in the same chain.
 // Bracketed header/body regions use the precomputed close, so failed candidates
 // cannot repeatedly walk a nested body or initializer.
-rust_source_test_item_end: fn(code: [U8], at: Int, closes: [Int], item_ends: RustSourceItemEnds, ends: &[Int]) -> Int? Never! {
+rust_source_test_item_end: fn(code: [U8], at: Int, closes: [Int], item_ends: RustSourceItemEnds, ends: ^[Int]) -> Int? Never! {
     visited := [Int]{}
     index := at
     result := -1

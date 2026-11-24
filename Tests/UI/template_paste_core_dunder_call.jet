@@ -1,0 +1,21 @@
+// A package's marker template can't paste a Core `__` name into a call:
+// only Core's own templates reach Core's machine space.
+use args: core.args
+
+Probe: struct {
+    impl Marker {
+        sites: [.Type],
+
+        expand: fn(self, target: Target) {
+            hook: "__cli_is_int"
+            shown: fn(self) -> Bool { args.#{hook}("42") }
+        }
+    }
+}
+
+#Probe
+Box: struct {
+    n: Int,
+}
+
+run: fn() { print(Box{n: 1}.n) }

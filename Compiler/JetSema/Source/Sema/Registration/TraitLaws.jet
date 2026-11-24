@@ -65,7 +65,7 @@ SemaTraitLawTable: struct {
     law_rows: [Row<SemaTraitLaw>],
 }
 
-sema_trait_laws_add: fn(graph: &SemaRegistrationGraph) Never! {
+sema_trait_laws_add: fn(graph: ^SemaRegistrationGraph) Never! {
     groups := Rows<SemaTraitLawGroup>{}
     empty_group: groups.add(SemaTraitLawGroup{first: 0, count: 0})
     declared := SemaTraitLawTable{names: name_table(), groups: groups, group_rows: [Row<SemaTraitLawGroup>]{empty_group}, laws: Rows<SemaTraitLaw>{}, law_rows: [Row<SemaTraitLaw>]{}}
@@ -168,7 +168,7 @@ sema_trait_law_written: fn(methods: [Func]) -> Bool Never! {
     methods.len() == 0
 }
 
-sema_trait_law_blocks: fn(type_name: String, blocks: [TraitImplBlock], found: &[SemaTraitLawImpl]) Never! {
+sema_trait_law_blocks: fn(type_name: String, blocks: [TraitImplBlock], found: ^[SemaTraitLawImpl]) Never! {
     loop block in blocks {
         if block.compiler_generated -> next
         span: block.span ?? next
@@ -180,7 +180,7 @@ sema_trait_law_blocks: fn(type_name: String, blocks: [TraitImplBlock], found: &[
 // `module_index`, parsed from `offset`: the property itself, or a skipped
 // test whose name says why the law is not checked. Pushes onto `faults` why
 // the compiler could not make the test (sema_trait_law_stopped), else None.
-sema_trait_law_test: fn(graph: SemaRegistrationGraph, module_index: Int, written: SemaTraitLawImpl, law: SemaTraitLaw, offset: Int, faults: &[String?]) -> TestDef Never! {
+sema_trait_law_test: fn(graph: SemaRegistrationGraph, module_index: Int, written: SemaTraitLawImpl, law: SemaTraitLaw, offset: Int, faults: ^[String?]) -> TestDef Never! {
     trait_name: sema_trait_law_leaf(written.trait_name)
     name: "{trait_name}.{law.name} for {written.type_name}"
     if sema_trait_law_waiver(written.markers, law.name) == .Val(reason) {
@@ -233,7 +233,7 @@ sema_trait_law_waiver: fn(markers: [Marker], law: String) -> String? Never! {
 SEMA_TRAIT_LAW_SKIP: "#Test(\"law\") {{\n    .skip {{}}\n}}\n"
 
 // A test named `name` that runs no case: the runner lists it as skipped.
-sema_trait_law_skipped: fn(offset: Int, name: String, faults: &[String?]) -> TestDef Never! {
+sema_trait_law_skipped: fn(offset: Int, name: String, faults: ^[String?]) -> TestDef Never! {
     test := sema_trait_law_parse(offset, SEMA_TRAIT_LAW_SKIP) ?? {
         return sema_trait_law_stopped(offset, name, "the skipped law test `{name}` does not reparse: {err.message}", faults)
     }
@@ -247,7 +247,7 @@ sema_trait_law_skipped: fn(offset: Int, name: String, faults: &[String?]) -> Tes
 // saying why: it stops with an internal-compiler-error report naming the
 // fault, which `faults` records. `jet test` runs every other test, then ends
 // as an internal compiler error (exit 101).
-sema_trait_law_stopped: fn(offset: Int, name: String, fault: String, faults: &[String?]) -> TestDef Never! {
+sema_trait_law_stopped: fn(offset: Int, name: String, fault: String, faults: ^[String?]) -> TestDef Never! {
     report: sema_trait_law_literal("internal compiler error: {fault}")
     test := sema_trait_law_parse(offset, "#Test(\"law\") {{\n    panic(\"{report}\")\n}}\n") ?? sema_trait_law_empty(offset)
     test.name = Val(name)

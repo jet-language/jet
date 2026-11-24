@@ -48,7 +48,7 @@ use {
 // ---------------------------------------------------------------------------
 // Reusable buffer growth & fixed-hole patch primitives.
 
-patch_grow_code: fn(p: &IRPatchEmitter, need: Int) Never! {
+patch_grow_code: fn(p: ^IRPatchEmitter, need: Int) Never! {
     min_cap: p.pos + need
     cap := p.code.len()
     if cap < 16384 -> cap = 16384
@@ -57,11 +57,11 @@ patch_grow_code: fn(p: &IRPatchEmitter, need: Int) Never! {
     loop p.code.len() < cap -> p.code.push(U8{0})
 }
 
-#Inline(Always) patch_ensure: fn(p: &IRPatchEmitter, need: Int) Never! {
+#Inline(Always) patch_ensure: fn(p: ^IRPatchEmitter, need: Int) Never! {
     if p.pos + need > p.code.len() -> patch_grow_code(p, need)
 }
 
-#Inline(Always) patch_rel32: fn(code: &[U8], site: Int, target: Int) Never! {
+#Inline(Always) patch_rel32: fn(code: ^[U8], site: Int, target: Int) Never! {
     o0_patch_i32(code, site, target - (site + 4))
 }
 
@@ -71,7 +71,7 @@ patch_grow_code: fn(p: &IRPatchEmitter, need: Int) Never! {
     slot >= 0 && p.const_epoch[slot] == p.block_epoch
 }
 
-#Inline(Always) patch_cf_barrier: fn(p: &IRPatchEmitter) Never! {
+#Inline(Always) patch_cf_barrier: fn(p: ^IRPatchEmitter) Never! {
     p.block_epoch += 1
     p.rax_slot = -1
     p.fused_slot = -1
@@ -290,7 +290,7 @@ ir_patch_emitter_new: fn() -> IRPatchEmitter Never! {
     }
 }
 
-patch_emitter_reset: fn(p: &IRPatchEmitter, op_count: Int, slot_count: Int) Never! {
+patch_emitter_reset: fn(p: ^IRPatchEmitter, op_count: Int, slot_count: Int) Never! {
     p.pos = 0
     if p.relocs.len() > 0 -> p.relocs.clear()
     if p.local_relocs.len() > 0 -> p.local_relocs.clear()
@@ -366,7 +366,7 @@ patch_emitter_reset: fn(p: &IRPatchEmitter, op_count: Int, slot_count: Int) Neve
 // ---------------------------------------------------------------------------
 // Lazy per-function data/text use registration & zero-copy relocations.
 
-patch_add_use: fn(p: &IRPatchEmitter, kind: &&IRX64UseKind, data: Int, text: &&String, length: Int) -> Int Never! {
+patch_add_use: fn(p: ^IRPatchEmitter, kind: ^^IRX64UseKind, data: Int, text: ^^String, length: Int) -> Int Never! {
     id: IR_X64_LOCAL_DATA + p.uses.kinds.len()
     p.uses.kinds.push(kind)
     p.uses.data.push(data)
@@ -375,18 +375,18 @@ patch_add_use: fn(p: &IRPatchEmitter, kind: &&IRX64UseKind, data: Int, text: &&S
     id
 }
 
-patch_use_len: fn(p: &IRPatchEmitter, local_id: Int) -> Int Never! {
+patch_use_len: fn(p: ^IRPatchEmitter, local_id: Int) -> Int Never! {
     p.use_lengths[local_id - IR_X64_LOCAL_DATA]
 }
 
-patch_file_text: fn(p: &IRPatchEmitter, f: IRFunction) -> Int Never! {
+patch_file_text: fn(p: ^IRPatchEmitter, f: IRFunction) -> Int Never! {
     if p.file_text_row >= 0 -> return p.file_text_row
     id: patch_add_use(p, IRX64UseKind.Text, -1, "{f.source_file}", f.source_file.bytes().len())
     p.file_text_row = id
     id
 }
 
-patch_stop_text: fn(p: &IRPatchEmitter, kind: Int) -> Int Never! {
+patch_stop_text: fn(p: ^IRPatchEmitter, kind: Int) -> Int Never! {
     existing: p.stop_text_rows[kind]
     if existing >= 0 -> return existing
     msg: if kind == {
@@ -401,7 +401,7 @@ patch_stop_text: fn(p: &IRPatchEmitter, kind: Int) -> Int Never! {
     id
 }
 
-patch_header_row: fn(p: &IRPatchEmitter, data_row: Int) -> Int Never! {
+patch_header_row: fn(p: ^IRPatchEmitter, data_row: Int) -> Int Never! {
     loop (i, key) in p.header_keys {
         if key == data_row -> return p.header_vals[i]
     }
@@ -411,7 +411,7 @@ patch_header_row: fn(p: &IRPatchEmitter, data_row: Int) -> Int Never! {
     id
 }
 
-patch_bigint_rows: fn(p: &IRPatchEmitter, name_row: Int, text: String) -> {text_id: Int, static_id: Int} Never! {
+patch_bigint_rows: fn(p: ^IRPatchEmitter, name_row: Int, text: String) -> {text_id: Int, static_id: Int} Never! {
     loop (i, key) in p.int_keys {
         if key == name_row -> return {text_id: p.int_text_vals[i], static_id: p.int_static_vals[i]}
     }
@@ -426,12 +426,12 @@ patch_bigint_rows: fn(p: &IRPatchEmitter, name_row: Int, text: String) -> {text_
     {text_id: tid, static_id: sid}
 }
 
-#Inline(Always) patch_reloc_data: fn(p: &IRPatchEmitter, at: Int, id: Int) Never! {
+#Inline(Always) patch_reloc_data: fn(p: ^IRPatchEmitter, at: Int, id: Int) Never! {
     if id >= IR_X64_LOCAL_DATA -> p.local_relocs.push(p.relocs.len())
     p.relocs.push(x64_reloc_data(at, id))
 }
 
-#Inline(Always) patch_reloc_fn: fn(p: &IRPatchEmitter, at: Int, id: Int) Never! {
+#Inline(Always) patch_reloc_fn: fn(p: ^IRPatchEmitter, at: Int, id: Int) Never! {
     p.relocs.push(x64_reloc_function(at, id))
 }
 
@@ -443,11 +443,11 @@ patch_bigint_rows: fn(p: &IRPatchEmitter, name_row: Int, text: String) -> {text_
     if fast.use_indexed_rt -> x64_reloc_runtime_data_id(at, sym_id) else -> x64_reloc_runtime_data(at, fast.runtime_symbols[sym_id])
 }
 
-#Inline(Always) patch_reloc_rt_id: fn(p: &IRPatchEmitter, fast: IRX64FastModule, at: Int, sym_id: Int) Never! {
+#Inline(Always) patch_reloc_rt_id: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, at: Int, sym_id: Int) Never! {
     p.relocs.push(patch_make_rt(fast, at, sym_id))
 }
 
-#Inline(Always) patch_reloc_rt_data_id: fn(p: &IRPatchEmitter, fast: IRX64FastModule, at: Int, sym_id: Int) Never! {
+#Inline(Always) patch_reloc_rt_data_id: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, at: Int, sym_id: Int) Never! {
     p.relocs.push(patch_make_rt_data(fast, at, sym_id))
 }
 
@@ -459,7 +459,7 @@ patch_bigint_rows: fn(p: &IRPatchEmitter, name_row: Int, text: String) -> {text_
 // ---------------------------------------------------------------------------
 // Stencil-backed register load, store, move, immediate, normalize & branch.
 
-patch_mov_ri: fn(p: &IRPatchEmitter, reg: Int, value: Int) Never! {
+patch_mov_ri: fn(p: ^IRPatchEmitter, reg: Int, value: Int) Never! {
     patch_ensure(p, 10)
     if reg == 0 -> p.rax_slot = -1
     if value >= 0 && value <= 4294967295 {
@@ -489,7 +489,7 @@ patch_mov_ri: fn(p: &IRPatchEmitter, reg: Int, value: Int) Never! {
     }
 }
 
-patch_lea_rbp: fn(p: &IRPatchEmitter, reg: Int, disp: Int) Never! {
+patch_lea_rbp: fn(p: ^IRPatchEmitter, reg: Int, disp: Int) Never! {
     patch_ensure(p, 8)
     if reg == 0 -> p.rax_slot = -1
     if patch_fits_i8(disp) {
@@ -519,7 +519,7 @@ patch_lea_rbp: fn(p: &IRPatchEmitter, reg: Int, disp: Int) Never! {
     }
 }
 
-patch_load_rbp: fn(p: &IRPatchEmitter, reg: Int, disp: Int) Never! {
+patch_load_rbp: fn(p: ^IRPatchEmitter, reg: Int, disp: Int) Never! {
     patch_ensure(p, 8)
     if disp == 0 {
         if reg == 0 -> p.rax_slot = -1
@@ -563,7 +563,7 @@ patch_load_rbp: fn(p: &IRPatchEmitter, reg: Int, disp: Int) Never! {
     }
 }
 
-patch_load_slot: fn(p: &IRPatchEmitter, reg: Int, slot: Int) Never! {
+patch_load_slot: fn(p: ^IRPatchEmitter, reg: Int, slot: Int) Never! {
     if patch_is_const(p, slot) {
         patch_mov_ri(p, reg, p.const_val[slot])
         return
@@ -578,7 +578,7 @@ patch_load_slot: fn(p: &IRPatchEmitter, reg: Int, slot: Int) Never! {
     patch_load_rbp(p, reg, p.homes[slot])
 }
 
-patch_store_rbp: fn(p: &IRPatchEmitter, disp: Int, reg: Int) Never! {
+patch_store_rbp: fn(p: ^IRPatchEmitter, disp: Int, reg: Int) Never! {
     if disp == 0 -> return
     patch_ensure(p, 8)
     if patch_fits_i8(disp) {
@@ -608,7 +608,7 @@ patch_store_rbp: fn(p: &IRPatchEmitter, disp: Int, reg: Int) Never! {
     }
 }
 
-patch_store_slot: fn(p: &IRPatchEmitter, slot: Int, reg: Int) Never! {
+patch_store_slot: fn(p: ^IRPatchEmitter, slot: Int, reg: Int) Never! {
     p.const_epoch[slot] = 0
     h: p.homes[slot]
     patch_store_rbp(p, h, reg)
@@ -619,7 +619,7 @@ patch_store_slot: fn(p: &IRPatchEmitter, slot: Int, reg: Int) Never! {
     }
 }
 
-patch_lea_rip: fn(p: &IRPatchEmitter, reg: Int) -> Int Never! {
+patch_lea_rip: fn(p: ^IRPatchEmitter, reg: Int) -> Int Never! {
     patch_ensure(p, 8)
     if reg == 0 -> p.rax_slot = -1
     base: p.pos
@@ -634,7 +634,7 @@ patch_lea_rip: fn(p: &IRPatchEmitter, reg: Int) -> Int Never! {
     base + 3
 }
 
-patch_load_rip: fn(p: &IRPatchEmitter, reg: Int) -> Int Never! {
+patch_load_rip: fn(p: ^IRPatchEmitter, reg: Int) -> Int Never! {
     patch_ensure(p, 8)
     if reg == 0 -> p.rax_slot = -1
     base: p.pos
@@ -646,7 +646,7 @@ patch_load_rip: fn(p: &IRPatchEmitter, reg: Int) -> Int Never! {
     base + 3
 }
 
-patch_load_xmm: fn(p: &IRPatchEmitter, single: Bool, xmm: Int, disp: Int) Never! {
+patch_load_xmm: fn(p: ^IRPatchEmitter, single: Bool, xmm: Int, disp: Int) Never! {
     patch_ensure(p, 10)
     if single {
         if patch_fits_i8(disp) {
@@ -699,7 +699,7 @@ patch_load_xmm: fn(p: &IRPatchEmitter, single: Bool, xmm: Int, disp: Int) Never!
     }
 }
 
-patch_store_xmm: fn(p: &IRPatchEmitter, single: Bool, disp: Int, xmm: Int) Never! {
+patch_store_xmm: fn(p: ^IRPatchEmitter, single: Bool, disp: Int, xmm: Int) Never! {
     if disp == 0 -> return
     patch_ensure(p, 24)
     if single {
@@ -755,7 +755,7 @@ patch_store_xmm: fn(p: &IRPatchEmitter, single: Bool, disp: Int, xmm: Int) Never
     }
 }
 
-patch_alu_rax_imm: fn(p: &IRPatchEmitter, ext: Int, imm: Int) Never! {
+patch_alu_rax_imm: fn(p: ^IRPatchEmitter, ext: Int, imm: Int) Never! {
     patch_ensure(p, 8)
     if ext != 7 -> p.rax_slot = -1
     if patch_fits_i8(imm) {
@@ -779,7 +779,7 @@ patch_alu_rax_imm: fn(p: &IRPatchEmitter, ext: Int, imm: Int) Never! {
     }
 }
 
-patch_narrow: fn(p: &IRPatchEmitter, reg: Int, signed: Bool, bits: Int) Never! {
+patch_narrow: fn(p: ^IRPatchEmitter, reg: Int, signed: Bool, bits: Int) Never! {
     if bits <= 0 || bits >= 64 -> return
     patch_ensure(p, 10)
     if reg == 0 -> p.rax_slot = -1
@@ -807,7 +807,7 @@ patch_narrow: fn(p: &IRPatchEmitter, reg: Int, signed: Bool, bits: Int) Never! {
     }
 }
 
-patch_normalize_row: fn(p: &IRPatchEmitter, fast: IRX64FastModule, type_row: Int, reg: Int) Never! {
+patch_normalize_row: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, type_row: Int, reg: Int) Never! {
     k: fast.type_kind[type_row]
     if k == O0_KIND_BOOL {
         patch_ensure(p, 6)
@@ -830,19 +830,19 @@ patch_normalize_row: fn(p: &IRPatchEmitter, fast: IRX64FastModule, type_row: Int
     if k == O0_KIND_FLOAT32 -> patch_narrow(p, reg, false, 32)
 }
 
-#Inline(Always) patch_jmp: fn(p: &IRPatchEmitter) -> Int Never! {
+#Inline(Always) patch_jmp: fn(p: ^IRPatchEmitter) -> Int Never! {
     patch_ensure(p, 6)
     base: p.pos
     p.pos = o0_st_jmp_rel32(p.code, base)
     base + 1
 }
 
-#Inline(Always) patch_jmp_to: fn(p: &IRPatchEmitter, target: Int) Never! {
+#Inline(Always) patch_jmp_to: fn(p: ^IRPatchEmitter, target: Int) Never! {
     site: patch_jmp(p)
     patch_rel32(p.code, site, target)
 }
 
-#Inline(Always) patch_jcc: fn(p: &IRPatchEmitter, cc: Int) -> Int Never! {
+#Inline(Always) patch_jcc: fn(p: ^IRPatchEmitter, cc: Int) -> Int Never! {
     patch_ensure(p, 6)
     base: p.pos
     p.pos = o0_st_jcc_rel32(p.code, base, cc)
@@ -850,7 +850,7 @@ patch_normalize_row: fn(p: &IRPatchEmitter, fast: IRX64FastModule, type_row: Int
 }
 
 // Copies `size` bytes from [rdx] to [rax]. Clobbers rax/rcx/rdx/rsi/rdi/r11.
-patch_copy_bytes_rdx_to_rax: fn(p: &IRPatchEmitter, size: Int) Never! {
+patch_copy_bytes_rdx_to_rax: fn(p: ^IRPatchEmitter, size: Int) Never! {
     if size <= 0 -> return
     p.rax_slot = -1
     if size > 64 {
@@ -913,7 +913,7 @@ patch_cold_new: fn(kind: IRX64ColdKind, site_start: Int, site_len: Int) -> IRPat
     }
 }
 
-patch_stop_if: fn(p: &IRPatchEmitter, f: IRFunction, at: Int, cc: Int, stop_kind: Int) Never! {
+patch_stop_if: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int, cc: Int, stop_kind: Int) Never! {
     s_start: p.cold_sites.len()
     p.cold_sites.push(patch_jcc(p, cc))
     cold := patch_cold_new(IRX64ColdKind.Stop, s_start, 1)
@@ -935,7 +935,7 @@ patch_cc: fn(op: IROp, unsigned: Bool) -> Int Never! {
     }
 }
 
-patch_call_out: fn(p: &IRPatchEmitter, f: IRFunction, target: X64Reloc, indirect: Bool, alloc_row: Int) Never! {
+patch_call_out: fn(p: ^IRPatchEmitter, f: IRFunction, target: X64Reloc, indirect: Bool, alloc_row: Int) Never! {
     patch_ensure(p, 12)
     p.rax_slot = -1
     if p.has_stream -> p.pos = o0_st_sfence(p.code, p.pos)
@@ -966,7 +966,7 @@ patch_call_out: fn(p: &IRPatchEmitter, f: IRFunction, target: X64Reloc, indirect
 // Absorbs immediately following exact-Int Drop instructions of `at`'s operands
 // (when the hot path already proved them inline, their Drop is a no-op on the
 // hot path and only runs in the cold slow path!).
-patch_operand_drops: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) -> {d0: Int, d1: Int, end_at: Int} Never! {
+patch_operand_drops: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) -> {d0: Int, d1: Int, end_at: Int} Never! {
     d0 := -1
     d1 := -1
     end_at := at
@@ -996,7 +996,7 @@ patch_located_stops_cold: fn(f: IRFunction, cold: IRPatchCold) -> Bool Never! {
 // ---------------------------------------------------------------------------
 // Call, tail jump, memory, arithmetic, control emitters.
 
-patch_call: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, target: X64Reloc, indirect: Int, args: [Int], start: Int, count: Int, dst: Int, alloc_row: Int) Never! {
+patch_call: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, target: X64Reloc, indirect: Int, args: [Int], start: Int, count: Int, dst: Int, alloc_row: Int) Never! {
     sret := false
     storage := 0
     if dst >= 0 {
@@ -1084,7 +1084,7 @@ patch_call: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, target:
     }
 }
 
-patch_tail_jump: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
+patch_tail_jump: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
     general := 0
     floats := 0
     loop pos in f.b[at]..<(f.b[at] + f.c[at]) {
@@ -1117,7 +1117,7 @@ patch_tail_jump: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at
     p.rax_slot = -1
 }
 
-patch_emit_load: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
+patch_emit_load: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
     dst: f.dst[at]
     trow: f.slot_type[dst]
     k: fast.type_kind[trow]
@@ -1172,7 +1172,7 @@ patch_emit_load: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at
     if k == O0_KIND_FLOAT || k == O0_KIND_FLOAT32 -> p.rax_slot = -1
 }
 
-patch_emit_store: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int, stream: Bool) Never! {
+patch_emit_store: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int, stream: Bool) Never! {
     val: f.c[at]
     trow: f.slot_type[val]
     k: fast.type_kind[trow]
@@ -1219,7 +1219,7 @@ patch_emit_store: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, a
     }
 }
 
-patch_floor_adjust: fn(p: &IRPatchEmitter, op: IROp) Never! {
+patch_floor_adjust: fn(p: ^IRPatchEmitter, op: IROp) Never! {
     patch_ensure(p, 32)
     p.pos = o0_st_test_rdx_rdx(p.code, p.pos)
     exact: patch_jcc(p, 4)
@@ -1236,7 +1236,7 @@ patch_floor_adjust: fn(p: &IRPatchEmitter, op: IROp) Never! {
     patch_rel32(p.code, same, done)
 }
 
-patch_range_check: fn(p: &IRPatchEmitter, f: IRFunction, at: Int, signed: Bool, bits: Int, stop_kind: Int) Never! {
+patch_range_check: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int, signed: Bool, bits: Int, stop_kind: Int) Never! {
     patch_ensure(p, 24)
     p.pos = o0_st_mov_rdx_rax(p.code, p.pos)
     patch_narrow(p, 2, signed, bits)
@@ -1245,7 +1245,7 @@ patch_range_check: fn(p: &IRPatchEmitter, f: IRFunction, at: Int, signed: Bool, 
     patch_stop_if(p, f, at, 5, stop_kind)
 }
 
-patch_word_binary: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int, kind: U8, signed: Bool, bits: Int, positive_div: Bool) Never! {
+patch_word_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int, kind: U8, signed: Bool, bits: Int, positive_div: Bool) Never! {
     op: f.op[at]
     sa: f.a[at]
     sb: f.b[at]
@@ -1435,7 +1435,7 @@ patch_word_binary: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, 
     p.rax_slot = -1
 }
 
-patch_exact_binary: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
+patch_exact_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
     op: f.op[at]
     sa: f.a[at]
     sb: f.b[at]
@@ -1684,7 +1684,7 @@ patch_exact_binary: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
     p.colds.push(cold)
 }
 
-patch_float_binary: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int, single: Bool) Never! {
+patch_float_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int, single: Bool) Never! {
     op: f.op[at]
     ha: p.homes[f.a[at]]
     hb: p.homes[f.b[at]]
@@ -1747,7 +1747,7 @@ patch_float_binary: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction,
     patch_store_xmm(p, single, hd, 0)
 }
 
-patch_string_binary: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
+patch_string_binary: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
     op: f.op[at]
     dst: f.dst[at]
     patch_load_slot(p, 7, f.a[at])
@@ -1770,7 +1770,7 @@ patch_string_binary: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction
     p.fused_cc = cc
 }
 
-patch_neg: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
+patch_neg: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
     sa: f.a[at]
     dst: f.dst[at]
     trow: f.slot_type[sa]
@@ -1834,7 +1834,7 @@ patch_neg: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int)
     if trap -> p.rax_slot = -1
 }
 
-patch_not: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
+patch_not: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
     sa: f.a[at]
     dst: f.dst[at]
     trow: f.slot_type[sa]
@@ -1878,7 +1878,7 @@ patch_not: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int)
     p.colds.push(cold)
 }
 
-patch_sqrt: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
+patch_sqrt: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
     single: fast.type_kind[f.slot_type[f.a[at]]] == O0_KIND_FLOAT32
     dst: f.dst[at]
     patch_load_xmm(p, single, 0, p.homes[f.a[at]])
@@ -1888,7 +1888,7 @@ patch_sqrt: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int
     patch_store_xmm(p, single, p.homes[dst], 0)
 }
 
-patch_int_big: fn(p: &IRPatchEmitter, f: IRFunction, at: Int) Never! {
+patch_int_big: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int) Never! {
     bits: f.b[at]
     dst: f.dst[at]
     patch_load_slot(p, 0, f.a[at])
@@ -1911,7 +1911,7 @@ patch_int_big: fn(p: &IRPatchEmitter, f: IRFunction, at: Int) Never! {
     p.fused_cc = cc
 }
 
-patch_convert: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
+patch_convert: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: Int) Never! {
     from_row: f.slot_type[f.a[at]]
     to_row: f.slot_type[f.dst[at]]
     fk: fast.type_kind[from_row]
@@ -1948,7 +1948,7 @@ patch_convert: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, at: 
     }
 }
 
-patch_transfer: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int) Never! {
+patch_transfer: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int) Never! {
     src: f.a[at]
     dst: f.dst[at]
     trow: f.slot_type[src]
@@ -2058,7 +2058,7 @@ patch_transfer: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IR
     if fast.type_class[trow] != O0_CLS_GENERAL -> p.rax_slot = -1
 }
 
-patch_drop: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int) Never! {
+patch_drop: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int) Never! {
     slot: f.a[at]
     if f.op[at] == .Close {
         patch_load_slot(p, 7, slot)
@@ -2068,7 +2068,7 @@ patch_drop: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunc
     patch_drop_slot(p, fast, m, f, slot, at)
 }
 
-patch_drop_slot: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, slot: Int, at: Int) Never! {
+patch_drop_slot: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, slot: Int, at: Int) Never! {
     trow: f.slot_type[slot]
     if !fast.type_has_drop[trow] -> return
     if p.in_stop_edge {
@@ -2124,7 +2124,7 @@ patch_drop_slot: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: I
     }
 }
 
-patch_call_runtime: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int) Never! {
+patch_call_runtime: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int) Never! {
     name_row: f.a[at]
     tag: fast.name_rt_tag[name_row]
     dst: f.dst[at]
@@ -2423,7 +2423,7 @@ patch_call_runtime: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f
 // ---------------------------------------------------------------------------
 // Structured control helpers.
 
-patch_ctrl_open: fn(p: &IRPatchEmitter, at: Int, head: Int, false_site: Int) Never! {
+patch_ctrl_open: fn(p: ^IRPatchEmitter, at: Int, head: Int, false_site: Int) Never! {
     p.ctrl_open.push(at)
     p.ctrl_head.push(head)
     p.ctrl_false.push(false_site)
@@ -2431,7 +2431,7 @@ patch_ctrl_open: fn(p: &IRPatchEmitter, at: Int, head: Int, false_site: Int) Nev
     p.ctrl_end_tail.push(-1)
 }
 
-patch_ctrl_push_end: fn(p: &IRPatchEmitter, row: Int, site: Int) Never! {
+patch_ctrl_push_end: fn(p: ^IRPatchEmitter, row: Int, site: Int) Never! {
     idx: p.end_sites.len()
     p.end_sites.push(site)
     p.end_next.push(-1)
@@ -2440,7 +2440,7 @@ patch_ctrl_push_end: fn(p: &IRPatchEmitter, row: Int, site: Int) Never! {
     p.ctrl_end_tail[row] = idx
 }
 
-patch_ctrl_branch: fn(p: &IRPatchEmitter, f: IRFunction, at: Int, depth: Int, conditional: Bool, cond_slot: Int) Never! {
+patch_ctrl_branch: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int, depth: Int, conditional: Bool, cond_slot: Int) Never! {
     row: p.ctrl_open.len() - 1 - depth
     if row < 0 {
         p.errors.push("{f.name}: branch depth {depth} leaves the function")
@@ -2485,7 +2485,7 @@ patch_ctrl_branch: fn(p: &IRPatchEmitter, f: IRFunction, at: Int, depth: Int, co
     patch_ctrl_push_end(p, row, site)
 }
 
-patch_ctrl_end: fn(p: &IRPatchEmitter, f: IRFunction, at: Int) Never! {
+patch_ctrl_end: fn(p: ^IRPatchEmitter, f: IRFunction, at: Int) Never! {
     if p.ctrl_open.len() == 0 {
         p.errors.push("{f.name}: End without an open construct")
         return
@@ -2510,7 +2510,7 @@ patch_ctrl_end: fn(p: &IRPatchEmitter, f: IRFunction, at: Int) Never! {
 // ---------------------------------------------------------------------------
 // Single-instruction dispatch.
 
-patch_emit_op: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int) Never! {
+patch_emit_op: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int) Never! {
     op: f.op[at]
     dst: f.dst[at]
     prev_fused_slot: p.fused_slot
@@ -2832,7 +2832,7 @@ patch_emit_op: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRF
 // ---------------------------------------------------------------------------
 // Out-of-line stop points & O(N) suffix-trie stop-edge sharing (G1 compliant).
 
-patch_stop_edge_is_bare_return: fn(p: &IRPatchEmitter, f: IRFunction, branch: Int, end_idx: Int) -> Bool Never! {
+patch_stop_edge_is_bare_return: fn(p: ^IRPatchEmitter, f: IRFunction, branch: Int, end_idx: Int) -> Bool Never! {
     if end_idx <= branch + 1 -> return false
     last: end_idx - 1
     if f.op[last] != .Return || f.a[last] >= 0 || f.b[last] == IR_TAIL_JUMP -> return false
@@ -2857,7 +2857,7 @@ patch_stop_edge_is_drop_chain: fn(f: IRFunction, branch: Int, end_idx: Int) -> B
     true
 }
 
-patch_in_loop: fn(p: &IRPatchEmitter, f: IRFunction) -> Bool Never! {
+patch_in_loop: fn(p: ^IRPatchEmitter, f: IRFunction) -> Bool Never! {
     loop opener in p.ctrl_open {
         if f.op[opener] == .Loop -> return true
     }
@@ -2867,7 +2867,7 @@ patch_in_loop: fn(p: &IRPatchEmitter, f: IRFunction) -> Bool Never! {
 // The stencil twin of X64Select.jet ir_x64_armed_poll: with `counted` the
 // hot path first spends one step of the runtime's step word and enters the
 // slow path once the word is below zero.
-patch_emit_armed_poll: fn(p: &IRPatchEmitter, fast: IRX64FastModule, at: Int, edge_id: Int, armed: Bool, counted: Bool{false}) Never! {
+patch_emit_armed_poll: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, at: Int, edge_id: Int, armed: Bool, counted: Bool{false}) Never! {
     s_start: p.cold_sites.len()
     if counted {
         patch_ensure(p, 13)
@@ -2892,7 +2892,7 @@ patch_emit_armed_poll: fn(p: &IRPatchEmitter, fast: IRX64FastModule, at: Int, ed
     p.colds.push(cold)
 }
 
-patch_emit_stop_quiet: fn(p: &IRPatchEmitter, bits: Int) Never! {
+patch_emit_stop_quiet: fn(p: ^IRPatchEmitter, bits: Int) Never! {
     if p.quiet_sites.len() > 0 -> p.quiet_sites.clear()
     if p.enter_sites.len() > 0 -> p.enter_sites.clear()
     patch_ensure(p, 80)
@@ -2914,7 +2914,7 @@ patch_emit_stop_quiet: fn(p: &IRPatchEmitter, bits: Int) Never! {
     loop site in p.enter_sites -> patch_rel32(p.code, site, here)
 }
 
-patch_push_stop_edge: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, branch: Int, end_idx: Int, hot_site: Int) Never! {
+patch_push_stop_edge: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, branch: Int, end_idx: Int, hot_site: Int) Never! {
     simple_edge: patch_stop_edge_is_drop_chain(f, branch, end_idx) || patch_cleanup_edge(p, fast, f, branch, end_idx).ok
     o_start: p.edge_open.len()
     o_len := 0
@@ -2939,7 +2939,7 @@ patch_push_stop_edge: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunctio
 }
 
 // G1a: uses O(1) anonymous-temp check instead of p.ends[stopped] != branch.
-patch_stop_point: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int, poll: Int, trap: Int, turn: Int, traps: Int) -> Int Never! {
+patch_stop_point: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, at: Int, poll: Int, trap: Int, turn: Int, traps: Int) -> Int Never! {
     if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap && f.a[at] != turn) {
         return -1
     }
@@ -3024,7 +3024,7 @@ patch_stop_point: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
 }
 
 // G1b: validates cleanup token locally inside (first+1)..<leave without p.starts/p.ends.
-patch_cleanup_edge: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, branch: Int, end_idx: Int) -> {ok: Bool, first: Int, leave: Int, token: Int} Never! {
+patch_cleanup_edge: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, branch: Int, end_idx: Int) -> {ok: Bool, first: Int, leave: Int, token: Int} Never! {
     none: {ok: false, first: -1, leave: -1, token: -1}
     last: end_idx - 1
     if last <= branch + 2 -> return none
@@ -3135,7 +3135,7 @@ patch_group_hash: fn(f: IRFunction, s: Int, e: Int) -> Int Never! {
     h
 }
 
-patch_suffix_find: fn(p: &IRPatchEmitter, slot: Int, next_off: Int) -> Int Never! {
+patch_suffix_find: fn(p: ^IRPatchEmitter, slot: Int, next_off: Int) -> Int Never! {
     loop i in 0..<p.suffix_slot.len() {
         if p.suffix_slot[i] == slot && p.suffix_next[i] == next_off -> return p.suffix_off[i]
     }
@@ -3143,7 +3143,7 @@ patch_suffix_find: fn(p: &IRPatchEmitter, slot: Int, next_off: Int) -> Int Never
 }
 
 // G1d: out-of-line stop edges with reusable scratch and local edge_def_epoch.
-patch_emit_stop_edges: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, exit: Int) Never! {
+patch_emit_stop_edges: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, exit: Int) Never! {
     if p.stop_edges.is_empty() -> return
     p.in_stop_edge = true
     p.at = -1
@@ -3384,14 +3384,14 @@ patch_emit_stop_edges: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule
 // ---------------------------------------------------------------------------
 // Cold slow paths & stack-grow path.
 
-patch_cold_target: fn(p: &IRPatchEmitter, pad: Int, exit: Int) -> Int Never! {
+patch_cold_target: fn(p: ^IRPatchEmitter, pad: Int, exit: Int) -> Int Never! {
     if pad >= 0 && pad < p.stop_edges.len() && p.stop_edges[pad].offset >= 0 {
         return p.stop_edges[pad].offset
     }
     exit
 }
 
-patch_emit_cold_drop: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, slot: Int) Never! {
+patch_emit_cold_drop: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, f: IRFunction, slot: Int) Never! {
     if slot < 0 -> return
     trow: f.slot_type[slot]
     if !fast.type_has_drop[trow] -> return
@@ -3404,7 +3404,7 @@ patch_emit_cold_drop: fn(p: &IRPatchEmitter, fast: IRX64FastModule, f: IRFunctio
     }
 }
 
-patch_emit_colds: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, exit: Int) Never! {
+patch_emit_colds: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: IRFunction, exit: Int) Never! {
     loop cold in p.colds {
         patch_cf_barrier(p)
         p.at = if cold.kind == .Poll || cold.kind == .Release -> -1 else -> cold.at
@@ -3569,7 +3569,7 @@ patch_emit_colds: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
     }
 }
 
-patch_stack_grow: fn(p: &IRPatchEmitter, fast: IRX64FastModule, row: Int, entered: Int, frame: Int, stacked: Int) -> IRX64Grow Never! {
+patch_stack_grow: fn(p: ^IRPatchEmitter, fast: IRX64FastModule, row: Int, entered: Int, frame: Int, stacked: Int) -> IRX64Grow Never! {
     patch_ensure(p, 512 + stacked * 20)
     start: p.pos
     p.pos = o0_st_prologue(p.code, start, IR_X64_STACK_SAVES)
@@ -3620,7 +3620,7 @@ ir_x64_patch_function: fn(m: IRModule, row: Int, poll: Int, trap: Int, turn: Int
     ir_x64_patch_function_in(m, fast, row, poll, trap, turn, p)
 }
 
-ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll: Int, trap: Int, turn: Int, p: &IRPatchEmitter) -> IRX64FunctionResult Never! {
+ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll: Int, trap: Int, turn: Int, p: ^IRPatchEmitter) -> IRX64FunctionResult Never! {
     f: m.functions[row]
     slot_count: f.slot_type.len()
     op_count: f.op.len()

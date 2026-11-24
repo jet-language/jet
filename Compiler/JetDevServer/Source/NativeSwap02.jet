@@ -17,7 +17,7 @@ impl NativeSwapState {
         }
     }
 
-    fail: fn(&self, explanation: NativeSwapExplanation) -> NativeSwapReceipt NativeSwapError! {
+    fail: fn(^self, explanation: NativeSwapExplanation) -> NativeSwapReceipt NativeSwapError! {
         receipt := self.rollback()
         receipt.outcome = if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected
         receipt.explanation = Val(explanation)

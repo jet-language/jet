@@ -64,7 +64,7 @@ sema_call_collections_fixed_join: fn(operation: SemaCollectionOperation, receive
 // 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with `id: Int` on a
 // `[U64:V]`) checks on its own and then widens into the slot, as Rust `widen_numeric_argument` does
 // after inference.
-sema_call_collections_check_argument: fn(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, borrows_string_view: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_collections_check_argument: fn(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, borrows_string_view: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     reported: diagnostics.len()
     previous_lending: context.lambda_lending_views
     previous_borrow: context.borrow_ctx
@@ -185,7 +185,7 @@ sema_call_collections_return_takes_default_route: fn(ret: Type?) -> Bool Never! 
     }
 }
 
-sema_call_collections_reject_callback_shape: fn(method: String, callback_return: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_collections_reject_callback_shape: fn(method: String, callback_return: Type, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if method == "filter" {
         accepted := if callback_return == {
             .Result(ok, _) -> ok == Type.Bool
@@ -217,7 +217,7 @@ sema_call_collections_reject_callback_shape: fn(method: String, callback_return:
 }
 
 // The ownership walk's parameter rows: a slot the row stores is a take
-// (`&&`) parameter, every other slot reads (collection_row_takes_argument).
+// (`^^`) parameter, every other slot reads (collection_row_takes_argument).
 sema_call_collections_ownership_params: fn(contract: SemaCollectionMethodContract, required_types: [Type]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     loop (index, ty) in required_types {
@@ -242,7 +242,7 @@ sema_call_collections_literal_remove_mode: fn(method: String, args: [CallArg]) -
     }
 }
 
-sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() == 0 && (method == "len" || method == "is_empty") {
         unwrapped_fast: sema_expr_unwrap_tag(receiver_value.ty)
         is_direct_collection: if unwrapped_fast == {
@@ -377,7 +377,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         required_types.push(required.copy())
         // A slot the row stores owns what it receives (#6611,
         // collection_row_takes_argument), so an unmarked name there is the
-        // call's take exactly as at a `&&` parameter (Calls/Checking.jet): a
+        // call's take exactly as at a `^^` parameter (Calls/Checking.jet): a
         // plain owned local moves at its last use, any other name moves out
         // of its owner here. A call never copies on its own:
         // a read parameter has no storage to give up (E0201). A slot that only
@@ -402,7 +402,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         walk_reports: takes_argument && updated_args[index].expr == .Ident(_, _, _)
         // A resource has one cleanup owner, so a take that would copy it out
         // of a place read in place (E0211) or out of a borrowed parameter
-        // (E0201 naming `&&`) is refused for that, never with a `.copy()` fix.
+        // (E0201 naming `^^`) is refused for that, never with a `.copy()` fix.
         if unmarked_take && (!sema_copy_site_refuse_resource_copy(value, environment, program, scopes, context, diagnostics) || !sema_copy_site_refuse_borrowed_copy(updated_args[index].expr, "`.{method}()`", environment, program, scopes, context, diagnostics)) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
@@ -548,7 +548,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
 // `Set<E>.from_bits(n)` cross it as a U64. A `#Specified` enum's cases
 // cross as their own values, so each must be one bit (E1132); any other
 // element is E1133.
-sema_call_set_bits_ready: fn(element: Type, callee: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_set_bits_ready: fn(element: Type, callee: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool {
     element_name: type_name(element)
     refused: sema_error("E1133", span, "`{callee}` needs a Set stored as bits, and `Set<{element_name}>` is not one", "only a Set of an enum with 1 to 64 cases, no payloads and no type parameters is stored as one bit per case", "use such an enum as the element, or read the Set with `to_list()`")
     named: if element == .Named(name) -> name.copy() else -> ""
@@ -613,7 +613,7 @@ sema_call_collections_list_element: fn(ty: Type) -> Type? Never! {
 
 // A successful runtime proof gives each output slot a distinct Fresh projection
 // on the original owner.
-sema_call_collections_record_disjoint_views: fn(receiver: Expr, method: String, args: [CallArg], span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) {
+sema_call_collections_record_disjoint_views: fn(receiver: Expr, method: String, args: [CallArg], span: Span, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext) {
     proof_spans := [Span]{}
     slots := [[String]]{}
     if method == "split_write" {

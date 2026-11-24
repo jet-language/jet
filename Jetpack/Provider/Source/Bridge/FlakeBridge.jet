@@ -323,7 +323,7 @@ provider_cmd_flake: fn(theme: Theme, dir: String, fixtures: String?) -[IO, FS, E
 
 // Evaluate every package derivation and named devShell, merge every loss into
 // the graph, and commit the semantic lock. Some(exit code) on failure.
-provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, graph: &FlakeGraph, facts: &DevShellFacts) -[IO, FS, Env, Exec, Time, Time.Wait]> Int? Never! {
+provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, graph: ^FlakeGraph, facts: ^DevShellFacts) -[IO, FS, Env, Exec, Time, Time.Wait]> Int? Never! {
     system: provider_bridge_host_system()
     source: if files.read(flake_path) == {
         .Ok(text) -> text
@@ -464,7 +464,7 @@ provider_evaluator_record: fn(key: String, exact: String, platform: String, flak
 
 // A host-system package output joins the shim's packages; any other system's
 // package is an unmapped fact.
-provider_record_package_output_fact: fn(facts: &DevShellFacts, output: FlakeOutput, system: String) Never! {
+provider_record_package_output_fact: fn(facts: ^DevShellFacts, output: FlakeOutput, system: String) Never! {
     if output.system == system {
         if output.attribute != "default" && output.attribute != "" && !facts.packages.contains(output.attribute) {
             facts.packages.push(output.attribute)

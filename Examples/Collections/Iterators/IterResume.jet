@@ -11,7 +11,7 @@ BagIter: struct {
     impl Iterator {
         Item: Int,
 
-        next: fn(&self) -> Int? {
+        next: fn(^self) -> Int? {
             if self.idx >= self.bag.data.len() -> return None
             v: self.bag.data[self.idx]
             self.idx += 1
@@ -21,7 +21,7 @@ BagIter: struct {
 }
 
 // Stops at the first item above `limit`; everything after it stays unread.
-first_over: fn(items: &Iter<Int>, limit: Int) -> Int? {
+first_over: fn(items: ^Iter<Int>, limit: Int) -> Int? {
     loop {
         item: items.next() ?? return None
         if item > limit -> return Val(item)

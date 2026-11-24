@@ -880,7 +880,7 @@ kit_execution_refused: fn(row: String) -> KitExecution {
 // The corpus in report order: by suite, then path. The pool runs entries in schedule
 // order and rows stream as entries finish; reports and failure lists keep this order
 // whatever the pool's size.
-kit_execute_corpus_order: fn(corpus: &[KitSelected]) {
+kit_execute_corpus_order: fn(corpus: ^[KitSelected]) {
     corpus.sort_by(fn(item) { "{item.suite}\n{item.entry.path}" })
 }
 
@@ -1325,7 +1325,7 @@ kit_execute_report: fn(index: Int, item: KitSelected, options: KitOptions, env: 
 }
 
 // One entry's report to the collector; a refused send means it is gone.
-kit_execute_send: fn(done: Sender<KitEntryRun>, run: &&KitEntryRun) Err! { done.send(run) }
+kit_execute_send: fn(done: Sender<KitEntryRun>, run: ^^KitEntryRun) Err! { done.send(run) }
 
 // One child of a process pool (kit_pool_run): entry `index`, its receipt or why it
 // couldn't run, and its wall time.
@@ -1392,7 +1392,7 @@ kit_pool_child: fn(index: Int, spec: ProcessSpec, done: Sender<KitPoolRun>) {
 }
 
 // One child's report to the pool; a refused send means it is gone.
-kit_pool_send: fn(done: Sender<KitPoolRun>, run: &&KitPoolRun) Err! { done.send(run) }
+kit_pool_send: fn(done: Sender<KitPoolRun>, run: ^^KitPoolRun) Err! { done.send(run) }
 
 // Folds a pool's runs into `history` and rewrites `suite`'s file (kit_history_save):
 // run i is the entry paths[i], measured by its wall time and its receipt's peak. A

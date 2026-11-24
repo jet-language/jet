@@ -9,7 +9,7 @@ recv lsp until $.id = 1
 json: stdout doc $.result.capabilities.hoverProvider = true
 json: stdout doc $.result.capabilities.definitionProvider = true
 json: stdout doc $.result.capabilities.referencesProvider = true
-json: stdout doc $.result.capabilities.completionProvider.resolveProvider = false
+json: stdout doc $.result.capabilities.completionProvider.resolveProvider = true
 json: stdout doc $.result.capabilities.renameProvider.prepareProvider = true
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/checked_text.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"#Error\\nPatternError: enum { Bad }\\nPattern: distinct String\\nimpl Pattern.CheckedText {\\n    Error: PatternError,\\n    check: fn(text: String) -[]> PatternError! {\\n        if text == \\\"\\\" -> return Err(PatternError.Bad)\\n        return Ok()\\n    }\\n    encode_hole: fn<T: Printable>(value: T) -[]> String { \\\"hole\\\" }\\n}\\n\\nuse_pattern: fn(value: Pattern, other: Pattern) -> Bool {\\n    value == other\\n}\\nrun: fn() {\\n    \\n}\\n\"}}}"

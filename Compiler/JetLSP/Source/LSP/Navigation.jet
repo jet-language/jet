@@ -3,7 +3,7 @@
 use {
     core.encoding.[Dyn]
     jet_driver.[jet_driver_layout_line, jet_driver_layout_summary]
-    jet_foundation.[Span, Type, derivation_record_line, derivation_record_notable, derivation_store_subject, foundation_byte_text, foundation_json_quote, type_name]
+    jet_foundation.[Span, Type, derivation_record_line, derivation_record_notable, derivation_store_subject, foundation_byte_text, foundation_json_quote, type_identity_unqualified_nominals, type_name]
     jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, lex, token_text]
     jet_semindex.[SemDeclared, SemDef, SemIndex, SemSymbolKind, semindex_ambient_print, semindex_import_binding, semindex_renamed_identity]
 }
@@ -35,10 +35,7 @@ lsp_hover_markdown: fn(signature: String, summary: String) -> String Never! {
 // `print` call the source resolves to nothing else is the ambient print.
 lsp_declared_at: fn(view: LSPView, offset: Int) -> SemDeclared? Never! {
     tokens: view.lexed.tokens
-    at: (loop (position, token) in tokens {
-        if token.span.start > offset -> break -1
-        if token.kind == TOKEN_IDENT && lsp_span_holds(token.span, offset) -> break position
-    } ?? -1)
+    at: lsp_ident_position(tokens, offset)
     if at < 0 -> return None
     name: token_text(view.lexed.tables, tokens[at])
     dotted: at >= 1 && tokens[at - 1].kind == TOKEN_DOT
@@ -61,6 +58,15 @@ lsp_declared_at: fn(view: LSPView, offset: Int) -> SemDeclared? Never! {
     Val(ambient)
 }
 
+// The position in `tokens` of the identifier at `offset`, or -1.
+lsp_ident_position: fn(tokens: [Token], offset: Int) -> Int Never! {
+    loop (position, token) in tokens {
+        if token.span.start > offset -> return -1
+        if token.kind == TOKEN_IDENT && lsp_span_holds(token.span, offset) -> return position
+    }
+    -1
+}
+
 // The Core name an import of the document binds to `local`
 // (JetSemIndex semindex_import_binding).
 lsp_import_binding: fn(view: LSPView, local: String) -> String? Never! {
@@ -75,6 +81,31 @@ lsp_import_binding: fn(view: LSPView, local: String) -> String? Never! {
 // declares it and the name it is declared as.
 lsp_declared_markdown: fn(declared: SemDeclared) -> String Never! {
     "{lsp_hover_markdown(declared.symbol.signature, declared.symbol.summary)}\n\nDeclared in `{declared.def.module_path}` as `{declared.def.qualified_name}`."
+}
+
+// A method call's name at `offset`, which the index resolves to no
+// definition, on a one-name receiver whose type the check knows
+// (lsp_checked_type): the compiler-owned `copy` and `move` every value has,
+// else the method that type's symbols hold, written in the source or built
+// in (`text.trim()`). Its hover is its signature, the receiver's type
+// spelled for `copy` and `move`.
+lsp_method_markdown: fn(view: LSPView, offset: Int) -> String? Never! {
+    tokens: view.lexed.tokens
+    at: lsp_ident_position(tokens, offset)
+    if at < 2 || tokens[at - 1].kind != TOKEN_DOT || at + 1 >= tokens.len() || tokens[at + 1].kind != TOKEN_LPAREN -> return None
+    index: view.checked.index ?? return None
+    receiver: lsp_target_at(view, tokens[at - 2].span.start) ?? return None
+    shown: type_name(type_identity_unqualified_nominals(lsp_checked_type(lsp_definition_at(index, receiver) ?? return None) ?? return None))
+    name: token_text(view.lexed.tables, tokens[at])
+    if name == "copy" || name == "move" {
+        summary: if name == "copy" -> "A new value equal to the receiver, which keeps its own." else -> "Takes the value out of the named place it is read from."
+        return Val(lsp_hover_markdown("{shown}.{name}() -> {shown}", summary))
+    }
+    owner: lsp_type_owner(shown)
+    loop symbol in view.checked.symbols {
+        if symbol.name == name && (symbol.owner ?? "") == owner -> return Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+    }
+    None
 }
 
 lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
@@ -103,6 +134,7 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         if markdown == None && lsp_declared_at(at.view, at.offset) == .Val(declared) {
             markdown = Val(lsp_declared_markdown(declared))
         }
+        if markdown == None -> markdown = lsp_method_markdown(at.view, at.offset)
         if markdown == None -> markdown = lsp_keyword_hover(at.view, at.offset)
         // How the check knows what is hovered, when its derivation says more
         // than that the definition checked.
@@ -299,6 +331,38 @@ lsp_document_highlight_response: fn(server: LSPServer, params: Dyn?, id: Dyn) ->
     lsp_response(id, "[{rows.join(",")}]")
 }
 
+// Linked editing: a local binding's or a parameter's declaration and each use
+// of it, all in this document, edited as one. Any other name may be used in
+// files the editor's linked ranges cannot reach, so it answers null; rename
+// covers it.
+lsp_linked_editing_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    index: at.view.checked.index ?? return lsp_response(id, "null")
+    module_path: at.view.module_path ?? return lsp_response(id, "null")
+    target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "null")
+    def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
+    if def.kind == {
+        .Local(_, _) | .Param(_) -> {}
+        .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {
+            return lsp_response(id, "null")
+        }
+    }
+    if def.module_path != module_path -> return lsp_response(id, "null")
+    text: at.view.doc.text
+    rows := [String]{}
+    loop occurrence in lsp_occurrences(index, target, declaration: true) {
+        if occurrence.module_path != module_path -> return lsp_response(id, "null")
+        span: lsp_name_span(text, occurrence.span, def.name)
+        // A use not spelled as the name, such as one a template wrote, is
+        // no range the editor can mirror.
+        if span.end > text.count_bytes() || foundation_byte_text(text.bytes(), span.start, span.end) != def.name {
+            return lsp_response(id, "null")
+        }
+        rows.push(lsp_range_json(lsp_byte_span_to_range(text, span)))
+    }
+    lsp_response(id, "{{\"ranges\":[{rows.join(",")}]}}")
+}
+
 // What a rename may change: a declaration in an open document, so every file
 // the rename edits is one the editor holds.
 LSPRenameTarget: struct {
@@ -358,9 +422,7 @@ lsp_valid_identifier: fn(name: String) -> Bool Never! {
 }
 
 // The rename's edits, one file each, bound to the document versions the check
-// read, and its semantic operation: the checked identity it renames. A program
-// with errors may hold a use the check could not resolve, so its rename is
-// refused rather than offered as complete.
+// read, and its semantic operation: the checked identity it renames.
 lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     new_name: lsp_text_member(params ?? return lsp_response(id, "null"), "newName") ?? return lsp_error_response(id, -32602, "rename needs a string newName")
@@ -374,22 +436,40 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         }
     }
     index: at.view.checked.index ?? return lsp_response(id, "null")
-    occurrences: lsp_open_occurrences(server, at.view, LSPTarget{module_path: target.def.module_path, span: target.def.def_span}, declaration: true)
+    edit: if lsp_rename_edit(server, at.view, target.def, new_name) == {
+        .Ok(members) -> members
+        .Err(problem) -> {
+            return lsp_error_response(id, problem.code, problem.message)
+        }
+    }
+    lsp_response(id, "{{{edit},\"semantic_ops\":[{lsp_rename_semantic_op(index, target.def, new_name)}]}}")
+}
+
+// The members of the workspace edit that renames `def` to `new_name` at every
+// occurrence the open documents' checks found, one file each, bound to the
+// document versions the checks read. A program with errors may hold a use the
+// check could not resolve, so the rename is refused rather than offered as
+// complete; `tolerated` names a code whose errors resolve every name as
+// written (a casing error never changes what a name means).
+lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: String, tolerated: String{""}) -> String LSPRPCError! {
+    occurrences: lsp_open_occurrences(server, view, LSPTarget{module_path: def.module_path, span: def.def_span}, declaration: true, tolerated: tolerated)
     errors := occurrences.errors
-    loop diagnostic in at.view.checked.diagnostics {
-        if !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> errors += 1
+    loop diagnostic in view.checked.diagnostics {
+        if diagnostic.code != tolerated && !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) {
+            errors += 1
+        }
     }
     if errors > 0 {
         counted: if errors == 1 -> "1 error" else -> "{errors} errors"
-        return lsp_error_response(id, -32803, "the program has {counted}, so the check may have missed a use of `{target.def.name}`; fix them, then rename")
+        return Err(LSPRPCError{code: -32803, message: "the program has {counted}, so the check may have missed a use of `{def.name}`; fix them, then rename"})
     }
     by_uri := [String:[String]]{}
     versions := [String:String]{}
     order := [String]{}
     loop placed in occurrences.placed {
         source: placed.source
-        span: lsp_name_span(source, placed.span, target.def.name)
-        if span.end > source.count_bytes() || foundation_byte_text(source.bytes(), span.start, span.end) != target.def.name {
+        span: lsp_name_span(source, placed.span, def.name)
+        if span.end > source.count_bytes() || foundation_byte_text(source.bytes(), span.start, span.end) != def.name {
             next
         }
         uri: lsp_path_to_uri(placed.path)
@@ -401,7 +481,7 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
             loop (_, doc) in server.diagnostic_state.docs {
                 if !lsp_source_paths_equal(doc.path, placed.path) -> next
                 if doc.text != source {
-                    return lsp_error_response(id, -32801, "`{placed.path}` changed after the check; rename again")
+                    return Err(LSPRPCError{code: -32801, message: "`{placed.path}` changed after the check; rename again"})
                 }
                 version = "{doc.version}"
             }
@@ -417,8 +497,7 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         edits: by_uri[uri].join(",")
         files.push(if server.document_changes -> "{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{versions[uri]}}},\"edits\":[{edits}]}}" else -> "{foundation_json_quote(uri)}:[{edits}]")
     }
-    edit: if server.document_changes -> "\"documentChanges\":[{files.join(",")}]" else -> "\"changes\":{{{files.join(",")}}}"
-    lsp_response(id, "{{{edit},\"semantic_ops\":[{lsp_rename_semantic_op(index, target.def, new_name)}]}}")
+    Ok(if server.document_changes -> "\"documentChanges\":[{files.join(",")}]" else -> "\"changes\":{{{files.join(",")}}}")
 }
 
 // The rename as a semantic operation, the shape `jet codemod` receipts record:

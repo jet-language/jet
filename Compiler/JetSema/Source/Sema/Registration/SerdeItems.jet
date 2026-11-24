@@ -88,7 +88,7 @@ use jet_foundation.[
 // O(items + types × wire fields), not a rescan per type and field. `foreign`
 // holds the codecs other modules give the types these items hold
 // ("{trait}|{leaf}"; sema_derive_foreign_codecs, sema_serde_graph_codecs).
-sema_serde_expand_builtin_items: fn(items: &[Item], foreign: NameTable) {
+sema_serde_expand_builtin_items: fn(items: ^[Item], foreign: NameTable) {
     facts: sema_derive_item_index(items)
     auto_encode: sema_derive_auto_selected(items, facts, "Encode", foreign)
     auto_decode: sema_derive_auto_selected(items, facts, "Decode", foreign)
@@ -661,7 +661,7 @@ sema_serde_items_method_body: fn(generated: SemaSerdeCodecBody, method: String) 
 // A generated codec impl of `type_name`. Its methods are as visible as the
 // type: another module's codec calls them on a field of the type, as the
 // parser makes an authored method public unless it is marked `priv`.
-sema_serde_items_impl: fn(type_name: String, trait_name: String, methods: &&[Func], is_pub: Bool, is_package_pub: Bool, span: Span) -> Item Never! {
+sema_serde_items_impl: fn(type_name: String, trait_name: String, methods: ^^[Func], is_pub: Bool, is_package_pub: Bool, span: Span) -> Item Never! {
     visible := methods.move()
     loop index in 0..<visible.len() {
         visible[index].is_pub = is_pub
@@ -1298,7 +1298,7 @@ sema_serde_items_migration_helpers: fn(definition: StructDef, items: [Item], spa
 
 // One codec's current-shape decode and historical-shape walk, at the spans
 // `current_span` and `walk_span`.
-sema_serde_items_migration_codec: fn(definition: StructDef, items: [Item], blocks: [MigrationDecl], stored: Bool, current_span: Span, walk_span: Span, helpers: &[Item], span: Span) Never! {
+sema_serde_items_migration_codec: fn(definition: StructDef, items: [Item], blocks: [MigrationDecl], stored: Bool, current_span: Span, walk_span: Span, helpers: ^[Item], span: Span) Never! {
     target: sema_data_result(Type.Named{name: definition.name}, sema_data_decode_error())
     current := sema_serde_items_method(sema_serde_items_migration_current(definition, stored), [TypeParam]{}, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, target, current_span)
     current.body = sema_serde_items_struct_decode_body(definition, items, stored, span)
@@ -1789,7 +1789,7 @@ sema_serde_items_enum_read_body: fn(definition: EnumDef, span: Span) -> [Stmt] N
 // `while reader.next_key() { if key_is(…) { arm } … else { reader.skip() } }`:
 // the open Object's members, each read by the arm its key names and any
 // other skipped.
-sema_serde_items_read_members: fn(arms: &&[SwitchArm], span: Span) -> Stmt Never! {
+sema_serde_items_read_members: fn(arms: ^^[SwitchArm], span: Span) -> Stmt Never! {
     member: if arms.len() == 0 -> [Stmt]{sema_serde_items_reader_skip(span)} else -> [Stmt]{Stmt.Switch{subject: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, arms: arms.move(), else_body: Val([Stmt]{sema_serde_items_reader_skip(span)}), span: span}}
     Stmt.While{cond: sema_serde_items_reader_call("next_key", [Expr]{}, span), body: member, span: span, arrow_body: false, label: None}
 }
@@ -2036,7 +2036,7 @@ sema_codec_demand_new: fn() -> SemaCodecDemand Never! {
 
 // The generated codec methods by symbol key, so a checked call and a codec
 // wave find their impl rows directly.
-sema_serde_index_codec_methods: fn(graph: &SemaRegistrationGraph) {
+sema_serde_index_codec_methods: fn(graph: ^SemaRegistrationGraph) {
     rows := [U32:SemaRegistrationRowRef]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].impls.len() {
@@ -2065,7 +2065,7 @@ sema_codec_demand_type: fn(graph: SemaRegistrationGraph, trait_name: String, ty:
 
 // The nominal leaf names inside `ty`: the type itself, its type arguments,
 // and the elements of its containers.
-sema_codec_type_names: fn(ty: Type, names: &[String]) Never! {
+sema_codec_type_names: fn(ty: Type, names: ^[String]) Never! {
     if ty == {
         .Named(name) -> { names.push(sema_serde_named_leaf(name)) }
         .Apply(name, args) -> {
@@ -2217,7 +2217,7 @@ sema_codec_method_body: fn(graph: SemaRegistrationGraph, type_name: String, id: 
 // impls become the next wave (graph.codec_wave_rows); returns their modules
 // in first-demand order. A module's items are indexed once, on its first
 // pending codec (sema_codec_index_module), so each codec is keyed lookups.
-sema_codec_fill_demanded: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail) -> [Int] {
+sema_codec_fill_demanded: fn(graph: ^SemaRegistrationGraph, trail: ^SemaGraphTrail) -> [Int] {
     wave := [Int:Bool]{}
     modules := [Int]{}
     position_keys := name_table_sized(64)
@@ -2273,7 +2273,7 @@ sema_codec_position: fn(keys: NameTable, positions: [Int], key: String) -> Int? 
 // per type and trait ("{module}|{type}|{trait}"), each key interned in `keys`
 // and its position in `positions` by id. Filling rewrites impl items in
 // place, so the positions hold for the whole fill.
-sema_codec_index_module: fn(items: [Item], module_index: Int, keys: &NameTable, positions: &[Int]) Never! {
+sema_codec_index_module: fn(items: [Item], module_index: Int, keys: ^NameTable, positions: ^[Int]) Never! {
     loop (position, item) in items {
         key := ""
         if item == {
@@ -2310,7 +2310,7 @@ sema_codec_impl_position: fn(items: [Item], type_name: String, trait_name: Strin
 // bodies: the registered method rows, the impl declaration, and the
 // program's impl item at `position` (the function memory plan reads the
 // items). Empty bodies undo it.
-sema_codec_set_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: Int, generated: SemaSerdeCodecBody, position: Int?) Never! {
+sema_codec_set_body: fn(graph: ^SemaRegistrationGraph, module_index: Int, row: Int, generated: SemaSerdeCodecBody, position: Int?) Never! {
     loop method_index in 0..<graph.modules[module_index].impls[row].methods.len() {
         name: graph.modules[module_index].impls[row].methods[method_index].declaration.name.copy()
         graph.modules[module_index].impls[row].methods[method_index].declaration.body = sema_serde_items_method_body(generated, name)
@@ -2329,7 +2329,7 @@ sema_codec_set_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: I
 // Undoes one filled codec body (SemaGraphUndo.CodecBody): the impl is a
 // header again and its requirement is new again, so a later pass over the
 // same graph that reaches the codec demands it afresh.
-sema_codec_undo_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: Int) {
+sema_codec_undo_body: fn(graph: ^SemaRegistrationGraph, module_index: Int, row: Int) {
     position: sema_codec_impl_position(graph.modules[module_index].program.items, graph.modules[module_index].impls[row].target_type_name, graph.modules[module_index].impls[row].trait_name)
     sema_codec_set_body(graph, module_index, row, SemaSerdeCodecBody{body: [Stmt]{}, read: [Stmt]{}, wire: [Type]{}}, position)
     trait_name: graph.modules[module_index].impls[row].trait_name ?? return
@@ -2348,7 +2348,7 @@ sema_codec_undo_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: 
 // (ir_reachable_core_rows), and the Prelude error module's are reached the
 // same way. sema_derive_waves checks the demanded ones after the body pass;
 // a compile that checks every Core body (`jet check Core`) demands them all.
-sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
+sema_derive_index_methods: fn(graph: ^SemaRegistrationGraph) {
     rows := [U32:SemaDeriveMethodRow]{}
     types := SemaDeriveTypeMethods{leaves: name_table_sized(64), keys: [[String]]{[String]{}}}
     loop module_index in 0..<graph.modules.len() {

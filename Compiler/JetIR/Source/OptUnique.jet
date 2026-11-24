@@ -11,9 +11,9 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // The list is a frame header: storage (StackAddress) written once, or a
 // slot moved from it once, whose buffer is stored before the Loop in a
 // region around it (so the header holds a list wherever the Loop starts);
-// or a parameter's header the function never rebinds (a `&` list, which
+// or a parameter's header the function never rebinds (a `^` list, which
 // holds the caller's list from the start). It may also be a field of such
-// storage or parameter (a `&` struct's list): the address `base + k` an
+// storage or parameter (a `^` struct's list): the address `base + k` an
 // Offset makes once, of a base that is there before the Loop. An Offset
 // made in the Loop is pure, so it goes before the Loop with the call.
 // A Loop can make its buffer shared again when it reads the header other
@@ -28,7 +28,7 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // `jet inspect decisions` names each call in a Loop: `unique <function>
 // <list type>: made unique before the Loop`, or `declined (<why>)`.
 
-ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[String]) -> Int Never! {
+ir_opt_hoist_unique: fn(m: IRModule, f: ^IRFunction, keys: [String], notes: ^[String]) -> Int Never! {
     has_loop := false
     has_unique := false
     loop at in 0..<f.op.len() {
@@ -363,7 +363,7 @@ ir_opt_header_store_keeps: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: I
 }
 
 // Uniqueness at the caller (O1, O2, before the call graph is built). A
-// function's first step can be to make a `&` list parameter's buffer its
+// function's first step can be to make a `^` list parameter's buffer its
 // own: after hoisting, a `#unique<..>` call on the parameter that only Block
 // openers, other such calls and side-effect-free instructions writing no
 // parameter precede. If only direct Calls reach that function, each Call
@@ -384,7 +384,7 @@ ir_opt_header_store_keeps: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: I
 // columns, which none writes, and each owns its part; the merges go in
 // function order, so every body, note and candidate is the same for any
 // thread count.
-ir_opt_unique_to_callers: fn(m: &IRModule, functions: &[IRFunction], keys: &[String], notes: &[String], threads: CompilerThreads) -> Int Never! {
+ir_opt_unique_to_callers: fn(m: ^IRModule, functions: ^[IRFunction], keys: ^[String], notes: ^[String], threads: CompilerThreads) -> Int Never! {
     count: functions.len()
     if m.entry < 0 || m.entry >= count -> return 0
     addressed := [Bool]{}
@@ -479,7 +479,7 @@ IROptUniqueView: struct {
 
 // Walk `phase` over `parts`, in part order: the last part on its own
 // thread, the ones before it the same way, and the first on this one.
-ir_opt_unique_walks: fn(m: IRModule, keys: [String], view: IROptUniqueView, parts: &&[IROptUniquePart], phase: Int) -> [IROptUniquePart] Never! {
+ir_opt_unique_walks: fn(m: IRModule, keys: [String], view: IROptUniqueView, parts: ^^[IROptUniquePart], phase: Int) -> [IROptUniquePart] Never! {
     rest := parts.move()
     last: rest.pop() ?? return rest
     if rest.len() == 0 {
@@ -496,7 +496,7 @@ ir_opt_unique_walks: fn(m: IRModule, keys: [String], view: IROptUniqueView, part
 }
 
 // One part's walk `phase` over its functions.
-ir_opt_unique_part: fn(m: IRModule, keys: [String], view: IROptUniqueView, part: &&IROptUniquePart, phase: Int) -> IROptUniquePart Never! {
+ir_opt_unique_part: fn(m: IRModule, keys: [String], view: IROptUniqueView, part: ^^IROptUniquePart, phase: Int) -> IROptUniquePart Never! {
     walked := part.move()
     if phase == {
         1 -> ir_opt_unique_scan(walked, keys, view)
@@ -509,7 +509,7 @@ ir_opt_unique_part: fn(m: IRModule, keys: [String], view: IROptUniqueView, part:
 
 // Walk 1 over one part: the functions a FunctionAddress names, and per
 // function whether it makes a parameter unique anywhere.
-ir_opt_unique_scan: fn(part: &IROptUniquePart, keys: [String], view: IROptUniqueView) Never! {
+ir_opt_unique_scan: fn(part: ^IROptUniquePart, keys: [String], view: IROptUniqueView) Never! {
     total: view.addressed.len()
     loop f in part.functions {
         unique := false
@@ -527,7 +527,7 @@ ir_opt_unique_scan: fn(part: &IROptUniquePart, keys: [String], view: IROptUnique
 // Walk 2 over one part: each function only direct Calls reach that makes a
 // parameter unique hoists its own unique calls, then lists its candidates
 // with its arity and the parameter's type row.
-ir_opt_unique_entries: fn(m: IRModule, keys: [String], part: &IROptUniquePart, view: IROptUniqueView) Never! {
+ir_opt_unique_entries: fn(m: IRModule, keys: [String], part: ^IROptUniquePart, view: IROptUniqueView) Never! {
     loop row in 0..<part.functions.len() {
         id: part.start + row
         if view.addressed[id] || !view.unique[id] -> next
@@ -543,7 +543,7 @@ ir_opt_unique_entries: fn(m: IRModule, keys: [String], part: &IROptUniquePart, v
 
 // Walk 3 over one part: per function whether it calls a candidate, and the
 // candidates a Call rules out (an arity or argument type row that differs).
-ir_opt_unique_judge: fn(part: &IROptUniquePart, view: IROptUniqueView) Never! {
+ir_opt_unique_judge: fn(part: ^IROptUniquePart, view: IROptUniqueView) Never! {
     total: view.addressed.len()
     loop g in part.functions {
         found := false
@@ -566,7 +566,7 @@ ir_opt_unique_judge: fn(part: &IROptUniquePart, view: IROptUniqueView) Never! {
 
 // Walk 4 over one part: each accepted candidate's own call goes, and each
 // Call of an accepted candidate's callee gets the unique call before it.
-ir_opt_unique_put: fn(part: &IROptUniquePart, view: IROptUniqueView) Never! {
+ir_opt_unique_put: fn(part: ^IROptUniquePart, view: IROptUniqueView) Never! {
     loop row in 0..<part.functions.len() {
         killed := false
         loop k in view.by_callee[part.start + row] {
@@ -581,7 +581,7 @@ ir_opt_unique_put: fn(part: &IROptUniquePart, view: IROptUniqueView) Never! {
 
 // Merges walk 1: the functions a FunctionAddress names, and per function
 // whether it makes a parameter unique.
-ir_opt_unique_scanned: fn(parts: &[IROptUniquePart], view: &IROptUniqueView) Never! {
+ir_opt_unique_scanned: fn(parts: ^[IROptUniquePart], view: ^IROptUniqueView) Never! {
     loop at in 0..<parts.len() {
         loop target in parts[at].addressed -> view.addressed[target] = true
         compiler_transfer_rows<Bool>(view.unique, parts[at].unique)
@@ -591,7 +591,7 @@ ir_opt_unique_scanned: fn(parts: &[IROptUniquePart], view: &IROptUniqueView) Nev
 // Merges walk 2 in function order: the notes go to `notes`, the candidate
 // columns to the view, with each function's candidates (`by_callee`).
 // Returns the calls ir_opt_hoist_unique moved.
-ir_opt_unique_candidates: fn(parts: &[IROptUniquePart], view: &IROptUniqueView, notes: &[String]) -> Int Never! {
+ir_opt_unique_candidates: fn(parts: ^[IROptUniquePart], view: ^IROptUniqueView, notes: ^[String]) -> Int Never! {
     loop _ in 0..<view.addressed.len() -> view.by_callee.push([Int]{})
     hoisted := 0
     loop at in 0..<parts.len() -> hoisted += ir_opt_unique_take(view, parts[at], notes)
@@ -600,7 +600,7 @@ ir_opt_unique_candidates: fn(parts: &[IROptUniquePart], view: &IROptUniqueView, 
 
 // Moves one part's walk 2 results onto the view and `notes`; returns its
 // hoisted calls.
-ir_opt_unique_take: fn(view: &IROptUniqueView, part: &IROptUniquePart, notes: &[String]) -> Int Never! {
+ir_opt_unique_take: fn(view: ^IROptUniqueView, part: ^IROptUniquePart, notes: ^[String]) -> Int Never! {
     compiler_transfer_rows<String>(notes, part.notes)
     loop callee in part.callees {
         view.by_callee[callee].push(view.ok.len())
@@ -615,7 +615,7 @@ ir_opt_unique_take: fn(view: &IROptUniqueView, part: &IROptUniquePart, notes: &[
 }
 
 // Merges walk 3: a candidate any Call of its callee rules out is not taken.
-ir_opt_unique_judged: fn(parts: [IROptUniquePart], view: &IROptUniqueView) Never! {
+ir_opt_unique_judged: fn(parts: [IROptUniquePart], view: ^IROptUniqueView) Never! {
     loop part in parts {
         loop k in part.bad -> view.ok[k] = false
     }
@@ -634,7 +634,7 @@ ir_opt_unique_param: fn(f: IRFunction, keys: [String], at: Int) -> Int Never! {
 // The `#unique<..>` calls on parameters that function `id` (`f`) makes
 // first (ir_opt_unique_to_callers), appended to the candidate columns. A
 // parameter any instruction writes is never one.
-ir_opt_entry_uniques: fn(m: IRModule, f: IRFunction, keys: [String], id: Int, callees: &[Int], params: &[Int], sites: &[Int], helpers: &[Int]) Never! {
+ir_opt_entry_uniques: fn(m: IRModule, f: IRFunction, keys: [String], id: Int, callees: ^[Int], params: ^[Int], sites: ^[Int], helpers: ^[Int]) Never! {
     taken := [Int]{}
     at := 0
     loop at < f.op.len() {
@@ -669,7 +669,7 @@ ir_opt_param_written: fn(f: IRFunction, param: Int) -> Bool Never! {
 // Puts the `#unique<..>` call of each accepted candidate (`ok`) before each
 // Call of its callee in `f`, on that Call's argument; `by_callee` holds each
 // function's candidates. Returns whether any went in.
-ir_opt_put_uniques: fn(f: &IRFunction, by_callee: [[Int]], params: [Int], helpers: [Int], ok: [Bool]) -> Bool Never! {
+ir_opt_put_uniques: fn(f: ^IRFunction, by_callee: [[Int]], params: [Int], helpers: [Int], ok: [Bool]) -> Bool Never! {
     count: by_callee.len()
     found := false
     loop at in 0..<f.op.len() {
@@ -705,7 +705,7 @@ ir_opt_put_uniques: fn(f: &IRFunction, by_callee: [[Int]], params: [Int], helper
 
 // fill(canvas): `loop i < canvas.words.len() -> canvas.words[i] = 1` the
 // way the builder makes it: the field's address (an Offset 32 bytes into
-// the `&` struct) made again in the Loop for its `#unique<..>` call (row 1
+// the `^` struct) made again in the Loop for its `#unique<..>` call (row 1
 // of `keys`) and its data load. `spoil` 1 also hands the struct to a call
 // (row 2) in the Loop, 2 stores a word over the field's buffer pointer
 // through the struct, 3 only stores another field.
@@ -769,7 +769,7 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
     notes[0].copy()
 }
 
-#Test("A `&` struct's list field is made its own once, before the Loop") {
+#Test("A `^` struct's list field is made its own once, before the Loop") {
     assert_eq(ir_opt_unique_field_test(0), "unique fill [I64]: made unique before the Loop")
     assert_eq(ir_opt_unique_field_test(3), "unique fill [I64]: made unique before the Loop")
 }
@@ -780,7 +780,7 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
 }
 
 // main calls fill(list) twice, then fill(word) `words` times with a word in
-// the list's place; fill's first step makes its `&` list parameter unique
+// the list's place; fill's first step makes its `^` list parameter unique
 // (the `#unique<..>` helper, row 1). Returns the unique calls in main and in
 // fill after ir_opt_unique_to_callers.
 ir_opt_unique_callers_test: fn(words: Int) -> [Int] Never! {

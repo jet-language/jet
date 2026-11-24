@@ -38,11 +38,11 @@ PresetError: enum {
 PresetSet: struct {
     presets: [String:PresetSpec]{[String:PresetSpec]{}},
 
-    insert: fn(&self, preset: PresetSpec) PresetError! { self.insert_checked(preset) }
+    insert: fn(^self, preset: PresetSpec) PresetError! { self.insert_checked(preset) }
 
     // An equal re-declaration is accepted; a different one under the same
     // name is a conflict.
-    insert_checked: fn(&self, preset: PresetSpec) PresetError! {
+    insert_checked: fn(^self, preset: PresetSpec) PresetError! {
         if self.presets.get(preset.name) == .Val(existing) {
             if existing != preset -> return Err(PresetError.Conflict(preset.name))
             return
@@ -89,7 +89,7 @@ PresetSet: struct {
         [String]{}
     }
 
-    resolve_into: fn(self, name: String, stack: &[String], resolved: &ResolvedPreset) PresetError! {
+    resolve_into: fn(self, name: String, stack: ^[String], resolved: ^ResolvedPreset) PresetError! {
         if stack.contains(name) {
             cycle := [String]{}
             started := false

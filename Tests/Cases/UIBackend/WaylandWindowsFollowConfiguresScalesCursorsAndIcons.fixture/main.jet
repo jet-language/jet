@@ -147,7 +147,7 @@ Fake: struct {
     failures: [String],
 }
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -182,13 +182,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -199,7 +199,7 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     f.out.clear()
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("step {f.step}: {message}")
 }
 
@@ -229,7 +229,7 @@ fake_version: fn(mode: FakeMode, interface: String) -> Int {
 }
 
 // Announces `scale120` the way the mode does.
-fake_announce: fn(f: &Fake, scale120: Int) {
+fake_announce: fn(f: ^Fake, scale120: Int) {
     f.scale120 = scale120
     if fake_fractional(f.mode) && f.fractional != 0 {
         id: f.fractional
@@ -247,7 +247,7 @@ fake_announce: fn(f: &Fake, scale120: Int) {
 }
 
 // A configure of `width` x `height`, in the resizing state if `resizing`.
-fake_configure: fn(f: &Fake, width: Int, height: Int, resizing: Bool) {
+fake_configure: fn(f: ^Fake, width: Int, height: Int, resizing: Bool) {
     f.serial += 1
     f.pending_ack = true
     serial: f.serial
@@ -266,7 +266,7 @@ fake_configure: fn(f: &Fake, width: Int, height: Int, resizing: Bool) {
 
 // Starts step `f.step`: its scale, then its configure, or the first of the
 // interactive resize's configures: six sizes on the way, then the last.
-fake_begin: fn(f: &Fake) {
+fake_begin: fn(f: ^Fake) {
     step: f.steps[f.step].copy()
     f.reached = false
     f.settled = 0
@@ -287,7 +287,7 @@ fake_begin: fn(f: &Fake) {
 }
 
 // Configures the next `count` sizes of the interactive resize.
-fake_drag: fn(f: &Fake, count: Int) {
+fake_drag: fn(f: ^Fake, count: Int) {
     sent := 0
     loop sent < count && f.drag.len() > 0 {
         size: f.drag[0].copy()
@@ -306,7 +306,7 @@ fake_buffer: fn(f: Fake, id: Int) -> FakeBuffer? {
 }
 
 // The state applied at a commit: an ack takes the configure's size.
-fake_commit: fn(f: &Fake) {
+fake_commit: fn(f: ^Fake) {
     f.commits += 1
     acked: f.acked
     f.acked = -1
@@ -398,7 +398,7 @@ fake_commit: fn(f: &Fake) {
 }
 
 // The pointer enters the surface at (10, 10) with a fresh serial.
-fake_enter: fn(f: &Fake) {
+fake_enter: fn(f: ^Fake) {
     f.enters += 1
     f.enter_serial = 100 + f.enters
     pointer: f.pointer
@@ -409,7 +409,7 @@ fake_enter: fn(f: &Fake) {
 
 // A cursor request at `serial`: `shape` 0 hides it. After the first hide
 // the pointer leaves and enters again, and the window must set it again.
-fake_cursor: fn(f: &Fake, serial: Int, shape: Int) {
+fake_cursor: fn(f: ^Fake, serial: Int, shape: Int) {
     shown: if shape == 0 -> "hidden" else -> "shape {shape}"
     f.report.push("cursor {shown} at enter {f.enters}")
     if serial != f.enter_serial {
@@ -430,7 +430,7 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
     -1
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -619,7 +619,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
 }
 
 // Handles every complete request in the inbox.
-fake_dispatch: fn(f: &Fake) -[Env]> {
+fake_dispatch: fn(f: ^Fake) -[Env]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

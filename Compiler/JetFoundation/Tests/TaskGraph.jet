@@ -43,7 +43,7 @@ graph_small: fn() -> CompilerTaskGraph Never! {
 
 // The nodes one slot runs `graph`, which it takes, in, until the run is done
 // or stuck.
-graph_order: fn(graph: &&CompilerTaskGraph) -> [Int] Never! {
+graph_order: fn(graph: ^^CompilerTaskGraph) -> [Int] Never! {
     schedule := compiler_task_schedule(graph, compiler_threads_single())
     order := [Int]{}
     loop compiler_task_schedule_next(schedule) == .Val(start) {
@@ -129,7 +129,7 @@ graph_test_node: fn(start: CompilerTaskStart, base: Int, inputs: [Int], clock: C
 
 // The values a run over `case`, which it takes, leaves, in node order: the
 // coordinator a phase keeps, as TaskGraph.jet lays it out.
-graph_test_run: fn(case: &&GraphTestCase, threads: CompilerThreads, trace_sink: CompilerTaskTraceSink?) -> [Int] {
+graph_test_run: fn(case: ^^GraphTestCase, threads: CompilerThreads, trace_sink: CompilerTaskTraceSink?) -> [Int] {
     values := [Int?]{}
     loop _ in 0..<case.base.len() -> values.push(None)
     schedule := compiler_task_schedule(case.graph, threads)
@@ -185,7 +185,7 @@ GraphTestSink: struct {
     }
 }
 
-graph_test_sink: fn(sink: &&GraphTestSink) -> CompilerTaskTraceSink Never! { sink.move() }
+graph_test_sink: fn(sink: ^^GraphTestSink) -> CompilerTaskTraceSink Never! { sink.move() }
 
 #Test("a traced task schedule writes one timed span per node, on its thread slot") {
     count: 40

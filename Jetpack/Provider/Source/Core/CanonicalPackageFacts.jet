@@ -59,7 +59,7 @@ provider_load_canonical_facts: fn(dir: String, marker: String) -[FS, Env]> Packa
     }
 }
 
-provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requested: String, out: &[CanonicalPackage]) -[FS, Env]> ProviderReason! {
+provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requested: String, out: ^[CanonicalPackage]) -[FS, Env]> ProviderReason! {
     seen := [String]{}
     loop member in members {
         relative: if member == {
@@ -89,7 +89,7 @@ provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requ
     }
 }
 
-provider_collect_one_canonical_package: fn(path: String, requested: String, seen: &[String], out: &[CanonicalPackage]) -[FS, Env]> ProviderReason! {
+provider_collect_one_canonical_package: fn(path: String, requested: String, seen: ^[String], out: ^[CanonicalPackage]) -[FS, Env]> ProviderReason! {
     if seen.contains(path) {
         return
     }
@@ -165,7 +165,7 @@ provider_core_tree_fingerprint: fn(root: String) -[FS, Env]> String ProviderReas
 }
 
 // Append `value` as `width` big-endian bytes.
-provider_push_be: fn(out: &[U8], value: Int, width: Int) Never! {
+provider_push_be: fn(out: ^[U8], value: Int, width: Int) Never! {
     shift := (width - 1) * 8
     loop shift >= 0 {
         out.push(U8{((value >> shift)) & 255})
@@ -173,7 +173,7 @@ provider_push_be: fn(out: &[U8], value: Int, width: Int) Never! {
     }
 }
 
-provider_collect_core_files: fn(root: String, relative: String, out: &[{relative: String, path: String}]) -[FS]> ProviderReason! {
+provider_collect_core_files: fn(root: String, relative: String, out: ^[{relative: String, path: String}]) -[FS]> ProviderReason! {
     current: if relative == "" -> root else -> files.join(root, relative)
     entries: files.list_dir(current) ?? return Err(ProviderReason{message: "{err}"})
     loop entry in entries {

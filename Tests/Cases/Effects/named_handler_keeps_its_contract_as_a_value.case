@@ -3,7 +3,7 @@
 # failure travel with the value, and a named handler crosses into a task,
 # with the same output at O0, O1 and O2. Mismatched contracts are still
 # refused: a wider row (E0747), a failure where the parameter says `Never`
-# (E0112), and a `&` parameter where the function type reads (E0227).
+# (E0112), and a `^` parameter where the function type reads (E0227).
 fixture: NamedHandlerKeepsItsContractAsAValue.fixture
 env: NO_COLOR=1
 step: jet check allowed.jet
@@ -25,4 +25,4 @@ exit: 1
 stderr: ~ "Error: Jet.ValueTypeMismatch: `accept_total` wants fn(Int) -[IO]> Never! for argument 1, but this is fn(Int) -[IO]> Rejected!\n  --> failure.jet:16:26" # the failure type travels with the value
 step: jet check borrow.jet
 exit: 1
-stderr: ~ "Error: Jet.MarkedFunctionValue: `bump` can't be used as a function value because its parameter `c` is `&`\n  --> borrow.jet:13:10" # the access mode is kept
+stderr: ~ "Error: Jet.MarkedFunctionValue: `bump` can't be used as a function value because its parameter `c` is `^`\n  --> borrow.jet:13:10" # the access mode is kept

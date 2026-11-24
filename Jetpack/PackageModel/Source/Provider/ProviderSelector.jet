@@ -54,7 +54,7 @@ ProviderSelector: struct {
         }
     }
 
-    set_value: fn(&self, field: ProviderSelectorField, value: String) Never! {
+    set_value: fn(^self, field: ProviderSelectorField, value: String) Never! {
         if field == {
             .Version -> { self.version = value }
             .Revision -> { self.revision = value }
@@ -179,7 +179,7 @@ ProviderSelectorDetails: struct {
     conflicts: [{key: String, left: String, right: String}],
     duplicates: [String],
 
-    // Facts separate on `&`, and on a `,` that starts another known
+    // Facts separate on `^`, and on a `,` that starts another known
     // `key=value` fact; a fact without `=` is a version.
     parse: fn(raw: String) -> ProviderSelectorDetails Never! {
         details := ProviderSelectorDetails{selector: ProviderSelector.empty(raw), unknown: [String]{}, conflicts: [{key: String, left: String, right: String}]{}, duplicates: [String]{}}
@@ -202,7 +202,7 @@ ProviderSelectorDetails: struct {
         details
     }
 
-    add_part: fn(&self, part: String) Never! {
+    add_part: fn(^self, part: String) Never! {
         if part == "" {
             return
         }

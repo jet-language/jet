@@ -18,7 +18,7 @@ use {
 }
 
 // The compiler value host word `word` holds.
-jet_eval_ir_host_value: fn(s: &JetEvalIRState, word: Int) -> TComptimeValue? Never! {
+jet_eval_ir_host_value: fn(s: ^JetEvalIRState, word: Int) -> TComptimeValue? Never! {
     if word < 1 || word > s.host_values.len() {
         jet_eval_ir_problem(s, "compiler value handle {word} is not live")
         return None
@@ -26,7 +26,7 @@ jet_eval_ir_host_value: fn(s: &JetEvalIRState, word: Int) -> TComptimeValue? Nev
     Val(s.host_values[word - 1].copy())
 }
 
-jet_eval_ir_host_types: fn(s: &JetEvalIRState) -> Shared<IRModule>? Never! {
+jet_eval_ir_host_types: fn(s: ^JetEvalIRState) -> Shared<IRModule>? Never! {
     if s.host_types == {
         .Val(cell) -> Val(cell.copy())
         .None -> {
@@ -36,7 +36,7 @@ jet_eval_ir_host_types: fn(s: &JetEvalIRState) -> Shared<IRModule>? Never! {
     }
 }
 
-jet_eval_ir_host_layouts: fn(s: &JetEvalIRState) -> Shared<[IRProgram]>? Never! {
+jet_eval_ir_host_layouts: fn(s: ^JetEvalIRState) -> Shared<[IRProgram]>? Never! {
     if s.host_layouts == {
         .Val(cell) -> Val(cell.copy())
         .None -> {
@@ -48,7 +48,7 @@ jet_eval_ir_host_layouts: fn(s: &JetEvalIRState) -> Shared<[IRProgram]>? Never! 
 
 // The words of an entry's parameters (type rows `params`) for `args`, none
 // for an entry run without arguments.
-jet_eval_ir_host_arguments: fn(s: &JetEvalIRState, params: [Int], args: [TComptimeValue]) -> [Int]? {
+jet_eval_ir_host_arguments: fn(s: ^JetEvalIRState, params: [Int], args: [TComptimeValue]) -> [Int]? {
     if args.len() == 0 -> return Val([Int]{})
     if args.len() != params.len() {
         jet_eval_ir_problem(s, "the entry takes {params.len()} parameters, given {args.len()}")
@@ -71,7 +71,7 @@ jet_eval_ir_host_arguments: fn(s: &JetEvalIRState, params: [Int], args: [TCompti
 // type row its key names; `impure` when the call sits in an `#Impure` block;
 // `start` and `end` the call's span in source file `file`
 // (ir_host_method).
-jet_eval_ir_host_method_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
+jet_eval_ir_host_method_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
     if args.len() < 5 || args.len() % 2 != 1 {
         return jet_eval_ir_primitive_shape(s, "jet_comptime_host_method")
     }
@@ -130,7 +130,7 @@ jet_eval_ir_host_method_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int,
 
 // jet_comptime_host_field(field, row key, word): field `field` of the
 // compiler value `word` of the type row its key names.
-jet_eval_ir_host_field_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
+jet_eval_ir_host_field_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
     if args.len() != 3 || dst_row < 0 {
         return jet_eval_ir_primitive_shape(s, "jet_comptime_host_field")
     }
@@ -153,7 +153,7 @@ jet_eval_ir_host_field_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int, 
 // jet_comptime_host_constant(key): comptime constant `key`, whose value
 // holds a compiler value: its computed value, from the constant row the
 // batch was built over (ir_host_constant).
-jet_eval_ir_host_constant_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
+jet_eval_ir_host_constant_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
     if args.len() != 1 || dst_row < 0 {
         return jet_eval_ir_primitive_shape(s, "jet_comptime_host_constant")
     }
@@ -171,7 +171,7 @@ jet_eval_ir_host_constant_route: fn(s: &JetEvalIRState, args: [Int], dst_row: In
 
 // jet_comptime_host_literal(key): a compile-time literal that is a compiler
 // value, which the built module keeps under `key` (ir_host_literal).
-jet_eval_ir_host_literal_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
+jet_eval_ir_host_literal_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
     if args.len() != 1 || dst_row < 0 {
         return jet_eval_ir_primitive_shape(s, "jet_comptime_host_literal")
     }
@@ -191,7 +191,7 @@ jet_eval_ir_host_literal_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int
 
 // The type row of `types` whose intern key is the String at `key` (the
 // builder's ir_host_row_key).
-jet_eval_ir_host_row: fn(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? Never! {
+jet_eval_ir_host_row: fn(types: IRModule, s: ^JetEvalIRState, key: Int) -> Int? Never! {
     text: jet_eval_ir_text(s, key) ?? return None
     if name_column_value(types.type_rows_keys, types.type_rows, text) == .Val(row) -> return Val(row)
     jet_eval_ir_problem(s, "host operand type `{text}` is not a row of the module")
@@ -205,7 +205,7 @@ jet_eval_ir_host_row: fn(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? 
 // `span` in source file `file`. `BuildError.into_err` is the default Err a
 // BuildError converts to (JetIR ir_try_reraise): its own record, which
 // already is that Err.
-jet_eval_ir_host_answer: fn(s: &JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -> TComptimeValue? {
+jet_eval_ir_host_answer: fn(s: ^JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -> TComptimeValue? {
     if owner == "compiler" -> return jet_eval_ir_compiler_query(s, method, values, span)
     if member == "BuildError.into_err" && values.len() == 1 -> return Val(values[0])
     if jet_eval_reflection_metadata_supported(owner, method) {
@@ -231,7 +231,7 @@ jet_eval_ir_host_answer: fn(s: &JetEvalIRState, owner: String, method: String, m
 // `core.compiler` query `query` on `values`: the compiler's query host
 // answers it, the typed result (a CompilerError failure included) or the
 // diagnostic that stops the evaluation.
-jet_eval_ir_compiler_query: fn(s: &JetEvalIRState, query: String, values: [TComptimeValue], span: Span) -> TComptimeValue? {
+jet_eval_ir_compiler_query: fn(s: ^JetEvalIRState, query: String, values: [TComptimeValue], span: Span) -> TComptimeValue? {
     host: if s.compiler == {
         .Val(installed) -> installed.clone_compiler_host()
         .None -> {
@@ -248,7 +248,7 @@ jet_eval_ir_compiler_query: fn(s: &JetEvalIRState, query: String, values: [TComp
     jet_eval_ir_host_reply(s, reply)
 }
 
-jet_eval_ir_host_reply: fn(s: &JetEvalIRState, reply: JetEvalBuildReply) -> TComptimeValue? Never! {
+jet_eval_ir_host_reply: fn(s: ^JetEvalIRState, reply: JetEvalBuildReply) -> TComptimeValue? Never! {
     if reply == {
         .Value(value) -> Val(value)
         .Failure(diagnostic) -> {
@@ -260,7 +260,7 @@ jet_eval_ir_host_reply: fn(s: &JetEvalIRState, reply: JetEvalBuildReply) -> TCom
     }
 }
 
-jet_eval_ir_host_projection: fn(s: &JetEvalIRState, answer: JetEvalCompilerValueAnswer) -> TComptimeValue? Never! {
+jet_eval_ir_host_projection: fn(s: ^JetEvalIRState, answer: JetEvalCompilerValueAnswer) -> TComptimeValue? Never! {
     if answer == {
         .Value(value) -> Val(value)
         .Fault(message) -> {
@@ -270,14 +270,14 @@ jet_eval_ir_host_projection: fn(s: &JetEvalIRState, answer: JetEvalCompilerValue
     }
 }
 
-jet_eval_ir_host_unwritable: fn(s: &JetEvalIRState, value: TComptimeValue, ty: Type) Never! {
+jet_eval_ir_host_unwritable: fn(s: ^JetEvalIRState, value: TComptimeValue, ty: Type) Never! {
     jet_eval_ir_unsupported(s, "writing compiler value {value} as an IR value of {type_name(ty)}")
 }
 
 // The IR word of compiler value `value` as type row `row` of `types`, laid
 // out by `p`: a host row's handle, a scalar, a runtime text or box; an
 // aggregate written to `area` (its own storage when 0), which is its word.
-jet_eval_ir_host_store: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, value: TComptimeValue, row: Int, area: Int) -> Int? {
+jet_eval_ir_host_store: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, value: TComptimeValue, row: Int, area: Int) -> Int? {
     if ir_host_value_row(types, p, row) != None {
         s.host_values.push(value.copy())
         return Val(s.host_values.len())
@@ -329,7 +329,7 @@ jet_eval_ir_host_store: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, v
 }
 
 // The index of variant `variant` of enum declaration `definition`.
-jet_eval_ir_host_variant: fn(s: &JetEvalIRState, p: IRProgram, definition: Int, variant: String) -> Int? Never! {
+jet_eval_ir_host_variant: fn(s: ^JetEvalIRState, p: IRProgram, definition: Int, variant: String) -> Int? Never! {
     declaration: p.types[definition]
     if declaration.kind == .Enum(variants, _) {
         loop (index, row) in variants {
@@ -343,7 +343,7 @@ jet_eval_ir_host_variant: fn(s: &JetEvalIRState, p: IRProgram, definition: Int, 
 // The word of a pointer row: an Option (0 when absent), a Result box
 // (selector 1 for success at 0, the payload at 8) or a boxed enum case
 // (discriminant at 0, its payload members).
-jet_eval_ir_host_box: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, value: TComptimeValue, row: Int) -> Int? {
+jet_eval_ir_host_box: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, value: TComptimeValue, row: Int) -> Int? {
     checked: ir_untag(ir_row_ty(types, p, row))
     if checked == .Option(inner) {
         if value == .Failed(_) -> return Val(0)
@@ -413,7 +413,7 @@ jet_eval_ir_host_box: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, val
 
 // Writes `value` of type row `row` at `address`: an aggregate in place,
 // anything else as its word.
-jet_eval_ir_host_put: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, value: TComptimeValue, row: Int, address: Int) -> Bool {
+jet_eval_ir_host_put: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, value: TComptimeValue, row: Int, address: Int) -> Bool {
     if types.types[row].kind == .Aggregate {
         return jet_eval_ir_host_fill(types, p, s, value, row, address)
     }
@@ -424,7 +424,7 @@ jet_eval_ir_host_put: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, val
 
 // Writes `value` as member `member` of the storage at `base`: in place, or
 // in a box of its own when the member is boxed.
-jet_eval_ir_host_member: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, value: TComptimeValue, member: IRMember, base: Int) -> Bool {
+jet_eval_ir_host_member: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, value: TComptimeValue, member: IRMember, base: Int) -> Bool {
     if !member.boxed {
         return jet_eval_ir_host_put(types, p, s, value, member.ty, base + member.offset)
     }
@@ -435,7 +435,7 @@ jet_eval_ir_host_member: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, 
 
 // Writes the aggregate `value` of type row `row` at `address`: a List
 // header over a runtime buffer, or a tuple's or struct's members.
-jet_eval_ir_host_fill: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, value: TComptimeValue, row: Int, address: Int) -> Bool {
+jet_eval_ir_host_fill: fn(types: ^IRModule, p: IRProgram, s: ^JetEvalIRState, value: TComptimeValue, row: Int, address: Int) -> Bool {
     checked: ir_untag(ir_row_ty(types, p, row))
     if ir_fixed_shape(types, p, row) == .Val(shape) {
         // An inline `[T#N]` takes its N elements in place.

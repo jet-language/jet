@@ -89,7 +89,7 @@ sema_window_callee_key: fn(callee: String, param: String) -> String Never! {
     sema_window_param_key(sema_window_plain_name(callee), param)
 }
 
-sema_window_collect_rows: fn(items: [Item], rows: &[SemaWindowFunctionRow]) {
+sema_window_collect_rows: fn(items: [Item], rows: ^[SemaWindowFunctionRow]) {
     loop item in items {
         if item == {
             .Func(func) -> {
@@ -105,7 +105,7 @@ sema_window_collect_rows: fn(items: [Item], rows: &[SemaWindowFunctionRow]) {
 
 // The candidates of every function in `items`, in the order
 // sema_window_collect_rows lists them; each body is scanned in place.
-sema_window_collect_candidates: fn(items: [Item], rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, candidates: &[SemaWindowCandidate]) {
+sema_window_collect_candidates: fn(items: [Item], rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, candidates: ^[SemaWindowCandidate]) {
     loop item in items {
         if item == {
             .Func(func) -> { sema_window_function_candidates(func, rows, positions, candidates) }
@@ -227,7 +227,7 @@ sema_window_collect_candidate_range: fn(graph: SemaRegistrationGraph, rows: [Sem
     candidates
 }
 
-sema_window_function_candidates: fn(func: Func, rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, candidates: &[SemaWindowCandidate]) {
+sema_window_function_candidates: fn(func: Func, rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, candidates: ^[SemaWindowCandidate]) {
     if positions.rows[sema_window_position_id(positions, func.name)].len() > 1 {
         return
     }
@@ -335,7 +335,7 @@ sema_window_is_param: fn(expr: Expr, param: String) -> Bool Never! {
     }
 }
 
-sema_window_scan_args: fn(args: [CallArg], param: String, scan: &SemaWindowScan) {
+sema_window_scan_args: fn(args: [CallArg], param: String, scan: ^SemaWindowScan) {
     loop arg in args -> sema_window_scan_expr(arg.expr, param, scan)
 }
 
@@ -348,15 +348,15 @@ sema_window_args_pass_param: fn(args: [CallArg], param: String) -> Bool Never! {
     false
 }
 
-sema_window_scan_optional: fn(expr: Expr?, param: String, scan: &SemaWindowScan) {
+sema_window_scan_optional: fn(expr: Expr?, param: String, scan: ^SemaWindowScan) {
     if expr == .Val(value) -> sema_window_scan_expr(value, param, scan)
 }
 
-sema_window_scan_body: fn(body: [Stmt], param: String, scan: &SemaWindowScan) {
+sema_window_scan_body: fn(body: [Stmt], param: String, scan: ^SemaWindowScan) {
     loop statement in body -> sema_window_scan_statement(statement, param, scan)
 }
 
-sema_window_scan_statement: fn(statement: Stmt, param: String, scan: &SemaWindowScan) {
+sema_window_scan_statement: fn(statement: Stmt, param: String, scan: ^SemaWindowScan) {
     if statement == {
         .Expr(expr) | .BreakValue(expr, _) | .Yield(expr, _) | .DeferClose(expr, _) -> {
             sema_window_scan_expr(expr, param, scan)
@@ -447,10 +447,10 @@ sema_window_scan_statement: fn(statement: Stmt, param: String, scan: &SemaWindow
     }
 }
 
-sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
+sema_window_scan_expr: fn(expr: Expr, param: String, scan: ^SemaWindowScan) {
     if expr == {
         .Place(inner, access, _, _) -> {
-            // A write window of the whole list (`edit: &xs`) can reach a resize.
+            // A write window of the whole list (`edit: ^xs`) can reach a resize.
             if access == PlaceAccess.Write && sema_window_is_param(inner, param) {
                 scan.resizes = true
             }

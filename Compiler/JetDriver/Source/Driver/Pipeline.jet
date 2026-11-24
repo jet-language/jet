@@ -160,7 +160,6 @@ use {
         sema_source_location_at,
         sema_effect_chain_name,
         sema_check_registered_module_text,
-        sema_source_file_at,
         sema_core_role,
         sema_core_role_functions,
         sema_core_roles_check,
@@ -338,7 +337,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, IRSourceTexts, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_core_role_names, ir_first_function_rows, ir_function_rows_get, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic, ir_source_texts]
+    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, IRSourceTexts, ir_codec_decode_roles, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_method_lowered_by_owner, ir_core_role_names, ir_first_function_rows, ir_function_rows_get, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic, ir_source_texts]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -572,7 +571,7 @@ jet_driver_timing_target_refusal: fn(load: JetDriverLoadResult, modules: [SemaGr
 // Ordinary Doc preserves its user-only projection. The explicit retained
 // Check projection also retains Core/generated/ABI rows from this same graph;
 // its separate source index list identifies the actual Review source owners.
-jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult, graph: SemaGraphResult, registration: SemaRegistrationGraph, values: [SemaComptimeItemValue], effect_identity: ModuleID, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> [JetDriverDocModule] Never! {
+jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult, graph: SemaGraphResult, registration: SemaRegistrationGraph, values: [SemaComptimeItemValue], effect_identity: ModuleID, checked_projection: Bool, capture: ^JetDriverCheckedProjectionCapture) -> [JetDriverDocModule] Never! {
     modules := [JetDriverDocModule]{}
     // copy: the shared name ledger owns its facts for the doc pass, and `graph` is the caller's
     // checked graph (a read parameter), which keeps its names for emission.
@@ -772,7 +771,7 @@ jet_driver_entry_selection: fn(load: JetDriverLoadResult) -> JetDriverPackageEnt
 // manifest `entry:` binding, else of the entry module's `run: fn` when it
 // takes no parameter or one `#CLI` record. None when the program has no
 // executable entry (a diagnostic says why when a binding fails).
-jet_driver_resolve_entry_key: fn(load: JetDriverLoadResult, table: ModuleTable, semantic_graph: SemaGraphResult, functions: [FnBody], modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> String? {
+jet_driver_resolve_entry_key: fn(load: JetDriverLoadResult, table: ModuleTable, semantic_graph: SemaGraphResult, functions: [FnBody], modules: [SemaGraphModuleResult], diagnostics: ^[Diagnostic]) -> String? {
     // One or two keys are read: each is counted over the rows, never a
     // whole-program count map (a Map filled in row order costs O(N^2) moves).
     loop source_module in semantic_graph.modules {
@@ -896,7 +895,7 @@ jet_driver_empty_compile_trace: fn() -> JetDriverCompileTrace Never! {
     JetDriverCompileTrace{stdout: [String]{}, stderr: [String]{}, soft_stop: false, exit_code: None}
 }
 
-jet_driver_record_eval_result: fn(trace: &JetDriverCompileTrace, result: JetEvalIRResult) Never! {
+jet_driver_record_eval_result: fn(trace: ^JetDriverCompileTrace, result: JetEvalIRResult) Never! {
     if result.stdout.len() > 0 -> trace.stdout.push(result.stdout)
     if result.stderr.len() > 0 -> trace.stderr.push(result.stderr)
     if result.debug_trace.len() > 0 -> trace.debug_trace.push(result.debug_trace)
@@ -1058,7 +1057,7 @@ jet_driver_target_machine_by_name: fn(name: String, package_version: String) -> 
 
 jet_driver_selected_target_machine: fn(
     request: JetDriverCompileRequest,
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
 ) -> TargetMachine? {
     target_triple: request.host_facts.target_triple ?? {
         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native host omitted its target triple", "target layout and machine identity use only the raw target identity authorized by Host", "supply the compiler target triple through HostFacts"))
@@ -1217,7 +1216,7 @@ jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult
 
 // Records the functions landed value `value` of constant `key` names into
 // `held` (ir_reach_held_add).
-jet_driver_comptime_value_functions_note: fn(held: &IRReachHeld, key: String, value: TComptimeValue) Never! {
+jet_driver_comptime_value_functions_note: fn(held: ^IRReachHeld, key: String, value: TComptimeValue) Never! {
     functions := name_table_sized(4)
     jet_driver_comptime_value_functions(value, functions)
     ir_reach_held_add(held, key, functions)
@@ -1234,7 +1233,7 @@ jet_driver_value_function_keys: fn(values: [SemaComptimeItemValue]) -> IRReachHe
 // Interns each function `value` names into `held`. The items of a list and
 // the values of a map share one type, so one scalar among them makes them
 // all scalars, which name no function.
-jet_driver_comptime_value_functions: fn(value: TComptimeValue, held: &NameTable) Never! {
+jet_driver_comptime_value_functions: fn(value: TComptimeValue, held: ^NameTable) Never! {
     if value == {
         .Function(key) -> { _ := name_intern(held, key) }
         .List(items) -> {
@@ -1276,7 +1275,7 @@ jet_driver_comptime_value_scalar: fn(value: TComptimeValue) -> Bool Never! {
 // another module marks it ambiguous. One module lists an impl method both on
 // its nominal and on its impl block, which is the same owner. The key column
 // is hashed, so a key inserted in any order is a constant-time append.
-jet_driver_comptime_owners_build: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex) Never! {
+jet_driver_comptime_owners_build: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex) Never! {
     index.owners_built = true
     loop source_module in graph.modules {
         loop function in source_module.functions {
@@ -1296,7 +1295,7 @@ jet_driver_comptime_owners_build: fn(graph: SemaRegistrationGraph, index: &JetDr
 }
 
 // Records that `module_identity` registers `key` (jet_driver_comptime_owners_build).
-jet_driver_comptime_owner_add: fn(index: &JetDriverComptimeRunIndex, module_identity: ModuleID, key: String) Never! {
+jet_driver_comptime_owner_add: fn(index: ^JetDriverComptimeRunIndex, module_identity: ModuleID, key: String) Never! {
     id: Int{module_identity.id}
     if name_column_value(index.owner_keys, index.owners, key) == .Val(owner) {
         if owner >= 0 && owner != id -> name_column_set(index.owner_keys, index.owners, key, -1)
@@ -1351,7 +1350,7 @@ JetDriverComptimeWaitRow: struct {
 
 // Queues function `function_key` of `module_identity` once, its node in
 // `nodes` beside it in `refs`; the result is its node.
-jet_driver_comptime_function_ref_add: fn(index: &JetDriverComptimeRunIndex, refs: &[JetDriverComptimeFunctionRef], nodes: &[Int], queued: &[Int:Bool], module_identity: ModuleID, function_key: String) -> Int Never! {
+jet_driver_comptime_function_ref_add: fn(index: ^JetDriverComptimeRunIndex, refs: ^[JetDriverComptimeFunctionRef], nodes: ^[Int], queued: ^[Int:Bool], module_identity: ModuleID, function_key: String) -> Int Never! {
     node: jet_driver_comptime_node_id(index, module_identity, function_key)
     if queued.get(node) != None -> return node
     queued[node] = true
@@ -1360,7 +1359,7 @@ jet_driver_comptime_function_ref_add: fn(index: &JetDriverComptimeRunIndex, refs
     node
 }
 
-jet_driver_comptime_wait_add: fn(dependencies: &[String], key: String) Never! {
+jet_driver_comptime_wait_add: fn(dependencies: ^[String], key: String) Never! {
     loop previous in dependencies {
         if previous == key {
             return
@@ -1374,7 +1373,7 @@ jet_driver_comptime_wait_add: fn(dependencies: &[String], key: String) Never! {
 // its tree names (ir_named_function_keys, which takes in each precise
 // operation Sema bound to its core.math function) and the Core functions
 // filling the jet_builtins roles its lowering runs (ir_core_role_names).
-jet_driver_comptime_named_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
+jet_driver_comptime_named_refs: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], refs: ^[JetDriverComptimeFunctionRef]) Never! {
     // Function values the body stores or reads out of a constant, Core
     // source functions Sema rewrote a Core call to, and the error
     // conversions its `?` calls are lowered with it, like its callees.
@@ -1416,10 +1415,11 @@ jet_driver_comptime_named_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
 // What each codec target in `tree` calls with no call fact
 // (ir_comptime_codec_targets): every Encode or Decode implementation, as the
 // target encodes or decodes, that it reaches by owner type, named from
-// `module_identity` (sema_comptime_codec_methods), and the
-// Core/Encoding/Encoding.jet decode helpers a container target is decoded
-// through, queued like the role fillers.
-jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) {
+// `module_identity` (sema_comptime_codec_methods), and the Core decode
+// helpers a container target is decoded through, the functions that fill
+// their jet_builtins roles (ir_codec_decode_roles), queued like the other
+// role fillers.
+jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: ^[JetDriverComptimeFunctionRef]) {
     targets: ir_comptime_codec_targets(graph.interner, tree, roots, body)
     if targets.len() == 0 {
         return
@@ -1430,16 +1430,10 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
         }
     }
     if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
-    loop module_row in graph.modules {
-        if !module_is_core(module_row.module_identity) || !module_row.source_file.ends_with("Core/Encoding/Encoding.jet") {
-            next
-        }
-        module_text_value: module_text(graph.module_table, module_row.module_identity)
-        loop name in ir_codec_decode_helpers() {
-            key: symbol_key_text(SymbolKind.Function, module_text_value, "", name)
-            if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
-                refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
-            }
+    loop filler in sema_core_role_functions(graph, ir_codec_decode_roles()) {
+        key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, filler.module_identity), "", filler.name)
+        if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
+            refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
         }
     }
 }
@@ -1457,7 +1451,7 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
 // building renders as it does at run time; a KeyBy type's `key` and a
 // written Comparable's `compare` order its Map keys and Set members, so a
 // Map built while building keeps the order it has at run time.
-jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
+jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: ^[JetDriverComptimeFunctionRef]) Never! {
     rendered := [Int:Bool]{}
     loop type_id in ir_comptime_expression_types(tree, roots, body) {
         ty: type_syntax(graph.interner, type_id)
@@ -1475,7 +1469,7 @@ jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
 // fillers, codec methods, owner-type methods and bounded trait methods
 // lowering calls, in that order, each possibly more than once. The closure
 // queues each the first time.
-jet_driver_comptime_body_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int]) -> [JetDriverComptimeFunctionRef] {
+jet_driver_comptime_body_refs: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int]) -> [JetDriverComptimeFunctionRef] {
     refs := [JetDriverComptimeFunctionRef]{}
     jet_driver_comptime_named_refs(graph, index, tree, roots, body, refs)
     jet_driver_comptime_codec_refs(graph, index, module_identity, tree, roots, body, refs)
@@ -1508,7 +1502,7 @@ jet_driver_comptime_row_impurity: fn(graph: SemaRegistrationGraph, checked: Sema
 // closure `asks`, which it does until a row is impure. Row `row` of the
 // run's checked functions keeps it for the closures after this one; a row
 // of -1 is one the run does not keep.
-jet_driver_comptime_closure_row: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, row: Int, checked: SemaComptimeFunctionResult, function: FnBody, asks: Bool, local_value: Bool) -> JetDriverComptimeClosureRow {
+jet_driver_comptime_closure_row: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, row: Int, checked: SemaComptimeFunctionResult, function: FnBody, asks: Bool, local_value: Bool) -> JetDriverComptimeClosureRow {
     found := index.closure_rows.get(row)
     changed := found == None
     cached := if found == .Val(kept) -> kept else -> JetDriverComptimeClosureRow{refs: jet_driver_comptime_function_refs(graph, index, checked.module_identity, function)}
@@ -1528,7 +1522,7 @@ jet_driver_comptime_closure_row: fn(graph: SemaRegistrationGraph, index: &JetDri
 
 // The functions checked function `function`'s body and parameter defaults
 // reach with no call fact (jet_driver_comptime_body_refs).
-jet_driver_comptime_function_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, function: FnBody) -> [JetDriverComptimeFunctionRef] {
+jet_driver_comptime_function_refs: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, module_identity: ModuleID, function: FnBody) -> [JetDriverComptimeFunctionRef] {
     defaults := [Int]{}
     loop parameter in function.params {
         if parameter.default == Val(value) -> defaults.push(value)
@@ -1539,7 +1533,7 @@ jet_driver_comptime_function_refs: fn(graph: SemaRegistrationGraph, index: &JetD
 // The node (JetDriverComptimeClosureNode) of function `function_key` of
 // `module_identity`, added unsettled, unchecked and not waiting the first
 // time the run names it.
-jet_driver_comptime_node_id: fn(index: &JetDriverComptimeRunIndex, module_identity: ModuleID, function_key: String) -> Int Never! {
+jet_driver_comptime_node_id: fn(index: ^JetDriverComptimeRunIndex, module_identity: ModuleID, function_key: String) -> Int Never! {
     key: "{module_identity.id}\n{function_key}"
     hash: name_text_hash(key)
     if name_column_get_hashed(index.node_names, index.node_ids, key, hash) == .Val(found) -> return found
@@ -1562,7 +1556,7 @@ jet_driver_comptime_node_id: fn(index: &JetDriverComptimeRunIndex, module_identi
 // failure settle. None at the first function that is not settled; the full
 // walk (jet_driver_comptime_function_closure) runs then. `impurity`,
 // `module_value` and `local_value` are the full walk's.
-jet_driver_comptime_settled_closure: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, checked_functions: [SemaComptimeFunctionResult], roots: [Int], module_value: Bool, local_value: Bool, impurity: String?, diagnostics: &[Diagnostic]) -> JetDriverComptimeFunctionClosure? {
+jet_driver_comptime_settled_closure: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, checked_functions: [SemaComptimeFunctionResult], roots: [Int], module_value: Bool, local_value: Bool, impurity: String?, diagnostics: ^[Diagnostic]) -> JetDriverComptimeFunctionClosure? {
     order := [Int]{}
     queued := [Int:Bool]{}
     loop root in roots {
@@ -1612,7 +1606,7 @@ jet_driver_comptime_settled_closure: fn(graph: SemaRegistrationGraph, index: &Je
 // Settled node `id`'s impurity for a module value (`local_value`: a local
 // value), its row's closure row's (jet_driver_comptime_closure_row), kept on
 // the node once asked.
-jet_driver_comptime_node_impurity: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, checked_functions: [SemaComptimeFunctionResult], id: Int, local_value: Bool) -> String? {
+jet_driver_comptime_node_impurity: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, checked_functions: [SemaComptimeFunctionResult], id: Int, local_value: Bool) -> String? {
     if local_value && index.nodes[id].local_known -> return index.nodes[id].local_impurity.copy()
     if !local_value && index.nodes[id].module_known -> return index.nodes[id].module_impurity.copy()
     row: index.nodes[id].row
@@ -1643,22 +1637,22 @@ jet_driver_comptime_node_impurity: fn(graph: SemaRegistrationGraph, index: &JetD
 // it reads only function declarations, which staged values never change, so
 // every on-demand function check of the run shares the one built at the first.
 // `program` is read-only here, so its graph is borrowed in place: a writable
-// `&program` turned the graph binding below into a whole-graph copy per call.
-jet_driver_comptime_merge_item_delta: fn(program: &SemaProgramTables, checked: &SemaComptimeItemCheck) Never! {
+// `^program` turned the graph binding below into a whole-graph copy per call.
+jet_driver_comptime_merge_item_delta: fn(program: ^SemaProgramTables, checked: ^SemaComptimeItemCheck) Never! {
     if checked.type_delta.len() == 0 -> return
-    if &program.registration_graph == .Val(graph) {
+    if ^program.registration_graph == .Val(graph) {
         delta := checked.type_delta.pop() ?? return
         remap: interner_merge_delta(graph.interner, delta)
-        if &checked.request == .Val(req) -> sema_remap_comptime_item_request(req, remap)
+        if ^checked.request == .Val(req) -> sema_remap_comptime_item_request(req, remap)
     }
 }
 
-jet_driver_comptime_merge_fn_delta: fn(program: &SemaProgramTables, checked: &SemaComptimeFunctionResult) Never! {
+jet_driver_comptime_merge_fn_delta: fn(program: ^SemaProgramTables, checked: ^SemaComptimeFunctionResult) Never! {
     if checked.type_delta.len() == 0 -> return
-    if &program.registration_graph == .Val(graph) {
+    if ^program.registration_graph == .Val(graph) {
         delta := checked.type_delta.pop() ?? return
         remap: interner_merge_delta(graph.interner, delta)
-        if &checked.function == .Val(func) {
+        if ^checked.function == .Val(func) {
             body_tree_remap_types(func.tree, remap)
         }
         loop idx in 0..<checked.conversions.len() {
@@ -1669,9 +1663,9 @@ jet_driver_comptime_merge_fn_delta: fn(program: &SemaProgramTables, checked: &Se
 }
 
 jet_driver_comptime_check_fn_with_program: fn(
-    environment: &SemaScopeEnvironment,
+    environment: ^SemaScopeEnvironment,
     program: SemaProgramTables,
-    comptime_scopes: &SemaComptimeScopes,
+    comptime_scopes: ^SemaComptimeScopes,
     available: SemaComptimeAvailableConstants,
     memory_plan: SemaFunctionMemoryPlan,
     values: [SemaComptimeItemValue],
@@ -1682,7 +1676,7 @@ jet_driver_comptime_check_fn_with_program: fn(
     sema_check_comptime_function(graph, environment, program, comptime_scopes, available, memory_plan, values, module_identity, function_key)
 }
 
-jet_driver_comptime_memory_plan_ensure: fn(program: SemaProgramTables, threads: CompilerThreads, memory_plan: &[SemaFunctionMemoryPlan]) Never! {
+jet_driver_comptime_memory_plan_ensure: fn(program: SemaProgramTables, threads: CompilerThreads, memory_plan: ^[SemaFunctionMemoryPlan]) Never! {
     if memory_plan.len() == 0 {
         if program.registration_graph == .Val(graph) {
             memory_plan.push(sema_function_memory_plan_from_graph(graph, threads))
@@ -1692,15 +1686,15 @@ jet_driver_comptime_memory_plan_ensure: fn(program: SemaProgramTables, threads: 
 
 jet_driver_comptime_closure_seed: fn(
     program: SemaProgramTables,
-    index: &JetDriverComptimeRunIndex,
+    index: ^JetDriverComptimeRunIndex,
     checked_functions: [SemaComptimeFunctionResult],
     request: SemaComptimeItemRequest,
     module_value: Bool,
     local_value: Bool,
-    queue: &[JetDriverComptimeFunctionRef],
-    queue_nodes: &[Int],
-    queued: &[Int:Bool],
-    diagnostics: &[Diagnostic],
+    queue: ^[JetDriverComptimeFunctionRef],
+    queue_nodes: ^[Int],
+    queued: ^[Int:Bool],
+    diagnostics: ^[Diagnostic],
 ) -> {ok: Bool, impurity: String?, settled: JetDriverComptimeFunctionClosure?} {
     graph: program.registration_graph ?? return {ok: false, impurity: None, settled: None}
     loop call in request.calls {
@@ -1732,14 +1726,14 @@ jet_driver_comptime_closure_seed: fn(
 }
 
 jet_driver_comptime_function_closure: fn(
-    environment: &SemaScopeEnvironment,
-    program: &SemaProgramTables,
-    comptime_scopes: &SemaComptimeScopes,
+    environment: ^SemaScopeEnvironment,
+    program: ^SemaProgramTables,
+    comptime_scopes: ^SemaComptimeScopes,
     available: SemaComptimeAvailableConstants,
-    index: &JetDriverComptimeRunIndex,
-    memory_plan: &[SemaFunctionMemoryPlan],
+    index: ^JetDriverComptimeRunIndex,
+    memory_plan: ^[SemaFunctionMemoryPlan],
     values: [SemaComptimeItemValue],
-    checked_functions: &[SemaComptimeFunctionResult],
+    checked_functions: ^[SemaComptimeFunctionResult],
     request: SemaComptimeItemRequest,
     // A module value's closure also records why it is impure, if it is: an
     // impure call, a runtime intrinsic (ir_runtime_intrinsic), or a body that
@@ -1748,7 +1742,7 @@ jet_driver_comptime_function_closure: fn(
     // A local value's closure also refuses `#Unsafe` code: it falls back to
     // run time quietly, where a refused module value fails the build.
     local_value: Bool,
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
     // Each breadth-first level of the queue is checked ahead on these
     // (jet_driver_comptime_closure_prefetch).
     threads: CompilerThreads,
@@ -1817,7 +1811,7 @@ jet_driver_comptime_function_closure: fn(
             else -> jet_driver_comptime_prefetched(index, node, program, values) ?? jet_driver_comptime_check_fn_with_program(environment, program, comptime_scopes, available, memory_plan[0], values, current.module_identity, current.function_key)
         }
         if fresh -> jet_driver_comptime_merge_fn_delta(program, checked)
-        if &program.registration_graph == .Val(graph) {
+        if ^program.registration_graph == .Val(graph) {
         if fresh && checked.waiting_dependencies.len() > 0 {
             if waited_row >= 0 -> index.waiting_functions[waited_row] = checked.copy() else {
                 index.waiting_at[node] = index.waiting_functions.len()
@@ -1934,7 +1928,7 @@ jet_driver_comptime_function_closure: fn(
     // A waiting closure is checked again once its dependencies land; its rows
     // are not all checked yet, so its obligations settle then.
     if waiting.len() == 0 {
-        if &program.registration_graph == .Val(graph) {
+        if ^program.registration_graph == .Val(graph) {
             if !sema_comptime_failure_closure_settle(graph, failure_closure, diagnostics) {
                 complete = false
             }
@@ -1949,7 +1943,7 @@ jet_driver_comptime_function_closure: fn(
 // closure's own check would have recorded it (sema_comptime_replay_demand).
 // A check that splices local values is dropped when one of them landed in
 // `values` since it was made: the closure checks the function again.
-jet_driver_comptime_prefetched: fn(index: &JetDriverComptimeRunIndex, node: Int, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> SemaComptimeFunctionResult? {
+jet_driver_comptime_prefetched: fn(index: ^JetDriverComptimeRunIndex, node: Int, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> SemaComptimeFunctionResult? {
     checked: index.prefetched[node].pop() ?? return None
     mark: index.prefetched_marks[node]
     index.prefetched_marks[node] = -1
@@ -1980,7 +1974,7 @@ jet_driver_comptime_prefetched: fn(index: &JetDriverComptimeRunIndex, node: Int,
 // the run's (SemaComptimeScopes.host_hooks): the walk leaves out the
 // functions whose checks load from the Core library's check
 // (sema_comptime_walk_open). The result is the number of checks kept.
-jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], prechecks: [SemaComptimeItemCheck?], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) -> Int {
+jet_driver_comptime_prefetch: fn(environments: ^[SemaScopeEnvironment], programs: ^[SemaProgramTables], available: SemaComptimeAvailableConstants, index: ^JetDriverComptimeRunIndex, memory_plan: ^[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], prechecks: [SemaComptimeItemCheck?], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) -> Int {
     jet_driver_comptime_prefetch_clear(index)
     if !jet_driver_comptime_prefetches(threads) -> return 0
     // A waiting check one of whose waits has landed is made again, as the
@@ -2011,7 +2005,7 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
 
 // Drops the checks and refs an earlier prefetch of the run kept that no
 // closure took, and the functions it left waiting.
-jet_driver_comptime_prefetch_clear: fn(index: &JetDriverComptimeRunIndex) Never! {
+jet_driver_comptime_prefetch_clear: fn(index: ^JetDriverComptimeRunIndex) Never! {
     loop node in 0..<index.nodes.len() {
         if index.prefetched[node].len() > 0 {
             index.prefetched[node] = [SemaComptimeFunctionResult]{}
@@ -2034,7 +2028,7 @@ jet_driver_comptime_prefetches: fn(threads: CompilerThreads) -> Bool {
 
 // The run's function memory plan, made once for the run, its walk on as many
 // threads as `threads` admits; false when the program lost its graph.
-jet_driver_comptime_memory_plan: fn(program: SemaProgramTables, threads: CompilerThreads, memory_plan: &[SemaFunctionMemoryPlan]) -> Bool {
+jet_driver_comptime_memory_plan: fn(program: SemaProgramTables, threads: CompilerThreads, memory_plan: ^[SemaFunctionMemoryPlan]) -> Bool {
     if memory_plan.len() == 0 {
         if program.registration_graph == .Val(graph) {
             memory_plan.push(sema_function_memory_plan_from_graph(graph, threads))
@@ -2049,7 +2043,7 @@ jet_driver_comptime_memory_plan: fn(program: SemaProgramTables, threads: Compile
 // each kept check reaches too, and keeps the functions whose checks waited
 // (JetDriverComptimeRunIndex.waited_jobs). Closes the walk once every queued
 // job is checked.
-jet_driver_comptime_walk: fn(environment: &SemaScopeEnvironment, program: &SemaProgramTables, version: Int, index: &JetDriverComptimeRunIndex, mark: Int, walk: &SemaComptimeWalk, jobs: [SemaComptimeFunctionJob], seen: &[Int:Bool], kept: &Int, follows: Bool) {
+jet_driver_comptime_walk: fn(environment: ^SemaScopeEnvironment, program: ^SemaProgramTables, version: Int, index: ^JetDriverComptimeRunIndex, mark: Int, walk: ^SemaComptimeWalk, jobs: [SemaComptimeFunctionJob], seen: ^[Int:Bool], kept: ^Int, follows: Bool) {
     sema_comptime_walk_push(walk, environment, program, version, jobs)
     loop {
         done := sema_comptime_walk_take(walk)
@@ -2065,7 +2059,7 @@ jet_driver_comptime_walk: fn(environment: &SemaScopeEnvironment, program: &SemaP
 
 // Keeps the functions of `done`, which it empties, whose checks waited on a
 // constant with no value, with those waits, in the order the walk made them.
-jet_driver_comptime_prefetch_waited: fn(index: &JetDriverComptimeRunIndex, done: &[SemaComptimeWalkDone]) Never! {
+jet_driver_comptime_prefetch_waited: fn(index: ^JetDriverComptimeRunIndex, done: ^[SemaComptimeWalkDone]) Never! {
     done.reverse()
     loop {
         row: done.pop() ?? break
@@ -2091,7 +2085,7 @@ jet_driver_comptime_prefetch_awaits: fn(index: JetDriverComptimeRunIndex, batch:
 // a value now, and keeps them for the closures
 // (jet_driver_comptime_prefetched), `host_hooks` as the pass's prefetch
 // takes them. The result is the number of checks kept.
-jet_driver_comptime_prefetch_landed: fn(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) -> Int {
+jet_driver_comptime_prefetch_landed: fn(environments: ^[SemaScopeEnvironment], programs: ^[SemaProgramTables], available: SemaComptimeAvailableConstants, index: ^JetDriverComptimeRunIndex, memory_plan: ^[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) -> Int {
     waited_jobs: compiler_take_rows<SemaComptimeFunctionJob>(index.waited_jobs)
     waited_on: compiler_take_rows<[String]>(index.waited_on)
     seen := [Int:Bool]{}
@@ -2130,7 +2124,7 @@ jet_driver_comptime_prefetch_landed: fn(environments: &[SemaScopeEnvironment], p
 // kept checks reach is not checked: the closure queues it as its next level.
 // `host_hooks` as the pass's prefetch takes them
 // (jet_driver_comptime_prefetch).
-jet_driver_comptime_closure_prefetch: fn(environment: &SemaScopeEnvironment, program: &SemaProgramTables, available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], host_hooks: SemaHostHookAccess?, queue: [JetDriverComptimeFunctionRef], queue_nodes: [Int], start: Int, end: Int, threads: CompilerThreads) {
+jet_driver_comptime_closure_prefetch: fn(environment: ^SemaScopeEnvironment, program: ^SemaProgramTables, available: SemaComptimeAvailableConstants, index: ^JetDriverComptimeRunIndex, memory_plan: ^[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], host_hooks: SemaHostHookAccess?, queue: [JetDriverComptimeFunctionRef], queue_nodes: [Int], start: Int, end: Int, threads: CompilerThreads) {
     if end - start < 2 || !jet_driver_comptime_prefetches(threads) {
         return
     }
@@ -2159,7 +2153,7 @@ jet_driver_comptime_closure_prefetch: fn(environment: &SemaScopeEnvironment, pro
 // each item's closure queues them (jet_driver_comptime_function_closure).
 // An item its precheck folded lands that fold at its turn and has no
 // closure, so it seeds nothing: most of a pass's items are folded tables.
-jet_driver_comptime_prefetch_seeds: fn(program: SemaProgramTables, index: &JetDriverComptimeRunIndex, prechecks: [SemaComptimeItemCheck?], seen: &[Int:Bool]) -> [SemaComptimeFunctionJob] {
+jet_driver_comptime_prefetch_seeds: fn(program: SemaProgramTables, index: ^JetDriverComptimeRunIndex, prechecks: [SemaComptimeItemCheck?], seen: ^[Int:Bool]) -> [SemaComptimeFunctionJob] {
     jobs := [SemaComptimeFunctionJob]{}
     graph_option: program.registration_graph
     graph: graph_option ?? return jobs
@@ -2189,14 +2183,14 @@ jet_driver_comptime_prefetch_seeds: fn(program: SemaProgramTables, index: &JetDr
 // takes it can tell whether one of them landed since
 // (jet_driver_comptime_prefetched). The result is the functions the kept
 // checks reach.
-jet_driver_comptime_prefetch_keep: fn(program: &SemaProgramTables, index: &JetDriverComptimeRunIndex, done: &[SemaComptimeWalkDone], mark: Int, seen: &[Int:Bool], kept: &Int) -> [SemaComptimeFunctionJob] {
+jet_driver_comptime_prefetch_keep: fn(program: ^SemaProgramTables, index: ^JetDriverComptimeRunIndex, done: ^[SemaComptimeWalkDone], mark: Int, seen: ^[Int:Bool], kept: ^Int) -> [SemaComptimeFunctionJob] {
     loop pos in 0..<done.len() {
         jet_driver_comptime_merge_fn_delta(program, done[pos].check)
     }
     jet_driver_comptime_prefetch_keep_in(program, index, done, mark, seen, kept)
 }
 
-jet_driver_comptime_prefetch_keep_in: fn(program: SemaProgramTables, index: &JetDriverComptimeRunIndex, done: [SemaComptimeWalkDone], mark: Int, seen: &[Int:Bool], kept: &Int) -> [SemaComptimeFunctionJob] {
+jet_driver_comptime_prefetch_keep_in: fn(program: SemaProgramTables, index: ^JetDriverComptimeRunIndex, done: [SemaComptimeWalkDone], mark: Int, seen: ^[Int:Bool], kept: ^Int) -> [SemaComptimeFunctionJob] {
     next_jobs := [SemaComptimeFunctionJob]{}
     graph_option: program.registration_graph
     graph: graph_option ?? return next_jobs
@@ -2302,7 +2296,7 @@ jet_driver_comptime_prefetch_refs_chunk: fn(graph: SemaRegistrationGraph, snapsh
 
 // Queues each of `keys` with its one owner, as a closure does; a key with no
 // unique owner is the closure's to report.
-jet_driver_comptime_prefetch_keys: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, seen: &[Int:Bool], jobs: &[SemaComptimeFunctionJob], keys: [String]) {
+jet_driver_comptime_prefetch_keys: fn(graph: SemaRegistrationGraph, index: ^JetDriverComptimeRunIndex, seen: ^[Int:Bool], jobs: ^[SemaComptimeFunctionJob], keys: [String]) {
     loop function_key in keys {
         if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
         owner: jet_driver_comptime_function_owner(index, function_key) ?? next
@@ -2312,14 +2306,14 @@ jet_driver_comptime_prefetch_keys: fn(graph: SemaRegistrationGraph, index: &JetD
 
 // Queues function `function_key` of `module_identity` once, unless the run
 // already checked it, holds a waiting or prefetched check of it or settled it.
-jet_driver_comptime_prefetch_add: fn(index: &JetDriverComptimeRunIndex, seen: &[Int:Bool], jobs: &[SemaComptimeFunctionJob], module_identity: ModuleID, function_key: String) {
+jet_driver_comptime_prefetch_add: fn(index: ^JetDriverComptimeRunIndex, seen: ^[Int:Bool], jobs: ^[SemaComptimeFunctionJob], module_identity: ModuleID, function_key: String) {
     node: jet_driver_comptime_node_id(index, module_identity, function_key)
     jet_driver_comptime_prefetch_node(index, seen, jobs, node, module_identity, function_key)
 }
 
 // Queues the function of node `node` (`function_key` of `module_identity`)
 // as jet_driver_comptime_prefetch_add does.
-jet_driver_comptime_prefetch_node: fn(index: JetDriverComptimeRunIndex, seen: &[Int:Bool], jobs: &[SemaComptimeFunctionJob], node: Int, module_identity: ModuleID, function_key: String) {
+jet_driver_comptime_prefetch_node: fn(index: JetDriverComptimeRunIndex, seen: ^[Int:Bool], jobs: ^[SemaComptimeFunctionJob], node: Int, module_identity: ModuleID, function_key: String) {
     if seen.get(node) != None {
         return
     }
@@ -2418,7 +2412,7 @@ jet_driver_comptime_wait_row_find: fn(rows: [JetDriverComptimeWaitRow], key: Str
     None
 }
 
-jet_driver_comptime_wait_cycle_from: fn(key: String, rows: [JetDriverComptimeWaitRow], path: &[String], finished: &[String]) -> Bool Never! {
+jet_driver_comptime_wait_cycle_from: fn(key: String, rows: [JetDriverComptimeWaitRow], path: ^[String], finished: ^[String]) -> Bool Never! {
     loop previous in path {
         if previous == key -> return true
     }
@@ -2472,7 +2466,7 @@ jet_driver_comptime_dependency_cycle: fn(rows: [JetDriverComptimeWaitRow]) -> [J
 // The run's evaluator configuration for one evaluation. An IR evaluation
 // reads constants from the build's constant rows, never from globals.
 // `compiler` answers its `core.compiler` queries.
-jet_driver_comptime_eval_config: fn(original: JetEvalConfig, inputs: &&JetEvalComptimeInputAdapter?, compiler: JetEvalCompilerQueryHost?) -> JetEvalConfig {
+jet_driver_comptime_eval_config: fn(original: JetEvalConfig, inputs: ^^JetEvalComptimeInputAdapter?, compiler: JetEvalCompilerQueryHost?) -> JetEvalConfig {
     build_host_adapter: if original.build_host_adapter == {
         None -> None
         Val(adapter) -> Val(adapter.clone_adapter())
@@ -2503,7 +2497,7 @@ jet_driver_trace_step_end: fn(trace_sink: CompilerTraceSink?, name: String, item
 // Moves the rows of `functions` flagged in `mask` onto `kept` and the others
 // onto `rest`, both in order, leaving `functions` empty. Each pop moves one
 // row, so no row is ever copied.
-jet_driver_partition_checked_functions: fn(functions: &[FnBody], mask: [Bool], kept: &[FnBody], rest: &[FnBody]) Never! {
+jet_driver_partition_checked_functions: fn(functions: ^[FnBody], mask: [Bool], kept: ^[FnBody], rest: ^[FnBody]) Never! {
     reversed := [FnBody]{}
     loop functions.len() > 0 {
         function := functions.pop() ?? {
@@ -2576,7 +2570,7 @@ jet_driver_comptime_lost_graph: fn(values: [SemaComptimeItemValue], functions: [
 // dependency's type has landed since, which leaves it one the batch computes
 // (jet_driver_comptime_type_land). Taken once: the caller moves its precheck
 // in and leaves it None, so a retried item checks again.
-jet_driver_comptime_prechecked: fn(precheck: &&SemaComptimeItemCheck?, available: SemaComptimeAvailableConstants, batch: JetDriverComptimeBatch, typed_from: Int) -> SemaComptimeItemCheck? {
+jet_driver_comptime_prechecked: fn(precheck: ^^SemaComptimeItemCheck?, available: SemaComptimeAvailableConstants, batch: JetDriverComptimeBatch, typed_from: Int) -> SemaComptimeItemCheck? {
     check := precheck.move() ?? return None
     if jet_driver_comptime_any_available(available, check.dependencies) -> return None
     if available.typed > typed_from {
@@ -2592,7 +2586,7 @@ jet_driver_comptime_prechecked: fn(precheck: &&SemaComptimeItemCheck?, available
 // (sema_comptime_value_sites), recording each typed row on `trail`, and
 // counts them as available. False when the tables lost their graph. Its
 // trace span is `comptime.apply`.
-jet_driver_comptime_apply_landed: fn(environment: &SemaScopeEnvironment, program: &SemaProgramTables, available: &SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue], from: Int, trail: &SemaGraphTrail, trace_sink: CompilerTraceSink?) -> Bool {
+jet_driver_comptime_apply_landed: fn(environment: ^SemaScopeEnvironment, program: ^SemaProgramTables, available: ^SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue], from: Int, trail: ^SemaGraphTrail, trace_sink: CompilerTraceSink?) -> Bool {
     jet_driver_trace_step_begin(trace_sink, "comptime.apply")
     landed := [SemaComptimeItemValue]{}
     body_values_changed := false
@@ -2606,7 +2600,7 @@ jet_driver_comptime_apply_landed: fn(environment: &SemaScopeEnvironment, program
             body_values_changed = true
         }
     }
-    if &program.registration_graph == {
+    if ^program.registration_graph == {
         None -> {
             jet_driver_trace_step_end(trace_sink, "comptime.apply", 0)
             return false
@@ -2635,8 +2629,8 @@ jet_driver_comptime_computes: fn(source: SemaComptimeItemSource) -> Bool Never! 
 // waiting only on such constants, joins the same batch
 // (jet_driver_comptime_computed_waits), so a dependency chain builds one
 // program, not one per level. False when the tables lost their graph.
-jet_driver_comptime_type_land: fn(program: &SemaProgramTables, available: &SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, source: SemaComptimeItemSource, expression: BodyExpr, trail: &SemaGraphTrail) -> Bool {
-    if &program.registration_graph == {
+jet_driver_comptime_type_land: fn(program: ^SemaProgramTables, available: ^SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, source: SemaComptimeItemSource, expression: BodyExpr, trail: ^SemaGraphTrail) -> Bool {
+    if ^program.registration_graph == {
         None -> return false
         .Val(resolved_graph) -> {
             typed: [SemaComptimeItemValue]{jet_driver_comptime_item_value(resolved_graph.interner, source, TComptimeValue.Unit, expression)}
@@ -2673,7 +2667,7 @@ JetDriverComptimeSettledWaits: struct {
     waits: [[String]],
 }
 
-jet_driver_comptime_settled_put: fn(settled: &JetDriverComptimeSettledWaits, key: String, waits: &&[String]) Never! {
+jet_driver_comptime_settled_put: fn(settled: ^JetDriverComptimeSettledWaits, key: String, waits: ^^[String]) Never! {
     if name_column_get(settled.keys, settled.rows, key) == .Val(row) {
         settled.waits[row] = waits.move()
         return
@@ -2682,7 +2676,7 @@ jet_driver_comptime_settled_put: fn(settled: &JetDriverComptimeSettledWaits, key
     settled.waits.push(waits.move())
 }
 
-jet_driver_comptime_settled_drop: fn(settled: &JetDriverComptimeSettledWaits, key: String) Never! {
+jet_driver_comptime_settled_drop: fn(settled: ^JetDriverComptimeSettledWaits, key: String) Never! {
     if name_column_get(settled.keys, settled.rows, key) != None -> name_column_set(settled.keys, settled.rows, key, -1)
 }
 
@@ -2809,7 +2803,7 @@ jet_driver_module_value_eval_reason: fn(result: JetEvalIRResult) -> String {
 
 // Lands local value `source` (SemaComptimeItemSource.local_value) as run-time
 // code for `reason`: its owner body keeps the initializer and reports nothing.
-jet_driver_comptime_local_value_runs: fn(values: &[SemaComptimeItemValue], source: SemaComptimeItemSource, reason: String) Never! {
+jet_driver_comptime_local_value_runs: fn(values: ^[SemaComptimeItemValue], source: SemaComptimeItemSource, reason: String) Never! {
     values.push(
         SemaComptimeItemValue{
             module_identity: source.module_identity,
@@ -2847,14 +2841,14 @@ jet_driver_comptime_local_value_eval_reason: fn(result: JetEvalIRResult) -> Stri
 // compile-time attempt's were not `reported` already. Nothing lands, so what
 // reads the value waits for good and the run fails at its end.
 jet_driver_module_value_refused: fn(
-    environment: &SemaScopeEnvironment,
-    program: &SemaProgramTables,
-    comptime_scopes: &SemaComptimeScopes,
+    environment: ^SemaScopeEnvironment,
+    program: ^SemaProgramTables,
+    comptime_scopes: ^SemaComptimeScopes,
     available: SemaComptimeAvailableConstants,
     source: SemaComptimeItemSource,
     reported: Bool,
     reason: String,
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
 ) {
     runtime := source.copy()
     runtime.module_value = false
@@ -2873,12 +2867,12 @@ jet_driver_module_value_refused: fn(
 // Refuses each of `refusals` (jet_driver_module_value_refused), whose
 // compile-time checks were reported; false when there were none.
 jet_driver_module_values_refused: fn(
-    environment: &SemaScopeEnvironment,
-    program: &SemaProgramTables,
-    comptime_scopes: &SemaComptimeScopes,
+    environment: ^SemaScopeEnvironment,
+    program: ^SemaProgramTables,
+    comptime_scopes: ^SemaComptimeScopes,
     available: SemaComptimeAvailableConstants,
     refusals: [JetDriverModuleValueRefusal],
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
 ) -> Bool {
     loop refusal in refusals {
         jet_driver_module_value_refused(environment, program, comptime_scopes, available, refusal.source, true, refusal.reason, diagnostics)
@@ -2911,13 +2905,13 @@ jet_driver_comptime_settled: fn(local_value: Bool, failed: Bool, complete: Bool,
 // binding for the site's local (sema_stmt_check_prepared_binding), and the
 // finalization would take that body as the function's
 // (sema_comptime_find_checked_function).
-jet_driver_comptime_pass_sites: fn(index: &JetDriverComptimeRunIndex, pending: [SemaComptimeItemSource], batch: JetDriverComptimeBatch) Never! {
+jet_driver_comptime_pass_sites: fn(index: ^JetDriverComptimeRunIndex, pending: [SemaComptimeItemSource], batch: JetDriverComptimeBatch) Never! {
     index.pass_sites = [Int:[String]]{}
     loop source in pending -> jet_driver_comptime_pass_site_add(index, source)
     loop entry in batch.entries -> jet_driver_comptime_pass_site_add(index, entry.source)
 }
 
-jet_driver_comptime_pass_site_add: fn(index: &JetDriverComptimeRunIndex, source: SemaComptimeItemSource) Never! {
+jet_driver_comptime_pass_site_add: fn(index: ^JetDriverComptimeRunIndex, source: SemaComptimeItemSource) Never! {
     if source.kind != SemaComptimeItemKind.BodyExpression || source.local_value {
         return
     }
@@ -2931,7 +2925,7 @@ jet_driver_comptime_pass_site_add: fn(index: &JetDriverComptimeRunIndex, source:
 // function check `checked` captured with no value
 // (SemaComptimeFunctionResult.comptime_body_sources); true when it added
 // one. Each captured site is one lookup, by the offset its span starts at.
-jet_driver_comptime_site_waits: fn(index: &JetDriverComptimeRunIndex, checked: SemaComptimeFunctionResult, own: String, waiting: &[String]) -> Bool Never! {
+jet_driver_comptime_site_waits: fn(index: ^JetDriverComptimeRunIndex, checked: SemaComptimeFunctionResult, own: String, waiting: ^[String]) -> Bool Never! {
     found := false
     loop captured in checked.comptime_body_sources {
         if captured.local_value || captured.key == own -> next
@@ -2969,7 +2963,7 @@ jet_driver_comptime_holds_run_site: fn(checked_functions: [SemaComptimeFunctionR
 // compiler threads. Checked in an earlier pass, a closure that waits on a
 // module value is checked again the next pass, one function at a time on
 // the lead thread.
-jet_driver_comptime_hold_ahead: fn(pending: &[SemaComptimeItemSource]) -> [SemaComptimeItemSource] Never! {
+jet_driver_comptime_hold_ahead: fn(pending: ^[SemaComptimeItemSource]) -> [SemaComptimeItemSource] Never! {
     held := [SemaComptimeItemSource]{}
     if jet_driver_comptime_all_ahead(pending) -> return held
     kept := [SemaComptimeItemSource]{}
@@ -3048,7 +3042,7 @@ jet_driver_comptime_batch_new: fn() -> JetDriverComptimeBatch Never! {
 // adding the foreign functions it reaches that the batch does not hold yet.
 // `computed`: the build computes the item's constant for the entries after
 // it (JetDriverComptimeEntry.computed).
-jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], foreign: [SemaCheckedForeignFunction], computed: Bool) Never! {
+jet_driver_comptime_batch_add: fn(batch: ^JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: ^[FnBody], foreign: [SemaCheckedForeignFunction], computed: Bool) Never! {
     loop row in foreign {
         held: loop previous in batch.foreign {
             if previous.symbol_id == row.symbol_id {
@@ -3101,7 +3095,7 @@ jet_driver_comptime_batch_single: fn(batch: JetDriverComptimeBatch, index: Int) 
 // Forgets the function checks recorded since `mark`: they ran while a batch
 // held values back, and the run checks them again after the batch lands, so
 // checked functions keep the order the run gives one item at a time.
-jet_driver_comptime_forget_functions: fn(checked_functions: &[SemaComptimeFunctionResult], index: &JetDriverComptimeRunIndex, mark: Int) Never! {
+jet_driver_comptime_forget_functions: fn(checked_functions: ^[SemaComptimeFunctionResult], index: ^JetDriverComptimeRunIndex, mark: Int) Never! {
     loop checked_functions.len() > mark {
         _ := checked_functions.pop()
         _ := index.closure_rows.remove(checked_functions.len())
@@ -3125,11 +3119,11 @@ jet_driver_comptime_forget_functions: fn(checked_functions: &[SemaComptimeFuncti
 // one-row program tables slot, which the declaration checks move into their
 // threads' shared state and back (sema_comptime_modules_with_values).
 jet_driver_comptime_stage: fn(
-    programs: &[SemaProgramTables],
+    programs: ^[SemaProgramTables],
     values: [SemaComptimeItemValue],
     checked_functions: [SemaComptimeFunctionResult],
     trace: JetDriverCompileTrace,
-    staging: &JetDriverComptimeStaging,
+    staging: ^JetDriverComptimeStaging,
     threads: CompilerThreads,
 ) -> JetDriverComptimeRunResult? {
     if staging.staged -> return None
@@ -3167,7 +3161,7 @@ jet_driver_comptime_stage: fn(
 
 // Moves every module of `from` onto the end of `to`, in order (popped, so no
 // module is copied).
-jet_driver_comptime_take_modules: fn(to: &[SemaGraphModuleResult], from: &[SemaGraphModuleResult]) Never! {
+jet_driver_comptime_take_modules: fn(to: ^[SemaGraphModuleResult], from: ^[SemaGraphModuleResult]) Never! {
     reversed := [SemaGraphModuleResult]{}
     loop from.len() > 0 {
         row := from.pop() ?? {
@@ -3193,13 +3187,13 @@ jet_driver_comptime_take_modules: fn(to: &[SemaGraphModuleResult], from: &[SemaG
 jet_driver_comptime_staged_flush: fn(
     request: JetDriverCompileRequest,
     batch: JetDriverComptimeBatch,
-    values: &[SemaComptimeItemValue],
+    values: ^[SemaComptimeItemValue],
     checked_functions: [SemaComptimeFunctionResult],
-    trace: &JetDriverCompileTrace,
-    programs: &[SemaProgramTables],
-    staging: &JetDriverComptimeStaging,
-    counters: &JetDriverComptimeCounters,
-    diagnostics: &[Diagnostic],
+    trace: ^JetDriverCompileTrace,
+    programs: ^[SemaProgramTables],
+    staging: ^JetDriverComptimeStaging,
+    counters: ^JetDriverComptimeCounters,
+    diagnostics: ^[Diagnostic],
 ) -> JetDriverComptimeFlush {
     if batch.entries.len() > 0 && !batch.bare {
         if request.trace_sink == .Val(sink) {
@@ -3229,13 +3223,13 @@ jet_driver_comptime_staged_flush: fn(
 jet_driver_comptime_flush: fn(
     request: JetDriverCompileRequest,
     batch: JetDriverComptimeBatch,
-    values: &[SemaComptimeItemValue],
+    values: ^[SemaComptimeItemValue],
     checked_functions: [SemaComptimeFunctionResult],
-    trace: &JetDriverCompileTrace,
+    trace: ^JetDriverCompileTrace,
     program: SemaProgramTables,
-    staging: &JetDriverComptimeStaging,
-    counters: &JetDriverComptimeCounters,
-    diagnostics: &[Diagnostic],
+    staging: ^JetDriverComptimeStaging,
+    counters: ^JetDriverComptimeCounters,
+    diagnostics: ^[Diagnostic],
 ) -> JetDriverComptimeFlush {
     graph_option: program.registration_graph
     graph: graph_option ?? return JetDriverComptimeFlush{stop: Val(jet_driver_comptime_lost_graph(values, checked_functions, trace)), progressed: false}
@@ -3454,7 +3448,7 @@ jet_driver_comptime_batch_names: fn(batch: JetDriverComptimeBatch) -> String Nev
 }
 
 // `known` holds the `module\nkey` of every source already pending or staged.
-jet_driver_comptime_checked_text_source_add: fn(sources: &[SemaComptimeItemSource], known: &NameTable, evaluation: SemaCheckedTextEvaluation) Never! {
+jet_driver_comptime_checked_text_source_add: fn(sources: ^[SemaComptimeItemSource], known: ^NameTable, evaluation: SemaCheckedTextEvaluation) Never! {
     source := sema_comptime_checked_text_source(evaluation)
     key: "{source.module_identity.id}\n{source.key}"
     if name_find(known, key) != None {
@@ -3474,7 +3468,7 @@ jet_driver_comptime_checked_text_source_add: fn(sources: &[SemaComptimeItemSourc
 // body a program reads from the Core image, and the Core library's own
 // check, whose solve saw every Core body, already discharged them. The
 // caller builds the bundle's name facts afterwards (jet_driver_merged_names).
-jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: ModuleTable, functions: [SemaComptimeFunctionResult]) -> String? Never! {
+jet_driver_merge_checked_text_functions: fn(graph: ^SemaGraphResult, table: ModuleTable, functions: [SemaComptimeFunctionResult]) -> String? Never! {
     // Module slots: the first checked row of each module id, -1 for none.
     module_rows := (loop _ in 0..<module_count(table) -> -1)
     loop (index, graph_module) in graph.modules {
@@ -3520,7 +3514,7 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: Modu
 // The bundle's name facts built over the graph's checked modules on the
 // compiler threads (jet_driver_merge_checked_text_functions); the
 // registration graph moves in and is returned.
-jet_driver_merged_names: fn(graph: &SemaGraphResult, registration: &&SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
+jet_driver_merged_names: fn(graph: ^SemaGraphResult, registration: ^^SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
     names := sema_name_facts_empty()
     returned := sema_name_build_facts_threads(registration, graph.modules, graph.names.structure_facts, threads, names)
     graph.names = names.move()
@@ -3534,7 +3528,7 @@ jet_driver_merged_names: fn(graph: &SemaGraphResult, registration: &&SemaRegistr
 // reaches already landed: otherwise every function of the closure that
 // reads one (as the Regex functions read Regex's) waits, and the closure is
 // checked again next pass.
-jet_driver_comptime_core_first: fn(sources: &[SemaComptimeItemSource]) {
+jet_driver_comptime_core_first: fn(sources: ^[SemaComptimeItemSource]) {
     prelude: "{JET_CANONICAL_EFFECT_PACKAGE_IDENTITY}/"
     sources.sort_by(fn(left: SemaComptimeItemSource, right: SemaComptimeItemSource) { jet_driver_comptime_item_rank(left, prelude) <=> jet_driver_comptime_item_rank(right, prelude) })
 }
@@ -3552,39 +3546,39 @@ jet_driver_comptime_item_rank: fn(source: SemaComptimeItemSource, prelude: Strin
 // `partial_graph`). The run's staging holds `declared` (read in place), and
 // the run hands it back in the result on every exit.
 jet_driver_run_comptime: fn(
-    staged: &&SemaRegistrationGraph,
+    staged: ^^SemaRegistrationGraph,
     // The declaration pass's modules of `staged` (jet_driver_comptime_stage), or empty.
-    declared: &&[SemaGraphModuleResult],
+    declared: ^^[SemaGraphModuleResult],
     // The boxed edges and copy facts of `staged` with `initial_values`
     // applied, or None: the declaration pass's
     // (SemaComptimeDeclarationStage.graph_facts), with no values, or a
     // finalization's carried ones, whose graph already holds every value.
-    graph_facts: &&SemaComptimeGraphFacts?,
+    graph_facts: ^^SemaComptimeGraphFacts?,
     sources: [SemaComptimeItemSource],
     initial_values: [SemaComptimeItemValue],
     initial_functions: [SemaComptimeFunctionResult],
     request: JetDriverCompileRequest,
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
     // The run's function memory plan, zero or one row: a caller holding the
     // plan of `staged`'s functions lends it here, and an empty slot gets the
     // one the run builds (jet_driver_comptime_run).
-    memory_plan: &[SemaFunctionMemoryPlan],
+    memory_plan: ^[SemaFunctionMemoryPlan],
 ) -> JetDriverComptimeRunResult {
     carried := [JetDriverComptimeStaging]{}
     jet_driver_run_comptime_carried(staged, declared, graph_facts, sources, initial_values, initial_functions, request, diagnostics, memory_plan, carried)
 }
 
 jet_driver_run_comptime_carried: fn(
-    staged: &&SemaRegistrationGraph,
-    declared: &&[SemaGraphModuleResult],
-    graph_facts: &&SemaComptimeGraphFacts?,
+    staged: ^^SemaRegistrationGraph,
+    declared: ^^[SemaGraphModuleResult],
+    graph_facts: ^^SemaComptimeGraphFacts?,
     sources: [SemaComptimeItemSource],
     initial_values: [SemaComptimeItemValue],
     initial_functions: [SemaComptimeFunctionResult],
     request: JetDriverCompileRequest,
-    diagnostics: &[Diagnostic],
-    memory_plan: &[SemaFunctionMemoryPlan],
-    carried_staging: &[JetDriverComptimeStaging],
+    diagnostics: ^[Diagnostic],
+    memory_plan: ^[SemaFunctionMemoryPlan],
+    carried_staging: ^[JetDriverComptimeStaging],
 ) -> JetDriverComptimeRunResult {
     counters := JetDriverComptimeCounters{items_checked: 0, programs_built: 0, item_functions_evaluated: 0, functions_built: 0}
     // Read before the tables take `staged`.
@@ -3651,7 +3645,7 @@ jet_driver_run_comptime_carried: fn(
 
 // Hands the declaration pass's modules back from a run to its stage, whose
 // finalization reads their type definitions (sema_finalize_registration_graph).
-jet_driver_comptime_return_declared: fn(stage: &SemaComptimeDeclarationStage, run: &JetDriverComptimeRunResult) Never! {
+jet_driver_comptime_return_declared: fn(stage: ^SemaComptimeDeclarationStage, run: ^JetDriverComptimeRunResult) Never! {
     stage.modules = [SemaGraphModuleResult]{}
     jet_driver_comptime_take_modules(stage.modules, run.declared)
 }
@@ -3663,23 +3657,23 @@ jet_driver_comptime_return_declared: fn(stage: &SemaComptimeDeclarationStage, ru
 // borrow; `trail` records the graph's edits; `keep_going` was read from the
 // graph before the tables took it (jet_driver_run_comptime).
 jet_driver_comptime_run: fn(
-    programs: &[SemaProgramTables],
-    environments: &[SemaScopeEnvironment],
-    trail: &SemaGraphTrail,
+    programs: ^[SemaProgramTables],
+    environments: ^[SemaScopeEnvironment],
+    trail: ^SemaGraphTrail,
     keep_going: Bool,
     sources: [SemaComptimeItemSource],
     initial_values: [SemaComptimeItemValue],
     initial_functions: [SemaComptimeFunctionResult],
     request: JetDriverCompileRequest,
-    staging: &JetDriverComptimeStaging,
-    counters: &JetDriverComptimeCounters,
-    diagnostics: &[Diagnostic],
+    staging: ^JetDriverComptimeStaging,
+    counters: ^JetDriverComptimeCounters,
+    diagnostics: ^[Diagnostic],
     // The memory plan reads only function declarations, which staged values
     // never change, so every on-demand function check shares one (zero or
     // one row): the caller's, or else built by the main thread while a
     // precheck's threads check, or at the run's first function check
     // (jet_driver_comptime_function_closure).
-    memory_plan: &[SemaFunctionMemoryPlan],
+    memory_plan: ^[SemaFunctionMemoryPlan],
 ) -> JetDriverComptimeRunResult {
     // copy: this run grows its own value list. initial_values is jet_driver_run_comptime's read
     // parameter, which also seeds the comptime environment and stays with the caller.
@@ -3771,7 +3765,7 @@ jet_driver_comptime_run: fn(
         jet_driver_trace_step_begin(request.trace_sink, "comptime.precheck")
         prechecks := sema_comptime_precheck_items(environments, programs, available, pending, request.compiler_threads, jet_driver_comptime_prefetches(request.compiler_threads), memory_plan)
         loop idx in 0..<prechecks.len() {
-            if &prechecks[idx] == .Val(check) {
+            if ^prechecks[idx] == .Val(check) {
                 jet_driver_comptime_merge_item_delta(programs[0], check)
             }
         }
@@ -4361,7 +4355,7 @@ JetDriverComptimeReach: struct {
     functions: [String],
 }
 
-jet_driver_comptime_reach_type: fn(reach: &JetDriverComptimeReach, ty: Type) Never! {
+jet_driver_comptime_reach_type: fn(reach: ^JetDriverComptimeReach, ty: Type) Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) -> {}
         .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -4370,13 +4364,13 @@ jet_driver_comptime_reach_type: fn(reach: &JetDriverComptimeReach, ty: Type) Nev
     }
 }
 
-jet_driver_comptime_reach_local: fn(reach: &JetDriverComptimeReach, local: TLocal) Never! {
+jet_driver_comptime_reach_local: fn(reach: ^JetDriverComptimeReach, local: TLocal) Never! {
     if local.deref || local.address_lifetime != None || local.persist_key != None || local.string_bytes_source != None || local.uninit_scalar || local.uninit_fixed {
         reach.everything = true
     }
 }
 
-jet_driver_comptime_reach_expr: fn(reach: &JetDriverComptimeReach, tree: BodyTree, expression: Int) Never! {
+jet_driver_comptime_reach_expr: fn(reach: ^JetDriverComptimeReach, tree: BodyTree, expression: Int) Never! {
     if reach.everything {
         return
     }
@@ -4418,7 +4412,7 @@ jet_driver_comptime_reach_expr: fn(reach: &JetDriverComptimeReach, tree: BodyTre
     }
 }
 
-jet_driver_comptime_reach_stmt: fn(reach: &JetDriverComptimeReach, tree: BodyTree, statement: Int) Never! {
+jet_driver_comptime_reach_stmt: fn(reach: ^JetDriverComptimeReach, tree: BodyTree, statement: Int) Never! {
     if reach.everything {
         return
     }
@@ -4453,7 +4447,7 @@ jet_driver_comptime_entry_bare: fn(request: SemaComptimeItemRequest, function_ke
 jet_driver_foreign_provider_owners_valid: fn(
     modules: [JetDriverLoadedModule],
     providers: [SemaForeignProviderInput],
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
 ) -> Bool {
     valid := true
     provider_index := 0
@@ -4491,7 +4485,7 @@ jet_driver_foreign_provider_owners_valid: fn(
 jet_driver_registration_foreign_handle_facts: fn(
     module_identity: ModuleID,
     providers: [SemaForeignProviderInput],
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
 ) -> [SemaRegistrationForeignHandleFacts]? {
     selected_index := Int?{None}
     index := 0
@@ -4540,7 +4534,7 @@ jet_driver_registration_foreign_handle_facts: fn(
 // (EffectModuleSource), so a compile parses none of its text: registration
 // sees the vocabulary, and no Prelude effect type enters a program's scope as
 // a type. No declarations is no module.
-jet_driver_canonical_effect_module: fn(effects: EffectModuleSource, table: &ModuleTable) -> SemaRegistrationModuleInput? {
+jet_driver_canonical_effect_module: fn(effects: EffectModuleSource, table: ^ModuleTable) -> SemaRegistrationModuleInput? {
     if effects.decls.len() == 0 -> return None
     program := ast_program()
     loop declaration in effects.decls -> program.items.push(Item.EffectDecl{value: declaration})
@@ -4580,7 +4574,7 @@ jet_driver_canonical_effect_module: fn(effects: EffectModuleSource, table: &Modu
 // (Prelude/Rules.jet) joins the same way, and only a load whose programs
 // declare a `#run { … }` contract clause, the one thing its rules hear, pays
 // for registering and checking it.
-jet_driver_retain_prelude_modules: fn(load: &JetDriverLoadResult) -> Bool {
+jet_driver_retain_prelude_modules: fn(load: ^JetDriverLoadResult) -> Bool {
     errors := sema_registration_original_error_module(load.module_table)
     if !jet_driver_retain_prelude_module(load, errors) -> return false
     if !jet_driver_items_declare_run_contract_in(load.modules) -> return true
@@ -4590,7 +4584,7 @@ jet_driver_retain_prelude_modules: fn(load: &JetDriverLoadResult) -> Bool {
 
 // One compiler-owned Prelude module joins the load. A loaded source holding
 // its path, alias, or identity is refused.
-jet_driver_retain_prelude_module: fn(load: &JetDriverLoadResult, original: &&SemaRegistrationModuleInput) -> Bool {
+jet_driver_retain_prelude_module: fn(load: ^JetDriverLoadResult, original: ^^SemaRegistrationModuleInput) -> Bool {
     module_identity: jet_driver_module_identity(original.package_identity, original.module_path)
     collides := false
     loop unit in load.source_units {
@@ -4677,7 +4671,7 @@ jet_driver_compile_internal_result: fn(load: JetDriverLoadResult, trace: JetDriv
 
 // Doc failures retain the checked ledger when it exists; early registration
 // failures retain only the import edges already proved.
-jet_driver_doc_failure: fn(result: &&JetDriverCompileResult, mode: JetDriverCompileMode, checked_facts: [StructureFact]?) -> JetDriverCompileResult Never! {
+jet_driver_doc_failure: fn(result: ^^JetDriverCompileResult, mode: JetDriverCompileMode, checked_facts: [StructureFact]?) -> JetDriverCompileResult Never! {
     failed := result.move()
     if mode == JetDriverCompileMode.Doc {
         failed.structure_facts = checked_facts ?? [StructureFact]{}
@@ -4862,7 +4856,7 @@ jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], reque
 
 // Names the module `alias` of the package `identity` for the deep-check scope
 // split, once: the root files of a package share its name.
-jet_driver_deep_check_module: fn(names: &[NameModule], alias: String, identity: String) -[]> Never! {
+jet_driver_deep_check_module: fn(names: ^[NameModule], alias: String, identity: String) -[]> Never! {
     loop row in names {
         if row.alias == alias && row.package == identity {
             return
@@ -4875,7 +4869,7 @@ jet_driver_deep_check_module: fn(names: &[NameModule], alias: String, identity: 
 // named tests of `test_modules` whose bodies checked, and their selected Check
 // Outputs, in declaration order. A Check Output whose callable did not check
 // is an E0003.
-jet_driver_test_plan: fn(test_modules: [U32:Bool], graph: SemaGraphResult, table: ModuleTable, functions: [FnBody], tests: &[TTestFact], output_checks: &[TOutputCheckFact], diagnostics: &[Diagnostic]) Never! {
+jet_driver_test_plan: fn(test_modules: [U32:Bool], graph: SemaGraphResult, table: ModuleTable, functions: [FnBody], tests: ^[TTestFact], output_checks: ^[TOutputCheckFact], diagnostics: ^[Diagnostic]) Never! {
     checked_keys := name_column_table(functions.len())
     checked := name_column()
     loop (index, function) in functions -> name_column_set(checked_keys, checked, function.key, index)
@@ -5134,8 +5128,7 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
 
 // The Core functions and methods a compile that lowers checks up front under
 // Core demand (SemaRegistrationGraph.core_lowering_roots), by key: the
-// top-level functions lowering keeps with no keyed call in a checked body
-// (ir_core_lowered_by_name) or finds by the jet_builtins role they fill
+// top-level functions lowering finds by the jet_builtins role they fill
 // (sema_core_role), every top-level function of a Core module with foreign
 // rows, which jet_driver_prunable_core_modules leaves rooted, or of the Core
 // unit under test (`tested`, jet_driver_test_modules: a `jet test` of a Core
@@ -5156,8 +5149,7 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bo
         }
         loop item in module_row.program.items {
             if item == .Func(func) {
-                source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, func.span)
-                if rooted || ir_core_lowered_by_name(true, source_file, func.name) || sema_core_role(func.markers, graph, identity) != "" {
+                if rooted || sema_core_role(func.markers, graph, identity) != "" {
                     _ := name_intern(roots, symbol_key_text(SymbolKind.Function, identity_text, "", func.name))
                 }
             }
@@ -5218,7 +5210,7 @@ jet_driver_keep_going_field: fn(text: String) -> String {
     text.replace("\t", " ").replace("\n", " | ").replace("\r", "")
 }
 
-jet_driver_keep_going_row: fn(kg: &JetDriverKeepGoingLog, phase: String, item: String, code: String, message: String, span: String) {
+jet_driver_keep_going_row: fn(kg: ^JetDriverKeepGoingLog, phase: String, item: String, code: String, message: String, span: String) {
     if !kg.enabled {
         return
     }
@@ -5255,7 +5247,7 @@ jet_driver_stage_lookup_counts: fn(graph: SemaRegistrationGraph?, fallback: Sema
 }
 
 // Writes the rows recorded since the last flush to the trace sink.
-jet_driver_keep_going_flush: fn(kg: &JetDriverKeepGoingLog, trace_sink: CompilerTraceSink?) {
+jet_driver_keep_going_flush: fn(kg: ^JetDriverKeepGoingLog, trace_sink: CompilerTraceSink?) {
     if trace_sink == .Val(sink) {
         loop index in kg.streamed..<kg.rows.len() {
             sink.begin("keepgoing", kg.rows[index], index, -1)
@@ -5273,7 +5265,7 @@ jet_driver_has_errors_since: fn(diagnostics: [Diagnostic], start: Int) -> Bool N
 }
 
 // The error reports of the stage diagnostics not yet recorded.
-jet_driver_keep_going_diagnostics: fn(kg: &JetDriverKeepGoingLog, phase: String, diagnostics: [Diagnostic]) {
+jet_driver_keep_going_diagnostics: fn(kg: ^JetDriverKeepGoingLog, phase: String, diagnostics: [Diagnostic]) {
     if !kg.enabled {
         return
     }
@@ -5290,7 +5282,7 @@ jet_driver_keep_going_diagnostics: fn(kg: &JetDriverKeepGoingLog, phase: String,
 
 // Why each incomplete module is incomplete (each failed function's label and
 // cause), one row per recorded reason.
-jet_driver_keep_going_incomplete_modules: fn(kg: &JetDriverKeepGoingLog, phase: String, modules: [SemaGraphModuleResult]) {
+jet_driver_keep_going_incomplete_modules: fn(kg: ^JetDriverKeepGoingLog, phase: String, modules: [SemaGraphModuleResult]) {
     loop graph_module in modules {
         if graph_module.complete -> next
         if graph_module.incomplete_reasons.len() == 0 {
@@ -5332,7 +5324,7 @@ jet_driver_keep_going_trap_body: fn(function: FnBody, reason: String) -> FnBody 
 
 // `lower:<name>@<position>` skip entries: the function at that position of
 // the lowering list lowers as a trap.
-jet_driver_keep_going_trap_lowering: fn(kg: &JetDriverKeepGoingLog, functions: &[FnBody]) {
+jet_driver_keep_going_trap_lowering: fn(kg: ^JetDriverKeepGoingLog, functions: ^[FnBody]) {
     skip: jet_driver_keep_going_skip_set(kg.skip)
     loop position in 0..<functions.len() {
         if name_find(skip, "lower:{functions[position].name}@{position}") == None -> next
@@ -5346,7 +5338,7 @@ jet_driver_keep_going_trap_lowering: fn(kg: &JetDriverKeepGoingLog, functions: &
 // Records the census row for a function that lowers as a trap and builds the
 // trap. The caller writes the trap into the slot after this returns, when no
 // view of the row is live.
-jet_driver_keep_going_trap_body_row: fn(kg: &JetDriverKeepGoingLog, function: FnBody, reason: String, trap_text: String) -> FnBody {
+jet_driver_keep_going_trap_body_row: fn(kg: ^JetDriverKeepGoingLog, function: FnBody, reason: String, trap_text: String) -> FnBody {
     jet_driver_keep_going_row(kg, "lower", "{function.name} [{function.key}]", "TRAPPED", reason, "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
     jet_driver_keep_going_trap_body(function, trap_text)
 }
@@ -5357,7 +5349,7 @@ jet_driver_keep_going_trap_body_row: fn(kg: &JetDriverKeepGoingLog, function: Fn
 // Under JET_KEEP_GOING a function whose check failed and whose own trap did
 // not check either (sema_keep_going_push_stub) is such a callee: each of its
 // callers lowers as a trap instead, and each is a census row.
-jet_driver_keep_going_trap_unresolved_calls: fn(kg: &JetDriverKeepGoingLog, functions: &[FnBody], modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable) {
+jet_driver_keep_going_trap_unresolved_calls: fn(kg: ^JetDriverKeepGoingLog, functions: ^[FnBody], modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable) {
     // Whether each declaration (by DeclID row) has a checked function or
     // foreign row.
     targets := (loop _ in 0..<decls.rows.len() -> false)
@@ -5404,13 +5396,13 @@ jet_driver_unresolved_direct_call: fn(function: FnBody, targets: [Bool]) -> Decl
 // One statement's subtrees. Its own function so the visitor closure lends the
 // `missing` write parameter: the stage-0 Rust tier then lends `targets` to the
 // closure instead of copying it per statement.
-jet_driver_unresolved_call_statement: fn(tree: BodyTree, statement: Int, targets: [Bool], missing: &DeclID?) Never! {
+jet_driver_unresolved_call_statement: fn(tree: BodyTree, statement: Int, targets: [Bool], missing: ^DeclID?) Never! {
     body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { jet_driver_unresolved_call_in(tree, child, targets, missing) })
 }
 
 // Records in `missing` (once) the first direct-call callee in `expression` or
 // below it that `targets` does not mark, read in place.
-jet_driver_unresolved_call_in: fn(tree: BodyTree, expression: Int, targets: [Bool], missing: &DeclID?) Never! {
+jet_driver_unresolved_call_in: fn(tree: BodyTree, expression: Int, targets: [Bool], missing: ^DeclID?) Never! {
     if missing != None {
         return
     }
@@ -5429,7 +5421,7 @@ jet_driver_unresolved_call_in: fn(tree: BodyTree, expression: Int, targets: [Boo
 // evaluation failed (a check, a refusal, or its step limit) never lands, so
 // its constant has no row: each function that reads it lowers as a trap
 // instead, and each is a census row.
-jet_driver_keep_going_trap_unvalued_constants: fn(kg: &JetDriverKeepGoingLog, functions: &[FnBody], modules: [SemaGraphModuleResult], symbols: SymbolTable) {
+jet_driver_keep_going_trap_unvalued_constants: fn(kg: ^JetDriverKeepGoingLog, functions: ^[FnBody], modules: [SemaGraphModuleResult], symbols: SymbolTable) {
     // The keys a constant read resolves by: each constant row's key and
     // symbol key, and each lowered function's key (a function read as a
     // value).
@@ -5467,13 +5459,13 @@ jet_driver_unvalued_constant: fn(function: FnBody, known: NameTable, symbols: Sy
 
 // One statement's subtrees, in its own function for the reason
 // jet_driver_unresolved_call_statement gives.
-jet_driver_unvalued_constant_statement: fn(tree: BodyTree, statement: Int, known: NameTable, symbols: SymbolTable, missing: &String?) Never! {
+jet_driver_unvalued_constant_statement: fn(tree: BodyTree, statement: Int, known: NameTable, symbols: SymbolTable, missing: ^String?) Never! {
     body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { jet_driver_unvalued_constant_in(tree, child, known, symbols, missing) })
 }
 
 // Records in `missing` (once) the key of the first constant read in
 // `expression` or below it that `known` does not hold, read in place.
-jet_driver_unvalued_constant_in: fn(tree: BodyTree, expression: Int, known: NameTable, symbols: SymbolTable, missing: &String?) Never! {
+jet_driver_unvalued_constant_in: fn(tree: BodyTree, expression: Int, known: NameTable, symbols: SymbolTable, missing: ^String?) Never! {
     if missing != None {
         return
     }
@@ -5626,13 +5618,13 @@ jet_driver_lowering_inputs: fn(request: JetDriverCompileRequest, keep_going: Jet
     jet_driver_lowering_inputs_with(request, none, keep_going)
 }
 
-jet_driver_lowering_inputs_owned: fn(owned_request: &&JetDriverCompileRequest, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
+jet_driver_lowering_inputs_owned: fn(owned_request: ^^JetDriverCompileRequest, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
     request := owned_request.move()
     preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
     jet_driver_lowering_inputs_with(request, preloaded, keep_going)
 }
 
-jet_driver_lowering_inputs_with: fn(request: JetDriverCompileRequest, preloaded: &[JetDriverPreloaded], keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
+jet_driver_lowering_inputs_with: fn(request: JetDriverCompileRequest, preloaded: ^[JetDriverPreloaded], keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
     collecting: keep_going != None
     kg := jet_driver_keep_going_log(keep_going)
     capture := JetDriverCheckedProjectionCapture{stop_before_lowering: true}
@@ -5654,11 +5646,11 @@ jet_driver_lowering_inputs_with: fn(request: JetDriverCompileRequest, preloaded:
 // captured when `capture_build_program` and the bundle's build nodes when
 // `capture_build_nodes`, failures kept going past as `keep_going` asks; the
 // request is restored after.
-jet_driver_lowering_inputs_selection: fn(request: &JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: &&String?, selected_entry: &&String?, capture_build_program: Bool, capture_build_nodes: Bool, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
+jet_driver_lowering_inputs_selection: fn(request: ^JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: ^^String?, selected_entry: ^^String?, capture_build_program: Bool, capture_build_nodes: Bool, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
     saved := JetDriverCompileSelectionRestore{mode: request.mode, capture_build_program: request.capture_build_program, capture_build_nodes: request.capture_build_nodes, entry_path: None, selected_entry: None, restore_selected_entry: false}
     if entry_path.move() == .Val(path) {
         // copy: `saved` keeps the request's original entry path to restore it; the field is
-        // overwritten right after (no exchange on a field of a `&` parameter).
+        // overwritten right after (no exchange on a field of a `^` parameter).
         saved.entry_path = Val(request.authorized_sources.entry_path.copy())
         request.authorized_sources.entry_path = path.move()
     }
@@ -5685,7 +5677,7 @@ JetDriverCheckedDeclarations: struct {
     foreign: [SemaCheckedForeignFunction],
 }
 
-jet_driver_checked_declarations: fn(checked: &JetDriverLoweringInputs) -> JetDriverCheckedDeclarations Never! {
+jet_driver_checked_declarations: fn(checked: ^JetDriverLoweringInputs) -> JetDriverCheckedDeclarations Never! {
     type_defs := [TTypeDef]{}
     impls := [TImplDef]{}
     constants := [TConstantDef]{}
@@ -5707,12 +5699,12 @@ jet_driver_checked_declarations: fn(checked: &JetDriverLoweringInputs) -> JetDri
 // the registration graph from here on); otherwise the input is a copy.
 // `packages` give each module's Module record its package.
 jet_driver_registration_module_inputs: fn(
-    modules: &[JetDriverLoadedModule],
+    modules: ^[JetDriverLoadedModule],
     source_units: [JetDriverSourceUnit],
     source_files: [SourceFile],
     packages: [JetDriverPackageInfo],
     providers: [SemaForeignProviderInput],
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
     core_sources: [JetDriverCoreSource],
     release_programs: Bool,
 ) -> [SemaRegistrationModuleInput]? {
@@ -5784,8 +5776,8 @@ jet_driver_module_meta_source: fn(unit: JetDriverSourceUnit, packages: [JetDrive
 // this path never loads, finalizes, or checks a source for a second time.
 jet_driver_project_completed_check: fn(
     request: JetDriverCompileRequest,
-    load: &&JetDriverLoadResult,
-    registration: &&SemaRegistrationGraph,
+    load: ^^JetDriverLoadResult,
+    registration: ^^SemaRegistrationGraph,
     graph: SemaGraphResult,
     values: [SemaComptimeItemValue],
     effect_identity: ModuleID,
@@ -5816,7 +5808,7 @@ jet_driver_project_completed_check: fn(
     JetDriverCheckedProjectionResult{compile: compile.move(), source_modules: capture.source_modules, entry_module: capture.entry_module, schema_ingress: capture.schema_ingress}
 }
 
-jet_driver_checked_projection: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+jet_driver_checked_projection: fn(owned_request: ^^JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
     request := owned_request.move()
     preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
     capture := JetDriverCheckedProjectionCapture{}
@@ -5833,7 +5825,7 @@ jet_driver_checked_projection: fn(owned_request: &&JetDriverCompileRequest) -> J
 // `jet budget`'s preflight: the `Check` compile of `request` and, when it
 // completes, its checked budget specs. Invalid specs are the compile's
 // diagnostics, as a check reports them.
-jet_driver_budget_projection: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+jet_driver_budget_projection: fn(owned_request: ^^JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
     request := owned_request.move()
     preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
     capture := JetDriverCheckedProjectionCapture{budget: true}
@@ -5843,7 +5835,7 @@ jet_driver_budget_projection: fn(owned_request: &&JetDriverCompileRequest) -> Je
     JetDriverCheckedProjectionResult{compile: compile.move(), source_modules: [Int]{}, entry_module: None, schema_ingress: None, budget_specs: capture.budget_specs, budget_facts: capture.budget_facts}
 }
 
-jet_driver_compile: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverCompileResult {
+jet_driver_compile: fn(owned_request: ^^JetDriverCompileRequest) -> JetDriverCompileResult {
     request := owned_request.move()
     preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
     kg := jet_driver_keep_going_log(None)
@@ -5933,7 +5925,7 @@ JetDriverCompileSelectionRestore: struct {
     restore_selected_entry: Bool,
 }
 
-jet_driver_compile_selection_restore: fn(request: &JetDriverCompileRequest, saved: &&JetDriverCompileSelectionRestore) Never! {
+jet_driver_compile_selection_restore: fn(request: ^JetDriverCompileRequest, saved: ^^JetDriverCompileSelectionRestore) Never! {
     request.mode = saved.mode
     request.capture_build_program = saved.capture_build_program
     request.capture_build_nodes = saved.capture_build_nodes
@@ -5941,19 +5933,19 @@ jet_driver_compile_selection_restore: fn(request: &JetDriverCompileRequest, save
     if saved.restore_selected_entry -> request.selected_entry = saved.selected_entry.move()
 }
 
-jet_driver_compile_selection: fn(request: &JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: &&String?, selected_entry: &&String?, capture_build_program: Bool, capture_build_nodes: Bool) -> JetDriverCompileResult {
+jet_driver_compile_selection: fn(request: ^JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: ^^String?, selected_entry: ^^String?, capture_build_program: Bool, capture_build_nodes: Bool) -> JetDriverCompileResult {
     saved := JetDriverCompileSelectionRestore{mode: request.mode, capture_build_program: request.capture_build_program, capture_build_nodes: request.capture_build_nodes, entry_path: None, selected_entry: None, restore_selected_entry: false}
     if entry_path.move() == .Val(path) {
         // copy: `saved` keeps the request's original entry path so it can restore it, and the
         // request's own field is overwritten with `path` right after. Jet has no exchange on a
-        // field of a write-borrowed (`&`) parameter.
+        // field of a write-borrowed (`^`) parameter.
         saved.entry_path = Val(request.authorized_sources.entry_path.copy())
         request.authorized_sources.entry_path = path.move()
     }
     if selected_entry.move() == .Val(name) {
         // copy: `saved` keeps the request's original selected entry so it can restore it, and the
         // request's own field is overwritten right after. Jet has no exchange on a field of a
-        // write-borrowed (`&`) parameter.
+        // write-borrowed (`^`) parameter.
         saved.selected_entry = request.selected_entry.copy()
         saved.restore_selected_entry = true
         request.selected_entry = Val(name.move())
@@ -5974,7 +5966,7 @@ jet_driver_compile_selection: fn(request: &JetDriverCompileRequest, mode: JetDri
 // The result keeps every error report, so a compile with any row never
 // passes; a crash later in the run still leaves the rows already streamed to
 // the trace sink.
-jet_driver_compile_keep_going: fn(owned_request: &&JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
+jet_driver_compile_keep_going: fn(owned_request: ^^JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
     request := owned_request.move()
     preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
     kg := jet_driver_keep_going_log(Val(options))
@@ -5991,7 +5983,7 @@ jet_driver_compile_keep_going: fn(owned_request: &&JetDriverCompileRequest, opti
     result
 }
 
-jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: &[JetDriverPreloaded], kg: &JetDriverKeepGoingLog, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> JetDriverCompileResult {
+jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: ^[JetDriverPreloaded], kg: ^JetDriverKeepGoingLog, checked_projection: Bool, capture: ^JetDriverCheckedProjectionCapture) -> JetDriverCompileResult {
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
     // JET_KEEP_GOING and `jet check Core` load every declaration of each
@@ -6089,7 +6081,7 @@ jet_driver_registered_function_keys: fn(graph: SemaRegistrationGraph) -> JetDriv
 }
 
 // The row of `module_identity`'s key set, added empty when it has none.
-jet_driver_registered_module: fn(registered: &JetDriverRegisteredKeys, module_identity: ModuleID) -> Int Never! {
+jet_driver_registered_module: fn(registered: ^JetDriverRegisteredKeys, module_identity: ModuleID) -> Int Never! {
     if registered.modules.get(module_identity.id) == .Val(at) -> return at
     at: registered.keys.len()
     registered.modules[module_identity.id] = at
@@ -6152,7 +6144,7 @@ jet_driver_registration_package_policies: fn(request: JetDriverCompileRequest, l
 // those the main package's `authority.grants` line lends it, by the name a
 // manifest writes it under, never by its own `allow` row. The denials that
 // bind them are the rows' own (sema_effects_check_modules).
-jet_driver_expert_policies: fn(policies: &[SemaRegistrationPackagePolicy], load: JetDriverLoadResult) Never! {
+jet_driver_expert_policies: fn(policies: ^[SemaRegistrationPackagePolicy], load: JetDriverLoadResult) Never! {
     root_index: jet_driver_entry_package_index(load) ?? return
     root: load.packages[root_index]
     names := JetDriverDependencyNames{}
@@ -6212,14 +6204,14 @@ jet_driver_comptime_host_module: fn(graph: SemaRegistrationGraph, module_identit
 // whole-program half. The landings append to `values`, `functions` and
 // `trace`; every graph edit is recorded on `trail`.
 jet_driver_finalize_program: fn(
-    graph: &&SemaRegistrationGraph,
-    trail: &SemaGraphTrail,
+    graph: ^^SemaRegistrationGraph,
+    trail: ^SemaGraphTrail,
     stage: SemaComptimeDeclarationStage,
-    values: &[SemaComptimeItemValue],
-    functions: &[SemaComptimeFunctionResult],
-    trace: &JetDriverCompileTrace,
+    values: ^[SemaComptimeItemValue],
+    functions: ^[SemaComptimeFunctionResult],
+    trace: ^JetDriverCompileTrace,
     request: JetDriverCompileRequest,
-    carried_staging: &[JetDriverComptimeStaging],
+    carried_staging: ^[JetDriverComptimeStaging],
 ) -> SemaGraphResult {
     bodies := sema_finalize_bodies_empty()
     body_graph: sema_finalize_bodies(graph, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
@@ -6247,7 +6239,7 @@ jet_driver_finalize_program: fn(
 // (jet_driver_compile_stages): on the first pass (`loop_probe`) the loops are
 // left out and the compile stops once the values are computed, handing them
 // back in `root_loop_values`; on the second the loops expand over them.
-jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, owned_load: &&JetDriverLoadResult, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture, owned_loop_values: &&[SemaRootLoopValue], loop_probe: Bool) -> JetDriverCompileResult {
+jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetDriverKeepGoingLog, owned_load: ^^JetDriverLoadResult, checked_projection: Bool, capture: ^JetDriverCheckedProjectionCapture, owned_loop_values: ^^[SemaRootLoopValue], loop_probe: Bool) -> JetDriverCompileResult {
     load := owned_load.move()
     loop_values := owned_loop_values.move()
     trace := jet_driver_empty_compile_trace()
@@ -7385,7 +7377,7 @@ JetDriverHeldRest: struct {
 // The task owns the state alone; a process that exits first hands its pages
 // back to the kernel. The state of a compile that checked fewer than
 // JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS functions (`checked`) drops here.
-jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
+jet_driver_release_aside: fn(checked: Int, state: ^^JetDriverHeldState) {
     held := state.move()
     if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS {
         return
@@ -7401,10 +7393,10 @@ jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
         run: held.run.move(),
         trail: held.trail.move(),
     }
-    t1: task &&dropped_reg { dropped_reg.modules.len() }
-    t2: task &&dropped_load { dropped_load.modules.len() }
-    t3: task &&dropped_checked { dropped_checked.modules.len() }
-    t4: task &&dropped_rest { dropped_rest.functions.len() }
+    t1: task ^^dropped_reg { dropped_reg.modules.len() }
+    t2: task ^^dropped_load { dropped_load.modules.len() }
+    t3: task ^^dropped_checked { dropped_checked.modules.len() }
+    t4: task ^^dropped_rest { dropped_rest.functions.len() }
     t1.detach()
     t2.detach()
     t3.detach()
@@ -7449,7 +7441,7 @@ JetDriverHeldOpened: struct {
 // The held program `held` opened, its probe at the entry module, its memory
 // plan computed on `threads`. None when the registration has no entry
 // module.
-jet_driver_held_eval_open: fn(held: &&JetDriverHeldState, threads: CompilerThreads) -> JetDriverHeldOpened? {
+jet_driver_held_eval_open: fn(held: ^^JetDriverHeldState, threads: CompilerThreads) -> JetDriverHeldOpened? {
     taken := held.move()
     module_files := name_column_table(taken.modules.len())
     modules := name_column()
@@ -7489,7 +7481,7 @@ jet_driver_held_eval_module: fn(held: JetDriverHeldEval, path: String) -> Module
 // `text`. A text that doesn't parse as a single function returns the
 // parse's reports and no body; a `path` no checked module has returns no
 // reports and no body.
-jet_driver_held_eval_check: fn(held: &JetDriverHeldEval, path: String, functions: [FnBody], symbols: &&SymbolTable, interner: &&Interner, types: &&[TTypeDef], text: String) -> JetDriverHeldChecked {
+jet_driver_held_eval_check: fn(held: ^JetDriverHeldEval, path: String, functions: [FnBody], symbols: ^^SymbolTable, interner: ^^Interner, types: ^^[TTypeDef], text: String) -> JetDriverHeldChecked {
     parsed := parse_source(text.bytes())
     if jet_driver_has_errors(parsed.diagnostics) || parsed.program.items.len() != 1 {
         return JetDriverHeldChecked{checked: SemaScriptProbeChecked{function: None, diagnostics: parsed.diagnostics.move(), complete: false}, symbols: symbols.move(), interner: interner.move(), types: types.move()}
@@ -7546,7 +7538,7 @@ JetDriverHeldChecked: struct {
 // checked types `types` are lent as jet_driver_held_eval_check lends them.
 // None when no checked module has `path`, the text doesn't parse there, or
 // no function there answers.
-jet_driver_held_eval_answer: fn(held: &JetDriverHeldEval, path: String, offset: Int, text: String, symbols: &&SymbolTable, interner: &&Interner, types: &&[TTypeDef]) -> JetDriverHeldAnswer {
+jet_driver_held_eval_answer: fn(held: ^JetDriverHeldEval, path: String, offset: Int, text: String, symbols: ^^SymbolTable, interner: ^^Interner, types: ^^[TTypeDef]) -> JetDriverHeldAnswer {
     going: jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), symbols.move(), interner.move(), types.move())
     held.probe.program.registration_graph = going.graph.move()
     held.probe.program.checked_types = going.types.move()
@@ -7562,7 +7554,7 @@ jet_driver_held_eval_answer: fn(held: &JetDriverHeldEval, path: String, offset: 
     JetDriverHeldAnswer{answer: answer.move(), symbols: back.symbols.move(), interner: back.interner.move(), types: back.types.move()}
 }
 
-jet_driver_held_eval_answer_in: fn(held: &JetDriverHeldEval, path: String, offset: Int, text: String) -> SemaEvalProbeAnswer? {
+jet_driver_held_eval_answer_in: fn(held: ^JetDriverHeldEval, path: String, offset: Int, text: String) -> SemaEvalProbeAnswer? {
     at := Int?{None}
     if held.probe.program.registration_graph == .Val(graph) {
         at = jet_driver_eval_segment_offset(graph.modules[held.probe.module_index].source_segments, path, offset)
@@ -7592,7 +7584,7 @@ JetDriverHeldAnswer: struct {
 // Spans count from 0 in `text`. None, with the registration as it was,
 // when the text is not one function, no checked module has `path`, or the
 // probe doesn't keep it.
-jet_driver_held_eval_append: fn(held: &JetDriverHeldEval, path: String, functions: [FnBody], symbols: &&SymbolTable, interner: &&Interner, types: &&[TTypeDef], text: String) -> JetDriverHeldAppended {
+jet_driver_held_eval_append: fn(held: ^JetDriverHeldEval, path: String, functions: [FnBody], symbols: ^^SymbolTable, interner: ^^Interner, types: ^^[TTypeDef], text: String) -> JetDriverHeldAppended {
     parsed := parse_source(text.bytes())
     if jet_driver_has_errors(parsed.diagnostics) || parsed.program.items.len() != 1 {
         return JetDriverHeldAppended{appended: None, symbols: symbols.move(), interner: interner.move(), types: types.move()}
@@ -7635,7 +7627,7 @@ JetDriverHeldLend: struct {
     types: [TTypeDef],
 }
 
-jet_driver_held_eval_lend: fn(graph: &&SemaRegistrationGraph?, symbols: &&SymbolTable, interner: &&Interner, types: &&[TTypeDef]) -> JetDriverHeldLend {
+jet_driver_held_eval_lend: fn(graph: ^^SemaRegistrationGraph?, symbols: ^^SymbolTable, interner: ^^Interner, types: ^^[TTypeDef]) -> JetDriverHeldLend {
     taken := graph.move()
     lent := taken.move() ?? return JetDriverHeldLend{graph: None, symbols: symbols.move(), interner: interner.move(), types: types.move()}
     previous := lent.symbols.move()
@@ -7649,12 +7641,12 @@ jet_driver_held_eval_lend: fn(graph: &&SemaRegistrationGraph?, symbols: &&Symbol
 // compile's state, so lowering runs while they drop instead of after. Facts
 // drop here when fewer than JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS checked
 // functions (`checked`: 0 when the build holds its state) produced them.
-jet_driver_release_facts_aside: fn(checked: Int, facts: &&[SemaCheckedFacts]) {
+jet_driver_release_facts_aside: fn(checked: Int, facts: ^^[SemaCheckedFacts]) {
     held: facts.move()
     if checked < JET_DRIVER_RELEASE_ASIDE_MIN_FUNCTIONS {
         return
     }
-    released: task &&held { held.len() }
+    released: task ^^held { held.len() }
     released.detach()
 }
 
@@ -7752,7 +7744,7 @@ jet_driver_effect_budget_root: fn(load: JetDriverLoadResult) -> Int? Never! {
 // Into `names`, each dependency's source root by its name (Rust
 // `ProgramBundle.dep_roots`) and its name by its package identity; the
 // count of the dependencies. The entry package is no dependency of itself.
-jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: &JetDriverDependencyNames) -> Int Never! {
+jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: ^JetDriverDependencyNames) -> Int Never! {
     loop package in load.packages {
         loop dependency in package.dependencies {
             if name_find(names.roots, dependency.name) != None -> next
@@ -7855,7 +7847,7 @@ JetDriverBudgetNameSpans: struct {
     spans: [Span?]{[Span?]{None}},
 }
 
-jet_driver_budget_name_span_put: fn(table: &JetDriverBudgetNameSpans, key: String, span: Span) Never! {
+jet_driver_budget_name_span_put: fn(table: ^JetDriverBudgetNameSpans, key: String, span: Span) Never! {
     id: name_index(name_intern(table.keys, key))
     if id == table.spans.len() -> table.spans.push(Val(span)) else -> table.spans[id] = Val(span)
 }
@@ -7934,7 +7926,7 @@ jet_driver_package_effect_roots: fn(load: JetDriverLoadResult, graph: SemaRegist
 // The package effect roots the effect row `row` names (`view` holds the
 // effect names its module may write), under the function key `key` of
 // `roots`. A dependency is named by `names`, by its package identity.
-jet_driver_package_effect_root_row: fn(roots: &JetDriverPackageEffectRoots, view: [SemaLibraryEffectName], names: JetDriverDependencyNames, root_identity: String, key: String, row: [EffectRowEntry]?) Never! {
+jet_driver_package_effect_root_row: fn(roots: ^JetDriverPackageEffectRoots, view: [SemaLibraryEffectName], names: JetDriverDependencyNames, root_identity: String, key: String, row: [EffectRowEntry]?) Never! {
     entries: row ?? return
     found := [String]{}
     loop entry in entries {
@@ -8015,7 +8007,7 @@ JetDriverBudgetEdgeChunk: struct {
     extra: [[Int]],
 }
 
-jet_driver_budget_edge_chunk: fn(callees: &&[[Int]], extra: &&[[Int]]) -> JetDriverBudgetEdgeChunk Never! {
+jet_driver_budget_edge_chunk: fn(callees: ^^[[Int]], extra: ^^[[Int]]) -> JetDriverBudgetEdgeChunk Never! {
     JetDriverBudgetEdgeChunk{callees: callees.move(), extra: extra.move()}
 }
 
@@ -8547,7 +8539,7 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, rows: JetDri
 // budget refusing that dependency, not an error of the dependency's own
 // check, so it joins the diagnostics after the dependency summary; the
 // root's own E0749 follows the same path.
-jet_driver_effect_budget_failure: fn(load: JetDriverLoadResult, budget: &&[Diagnostic], trace: JetDriverCompileTrace) -> JetDriverCompileResult Never! {
+jet_driver_effect_budget_failure: fn(load: JetDriverLoadResult, budget: ^^[Diagnostic], trace: JetDriverCompileTrace) -> JetDriverCompileResult Never! {
     result := jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
     result.diagnostics.extend(budget.move())
     result
@@ -8592,7 +8584,7 @@ jet_driver_trace_released: fn(trace_sink: CompilerTraceSink?) {
 
 // `keepgoing.final` (jet_driver_compile_keep_going's rows past the stages)
 // opens and closes through these parameters, not a match on the request
-// inline: that request is an owned (`&&`) parameter, a local to the Rust
+// inline: that request is an owned (`^^`) parameter, a local to the Rust
 // tier (stage 0), which reads a pattern payload of a local's field by copy
 // (in place only under a parameter), and a trace sink, a
 // trait object, has no copy (E0599).
@@ -8677,7 +8669,7 @@ jet_driver_tidy_pass_b_threads: fn(functions: [FnBody], bodies: [Int?], decls: D
 // Runs the four post-check tidy lint passes (L2511, L0305, L0306, L0308) in
 // parallel across `threads`, and filters `#Allow` only across modules that
 // produced a lint.
-jet_driver_run_tidy_lints: fn(load: &JetDriverLoadResult, checked_functions: [FnBody], registration_graph: SemaRegistrationGraph, collect_cost: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?) {
+jet_driver_run_tidy_lints: fn(load: ^JetDriverLoadResult, checked_functions: [FnBody], registration_graph: SemaRegistrationGraph, collect_cost: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?) {
     jet_driver_trace_step_begin(trace_sink, "driver.tidy")
     count: checked_functions.len()
     workers: compiler_threads_admit(threads, count, count, 256, 0, 0)

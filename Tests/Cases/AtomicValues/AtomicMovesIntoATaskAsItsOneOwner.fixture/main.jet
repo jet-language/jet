@@ -4,13 +4,13 @@ Holder: struct {
 
 run: fn() {
     value: Holder{counter: 7}
-    child: task &&value {
+    child: task ^^value {
         _ := value.counter.add(5)
         value.counter.load()
     }
     print("holder {child.join() ?? 0}")
     word: Atomic<Int>.try_new(3) ?? return
-    worker: task &&word {
+    worker: task ^^word {
         word.store(word.load() * 4)
         word.load()
     }

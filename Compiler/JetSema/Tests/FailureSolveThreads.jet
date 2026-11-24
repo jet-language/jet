@@ -43,7 +43,7 @@ failure_threads_source: fn(index: Int, count: Int) -> String {
     parts.join("")
 }
 
-failure_threads_input: fn(table: &ModuleTable, index: Int, count: Int, failures: &[String]) -> SemaRegistrationModuleInput? {
+failure_threads_input: fn(table: ^ModuleTable, index: Int, count: Int, failures: ^[String]) -> SemaRegistrationModuleInput? {
     source: failure_threads_source(index, count)
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
@@ -56,7 +56,7 @@ failure_threads_input: fn(table: &ModuleTable, index: Int, count: Int, failures:
 
 // Each checked function's return and failure carrier, then the
 // diagnostics, of the program checked on `threads`.
-failure_threads_rows: fn(count: Int, threads: CompilerThreads, failures: &[String]) -> [String] {
+failure_threads_rows: fn(count: Int, threads: CompilerThreads, failures: ^[String]) -> [String] {
     label: "{threads.cores} cores"
     table := module_table()
     inputs := [SemaRegistrationModuleInput]{}

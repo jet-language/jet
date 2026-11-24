@@ -129,7 +129,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     source: "Host: struct {{}}\nimpl Host {{\n    open: fn(self, path: String) -[FS]> Int\n}}\nrun: fn() {{}}\n"
     lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    // Rust `parse(&tokens).is_err()`: the ordinary parse reports an error. The check
+    // Rust `parse(^tokens).is_err()`: the ordinary parse reports an error. The check
     // acceptance (`jfmt_check_parse_accepts`) admits E0081 on purpose, as `parse_for_check` does.
     assert(
         loop d in parser_test_result(source).diagnostics {

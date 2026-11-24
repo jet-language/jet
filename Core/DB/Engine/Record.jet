@@ -94,7 +94,7 @@ decode_record: fn(rec: [U8], enc: Int) -> [Mem] SQLError! {
 // format file_format; integers 0 and 1 take types 8 and 9 from format 4 on.
 // An IntReal needing 8 bytes is stored as the REAL it stands for, and m
 // becomes that REAL, as in C.
-serial_type: fn(m: &Mem, file_format: Int) -> Int Never! {
+serial_type: fn(m: ^Mem, file_format: Int) -> Int Never! {
     f: m.flags
     if f & MEM_NULL != 0 {
         if f & MEM_ZERO != 0 -> return 10
@@ -125,14 +125,14 @@ serial_type: fn(m: &Mem, file_format: Int) -> Int Never! {
 }
 
 // Append the `n`-byte big-endian two's-complement form of `value`.
-put_signed: fn(out: &[U8], value: Int, n: Int) Never! {
+put_signed: fn(out: ^[U8], value: Int, n: Int) Never! {
     v: if value < 0 -> value + 18446744073709551616 else -> value
     loop i in 0..<n -> out.push(U8{(v >> (8 * (n - 1 - i))) & 255})
 }
 
 // sqlite3VdbeSerialPut: append the body bytes of m as serial type `t`; a
 // MEM_Zero blob or text is expanded with its zero bytes.
-serial_put: fn(out: &[U8], m: Mem, t: Int) Never! {
+serial_put: fn(out: ^[U8], m: Mem, t: Int) Never! {
     if t >= 1 && t <= 6 -> put_signed(out, m.i, serial_len(t)) else if t == 7 {
         put_signed(out, math.to_bits(m.r), 8)
     } else if t >= 12 {
@@ -145,7 +145,7 @@ serial_put: fn(out: &[U8], m: Mem, t: Int) Never! {
 
 // The record OP_MakeRecord builds from `values` (fileformat2.html 2.1):
 // the header size varint, the serial types, then the bodies.
-make_record: fn(values: &[Mem], file_format: Int) -> [U8] Never! {
+make_record: fn(values: ^[Mem], file_format: Int) -> [U8] Never! {
     types := [Int]{}
     header_body := 0
     loop k in 0..<values.len() {
@@ -379,7 +379,7 @@ key_slice: fn(buf: [U8], at: Int, n: Int) -> [U8] Never! {
 
 // sqlite3VdbeRecordUnpack: the fields of the n_key-byte record `key` into
 // p.mem, at most p.n_field of them; n_field becomes the count read.
-record_unpack: fn(info: KeyInfo, n_key: Int, key: [U8], p: &UnpackedRecord) Never! {
+record_unpack: fn(info: KeyInfo, n_key: Int, key: [U8], p: ^UnpackedRecord) Never! {
     p.default_rc = 0
     hdr: key_varint(key, 0)
     sz_hdr: hdr.value
@@ -437,7 +437,7 @@ coll_of: fn(info: KeyInfo, i: Int) -> Int Never! {
 // buf[at] with p, negative when the record sorts first; with skip the
 // first fields are known equal. A corrupt record sets p.err_code and
 // compares 0.
-record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord, skip: Bool) -> Int Never! {
+record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord, skip: Bool) -> Int Never! {
     d1 := 0
     i := 0
     sz_hdr1 := 0
@@ -547,13 +547,13 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
 }
 
 // sqlite3VdbeRecordCompare.
-record_compare: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
+record_compare: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -> Int Never! {
     record_compare_with_skip(n_key1, buf, at, p, false)
 }
 
 // vdbeRecordCompareInt: the first field of p is an integer and the
 // record's header size fits in one byte.
-record_compare_int: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
+record_compare_int: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -> Int Never! {
     body: at + (key_byte(buf, at) & 63)
     serial_type: key_byte(buf, at + 1)
     if serial_type == 0 || serial_type == 7 || serial_type > 9 {
@@ -570,7 +570,7 @@ record_compare_int: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> I
 
 // vdbeRecordCompareString: the first field of p is a text compared BINARY
 // and the record's header size fits in one byte.
-record_compare_string: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
+record_compare_string: fn(n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -> Int Never! {
     serial_type := key_byte(buf, at + 1)
     if serial_type >= 128 {
         // (signed char)aKey1[1] < 0: the serial type is a longer varint.
@@ -607,7 +607,7 @@ COMPARE_STRING: 2
 
 // sqlite3VdbeFindCompare: the comparison for p, setting r1, r2 and the
 // cached first value it uses.
-find_compare: fn(p: &UnpackedRecord) -> Int Never! {
+find_compare: fn(p: ^UnpackedRecord) -> Int Never! {
     if p.key_info.n_all_field <= 13 {
         flags: p.mem[0].flags
         sf: sort_flags_of(p.key_info, 0)
@@ -632,7 +632,7 @@ find_compare: fn(p: &UnpackedRecord) -> Int Never! {
 }
 
 // Run the comparison `kind` find_compare chose.
-compare_by: fn(kind: Int, n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
+compare_by: fn(kind: Int, n_key1: Int, buf: [U8], at: Int, p: ^UnpackedRecord) -> Int Never! {
     if kind == COMPARE_INT -> return record_compare_int(n_key1, buf, at, p)
     if kind == COMPARE_STRING -> return record_compare_string(n_key1, buf, at, p)
     record_compare(n_key1, buf, at, p)

@@ -171,13 +171,13 @@ priv internal: module {
         output.split(String.from_bytes([U8]{0}) ?? "").to_list()
     }
 
-    git_add_path: fn(paths: &[String], path: String) Never! {
+    git_add_path: fn(paths: ^[String], path: String) Never! {
         if path != "" && !paths.contains(path) -> paths.push(path.copy())
     }
 
     // The files under `root` (below `rel`) not in `tracked`, `skip`
     // directories and directory symlinks not entered.
-    git_extra: fn(root: String, rel: String, tracked: Set<String>, skip: [String], found: &[Drift]) -[FS.Read]> Never! {
+    git_extra: fn(root: String, rel: String, tracked: Set<String>, skip: [String], found: ^[Drift]) -[FS.Read]> Never! {
         loop entry in core.files.list_dir(core.files.join(root, rel)) ?? [] {
             path: if rel == "" -> entry.name.copy() else -> "{rel}/{entry.name}"
             if {

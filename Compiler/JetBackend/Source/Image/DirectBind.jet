@@ -20,7 +20,7 @@ use jet_foundation.[CompilerThreads, NameTable, name_index, name_intern, name_ta
 // x64_bind_runtime_image_at binds their object. With `unwritten` the errors
 // are the object writer's. The image is the executable's image part, bound
 // or not.
-x64_bind_functions_at: fn(name: String, program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], threads: CompilerThreads, image: &&[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
+x64_bind_functions_at: fn(name: String, program: ^^X64ObjectModule, functions: ^^[X64CompiledFunction], debug: ^^[X64FunctionDebug], threads: CompilerThreads, image: ^^[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
     c := link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
     exe := x64_executable_whole([U8]{})
     if link_direct_bind(c, exe, program, functions, debug, program_base, gap_at, gap) {
@@ -45,7 +45,7 @@ x64_bind_functions_at: fn(name: String, program: &&X64ObjectModule, functions: &
 // bytes, none of which a load maps. The loaded bytes are the ones the plain
 // bind gives (x64_comptime_code), so the code a debugger stops in is the
 // code that runs without one; x64_comptime_facts reads the facts out.
-x64_bind_functions_debug_at: fn(name: String, program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], threads: CompilerThreads, image: &&[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
+x64_bind_functions_debug_at: fn(name: String, program: ^^X64ObjectModule, functions: ^^[X64CompiledFunction], debug: ^^[X64FunctionDebug], threads: CompilerThreads, image: ^^[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
     exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
     object: x64_object_functions_threads(program.move(), functions.move(), debug.move(), exports, [X64DataExport]{}, threads, true, false)
     if object.errors.len() > 0 {
@@ -59,7 +59,7 @@ x64_bind_functions_debug_at: fn(name: String, program: &&X64ObjectModule, functi
 // The executable x64_bind_runtime_image_at makes of the object of
 // `functions`, written into `exe` but for its image part (input 1 of `c`);
 // false, with `exe` unfinished, when the object route must make it.
-link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], program_base: Int, gap_at: Int, gap: Int) -> Bool Never! {
+link_direct_bind: fn(c: ^LinkContext, exe: ^X64Executable, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], program_base: Int, gap_at: Int, gap: Int) -> Bool Never! {
     view := link_image_view(c, 1, gap_at, gap)
     if c.errors.len() > 0 || view.exports_slots == 0 -> return false
     if program_base & LINK_PAGE - 1 != 0 || program_base < view.program_base -> return false
@@ -343,7 +343,7 @@ link_direct_startup_address: fn(startup: LinkSynth, name: String, text_at: Int, 
 // per name (`looked`, `import_at` by its id in `names`); -1 when the image
 // does not export it or it names `main` or a binding symbol, which the bind
 // resolves otherwise.
-link_direct_import: fn(c: LinkContext, view: LinkImageView, names: &NameTable, looked: &[Bool], import_at: &[Int], symbol: String) -> Int Never! {
+link_direct_import: fn(c: LinkContext, view: LinkImageView, names: ^NameTable, looked: ^[Bool], import_at: ^[Int], symbol: String) -> Int Never! {
     id: name_index(name_intern(names, symbol))
     loop looked.len() <= id {
         looked.push(false)

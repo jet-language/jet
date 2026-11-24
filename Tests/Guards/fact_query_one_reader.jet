@@ -36,7 +36,7 @@ FQ_GUARD: "Tests/Guards/fact_query_one_reader.jet"
 // Every call of a reader in `readers` under `path` outside `homes`, as
 // `path:line: reader`. Symbolic links, hidden entries and build output are
 // skipped, and so are files that are not Jet.
-fq_calls: fn(path: String, readers: [String], homes: [String], out: &[String]) -[FS]> {
+fq_calls: fn(path: String, readers: [String], homes: [String], out: ^[String]) -[FS]> {
     if fq_files.is_symlink(path) -> return
     if fq_files.is_dir(path) {
         loop child in (fq_files.list_dir(path) ?? panic("list {path}: {err}")) {

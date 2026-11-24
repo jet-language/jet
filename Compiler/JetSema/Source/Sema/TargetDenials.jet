@@ -31,7 +31,7 @@ use jet_foundation.[
     sema_effect_covers,
 ]
 
-sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
+sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) Never! {
     denied: jet_target_machine_denied_effects(graph.target_machine)
     if denied.len() == 0 {
         return
@@ -116,7 +116,7 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
 // the entries reach. A use the walk finds past the program's own code is
 // E3301 at the program's call that leads to it, and a body the program never
 // reaches is never refused.
-sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
+sema_target_no_os_reach_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) Never! {
     if !graph.target_machine.no_os {
         return
     }
@@ -177,7 +177,7 @@ sema_target_position: fn(keys: NameTable, key: String) -> Int? Never! {
 // the program's own call that leads out of its code, once per such call. A
 // path that reaches the module straight from the program's own code was
 // refused in that body.
-sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, rows: [SemaTargetSlot], keys: NameTable, parents: [Int], position: Int, reported: &[String], diagnostics: &[Diagnostic]) Never! {
+sema_target_no_os_reach_report: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, rows: [SemaTargetSlot], keys: NameTable, parents: [Int], position: Int, reported: ^[String], diagnostics: ^[Diagnostic]) Never! {
     back := [Int]{position}
     loop parents[back[back.len() - 1]] >= 0 { back.push(parents[back[back.len() - 1]]) }
     steps: loop at in 0..<back.len() -> back[back.len() - 1 - at]
@@ -281,7 +281,7 @@ sema_target_denied_diagnostic: fn(function: String, denied: String, target: Stri
 // E3301 reports and its allocator rows the heap proof's E3303
 // (sema_effect_check_heap_free), so only its capability rows are reported
 // here.
-sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaCoreUsageResult, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaCoreUsageResult, diagnostics: ^[Diagnostic]) -> Bool Never! {
     machine: graph.target_machine
     if !machine.no_os -> return true
     // The profile's own gaps hold for every program; only what a use adds is

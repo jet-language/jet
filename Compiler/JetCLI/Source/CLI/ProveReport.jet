@@ -434,7 +434,7 @@ jet_cli_prove_groups: fn(members: [JetCLIProveMember], color: Bool, json: Bool) 
 }
 
 // Whether `items` declare a `#Test`; each named one is added to `sites`.
-jet_cli_prove_collect_tests: fn(member: JetCLIProveMember, items: [Item], sites: &[JetCLIProveTestSite]) -> Bool Never! {
+jet_cli_prove_collect_tests: fn(member: JetCLIProveMember, items: [Item], sites: ^[JetCLIProveTestSite]) -> Bool Never! {
     found := false
     loop item in items {
         if item == {
@@ -684,7 +684,7 @@ jet_cli_prove_error_item: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
 // effect callbacks, scrubs, replayability and distinct ranges; a member that
 // does not parse or declares none of them is one generic checked item. Its
 // `#Pre`/`#Post` clauses join `contracts` (`collect_func_semantics`).
-jet_cli_prove_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, items: &[JetCLIProveFrontItem], contracts: &[JetCLIProveContract]) Never! {
+jet_cli_prove_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, items: ^[JetCLIProveFrontItem], contracts: ^[JetCLIProveContract]) Never! {
     before: items.len()
     parsed: parse_source(member.source.bytes())
     if jet_cli_errors(parsed.diagnostics).len() == 0 {
@@ -706,7 +706,7 @@ jet_cli_prove_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember
     )
 }
 
-jet_cli_prove_item_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, declared: [Item], items: &[JetCLIProveFrontItem], contracts: &[JetCLIProveContract]) Never! {
+jet_cli_prove_item_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, declared: [Item], items: ^[JetCLIProveFrontItem], contracts: ^[JetCLIProveContract]) Never! {
     loop item in declared {
         if item == {
             .Func(func) -> { jet_cli_prove_func_facts(identity, member, func, items, contracts) }
@@ -740,7 +740,7 @@ jet_cli_prove_item_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveM
     }
 }
 
-jet_cli_prove_func_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, func: Func, items: &[JetCLIProveFrontItem], contracts: &[JetCLIProveContract]) Never! {
+jet_cli_prove_func_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, func: Func, items: ^[JetCLIProveFrontItem], contracts: ^[JetCLIProveContract]) Never! {
     if func.declared_effects == .Val(effects) {
         span: if effects.len() > 0 -> effects[0].span.copy() else -> func.span.copy()
         names: loop entry in effects -> entry.name.copy()
@@ -765,7 +765,7 @@ jet_cli_prove_func_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveM
 
 // A declared clause, placed where its condition starts: the site the
 // runtime names when it checks the clause (JetSema Contracts.jet).
-jet_cli_prove_contract: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, function: String, marker: String, clause: ContractClause, contracts: &[JetCLIProveContract]) Never! {
+jet_cli_prove_contract: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, function: String, marker: String, clause: ContractClause, contracts: ^[JetCLIProveContract]) Never! {
     span: expr_span(clause.cond)
     contracts.push(
         JetCLIProveContract{
@@ -781,7 +781,7 @@ jet_cli_prove_contract: fn(identity: JetCLIProveIdentity, member: JetCLIProveMem
     )
 }
 
-jet_cli_prove_fact: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, facet: String, kind: String, span: Span, claim: String, items: &[JetCLIProveFrontItem]) Never! {
+jet_cli_prove_fact: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember, facet: String, kind: String, span: Span, claim: String, items: ^[JetCLIProveFrontItem]) Never! {
     items.push(
         JetCLIProveFrontItem{
             id: jet_cli_prove_evidence_id(identity, kind, member.path, jet_cli_prove_span_text(member.source, span), claim),
@@ -952,7 +952,7 @@ jet_cli_prove_exit_rank: fn(code: Int) -> Int Never! {
 // property's seed is its failure's, else the run's `seed`. Contract records
 // join `observed`. True when a test ended at an uncaught runtime stop it
 // didn't expect.
-jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], entry: JetCLIProveMember, sites: [JetCLIProveTestSite], records: [EvidenceRecord], cwd: String, seed: Int, items: &[JetCLIProveTestItem], observed: &[JetCLIProveObserved]) -> Bool Never! {
+jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], entry: JetCLIProveMember, sites: [JetCLIProveTestSite], records: [EvidenceRecord], cwd: String, seed: Int, items: ^[JetCLIProveTestItem], observed: ^[JetCLIProveObserved]) -> Bool Never! {
     stops := [JetCLIProveStopRecord]{}
     stopped := false
     loop record in records {
@@ -1242,7 +1242,7 @@ JetCLIProveBudgetCount: struct {
     unavailable: Int{0},
 }
 
-jet_cli_prove_budget_count: fn(count: &JetCLIProveBudgetCount, fact: JetCLIBudgetFact) Never! {
+jet_cli_prove_budget_count: fn(count: ^JetCLIProveBudgetCount, fact: JetCLIBudgetFact) Never! {
     count.selected += 1
     if fact.outcome == "pass" -> count.met += 1
     if fact.outcome == "fail" -> count.failed += 1

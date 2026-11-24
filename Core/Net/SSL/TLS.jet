@@ -70,7 +70,7 @@ ssl_mfl_code_to_length: fn(mfl: Int) -> Int Never! {
 /// certificate is parsed again from its DER, the first of the chain alone
 /// as C keeps it; the hostname is kept only for a client's session, as C
 /// copies it only there.
-ssl_session_copy: fn(dst: &ssldefs.SSLSession, src: ssldefs.SSLSession) ssldefs.SSLError! {
+ssl_session_copy: fn(dst: ^ssldefs.SSLSession, src: ssldefs.SSLSession) ssldefs.SSLError! {
     ssldefs.ssl_session_wipe(dst)
     dst = ssldefs.SSLSession{
         valid: true,
@@ -116,13 +116,13 @@ ssl_session_copy: fn(dst: &ssldefs.SSLSession, src: ssldefs.SSLSession) ssldefs.
 
 /// Hash the transcript with the ciphersuite's digest alone from now on
 /// (mbedtls_ssl_optimize_checksum).
-ssl_optimize_checksum: fn(ssl: &ssldefs.SSLContext, cs: suites.SSLCiphersuite) Never! {
+ssl_optimize_checksum: fn(ssl: ^ssldefs.SSLContext, cs: suites.SSLCiphersuite) Never! {
     ssl.handshake.checksum_md = if cs.mac == .SHA384 -> 2 else -> 1
 }
 
 /// Add the transcript's handshake message header of a message of
 /// `total_hs_len` bytes (mbedtls_ssl_add_hs_hdr_to_checksum).
-ssl_add_hs_hdr_to_checksum: fn(hs: &ssldefs.SSLHandshake, hs_type: Int, total_hs_len: Int) Never! {
+ssl_add_hs_hdr_to_checksum: fn(hs: ^ssldefs.SSLHandshake, hs_type: Int, total_hs_len: Int) Never! {
     hdr: [U8]{ssldefs.ssl_byte(hs_type), ssldefs.ssl_byte(total_hs_len >> 16), ssldefs.ssl_byte(total_hs_len >> 8), ssldefs.ssl_byte(total_hs_len)}
     ssl_update_checksum(hs, hdr, 0, 4)
 }
@@ -131,13 +131,13 @@ ssl_add_hs_hdr_to_checksum: fn(hs: &ssldefs.SSLHandshake, hs_type: Int, total_hs
 /// transcript (mbedtls_ssl_add_hs_msg_to_checksum). It takes the
 /// handshake rather than the context, so the message can be the context's
 /// in_buf or out_buf.
-ssl_add_hs_msg_to_checksum: fn(hs: &ssldefs.SSLHandshake, hs_type: Int, msg: [U8], off: Int, len: Int) Never! {
+ssl_add_hs_msg_to_checksum: fn(hs: ^ssldefs.SSLHandshake, hs_type: Int, msg: [U8], off: Int, len: Int) Never! {
     ssl_add_hs_hdr_to_checksum(hs, hs_type, len)
     ssl_update_checksum(hs, msg, off, len)
 }
 
 /// Restart both transcript hashes (mbedtls_ssl_reset_checksum).
-ssl_reset_checksum: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_reset_checksum: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssl.handshake.fin_sha256 = Val(hashes.hash_start(.SHA256))
     ssl.handshake.fin_sha384 = Val(hashes.hash_start(.SHA384))
 }
@@ -145,15 +145,15 @@ ssl_reset_checksum: fn(ssl: &ssldefs.SSLContext) Never! {
 /// Add buf[off..<off+len] to the transcript hashes in use: both until the
 /// ciphersuite is known (ssl_update_checksum_start), then its digest's
 /// alone (ssl_update_checksum_sha256, ssl_update_checksum_sha384).
-ssl_update_checksum: fn(hs: &ssldefs.SSLHandshake, buf: [U8], off: Int, len: Int) Never! {
+ssl_update_checksum: fn(hs: ^ssldefs.SSLHandshake, buf: [U8], off: Int, len: Int) Never! {
     if hs.checksum_md != 2 {
-        if &hs.fin_sha256 == {
+        if ^hs.fin_sha256 == {
             .Val(c) -> { hashes.hash_update_range(c, buf, off, len) }
             None -> {}
         }
     }
     if hs.checksum_md != 1 {
-        if &hs.fin_sha384 == {
+        if ^hs.fin_sha384 == {
             .Val(c) -> { hashes.hash_update_range(c, buf, off, len) }
             None -> {}
         }
@@ -178,7 +178,7 @@ ssl_handshake_params_init: fn() -> ssldefs.SSLHandshake Never! {
 
 /// Start a handshake (ssl_handshake_init): a fresh negotiated transform
 /// and session, the handshake state reset and the transcript restarted.
-ssl_handshake_init: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_handshake_init: fn(ssl: ^ssldefs.SSLContext) Never! {
     if ssl.transform_negotiate >= 0 {
         ssldefs.ssl_transform_wipe(ssl.tpool[ssl.transform_negotiate])
         ssl.tpool[ssl.transform_negotiate] = ssldefs.SSLTransform{valid: true}
@@ -253,7 +253,7 @@ ssl_conf_version_check: fn(conf: ssldefs.SSLConfig) ssldefs.SSLError! {
 
 /// Set a context up to use `conf` (mbedtls_ssl_setup). The context takes
 /// the configuration over, where C keeps a pointer to the caller's.
-ssl_setup: fn(ssl: &ssldefs.SSLContext, conf: &&ssldefs.SSLConfig) ssldefs.SSLError! {
+ssl_setup: fn(ssl: ^ssldefs.SSLContext, conf: ^^ssldefs.SSLConfig) ssldefs.SSLError! {
     ssl.conf = conf
     ssl.has_conf = true
     ssl_conf_version_check(ssl.conf) ?? return Err(err)
@@ -272,7 +272,7 @@ ssl_setup: fn(ssl: &ssldefs.SSLContext, conf: &&ssldefs.SSLConfig) ssldefs.SSLEr
 /// (mbedtls_ssl_session_reset_msg_layer). `partial` keeps the datagram
 /// being read and the bad-MAC count, for a DTLS client reconnecting from
 /// the same port.
-ssl_session_reset_msg_layer: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! {
+ssl_session_reset_msg_layer: fn(ssl: ^ssldefs.SSLContext, partial: Bool) Never! {
     sslmsg.ssl_set_timer(ssl, 0)
     sslmsg.ssl_reset_in_pointers(ssl)
     sslmsg.ssl_reset_out_pointers(ssl)
@@ -314,7 +314,7 @@ ssl_session_reset_msg_layer: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! 
 /// callbacks (mbedtls_ssl_session_reset_int); see
 /// ssl_session_reset_msg_layer for `partial`, which also keeps the
 /// client's transport ID.
-ssl_session_reset_int: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! {
+ssl_session_reset_int: fn(ssl: ^ssldefs.SSLContext, partial: Bool) Never! {
     sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_HELLO_REQUEST)
     ssl.tls_version = ssl.conf.max_tls_version
     ssl_session_reset_msg_layer(ssl, partial)
@@ -334,12 +334,12 @@ ssl_session_reset_int: fn(ssl: &ssldefs.SSLContext, partial: Bool) Never! {
 }
 
 /// mbedtls_ssl_session_reset.
-ssl_session_reset: fn(ssl: &ssldefs.SSLContext) Never! { ssl_session_reset_int(ssl, false) }
+ssl_session_reset: fn(ssl: ^ssldefs.SSLContext) Never! { ssl_session_reset_int(ssl, false) }
 
 /// Free what the handshake holds (mbedtls_ssl_handshake_free): its
 /// secrets are wiped, its buffered and in-flight messages and its TLS 1.3
 /// handshake transform released, and the state cleared.
-ssl_handshake_free: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_handshake_free: fn(ssl: ^ssldefs.SSLContext) Never! {
     if !ssl.has_handshake {
         return
     }
@@ -351,7 +351,7 @@ ssl_handshake_free: fn(ssl: &ssldefs.SSLContext) Never! {
     ssldefs.ssl_wipe(ssl.handshake.client_handshake_traffic_secret)
     ssldefs.ssl_wipe(ssl.handshake.server_handshake_traffic_secret)
     ssldefs.ssl_wipe(ssl.handshake.finished_digest)
-    if &ssl.handshake.psk == {
+    if ^ssl.handshake.psk == {
         .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
@@ -366,7 +366,7 @@ ssl_handshake_free: fn(ssl: &ssldefs.SSLContext) Never! {
 /// through pointers, so every pool entry is wiped too, and the
 /// configuration's PSK (mbedtls_ssl_config_free's part, since the context
 /// owns its configuration).
-ssl_free: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_free: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssldefs.ssl_wipe(ssl.out_buf)
     ssldefs.ssl_wipe(ssl.in_buf)
     ssldefs.ssl_transform_release(ssl, ssl.transform)
@@ -380,7 +380,7 @@ ssl_free: fn(ssl: &ssldefs.SSLContext) Never! {
     ssldefs.ssl_session_release(ssl, ssl.session)
     loop i in 0..<ssl.tpool.len() -> ssldefs.ssl_transform_release(ssl, i)
     loop i in 0..<ssl.spool.len() -> ssldefs.ssl_session_release(ssl, i)
-    if &ssl.conf.psk == {
+    if ^ssl.conf.psk == {
         .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
@@ -392,13 +392,13 @@ ssl_free: fn(ssl: &ssldefs.SSLContext) Never! {
 
 /// Use the timer, or stop using it (mbedtls_ssl_set_timer_cb with
 /// mbedtls_timing's callbacks or none); it starts canceled.
-ssl_set_timer_cb: fn(ssl: &ssldefs.SSLContext, enabled: Bool) Never! {
+ssl_set_timer_cb: fn(ssl: ^ssldefs.SSLContext, enabled: Bool) Never! {
     ssl.timer.enabled = enabled
     sslmsg.ssl_set_timer(ssl, 0)
 }
 
 /// Offer to resume `session` (mbedtls_ssl_set_session).
-ssl_set_session: fn(ssl: &ssldefs.SSLContext, session: ssldefs.SSLSession) ssldefs.SSLError! {
+ssl_set_session: fn(ssl: ^ssldefs.SSLContext, session: ssldefs.SSLSession) ssldefs.SSLError! {
     if ssl.session_negotiate < 0 || ssl.conf.endpoint != ssldefs.SSL_IS_CLIENT {
         return Err(.BadInputData)
     }
@@ -414,7 +414,7 @@ ssl_set_session: fn(ssl: &ssldefs.SSLContext, session: ssldefs.SSLSession) sslde
 
 /// Add an own certificate chain and key, or with None remove them all
 /// (mbedtls_ssl_conf_own_cert).
-ssl_conf_own_cert: fn(conf: &ssldefs.SSLConfig, kc: &&ssldefs.SSLKeyCert?) Never! {
+ssl_conf_own_cert: fn(conf: ^ssldefs.SSLConfig, kc: ^^ssldefs.SSLKeyCert?) Never! {
     if kc == {
         .Val(k) -> { conf.key_cert.push(k) }
         None -> conf.key_cert = [ssldefs.SSLKeyCert]{}
@@ -423,7 +423,7 @@ ssl_conf_own_cert: fn(conf: &ssldefs.SSLConfig, kc: &&ssldefs.SSLKeyCert?) Never
 
 /// The SNI callback's own certificate chain and key for this handshake,
 /// added, or with None removed (mbedtls_ssl_set_hs_own_cert).
-ssl_set_hs_own_cert: fn(ssl: &ssldefs.SSLContext, kc: &&ssldefs.SSLKeyCert?) Never! {
+ssl_set_hs_own_cert: fn(ssl: ^ssldefs.SSLContext, kc: ^^ssldefs.SSLKeyCert?) Never! {
     if kc == {
         .Val(k) -> { ssl.handshake.sni_key_cert.push(k) }
         None -> ssl.handshake.sni_key_cert = [ssldefs.SSLKeyCert]{}
@@ -433,7 +433,7 @@ ssl_set_hs_own_cert: fn(ssl: &ssldefs.SSLContext, kc: &&ssldefs.SSLKeyCert?) Nev
 /// Apply what an SNI or certificate callback selected
 /// (mbedtls_ssl_set_hs_own_cert, set_hs_ca_chain, set_hs_authmode and
 /// set_hs_dn_hints).
-ssl_apply_hs_override: fn(ssl: &ssldefs.SSLContext, ov: &&ssldefs.SSLHsOverride) Never! {
+ssl_apply_hs_override: fn(ssl: ^ssldefs.SSLContext, ov: ^^ssldefs.SSLHsOverride) Never! {
     ssl.handshake.sni_key_cert.extend(ov.key_cert.move())
     if ov.ca_chain != None {
         ssl.handshake.sni_ca_chain = ov.ca_chain.move()
@@ -480,7 +480,7 @@ ssl_own_key_cert_is_hs: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 
 /// A signature with the own private key (mbedtls_pk_sign_ext on
 /// mbedtls_ssl_own_key); BadInput when there is no own key.
-ssl_own_key_sign_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, kind: oids.PKType, md: hashes.Md?, hash: [U8], sig_size: Int, rng: &R) -> [U8] pk.PKError! {
+ssl_own_key_sign_ext: fn<R: RNG>(ssl: ^ssldefs.SSLContext, kind: oids.PKType, md: hashes.Md?, hash: [U8], sig_size: Int, rng: ^R) -> [U8] pk.PKError! {
     i: ssl_own_key_cert(ssl)
     if i < 0 -> return Err(.BadInput)
     if ssl_own_key_cert_is_hs(ssl) {
@@ -491,7 +491,7 @@ ssl_own_key_sign_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, kind: oids.PKType, md
 
 /// A signature with the own private key (mbedtls_pk_sign on
 /// mbedtls_ssl_own_key); BadInput when there is no own key.
-ssl_own_key_sign: fn<R: RNG>(ssl: &ssldefs.SSLContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: &R) -> [U8] pk.PKError! {
+ssl_own_key_sign: fn<R: RNG>(ssl: ^ssldefs.SSLContext, md: hashes.Md?, hash: [U8], sig_size: Int, rng: ^R) -> [U8] pk.PKError! {
     i: ssl_own_key_cert(ssl)
     if i < 0 -> return Err(.BadInput)
     if ssl_own_key_cert_is_hs(ssl) {
@@ -547,7 +547,7 @@ ssl_own_cert_pk_len: fn(ssl: ssldefs.SSLContext) -> Int Never! {
 /// A fixed-length decryption with the own private key, with implicit
 /// rejection (pk.pk_decrypt_fixed on mbedtls_ssl_own_key); BadInput when
 /// there is no own key.
-ssl_own_key_decrypt_fixed: fn<R: RNG>(ssl: &ssldefs.SSLContext, input: [U8], len: Int, rng: &R) -> rsa.V15Fixed pk.PKError! {
+ssl_own_key_decrypt_fixed: fn<R: RNG>(ssl: ^ssldefs.SSLContext, input: [U8], len: Int, rng: ^R) -> rsa.V15Fixed pk.PKError! {
     i: ssl_own_key_cert(ssl)
     if i < 0 -> return Err(.BadInput)
     if ssl_own_key_cert_is_hs(ssl) {
@@ -558,8 +558,8 @@ ssl_own_key_decrypt_fixed: fn<R: RNG>(ssl: &ssldefs.SSLContext, input: [U8], len
 
 /// Give the handshake an ECDH context if it has none yet (C's
 /// ssl_handshake_params_init sets one up with mbedtls_ecdh_init).
-ssl_ecdh_ready: fn(ssl: &ssldefs.SSLContext) Never! {
-    have: if &ssl.handshake.ecdh_ctx == {
+ssl_ecdh_ready: fn(ssl: ^ssldefs.SSLContext) Never! {
+    have: if ^ssl.handshake.ecdh_ctx == {
         .Val(_) -> true
         None -> false
     }
@@ -567,8 +567,8 @@ ssl_ecdh_ready: fn(ssl: &ssldefs.SSLContext) Never! {
 }
 
 /// Give the handshake a DHM context if it has none yet (mbedtls_dhm_init).
-ssl_dhm_ready: fn(ssl: &ssldefs.SSLContext) Never! {
-    have: if &ssl.handshake.dhm_ctx == {
+ssl_dhm_ready: fn(ssl: ^ssldefs.SSLContext) Never! {
+    have: if ^ssl.handshake.dhm_ctx == {
         .Val(_) -> true
         None -> false
     }
@@ -577,7 +577,7 @@ ssl_dhm_ready: fn(ssl: &ssldefs.SSLContext) Never! {
 
 /// Set an ECDH context's group and one side's key from an EC key
 /// (mbedtls_ecdh_get_params); the failure, None on success.
-ssl_ecdh_get_params_failure: fn(ctx: &ecdh.ECDHContext, key: ecp.Keypair, side: ecdh.ECDHSide) -> ecp.EcpError? Never! {
+ssl_ecdh_get_params_failure: fn(ctx: ^ecdh.ECDHContext, key: ecp.Keypair, side: ecdh.ECDHSide) -> ecp.EcpError? Never! {
     if ecdh.ecdh_get_params(ctx, key, side) == {
         .Ok(_) -> None
         .Err(e) -> Val(e)
@@ -586,7 +586,7 @@ ssl_ecdh_get_params_failure: fn(ctx: &ecdh.ECDHContext, key: ecp.Keypair, side: 
 
 /// Keep a computed shared secret as the premaster secret and wipe the copy
 /// (the DH and ECDH calc_secret calls writing into handshake->premaster).
-ssl_set_premaster: fn(ssl: &ssldefs.SSLContext, secret: &[U8]) Never! {
+ssl_set_premaster: fn(ssl: ^ssldefs.SSLContext, secret: ^[U8]) Never! {
     ssldefs.ssl_copy_into(ssl.handshake.premaster, 0, secret, 0, secret.len())
     ssl.handshake.pmslen = secret.len()
     ssldefs.ssl_wipe(secret)
@@ -602,8 +602,8 @@ ssl_conf_has_static_psk: fn(conf: ssldefs.SSLConfig) -> Bool Never! {
 }
 
 // Drop the configured PSK and identity (ssl_conf_remove_psk).
-ssl_conf_remove_psk: fn(conf: &ssldefs.SSLConfig) Never! {
-    if &conf.psk == {
+ssl_conf_remove_psk: fn(conf: ^ssldefs.SSLConfig) Never! {
+    if ^conf.psk == {
         .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
@@ -613,7 +613,7 @@ ssl_conf_remove_psk: fn(conf: &ssldefs.SSLConfig) Never! {
 
 /// Configure the PSK and its identity (mbedtls_ssl_conf_psk); only one
 /// may be configured.
-ssl_conf_psk: fn(conf: &ssldefs.SSLConfig, psk: [U8], psk_identity: [U8]) ssldefs.SSLError! {
+ssl_conf_psk: fn(conf: ^ssldefs.SSLConfig, psk: [U8], psk_identity: [U8]) ssldefs.SSLError! {
     if ssl_conf_has_static_psk(conf) -> return Err(.FeatureUnavailable)
     if psk.len() == 0 || psk.len() > ssldefs.SSL_PSK_MAX_LEN -> return Err(.BadInputData)
     conf.psk = Val(psk.copy())
@@ -627,11 +627,11 @@ ssl_conf_psk: fn(conf: &ssldefs.SSLConfig, psk: [U8], psk_identity: [U8]) ssldef
 
 /// The PSK for this handshake, as a server's PSK callback picks it
 /// (mbedtls_ssl_set_hs_psk).
-ssl_set_hs_psk: fn(ssl: &ssldefs.SSLContext, psk: [U8]) ssldefs.SSLError! {
+ssl_set_hs_psk: fn(ssl: ^ssldefs.SSLContext, psk: [U8]) ssldefs.SSLError! {
     if !ssl.has_handshake -> return Err(.BadInputData)
     if psk.len() > ssldefs.SSL_PSK_MAX_LEN -> return Err(.BadInputData)
     // ssl_remove_psk.
-    if &ssl.handshake.psk == {
+    if ^ssl.handshake.psk == {
         .Val(p) -> { ssldefs.ssl_wipe(p) }
         None -> {}
     }
@@ -667,7 +667,7 @@ ssl_get_mode_from_ciphersuite: fn(encrypt_then_mac: Int, suite: suites.SSLCipher
 
 /// The DHM prime and generator a server offers, big-endian
 /// (mbedtls_ssl_conf_dh_param_bin).
-ssl_conf_dh_param_bin: fn(conf: &ssldefs.SSLConfig, dhm_p: [U8], dhm_g: [U8]) ssldefs.SSLError! {
+ssl_conf_dh_param_bin: fn(conf: ^ssldefs.SSLConfig, dhm_p: [U8], dhm_g: [U8]) ssldefs.SSLError! {
     conf.dhm_p = None
     conf.dhm_g = None
     p: bn.read_binary(dhm_p) ?? return Err(.Mpi(err))
@@ -754,7 +754,7 @@ ssl_tls12_preset_suiteb_sig_algs: fn() -> [Int] Never! {
 
 /// Load the defaults of an endpoint, transport and preset into `conf`
 /// (mbedtls_ssl_config_defaults); the other settings keep their values.
-ssl_config_defaults: fn(conf: &ssldefs.SSLConfig, endpoint: Int, transport: Int, preset: Int) ssldefs.SSLError! {
+ssl_config_defaults: fn(conf: ^ssldefs.SSLConfig, endpoint: Int, transport: Int, preset: Int) ssldefs.SSLError! {
     conf.endpoint = endpoint
     conf.transport = transport
     if endpoint == ssldefs.SSL_IS_CLIENT {
@@ -810,7 +810,7 @@ ssl_get_hostname_pointer: fn(ssl: ssldefs.SSLContext) -> String? Never! {
 
 /// The server's name, for SNI and to check its certificate against;
 /// None skips the check (mbedtls_ssl_set_hostname).
-ssl_set_hostname: fn(ssl: &ssldefs.SSLContext, hostname: String?) ssldefs.SSLError! {
+ssl_set_hostname: fn(ssl: ^ssldefs.SSLContext, hostname: String?) ssldefs.SSLError! {
     if hostname == {
         .Val(h) -> {
             if h.bytes().len() > ssldefs.SSL_MAX_HOST_NAME_LEN -> return Err(.BadInputData)
@@ -823,7 +823,7 @@ ssl_set_hostname: fn(ssl: &ssldefs.SSLContext, hostname: String?) ssldefs.SSLErr
 
 /// The application protocols to offer or accept, in preference order
 /// (mbedtls_ssl_conf_alpn_protocols).
-ssl_conf_alpn_protocols: fn(conf: &ssldefs.SSLConfig, protos: [String]) ssldefs.SSLError! {
+ssl_conf_alpn_protocols: fn(conf: ^ssldefs.SSLConfig, protos: [String]) ssldefs.SSLError! {
     tot_len := 0
     loop p in protos {
         cur_len: p.bytes().len()
@@ -836,7 +836,7 @@ ssl_conf_alpn_protocols: fn(conf: &ssldefs.SSLConfig, protos: [String]) ssldefs.
 }
 
 /// The largest record to ask the peer for (mbedtls_ssl_conf_max_frag_len).
-ssl_conf_max_frag_len: fn(conf: &ssldefs.SSLConfig, mfl_code: Int) ssldefs.SSLError! {
+ssl_conf_max_frag_len: fn(conf: ^ssldefs.SSLConfig, mfl_code: Int) ssldefs.SSLError! {
     if mfl_code < 0 || mfl_code >= ssldefs.SSL_MAX_FRAG_LEN_INVALID || ssl_mfl_code_to_length(mfl_code) > ssldefs.TLS_EXT_ADV_CONTENT_LEN {
         return Err(.BadInputData)
     }
@@ -845,14 +845,14 @@ ssl_conf_max_frag_len: fn(conf: &ssldefs.SSLConfig, mfl_code: Int) ssldefs.SSLEr
 
 /// Whether a TLS 1.2 client asks for session tickets
 /// (mbedtls_ssl_conf_session_tickets).
-ssl_conf_session_tickets: fn(conf: &ssldefs.SSLConfig, use_tickets: Bool) Never! {
+ssl_conf_session_tickets: fn(conf: ^ssldefs.SSLConfig, use_tickets: Bool) Never! {
     conf.session_tickets &= -2
     if use_tickets -> conf.session_tickets |= 1
 }
 
 /// Whether a TLS 1.3 client reports NewSessionTicket messages to the
 /// caller (mbedtls_ssl_conf_tls13_enable_signal_new_session_tickets).
-ssl_conf_tls13_enable_signal_new_session_tickets: fn(conf: &ssldefs.SSLConfig, signal: Bool) Never! {
+ssl_conf_tls13_enable_signal_new_session_tickets: fn(conf: ^ssldefs.SSLConfig, signal: Bool) Never! {
     conf.session_tickets &= -3
     if signal -> conf.session_tickets |= 2
 }
@@ -871,7 +871,7 @@ ssl_conf_is_signal_new_session_tickets_enabled: fn(conf: ssldefs.SSLConfig) -> I
 
 /// The TLS 1.3 key exchange modes to allow
 /// (mbedtls_ssl_conf_tls13_key_exchange_modes).
-ssl_conf_tls13_key_exchange_modes: fn(conf: &ssldefs.SSLConfig, kex_modes: Int) Never! {
+ssl_conf_tls13_key_exchange_modes: fn(conf: ^ssldefs.SSLConfig, kex_modes: Int) Never! {
     conf.tls13_kex_modes = kex_modes & ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_ALL
 }
 
@@ -995,7 +995,7 @@ ssl_get_peer_cert_der: fn(ssl: ssldefs.SSLContext) -> [[U8]]? Never! {
 
 /// A copy of the session to resume later; each session can be taken once
 /// (mbedtls_ssl_get_session).
-ssl_get_session: fn(ssl: &ssldefs.SSLContext, dst: &ssldefs.SSLSession) ssldefs.SSLError! {
+ssl_get_session: fn(ssl: ^ssldefs.SSLContext, dst: ^ssldefs.SSLSession) ssldefs.SSLError! {
     if ssl.session < 0 || ssl.conf.endpoint != ssldefs.SSL_IS_CLIENT -> return Err(.BadInputData)
     if ssl.spool[ssl.session].exported == 1 -> return Err(.FeatureUnavailable)
     ssl_session_copy(dst, ssl.spool[ssl.session]) ?? return Err(err)
@@ -1063,7 +1063,7 @@ ssl_get_extension_mask: fn(extension_type: Int) -> Int Never! {
 }
 
 /// Record a TLS 1.3 extension as sent (mbedtls_ssl_tls13_set_hs_sent_ext_mask).
-ssl_tls13_set_hs_sent_ext_mask: fn(ssl: &ssldefs.SSLContext, extension_type: Int) Never! {
+ssl_tls13_set_hs_sent_ext_mask: fn(ssl: ^ssldefs.SSLContext, extension_type: Int) Never! {
     ssl.handshake.sent_extensions |= ssl_get_extension_mask(extension_type)
 }
 
@@ -1412,12 +1412,12 @@ ssl_tls13_session_ticket_allow_psk_ephemeral: fn(session: ssldefs.SSLSession) ->
 }
 
 /// mbedtls_ssl_tls13_session_set_ticket_flags.
-ssl_tls13_session_set_ticket_flags: fn(session: &ssldefs.SSLSession, flags: Int) Never! {
+ssl_tls13_session_set_ticket_flags: fn(session: ^ssldefs.SSLSession, flags: Int) Never! {
     session.ticket_flags |= flags & ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK
 }
 
 /// mbedtls_ssl_tls13_session_clear_ticket_flags.
-ssl_tls13_session_clear_ticket_flags: fn(session: &ssldefs.SSLSession, flags: Int) Never! {
+ssl_tls13_session_clear_ticket_flags: fn(session: ^ssldefs.SSLSession, flags: Int) Never! {
     session.ticket_flags &~= (flags & ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK)
 }
 
@@ -1442,7 +1442,7 @@ ssl_chk_buf: fn(cur: Int, end: Int, need: Int) ssldefs.SSLError! {
 
 /// DecodeError, with a decode_error alert pending, unless `need` bytes are
 /// left to read (MBEDTLS_SSL_CHK_BUF_READ_PTR).
-ssl_chk_buf_read: fn(ssl: &ssldefs.SSLContext, cur: Int, end: Int, need: Int) ssldefs.SSLError! {
+ssl_chk_buf_read: fn(ssl: ^ssldefs.SSLContext, cur: Int, end: Int, need: Int) ssldefs.SSLError! {
     if !ssl_chk_buf_ptr(cur, end, need) {
         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_DECODE_ERROR, .DecodeError)
         return Err(.DecodeError)
@@ -1450,7 +1450,7 @@ ssl_chk_buf_read: fn(ssl: &ssldefs.SSLContext, cur: Int, end: Int, need: Int) ss
 }
 
 /// Send a fatal alert where C ignores whether it could be sent.
-ssl_send_fatal_alert: fn<R: RNG>(ssl: &ssldefs.SSLContext, message: Int, rng: &R) Never! {
+ssl_send_fatal_alert: fn<R: RNG>(ssl: ^ssldefs.SSLContext, message: Int, rng: ^R) Never! {
     sslmsg.ssl_send_alert_message(ssl, ssldefs.SSL_ALERT_LEVEL_FATAL, message, rng) ?? ()
 }
 
@@ -1459,7 +1459,7 @@ ssl_send_fatal_alert: fn<R: RNG>(ssl: &ssldefs.SSLContext, message: Int, rng: &R
 
 // Flush what is pending, and go on sending a DTLS flight being sent
 // (ssl_prepare_handshake_step).
-ssl_prepare_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_prepare_handshake_step: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     sslmsg.ssl_flush_output(ssl) ?? return Err(err)
     if sslmsg.ssl_is_dtls(ssl) && ssl.handshake.retransmit_state == ssldefs.SSL_RETRANS_SENDING {
         sslmsg.ssl_flight_transmit(ssl, rng) ?? return Err(err)
@@ -1468,7 +1468,7 @@ ssl_prepare_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldef
 
 // The step for the endpoint and protocol version, C's dispatch in
 // mbedtls_ssl_handshake_step: BadInputData for an endpoint that is neither.
-ssl_handshake_step_endpoint: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_handshake_step_endpoint: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT {
         if ssl.state == ssldefs.SSL_HELLO_REQUEST {
             sslmsg.ssl_handshake_set_state(ssl, ssldefs.SSL_CLIENT_HELLO)
@@ -1495,7 +1495,7 @@ ssl_handshake_step_endpoint: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) sslde
 /// handshake holds is freed: its secrets, key shares, transcript and
 /// handshake transform. The empty structure stays for the post-handshake
 /// NewSessionTicket, as mbedtls keeps the structure itself until ssl_free.
-ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_handshake_step: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if !ssl.has_conf || !ssl.has_handshake || ssl.state == ssldefs.SSL_HANDSHAKE_OVER {
         return Err(.BadInputData)
     }
@@ -1515,14 +1515,14 @@ ssl_handshake_step: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
 
 /// Perform the handshake to its end (mbedtls_ssl_handshake). DTLS needs the
 /// timer (ssl_set_timer_cb).
-ssl_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_handshake: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     if sslmsg.ssl_is_dtls(ssl) && !ssl.timer.enabled -> return Err(.BadInputData)
     loop ssl.state != ssldefs.SSL_HANDSHAKE_OVER { ssl_handshake_step(ssl, rng) ?? return Err(err) }
 }
 
 // Write a HelloRequest (ssl_write_hello_request).
-ssl_write_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_write_hello_request: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl.out_msglen = 4
     ssl.out_msgtype = ssldefs.SSL_MSG_HANDSHAKE
     ssl.out_buf[ssl.out_msg] = ssldefs.ssl_byte(ssldefs.SSL_HS_HELLO_REQUEST)
@@ -1531,7 +1531,7 @@ ssl_write_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.S
 
 /// Start a renegotiation on the client, or on the server once the client
 /// asked for one (mbedtls_ssl_start_renegotiation).
-ssl_start_renegotiation: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_start_renegotiation: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl_handshake_init(ssl)
     // RFC 6347 4.2.2: the HelloRequest has message_seq 0, so the
     // ServerHello that answers it has 1.
@@ -1547,7 +1547,7 @@ ssl_start_renegotiation: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.S
 
 /// Ask for a renegotiation, or go on with one (mbedtls_ssl_renegotiate): a
 /// server sends a HelloRequest, a client starts the handshake.
-ssl_renegotiate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_renegotiate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     if ssl.conf.endpoint == ssldefs.SSL_IS_SERVER {
         if !sslmsg.ssl_is_handshake_over(ssl) -> return Err(.BadInputData)
@@ -1567,7 +1567,7 @@ ssl_renegotiate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError!
 /// (mbedtls_ssl_resend_hello_request). Without an enforced limit it is
 /// resent for as many records as the retransmission timeout takes to
 /// double from its minimum to its maximum.
-ssl_resend_hello_request: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_resend_hello_request: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if ssl.conf.renego_max_records < 0 {
         ratio := ssl.conf.hs_timeout_max /% ssl.conf.hs_timeout_min + 1
         doublings := 1
@@ -1644,7 +1644,7 @@ ssl_tls_prf_get_type: fn(md: hashes.Md?) -> Int Never! {
 /// Pick the digest of the PRF, of calc_verify and of calc_finished for a
 /// ciphersuite's MAC (ssl_set_handshake_prfs): SHA-384 for SHA-384, else
 /// SHA-256.
-ssl_set_handshake_prfs: fn(hs: &ssldefs.SSLHandshake, hash: hashes.Md) Never! {
+ssl_set_handshake_prfs: fn(hs: ^ssldefs.SSLHandshake, hash: hashes.Md) Never! {
     md: if hash == .SHA384 -> hashes.Md.SHA384 else -> hashes.Md.SHA256
     hs.tls_prf_md = Val(md)
     hs.calc_verify_md = Val(md)
@@ -1653,7 +1653,7 @@ ssl_set_handshake_prfs: fn(hs: &ssldefs.SSLHandshake, hash: hashes.Md) Never! {
 /// Use the TLS HashAlgorithm `md` for calc_verify
 /// (mbedtls_ssl_set_calc_verify_md); false, where C returns -1, for one
 /// other than SHA-256 and SHA-384.
-ssl_set_calc_verify_md: fn(ssl: &ssldefs.SSLContext, md: Int) -> Bool Never! {
+ssl_set_calc_verify_md: fn(ssl: ^ssldefs.SSLContext, md: Int) -> Bool Never! {
     if md == ssldefs.SSL_HASH_SHA384 {
         ssl.handshake.calc_verify_md = Val(hashes.Md.SHA384)
         return true
@@ -1700,7 +1700,7 @@ ssl_calc_verify: fn(ssl: ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
 // The master secret of the negotiated session, from the premaster secret,
 // which is wiped; nothing for a resumed session (ssl_compute_master). With
 // the extended master secret the seed is the session hash (RFC 7627 4).
-ssl_compute_master: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_compute_master: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     if ssl.handshake.resume != 0 {
         return
     }
@@ -1719,7 +1719,7 @@ ssl_compute_master: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 
 /// Compute the master secret and fill the negotiated transform with the
 /// keys it expands to (mbedtls_ssl_derive_keys).
-ssl_derive_keys: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_derive_keys: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     ssl_set_handshake_prfs(ssl.handshake, cs.mac)
     ssl_compute_master(ssl) ?? return Err(err)
@@ -1738,7 +1738,7 @@ ssl_derive_keys: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 
 // Key one cipher context for `op`, CBC without padding as the record layer
 // pads; the failure, None for none.
-ssl_tls12_key_cipher: fn(ctx: &layer.CipherContext, key: [U8], op: layer.CipherOperation) -> layer.CipherLayerError? Never! {
+ssl_tls12_key_cipher: fn(ctx: ^layer.CipherContext, key: [U8], op: layer.CipherOperation) -> layer.CipherLayerError? Never! {
     if layer.cipher_setkey(ctx, key, op) == {
         .Err(e) -> return Val(e)
         .Ok(_) -> {}
@@ -1754,7 +1754,7 @@ ssl_tls12_key_cipher: fn(ctx: &layer.CipherContext, key: [U8], op: layer.CipherO
 
 // Key the encryption and decryption contexts from the key block; the
 // failure, None for none. The key copies are wiped.
-ssl_tls12_key_ciphers: fn(enc: &layer.CipherContext, dec: &layer.CipherContext, keyblk: [U8], key1: Int, key2: Int, keylen: Int) -> layer.CipherLayerError? Never! {
+ssl_tls12_key_ciphers: fn(enc: ^layer.CipherContext, dec: ^layer.CipherContext, keyblk: [U8], key1: Int, key2: Int, keylen: Int) -> layer.CipherLayerError? Never! {
     k1 := ssldefs.ssl_bytes_of(keyblk, key1, keylen)
     k2 := ssldefs.ssl_bytes_of(keyblk, key2, keylen)
     failure := ssl_tls12_key_cipher(enc, k1, .Encrypt)
@@ -1767,7 +1767,7 @@ ssl_tls12_key_ciphers: fn(enc: &layer.CipherContext, dec: &layer.CipherContext, 
 // Fill transform `tix` with what `master` and `randbytes` (server random ||
 // client random) expand to under the ciphersuite
 // (ssl_tls12_populate_transform, RFC 5246 6.3).
-ssl_tls12_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, ciphersuite: Int, master: [U8], encrypt_then_mac: Int, prf_md: hashes.Md, randbytes: [U8], tls_version: Int, endpoint: Int) ssldefs.SSLError! {
+ssl_tls12_populate_transform: fn(ssl: ^ssldefs.SSLContext, tix: Int, ciphersuite: Int, master: [U8], encrypt_then_mac: Int, prf_md: hashes.Md, randbytes: [U8], tls_version: Int, endpoint: Int) ssldefs.SSLError! {
     ssl.tpool[tix].encrypt_then_mac = encrypt_then_mac
     ssl.tpool[tix].tls_version = tls_version
     ssl.tpool[tix].randbytes = randbytes.copy()
@@ -1875,7 +1875,7 @@ ssl_tls12_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, ciphersuite
 /// The premaster secret of a PSK key exchange: the other secret, then the
 /// PSK, each after a 2-byte length (mbedtls_ssl_psk_derive_premaster,
 /// RFC 4279 2, RFC 5489 2).
-ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SSLKeyExchange, rng: &R) ssldefs.SSLError! {
+ssl_psk_derive_premaster: fn<R: RNG>(ssl: ^ssldefs.SSLContext, key_ex: suites.SSLKeyExchange, rng: ^R) ssldefs.SSLError! {
     // Only DHE-PSK goes on without a PSK, with the DH secret alone.
     psk := [U8]{}
     if ssl_get_psk(ssl) == {
@@ -1904,7 +1904,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SS
             p += 50
         }
         .DHEPSK -> {
-            secret := if &ssl.handshake.dhm_ctx == {
+            secret := if ^ssl.handshake.dhm_ctx == {
                 .Val(ctx) -> dhm.dhm_calc_secret(ctx, rng) ?? return Err(.DHM(err))
                 None -> {
                     return Err(.InternalError)
@@ -1921,7 +1921,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SS
         }
         .ECDHEPSK -> {
             plen: end - (p + 2)
-            z := if &ssl.handshake.ecdh_ctx == {
+            z := if ^ssl.handshake.ecdh_ctx == {
                 .Val(ctx) -> ecdh.ecdh_calc_secret(ctx, plen, rng) ?? return Err(.ECP(err))
                 None -> {
                     return Err(.InternalError)
@@ -1948,7 +1948,7 @@ ssl_psk_derive_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, key_ex: suites.SS
 
 /// Write the Certificate message (mbedtls_ssl_write_certificate): none for
 /// a ciphersuite without certificates or a client not asked for one.
-ssl_write_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_write_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     if !suites.ssl_ciphersuite_uses_srv_cert(cs) {
         sslmsg.ssl_handshake_increment_state(ssl)
@@ -1981,7 +1981,7 @@ ssl_write_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSL
 
 // Parse the Certificate message into `chain` (ssl_parse_certificate_chain).
 // In a client's renegotiation the server's certificate may not change.
-ssl_parse_certificate_chain: fn<R: RNG>(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], rng: &R) ssldefs.SSLError! {
+ssl_parse_certificate_chain: fn<R: RNG>(ssl: ^ssldefs.SSLContext, chain: ^[x509crt.X509Crt], rng: ^R) ssldefs.SSLError! {
     m: ssl.in_msg
     hdr: sslmsg.ssl_hs_hdr_len(ssl)
     if ssl.in_msgtype != ssldefs.SSL_MSG_HANDSHAKE || ssldefs.ssl_u8(ssl.in_buf, m) != ssldefs.SSL_HS_CERTIFICATE {
@@ -2079,7 +2079,7 @@ ssl_srv_check_client_no_crt_notification: fn(ssl: ssldefs.SSLContext) -> Bool Ne
 // Whether no Certificate message is to come: none with the ciphersuite, a
 // server's with RSA-PSK or without client authentication
 // (ssl_parse_certificate_coordinate, true for SSL_CERTIFICATE_SKIP).
-ssl_parse_certificate_coordinate: fn(ssl: &ssldefs.SSLContext, cs: suites.SSLCiphersuite, authmode: Int) -> Bool Never! {
+ssl_parse_certificate_coordinate: fn(ssl: ^ssldefs.SSLContext, cs: suites.SSLCiphersuite, authmode: Int) -> Bool Never! {
     if !suites.ssl_ciphersuite_uses_srv_cert(cs) {
         ssl.spool[ssl.session_negotiate].verify_result = 0
         return true
@@ -2097,7 +2097,7 @@ ssl_parse_certificate_coordinate: fn(ssl: &ssldefs.SSLContext, cs: suites.SSLCip
 /// Read and verify the peer's Certificate message
 /// (mbedtls_ssl_parse_certificate); the authentication mode is the SNI
 /// callback's if it set one.
-ssl_parse_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_parse_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     authmode: if ssl.handshake.sni_authmode != ssldefs.SSL_VERIFY_UNSET -> ssl.handshake.sni_authmode else -> ssl.conf.authmode
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     if ssl_parse_certificate_coordinate(ssl, cs, authmode) {
@@ -2136,7 +2136,7 @@ ssl_calc_finished: fn(ssl: ssldefs.SSLContext, from: Int) -> [U8] ssldefs.SSLErr
 
 /// Drop the handshake and make the negotiated transform current
 /// (mbedtls_ssl_handshake_wrapup_free_hs_transform).
-ssl_handshake_wrapup_free_hs_transform: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_handshake_wrapup_free_hs_transform: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssl_handshake_free(ssl)
     ssl.has_handshake = false
     ssldefs.ssl_transform_release(ssl, ssl.transform)
@@ -2147,7 +2147,7 @@ ssl_handshake_wrapup_free_hs_transform: fn(ssl: &ssldefs.SSLContext) Never! {
 /// End the handshake (mbedtls_ssl_handshake_wrapup): the negotiated session
 /// becomes current and, when new, is offered to the session cache. A DTLS
 /// endpoint keeps the handshake while its last flight may be resent.
-ssl_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_handshake_wrapup: fn(ssl: ^ssldefs.SSLContext) Never! {
     resume: ssl.handshake.resume
     if ssl.renego_status == ssldefs.SSL_RENEGOTIATION_IN_PROGRESS {
         ssl.renego_status = ssldefs.SSL_RENEGOTIATION_DONE
@@ -2184,7 +2184,7 @@ ssl_handshake_wrapup: fn(ssl: &ssldefs.SSLContext) Never! {
 /// Write the Finished message, switching to the negotiated transform
 /// (mbedtls_ssl_write_finished). DTLS keeps the previous epoch to resend
 /// the flight with.
-ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_write_finished: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     sslmsg.ssl_update_out_pointers(ssl, ssl.transform_negotiate)
     buf := ssl_calc_finished(ssl, ssl.conf.endpoint) ?? return Err(err)
     hash_len: 12
@@ -2227,7 +2227,7 @@ ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
 }
 
 /// Read and check the peer's Finished message (mbedtls_ssl_parse_finished).
-ssl_parse_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_parse_finished: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     buf := ssl_calc_finished(ssl, ssl.conf.endpoint ~ 1) ?? return Err(err)
     if sslmsg.ssl_read_record(ssl, true, rng) == {
         .Err(e) -> {
@@ -2324,7 +2324,7 @@ ssl_validate_ciphersuite: fn(ssl: ssldefs.SSLContext, suite_info: suites.SSLCiph
 
 /// Write the signature_algorithms extension at out_buf[p..<end]: its length
 /// (mbedtls_ssl_write_sig_alg_ext, RFC 8446 4.2.3).
-ssl_write_sig_alg_ext: fn(ssl: &ssldefs.SSLContext, p: Int, end: Int) -> Int ssldefs.SSLError! {
+ssl_write_sig_alg_ext: fn(ssl: ^ssldefs.SSLContext, p: Int, end: Int) -> Int ssldefs.SSLError! {
     // Extension type, extension length and list length come first.
     ssl_chk_buf(p, end, 6) ?? return Err(err)
     sig_algs: ssl_get_sig_algs(ssl)
@@ -2348,7 +2348,7 @@ ssl_write_sig_alg_ext: fn(ssl: &ssldefs.SSLContext, p: Int, end: Int) -> Int ssl
 /// Parse the peer's signature_algorithms extension at in_buf[p..<end] into
 /// received_sig_algs (mbedtls_ssl_parse_sig_alg_ext). Under TLS 1.2 only
 /// those we support and offer are kept.
-ssl_parse_sig_alg_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
+ssl_parse_sig_alg_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
     p := buf
     ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     supported_sig_algs_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
@@ -2380,7 +2380,7 @@ ssl_parse_sig_alg_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssldefs.
 /// Parse the client's server_name extension at in_buf[buf..<end] and hand
 /// the host name to the SNI callback (mbedtls_ssl_parse_server_name_ext,
 /// RFC 6066 3).
-ssl_parse_server_name_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
+ssl_parse_server_name_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
     p := buf
     ssl_chk_buf_read(ssl, p, end, 2) ?? return Err(err)
     server_name_list_len: ssldefs.ssl_get_u16(ssl.in_buf, p)
@@ -2416,7 +2416,7 @@ ssl_parse_server_name_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssld
 /// Parse the peer's application_layer_protocol_negotiation extension at
 /// in_buf[buf..<end] and choose our first protocol it lists
 /// (mbedtls_ssl_parse_alpn_ext, RFC 7301 3.1).
-ssl_parse_alpn_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
+ssl_parse_alpn_ext: fn(ssl: ^ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSLError! {
     ours: ssl.conf.alpn_list ?? return
     p := buf
     // Extension data length, then at least one name and its length.
@@ -2457,7 +2457,7 @@ ssl_parse_alpn_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ssldefs.SSL
 /// Write the server's application_layer_protocol_negotiation extension with
 /// the chosen protocol at out_buf[p..<end]: its length, 0 for none chosen
 /// (mbedtls_ssl_write_alpn_ext).
-ssl_write_alpn_ext: fn(ssl: &ssldefs.SSLContext, p: Int, end: Int) -> Int ssldefs.SSLError! {
+ssl_write_alpn_ext: fn(ssl: ^ssldefs.SSLContext, p: Int, end: Int) -> Int ssldefs.SSLError! {
     chosen: ssl.alpn_chosen ?? return Ok(0)
     name: chosen.bytes()
     protocol_name_len: name.len()
@@ -2474,7 +2474,7 @@ ssl_write_alpn_ext: fn(ssl: &ssldefs.SSLContext, p: Int, end: Int) -> Int ssldef
 
 /// Set the host name a TLS 1.3 ticket was issued for
 /// (mbedtls_ssl_session_set_hostname); None clears it.
-ssl_session_set_hostname: fn(session: &ssldefs.SSLSession, hostname: String?) ssldefs.SSLError! {
+ssl_session_set_hostname: fn(session: ^ssldefs.SSLSession, hostname: String?) ssldefs.SSLError! {
     if hostname == {
         .Val(h) -> {
             if h.bytes().len() > ssldefs.SSL_MAX_HOST_NAME_LEN -> return Err(.BadInputData)
@@ -2491,7 +2491,7 @@ ssl_session_set_hostname: fn(session: &ssldefs.SSLSession, hostname: String?) ss
 /// peer of a `recv_endpoint` with the ciphersuite
 /// (mbedtls_ssl_check_cert_usage, true where C returns 0); what they do not
 /// allow is added to `flags`.
-ssl_check_cert_usage: fn(cert: x509crt.X509Crt, ciphersuite: suites.SSLCiphersuite?, recv_endpoint: Int, tls_version: Int, flags: &Int) -> Bool Never! {
+ssl_check_cert_usage: fn(cert: x509crt.X509Crt, ciphersuite: suites.SSLCiphersuite?, recv_endpoint: Int, tls_version: Int, flags: ^Int) -> Bool Never! {
     ok := true
     usage := x509.X509_KU_DIGITAL_SIGNATURE
     if tls_version == ssldefs.SSL_VERSION_TLS1_2 && recv_endpoint == ssldefs.SSL_IS_CLIENT {
@@ -2575,13 +2575,13 @@ ssl_verify_alert: fn(verify_result: Int) -> Int Never! {
 // The X.509 check of `chain` against the SNI callback's CAs and CRLs if it
 // set any, else the configuration's, at ssl_time's UTC date; the failure,
 // None for none.
-ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U8]?, vrfy: x509crt.X509VerifyCallback?) -> x509.X509Error? Never! {
+ssl_verify_chain: fn(ssl: ^ssldefs.SSLContext, chain: ^[x509crt.X509Crt], cn: [U8]?, vrfy: x509crt.X509VerifyCallback?) -> x509.X509Error? Never! {
     // The CRLs and profile are read before the CA list's write window.
     profile := ssl.conf.cert_profile
     sni_crl := ssl.handshake.sni_ca_crl.copy()
     conf_crl := ssl.conf.ca_crl.copy()
     now: x509.x509_time_gmtime(ssldefs.ssl_time())
-    if &ssl.handshake.sni_ca_chain == {
+    if ^ssl.handshake.sni_ca_chain == {
         .Val(c) -> {
             if x509crt.x509_crt_verify_with_profile_at(chain, c, sni_crl, profile, cn, vrfy, now) == {
                 .Err(e) -> return Val(e)
@@ -2590,7 +2590,7 @@ ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U
         }
         None -> {}
     }
-    if &ssl.conf.ca_chain == {
+    if ^ssl.conf.ca_chain == {
         .Val(c) -> {
             if x509crt.x509_crt_verify_with_profile_at(chain, c, conf_crl, profile, cn, vrfy, now) == {
                 .Err(e) -> return Val(e)
@@ -2610,7 +2610,7 @@ ssl_verify_chain: fn(ssl: &ssldefs.SSLContext, chain: &[x509crt.X509Crt], cn: [U
 /// the X.509 check against the CAs, the SNI callback's if it set any, then
 /// the curve of a TLS 1.2 EC key and the key usages. The result is in the
 /// negotiated session's verify_result; a failure sends its alert.
-ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chain: &[x509crt.X509Crt], ciphersuite_info: suites.SSLCiphersuite?, rng: &R) ssldefs.SSLError! {
+ssl_verify_certificate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, authmode: Int, chain: ^[x509crt.X509Crt], ciphersuite_info: suites.SSLCiphersuite?, rng: ^R) ssldefs.SSLError! {
     sn: ssl.session_negotiate
     if authmode == ssldefs.SSL_VERIFY_NONE {
         ssl.spool[sn].verify_result = 0
@@ -2799,7 +2799,7 @@ vec_tally: fn(what: String) -> VecTally Never! {
     VecTally{what: what, pass: 0, fail: 0, lenient: 0, failures: [String]{}}
 }
 
-vec_check: fn(t: &VecTally, ok: Bool, record: String) Never! {
+vec_check: fn(t: ^VecTally, ok: Bool, record: String) Never! {
     if ok {
         t.pass += 1
         return
@@ -3059,7 +3059,7 @@ vec_wy_hex: fn(d: Dyn, key: String) -> [U8] { vec_hex(vec_text(d, key)) }
 /// Tally Wycheproof case `c`: a valid case must be accepted, an invalid one
 /// refused, an acceptable one either. `lenient_der` counts invalid DER
 /// signatures with BER lengths or unsigned INTEGERs apart when accepted.
-vec_wy_verdict: fn(t: &VecTally, file: String, c: Dyn, accepted: Bool, lenient_der: Bool) {
+vec_wy_verdict: fn(t: ^VecTally, file: String, c: Dyn, accepted: Bool, lenient_der: Bool) {
     result: vec_text(c, "result")
     ok: if result == {
         "valid" -> accepted
@@ -3097,7 +3097,7 @@ vec_gcm_open: fn(key: [U8], iv: [U8], aad: [U8], sealed: [U8]) -> [U8]? {
 // `algorithm`, whose signature over `signed` is `signature` and whose
 // certificate key is `key`: 0 when the engine takes it, else the alert it
 // pends.
-vec_certificate_verify: fn(key: &&pk.PKContext, algorithm: Int, signature: [U8], signed: [U8]) -> Int {
+vec_certificate_verify: fn(key: ^^pk.PKContext, algorithm: Int, signature: [U8], signed: [U8]) -> Int {
     conf := ssldefs.SSLConfig{}
     ssl_config_defaults(conf, ssldefs.SSL_IS_CLIENT, ssldefs.SSL_TRANSPORT_STREAM, ssldefs.SSL_PRESET_DEFAULT) ?? panic("defaults: {err}")
     ssl := ssldefs.SSLContext{}
@@ -3842,14 +3842,14 @@ CtRand: struct {
     // The same xorshift as a premaster's random source, for timings that must
     // not carry an HMAC_DRBG's own spread.
     impl RNG {
-        fill: fn(&self, out: &[U8]) -> Bool Never! {
+        fill: fn(^self, out: ^[U8]) -> Bool Never! {
             loop i in 0..<out.len() -> out[i] = U8{ct_next(self) & U64{255}}
             true
         }
     }
 }
 
-#Overflow(.Wrapping) ct_next: fn(r: &CtRand) -> U64 Never! {
+#Overflow(.Wrapping) ct_next: fn(r: ^CtRand) -> U64 Never! {
     x := r.s.copy()
     x ~= x << 13
     x ~= x >> 7
@@ -3858,7 +3858,7 @@ CtRand: struct {
     x
 }
 
-ct_bytes: fn(r: &CtRand, n: Int) -> [U8] Never! {
+ct_bytes: fn(r: ^CtRand, n: Int) -> [U8] Never! {
     out := [U8]{}
     loop _ in 0..<n -> out.push(U8{ct_next(r) & U64{255}})
     out
@@ -4236,7 +4236,7 @@ ct_pbkdf2: fn(password: [U8], salt: [U8]) -> Int {
 /// `kind`: 0 a good one (version 3.3, then 46 drawn bytes); 1 a block
 /// whose first byte is 1; 2 a block with no zero after its padding; 3 a
 /// 47-byte message; 4 a 48-byte message with version 3.2.
-ct_rsa_kx_sealed: fn(key: &rsa.RSAContext, rng: &drbg.HMACDrbg, r: &CtRand, kind: Int) -> [U8] {
+ct_rsa_kx_sealed: fn(key: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, r: ^CtRand, kind: Int) -> [U8] {
     if kind == 1 || kind == 2 {
         // The block's private-key image is no EME-PKCS1-v1_5 encoding: the
         // raw public operation turns it into the ciphertext.
@@ -4256,7 +4256,7 @@ ct_rsa_kx_sealed: fn(key: &rsa.RSAContext, rng: &drbg.HMACDrbg, r: &CtRand, kind
 /// A TLS 1.2 server whose own RSA key is `key` and whose ClientKeyExchange
 /// body is `sealed`, for srv12.ssl_srv12_parse_encrypted_pms (RFC 5246
 /// section 7.4.7.1).
-ct_rsa_kx_server: fn(key: &rsa.RSAContext, sealed: [U8]) -> ssldefs.SSLContext {
+ct_rsa_kx_server: fn(key: ^rsa.RSAContext, sealed: [U8]) -> ssldefs.SSLContext {
     own := pk.pk_new()
     pk.pk_setup(own, pk.pk_info_from_type(.RSA)) ?? panic("own key: {err}")
     own.rsa = rsa.rsa_copy(key)
@@ -4277,7 +4277,7 @@ ct_rsa_kx_server: fn(key: &rsa.RSAContext, sealed: [U8]) -> ssldefs.SSLContext {
 
 /// The premaster secret a server takes from its ClientKeyExchange: the
 /// client's, or a random one in its place.
-ct_rsa_kx_premaster: fn(ssl: &ssldefs.SSLContext, rng: &drbg.HMACDrbg) -> [U8] {
+ct_rsa_kx_premaster: fn(ssl: ^ssldefs.SSLContext, rng: ^drbg.HMACDrbg) -> [U8] {
     srv12.ssl_srv12_parse_encrypted_pms(ssl, 0, ssl.in_buf.len(), 0, rng) ?? panic("premaster: {err}")
     ssl.handshake.premaster.copy()
 }
@@ -4316,7 +4316,7 @@ ct_rsa_kx_premaster: fn(ssl: &ssldefs.SSLContext, rng: &drbg.HMACDrbg) -> [U8] {
 /// of `kind` (as ct_rsa_kx_sealed), `len` bytes: 0 a good one (0, 2, a
 /// nonzero padding, 0, version 3.3, 46 drawn bytes); 1 a first byte of 1;
 /// 2 no zero after the padding; 3 a 47-byte message; 4 version 3.2.
-ct_rsa_kx_block: fn(r: &CtRand, len: Int, kind: Int) -> [U8] {
+ct_rsa_kx_block: fn(r: ^CtRand, len: Int, kind: Int) -> [U8] {
     block := ct_bytes(r, len)
     loop i in 0..<len -> block[i] = block[i] | U8{1}
     block[0] = if kind == 1 -> U8{1} else -> U8{0}
@@ -4334,7 +4334,7 @@ ct_rsa_kx_block: fn(r: &CtRand, len: Int, kind: Int) -> [U8] {
 /// unpadding to 48 bytes with its verdict (rsa.v15_fixed_of_block), then
 /// the premaster's choice (srv12.ssl_srv12_take_premaster). Gives a byte
 /// of the premaster taken.
-ct_rsa_kx_after_private: fn<R: RNG>(ssl: &ssldefs.SSLContext, block: [U8], rng: &R) -> Int {
+ct_rsa_kx_after_private: fn<R: RNG>(ssl: ^ssldefs.SSLContext, block: [U8], rng: ^R) -> Int {
     buf := block.copy()
     fixed := rsa.v15_fixed_of_block(buf, 48)
     srv12.ssl_srv12_take_premaster(ssl, fixed.out, fixed.bad, 0, rng) ?? panic("premaster: {err}")
@@ -4351,7 +4351,7 @@ CtKxBlocks: struct {
 
 /// One timed run: the input (255, 255), the fixed class's, takes the next
 /// good block, any other the next bad one, in the same turn.
-ct_rsa_kx_block_turn: fn(blocks: &CtKxBlocks, ssl: &ssldefs.SSLContext, x: [U8], rng: &CtRand) -> Int {
+ct_rsa_kx_block_turn: fn(blocks: ^CtKxBlocks, ssl: ^ssldefs.SSLContext, x: [U8], rng: ^CtRand) -> Int {
     k: blocks.turn %% 16
     blocks.turn += 1
     if x[0] == (U8{255}) && x[1] == (U8{255}) {
@@ -4401,7 +4401,7 @@ ct_rsa_kx_block_turn: fn(blocks: &CtKxBlocks, ssl: &ssldefs.SSLContext, x: [U8],
 /// later); 2 a label hash with its last byte flipped; 3 0x02 in place of
 /// the 0x01; 4 a good padding with a 40-byte message, longer than the 32
 /// bytes the output holds.
-ct_oaep_db: fn(r: &CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
+ct_oaep_db: fn(r: ^CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
     db := [U8]{}
     lhash: hashes.hash(.SHA256, label)
     loop i in 0..<32 -> db.push(lhash[i])
@@ -4417,7 +4417,7 @@ ct_oaep_db: fn(r: &CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
 /// The block an RSA private operation gives for an RSAES-OAEP ciphertext
 /// (RFC 8017 section 7.1.1 step 3): 0, the masked seed and the masked DB of
 /// ct_oaep_db, `len` bytes; kind 1 has a first byte of 1.
-ct_oaep_block: fn(r: &CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
+ct_oaep_block: fn(r: ^CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
     seed: ct_bytes(r, 32)
     block := [U8]{U8{0}}
     if kind == 1 -> block[0] = U8{1}
@@ -4443,7 +4443,7 @@ ct_oaep_after_private: fn(block: [U8], label: [U8]) -> Int {
 /// The ciphertext of an OAEP block under SHA-256 with the label `label`:
 /// good (kind 0) or bad of a kind 1 to 4 (ct_oaep_block). Public, as a
 /// ciphertext on the wire is.
-ct_oaep_sealed: fn(key: &rsa.RSAContext, r: &CtRand, label: [U8], kind: Int) -> [U8] {
+ct_oaep_sealed: fn(key: ^rsa.RSAContext, r: ^CtRand, label: [U8], kind: Int) -> [U8] {
     block: ct_oaep_block(r, key.len, label, kind)
     rsa.rsa_public(key, block) ?? panic("public operation: {err}")
 }
@@ -4459,7 +4459,7 @@ CtOaepBlocks: struct {
 
 /// One timed run: the input (255, 255), the fixed class's, takes the next
 /// good block, any other the next bad one, in the same turn.
-ct_oaep_block_turn: fn(blocks: &CtOaepBlocks, x: [U8]) -> Int {
+ct_oaep_block_turn: fn(blocks: ^CtOaepBlocks, x: [U8]) -> Int {
     k: blocks.turn %% 16
     blocks.turn += 1
     if x[0] == (U8{255}) && x[1] == (U8{255}) {
@@ -4563,7 +4563,7 @@ ct_pkcs8_rsa_der: fn(pkcs1: [U8]) -> [U8] Never! {
 
 /// The bit length of the key pk_parse_key reads from `key`, 0 when it
 /// refuses it.
-ct_parsed_bits: fn(key: [U8], rng: &drbg.HMACDrbg) -> Int {
+ct_parsed_bits: fn(key: [U8], rng: ^drbg.HMACDrbg) -> Int {
     ctx := pkparse.pk_parse_key(key, None, rng) ?? return 0
     pk.pk_get_bitlen(ctx)
 }
@@ -4582,7 +4582,7 @@ ct_rsa_key_der: fn() -> [U8] {
 /// and its bit length, p and q stay odd, and n and e are kept. The parse
 /// checks the private values only for being positive and p and q for being
 /// odd (rsa_check_context), so the result parses, at the original's layout.
-ct_rsa_redrawn: fn(r: &CtRand, der: [U8]) -> [U8] {
+ct_rsa_redrawn: fn(r: ^CtRand, der: [U8]) -> [U8] {
     out := der.copy()
     end: out.len()
     p := 0
@@ -4600,7 +4600,7 @@ ct_rsa_redrawn: fn(r: &CtRand, der: [U8]) -> [U8] {
 /// The content buf[at..at + len] of a positive DER INTEGER drawn again from
 /// r: a leading zero byte and the top set bit stay where they are; `odd`
 /// sets the lowest bit.
-ct_redraw_integer: fn(r: &CtRand, buf: &[U8], at: Int, len: Int, odd: Bool) {
+ct_redraw_integer: fn(r: ^CtRand, buf: ^[U8], at: Int, len: Int, odd: Bool) {
     lead := at
     if buf[lead] == (U8{0}) -> lead += 1
     top := U8{0x80}
@@ -4626,7 +4626,7 @@ ct_redraw_integer: fn(r: &CtRand, buf: &[U8], at: Int, len: Int, odd: Bool) {
 }
 
 #Unsafe("`r` draws test keys and nonces, each used for this run only")
-ct_entry: fn(r: &CtRand, ctx: &rsa.RSAContext, rng: &drbg.HMACDrbg, rsa_der: [U8]) {
+ct_entry: fn(r: ^CtRand, ctx: ^rsa.RSAContext, rng: ^drbg.HMACDrbg, rsa_der: [U8]) {
     mac: ct_bytes(r, 32)
     flipped: ct_last_flipped(mac)
     assert(ctime.memcmp(mac, 0, flipped, 0, 32) != 0)
@@ -4978,7 +4978,7 @@ ct_drbg: fn(seed: [U8]) -> [U8] {
 }
 
 /// TLS 1.3 AES-128-GCM traffic keys and IVs drawn from `r`.
-ct_record_keys: fn(r: &CtRand) -> keys13.SSLKeySet Never! {
+ct_record_keys: fn(r: ^CtRand) -> keys13.SSLKeySet Never! {
     keys13.SSLKeySet{client_write_key: ct_bytes(r, 16), server_write_key: ct_bytes(r, 16), client_write_iv: ct_bytes(r, 12), server_write_iv: ct_bytes(r, 12), key_len: 16, iv_len: 12}
 }
 
@@ -4997,7 +4997,7 @@ ct_record_layer: fn(keys: keys13.SSLKeySet) -> ssldefs.SSLContext {
 /// The first application-data record of `plain` the server seals, with
 /// `head` bytes free before the data for an explicit IV: the 5-byte header,
 /// then the explicit IV, the ciphertext and its tag or MAC.
-ct_record_seal: fn(ssl: &ssldefs.SSLContext, plain: [U8], head: Int) -> [U8] {
+ct_record_seal: fn(ssl: ^ssldefs.SSLContext, plain: [U8], head: Int) -> [U8] {
     buf := ssldefs.ssl_zeros(5 + head + plain.len() + 64)
     ssldefs.ssl_copy_into(buf, 5 + head, plain, 0, plain.len())
     rec := ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 5, buf_len: buf.len() - 5, data_offset: head, data_len: plain.len(), cid_len: 0}
@@ -5050,7 +5050,7 @@ ct_cbc_layer: fn(master: [U8], randbytes: [U8]) -> ssldefs.SSLContext {
 /// header, the explicit IV `iv`, then AES-128-CBC of `plain`, its
 /// HMAC-SHA-256 (with its first byte flipped unless `mac_ok`) and the
 /// padding.
-ct_cbc_record: fn(t: &ssldefs.SSLTransform, plain: [U8], pad: Int, iv: [U8], mac_ok: Bool) -> [U8] {
+ct_cbc_record: fn(t: ^ssldefs.SSLTransform, plain: [U8], pad: Int, iv: [U8], mac_ok: Bool) -> [U8] {
     rec: ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, data_len: plain.len(), cid_len: 0}
     add_data: sslmsg.ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
     body := plain.copy()
@@ -5059,7 +5059,7 @@ ct_cbc_record: fn(t: &ssldefs.SSLTransform, plain: [U8], pad: Int, iv: [U8], mac
     loop _ in 0..pad -> body.push(ssldefs.ssl_byte(pad))
     assert(body.len() %% 16 == 0)
     enc := [U8]{}
-    if &t.cipher_enc == {
+    if ^t.cipher_enc == {
         .Val(c) -> { enc = layer.cipher_crypt(c, iv, body) ?? panic("encrypt: {err}") }
         None -> panic("no cipher")
     }
@@ -5073,7 +5073,7 @@ ct_cbc_record: fn(t: &ssldefs.SSLTransform, plain: [U8], pad: Int, iv: [U8], mac
 /// `tail.len()` bytes replaced by `tail`: the plaintext length, or the error
 /// code. Each call sets the transform's IV from the record and restarts its
 /// cipher, so one transform opens every record alike.
-ct_cbc_open: fn(t: &ssldefs.SSLTransform, sealed: [U8], tail: [U8]) -> Int {
+ct_cbc_open: fn(t: ^ssldefs.SSLTransform, sealed: [U8], tail: [U8]) -> Int {
     buf := sealed.copy()
     ssldefs.ssl_copy_into(buf, buf.len() - tail.len(), tail, 0, tail.len())
     rec := ssldefs.SSLRecord{ctr: ssldefs.ssl_zeros(8), rtype: ssldefs.SSL_MSG_APPLICATION_DATA, ver: [U8]{3, 3}, buf_start: 0, buf_len: buf.len(), data_offset: 5, data_len: buf.len() - 5, cid_len: 0}

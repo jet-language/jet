@@ -18,7 +18,7 @@ NixProvider: struct {
 
     // The exact identity a cached Nix output must carry: the locked closure,
     // then a lock-published local fallback, then a native catalog recipe.
-    cache_expectation: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+    cache_expectation: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
         if ctx.project_dir == {
             .Val(project) -> {
                 if pkg_lock_load_strict(project) == {
@@ -63,7 +63,7 @@ NixProvider: struct {
     // Plan one shared closure for every signed-index ref; native catalog
     // recipes contribute their artifact size, and a ref the index does not
     // cover stays unknown (its fallback policy is checked at realization).
-    plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+    plan_downloads: fn(self, verification: ^StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
         first: if specs.len() > 0 -> specs[0].raw else -> "Nix package"
         index: ctx.nix_index ?? return Err(ProviderError.Unsupported("download planning needs a signed index for `{first}`"))
         plan := DownloadPlan.empty()
@@ -123,7 +123,7 @@ NixProvider: struct {
         Ok(None)
     }
 
-    realize: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
+    realize: fn(self, verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
         self.validate_cache_authority(spec, table, ctx)
         if ctx.project_dir == {
             .Val(project) -> {

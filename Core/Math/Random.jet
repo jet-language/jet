@@ -31,7 +31,7 @@ C_BASE53_FLOAT: 9007199254740992.0
 // Caller-owned capabilities use SplitMix64, not the ambient xorshift stream.
 // Keep state transitions in explicitly wrapping sized words. Jet's exact Int
 // holds the bounded draw's full 64-by-64 product without a new scalar carrier.
-seeded_next: fn(state: &U64) -> U64 Never! {
+seeded_next: fn(state: ^U64) -> U64 Never! {
     state = wrapping(state + U64{11400714819323198485})
     word := U64{state}
     word = wrapping((word ~ (word >> 30)) * U64{13787848793156543929})
@@ -42,7 +42,7 @@ seeded_next: fn(state: &U64) -> U64 Never! {
 // A zero bound denotes the full 2^64 domain. Lemire rejection retains the
 // exact native stream: a modulo-only draw would bias the result and consume
 // a different number of words for large bounds.
-seeded_bounded: fn(state: &U64, bound: U64) -> U64 Never! {
+seeded_bounded: fn(state: ^U64, bound: U64) -> U64 Never! {
     if bound == (U64{0}) -> return seeded_next(state)
     threshold: wrapping(U64{0} - bound) %% bound
     loop {
@@ -54,7 +54,7 @@ seeded_bounded: fn(state: &U64, bound: U64) -> U64 Never! {
 
 // The public capability checks its endpoints at the signed-64 boundary.
 // This kernel preserves that domain, including its wrapped inclusive width.
-__seeded_int: fn(state: &U64, low: Int, high: Int) -> Int? Never! {
+priv __seeded_int: fn(state: ^U64, low: Int, high: Int) -> Int? Never! {
     if high < low -> return None
     if high == low -> return Val(low)
     width: U64{(high - low + 1) & 18446744073709551615}
@@ -64,67 +64,67 @@ __seeded_int: fn(state: &U64, low: Int, high: Int) -> Int? Never! {
     Val(value)
 }
 
-seeded_unit: fn(state: &U64) -> Float Never! { Float{seeded_next(state) >> 11} / C_BASE53_FLOAT }
+seeded_unit: fn(state: ^U64) -> Float Never! { Float{seeded_next(state) >> 11} / C_BASE53_FLOAT }
 
 /// Deterministic caller-owned capability. Drawing edits this owner's one word;
 /// an explicit clone duplicates its state, never a process-global stream.
 RNG: struct {
     state: U64,
 
-    int: fn(&self, low: Int, high: Int) -> Int Never! {
+    int: fn(^self, low: Int, high: Int) -> Int Never! {
         lower: Int{I64{low}}
         upper: Int{I64{high}}
         if upper < lower -> core.math.__numeric_stop("RNG.int requires low <= high")
         __seeded_int(self.state, lower, upper) ?? core.math.__numeric_stop("RNG.int requires low <= high")
     }
 
-    float: fn(&self) -> Float Never! { seeded_unit(self.state) }
+    float: fn(^self) -> Float Never! { seeded_unit(self.state) }
 
-    float_range: fn(&self, low: Float, high: Float) -> Float Never! {
+    float_range: fn(^self, low: Float, high: Float) -> Float Never! {
         if !(high > low) -> return low
         low + (high - low) * self.float()
     }
 
-    bool: fn(&self) -> Bool Never! { (seeded_next(self.state) & U64{1}) == U64{1} }
+    bool: fn(^self) -> Bool Never! { (seeded_next(self.state) & U64{1}) == U64{1} }
 
     // Public bool(p)'s existing arity-1 row targets this reserved
     // method; the zero-argument coin draw uses bool(), not a default p=0.5.
-    __bool_p: fn(&self, probability: Float) -> Bool Never! {
+    __bool_p: fn(^self, probability: Float) -> Bool Never! {
         if probability <= 0.0 || math.is_nan(probability) -> return false
         if probability >= 1.0 -> return true
         self.float() < probability
     }
 
-    float_open: fn(&self) -> Float Never! { math.max_float(self.float(), 2.2250738585072014e-308) }
+    float_open: fn(^self) -> Float Never! { math.max_float(self.float(), 2.2250738585072014e-308) }
 
-    normal: fn(&self, mean: Float, stddev: Float) -> Float Never! {
+    normal: fn(^self, mean: Float, stddev: Float) -> Float Never! {
         first: self.float_open()
         second: self.float()
         sample: math.sqrt((Float{-2.0}) * math.ln(first)) * math.cos(math.TAU * second)
         mean + sample * math.max_float(stddev, 0.0)
     }
 
-    exponential: fn(&self, lambda: Float) -> Float Never! {
+    exponential: fn(^self, lambda: Float) -> Float Never! {
         if lambda <= 0.0 || math.is_nan(lambda) -> return 0.0
         sample: self.float_open()
         return -math.ln(sample) / lambda
     }
 
-    bytes: fn(&self, count: Int) -> [U8] Never! {
+    bytes: fn(^self, count: Int) -> [U8] Never! {
         length: Int{I64{count}}
         out := [U8]{}
         loop _ in 0..<length -> out.push(U8{seeded_next(self.state) & U64{255}})
         out
     }
 
-    split: fn(&self) -> RNG Never! { RNG{state: seeded_next(self.state)} }
+    split: fn(^self) -> RNG Never! { RNG{state: seeded_next(self.state)} }
 
-    pick: fn<T>(&self, items: [T]) -> T? Never! {
+    pick: fn<T>(^self, items: [T]) -> T? Never! {
         if items.len() == 0 -> return None
         Val(items[self.int(0, items.len() - 1)].copy())
     }
 
-    weighted_pick: fn<T>(&self, items: [T], weights: [Float]) -> T? Never! {
+    weighted_pick: fn<T>(^self, items: [T], weights: [Float]) -> T? Never! {
         if items.len() == 0 || items.len() != weights.len() -> return None
         total := Float{0.0}
         loop weight in weights {
@@ -141,7 +141,7 @@ RNG: struct {
         Val(items[items.len() - 1].copy())
     }
 
-    sample: fn<T>(&self, items: [T], count: Int) -> [T] Never! {
+    sample: fn<T>(^self, items: [T], count: Int) -> [T] Never! {
         want := Int{I64{count}}
         if want < 0 -> want = 0
         if want > items.len() -> want = items.len()
@@ -157,7 +157,7 @@ RNG: struct {
         pool
     }
 
-    shuffle: fn<T>(&self, items: &[T]) Never! {
+    shuffle: fn<T>(^self, items: ^[T]) Never! {
         index := items.len() - 1
         loop index > 0 {
             picked: self.int(0, index)
@@ -173,7 +173,7 @@ RNG: struct {
 
 // The world owns synchronization and journaling. Jet owns the transition;
 // compare/exchange keeps concurrent draws on that same serialized stream.
-__word: fn() -[Rand]> Int Never! {
+priv __word: fn() -[Rand]> Int Never! {
     loop {
         previous: rt.rng_state()
         word := Int{previous}
@@ -336,7 +336,7 @@ weighted_pick: fn<T>(items: [T], weights: [Float]) -[Rand]> T? Never! {
 }
 
 /// Fisher–Yates. Mutates `items` in place.
-shuffle: fn(items: &[Int]) -[Rand]> Never! {
+shuffle: fn(items: ^[Int]) -[Rand]> Never! {
     n: items.len()
     if n < 2 {
         return

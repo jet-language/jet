@@ -1,4 +1,4 @@
-// `pointer.*.bump(by)` calls a trait `&self` method on the value at a raw
+// `pointer.*.bump(by)` calls a trait `^self` method on the value at a raw
 // pointer: each call writes the `Counter` that `address` names in place.
 use core.mem
 
@@ -6,7 +6,7 @@ Counter: struct {
     n: Int,
 
     impl Bumps {
-        bump: fn(&self, by: Int) -> Int {
+        bump: fn(^self, by: Int) -> Int {
             self.n += by
             self.n
         }
@@ -14,7 +14,7 @@ Counter: struct {
 }
 
 Bumps: trait {
-    bump: fn(&self, by: Int) -> Int,
+    bump: fn(^self, by: Int) -> Int,
 }
 
 bump_at: fn<A: Bumps>(address: Int, by: Int) -> Int {

@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Changing a field needs write access to the value that owns it, and this receiver gives read access only</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write the receiver as `&amp;self` before assigning to `self.field`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write the receiver as `^self` before assigning to `self.field`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.FieldWriteWithoutMarker</code>: <code>Tests/UI/arm_binding_write_blames_the_binding.stderr</code>.</p>
 <pre class="diag">Error: Jet.FieldWriteWithoutMarker: Cannot edit through `p` — it is a read-only arm binding
@@ -42,8 +42,8 @@
     |
  14 |         .Point(p) -&gt; { p.x = 5 }
     |                          ^
- Why: An arm binds a read window into `item` when the subject it tests is written without `&amp;`, so `p` can&#39;t change it, whatever access `item` has
- Fix: Write the subject with `&amp;` so the arm binds a write window: `if &amp;subject == { … }`
+ Why: An arm binds a read window into `item` when the subject it tests is written without `^`, so `p` can&#39;t change it, whatever access `item` has
+ Fix: Write the subject with `^` so the arm binds a write window: `if ^subject == { … }`
 More: jet-lang.dev/e/Jet.FieldWriteWithoutMarker
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

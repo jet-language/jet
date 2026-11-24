@@ -19,11 +19,11 @@ fixture_run: fn() -> ProcessReceipt {
     process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
 }
 
-fixture_copy: fn(out: &[U8], bytes: [U8], start: Int, end: Int) {
+fixture_copy: fn(out: ^[U8], bytes: [U8], start: Int, end: Int) {
     loop i in start..<end -> out.push(bytes[i])
 }
 
-fixture_u16: fn(out: &[U8], n: Int) {
+fixture_u16: fn(out: ^[U8], n: Int) {
     out.push(U8{(n /% 256) %% 256})
     out.push(U8{n %% 256})
 }
@@ -57,7 +57,7 @@ fixture_send: fn(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     (net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")).drop("the fixture reply needs no sent byte count")
 }
 
-fixture_read_exact: fn(stream: &net.TCPStream, n: Int) -> [U8] {
+fixture_read_exact: fn(stream: ^net.TCPStream, n: Int) -> [U8] {
     out := [U8]{}
     loop out.len() < n {
         chunk: net.tcp_read_bytes(stream, n - out.len()) ?? panic("read exact")

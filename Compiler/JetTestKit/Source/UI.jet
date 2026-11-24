@@ -728,7 +728,7 @@ kit_ui_source_code: fn(code: String) -> Bool {
     words.len() >= 2 && words.all(fn(word) { word != "" && word.bytes().all(fn(byte) { (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57})) }) })
 }
 
-kit_ui_add_code: fn(codes: &[String], code: String) {
+kit_ui_add_code: fn(codes: ^[String], code: String) {
     if !kit_expect_named(codes, code) -> codes.push(code.copy())
 }
 
@@ -792,7 +792,7 @@ KIT_UI_ALLOWLIST: "Tests/diagnostics_coverage_allowlist.tsv"
 // The codes a `.jet` implementation source under `directory` names, skipping
 // test packages and fixtures (#6193; Tests/Guards/diagnostics_coverage.jet
 // scans the same sources).
-kit_ui_emitted: fn(root: String, directory: String, rows: [KitUIRegistryRow], codes: &[String]) {
+kit_ui_emitted: fn(root: String, directory: String, rows: [KitUIRegistryRow], codes: ^[String]) {
     path: files.join(root, directory)
     if !files.exists(path) {
         return
@@ -850,7 +850,7 @@ kit_ui_allowed: fn(rows: [KitUIAllowance], code: String, side: String) -> Bool {
 
 // The snapshot-coverage verdict. `kept` receives the allowlist's lines without
 // its stale allowances, the text a bless writes back.
-kit_ui_set_coverage: fn(rows: [KitUIRegistryRow], emitted: [String], rendered: [String], allowance_text: String, kept: &[String]) -> KitVerdict {
+kit_ui_set_coverage: fn(rows: [KitUIRegistryRow], emitted: [String], rendered: [String], allowance_text: String, kept: ^[String]) -> KitVerdict {
     registered := [String]{}
     left := [String]{}
     right := [String]{}

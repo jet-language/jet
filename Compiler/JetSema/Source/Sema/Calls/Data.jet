@@ -120,7 +120,7 @@ sema_dyn_site: fn(expr: Expr) -> String Never! {
     }
 }
 
-sema_dyn_index_operation: fn(ty: Type, site: String, span: Span, index_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> THandleOp? {
+sema_dyn_index_operation: fn(ty: Type, site: String, span: Span, index_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> THandleOp? {
     location: sema_expression_panic_location(environment, program, scopes, span)
     resolved: sema_expr_expected_type(ty, environment, program)
     if resolved == Type.String -> return Val(THandleOp.DynIndexKey{site: site, location: location})
@@ -129,7 +129,7 @@ sema_dyn_index_operation: fn(ty: Type, site: String, span: Span, index_span: Spa
     None
 }
 
-sema_dyn_try_member: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_dyn_try_member: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "get" && method != "has" && method != "keys" && method != "remove" && method != "len" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -201,7 +201,7 @@ sema_data_label: fn(argument: CallArg) -> String? {
     }
 }
 
-sema_data_check_labels: fn(name: String, args: [CallArg], allowed: [String], span: Span, diagnostics: &[Diagnostic]) {
+sema_data_check_labels: fn(name: String, args: [CallArg], allowed: [String], span: Span, diagnostics: ^[Diagnostic]) {
     loop argument in args {
         label: sema_data_label(argument) ?? next
         if sema_serde_has_name(allowed, label) -> next
@@ -209,28 +209,28 @@ sema_data_check_labels: fn(name: String, args: [CallArg], allowed: [String], spa
     }
 }
 
-sema_data_check_argument: fn(name: String, index: Int, argument: CallArg, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_data_check_argument: fn(name: String, index: Int, argument: CallArg, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     sema_check_expression(argument.expr, Val(expected), environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-sema_data_check_discarded_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_data_check_discarded_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
     loop argument in args {
         _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     }
 }
 
-sema_data_arity_diagnostic: fn(name: String, expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {
+sema_data_arity_diagnostic: fn(name: String, expected: Int, actual: Int, span: Span, diagnostics: ^[Diagnostic]) {
     diagnostics.push(sema_error("E0104", span, "`{name}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "this Core operation has a fixed arity", "pass exactly {expected} argument{if expected == 1 -> "" else -> "s"}"))
 }
 
-sema_data_check_explicit_type_args: fn(name: String, type_args: [Type], expected: Int, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_data_check_explicit_type_args: fn(name: String, type_args: [Type], expected: Int, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if type_args.len() == expected -> return true
     diagnostics.push(sema_error("E0119", span, "`{name}` expects {expected} type argument{if expected == 1 -> "" else -> "s"}, got {type_args.len()}", "explicit type arguments must match the operation's declared generic shape", "provide exactly {expected} type argument{if expected == 1 -> "" else -> "s"}"))
     false
 }
 
 // `value.encode()`, or the storage codec's `value.encode_stored()` (`method`).
-sema_data_check_encode: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_data_check_encode: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 0 || type_args.len() != 0 {
         sema_data_arity_diagnostic(method, 0, args.len(), span, diagnostics)
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -259,7 +259,7 @@ sema_data_check_encode: fn(receiver: Expr, receiver_value: TExpr, method: String
 // The storage codec (`value.encode_stored()`, `tree.decode_stored<T>()`)
 // keeps the `#Secret` fields the wire codec leaves off, so only Core and the
 // derived codec bodies call it; anywhere else `method` does not exist (E0102).
-sema_data_stored_codec_hidden: fn(owner: Type, method: String, span: Span, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_data_stored_codec_hidden: fn(owner: Type, method: String, span: Span, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     if module_is_core(environment.module_identity) || context.compiler_generated -> return false
     diagnostics.push(sema_error("E0102", span, "`{type_name(owner)}` has no method `{method}`", "the storage codec keeps `#Secret` fields, so only Core's stored tables and derived codecs call it", "call `.encode()` or `.decode<T>()`, which leave `#Secret` fields off the wire"))
     true
@@ -271,7 +271,7 @@ sema_data_stored_codec_hidden: fn(owner: Type, method: String, span: Span, envir
 // decodes; it is an error-list helper, not another decode API. It consumes
 // the child's carrier, so a decode call written as the child keeps its Result
 // rather than propagating it.
-sema_data_check_field_error_under: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_data_check_field_error_under: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 2 {
         sema_data_arity_diagnostic("FieldError.under", 2, args.len(), span, diagnostics)
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -313,7 +313,7 @@ sema_data_accessor_contract: fn(method: String, receiver_ty: Type, alias: Bool) 
     }
 }
 
-sema_data_try_accessor: fn(receiver: Expr, receiver_value: TExpr, name: String, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_data_try_accessor: fn(receiver: Expr, receiver_value: TExpr, name: String, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     alias := name != "Dyn"
     contract: sema_data_accessor_contract(method, receiver_value.ty, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if type_args.len() != 0 {
@@ -355,7 +355,7 @@ sema_data_without_user_tags: fn(ty: Type) -> Type Never! {
 
 // `expect_core_arg`: the argument is checked against the parameter type and a
 // mismatch the checker did not already report is E0112.
-sema_data_expect_core_arg: fn(name: String, index: Int, required: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_data_expect_core_arg: fn(name: String, index: Int, required: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     value: sema_data_check_argument(name, index, argument, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if sema_call_host_callback_assignable(required, value.ty, environment, program) == (.Val(false)) {
         diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{name}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, value.ty)))
@@ -385,7 +385,7 @@ sema_data_fn_has_empty_effect_bound: fn(ty: Type) -> Bool Never! {
 // values keep their nominal or exact types. The expected callback carries an
 // explicit empty effect bound: a maintained query replays its callbacks after
 // each source delta (`check_query_callback_effect`).
-sema_data_infer_query_callback: fn(call_name: String, row: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDataQueryCallback {
+sema_data_infer_query_callback: fn(call_name: String, row: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDataQueryCallback {
     required: Type.Fn{params: [Type]{row}, ret: None, effect_bound: Val([EffectRowEntry]{}), param_contract: None, call_metadata: None, return_view_provenance: None}
     checked: sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDataQueryCallback{value: None, result: None}
     callback_span: expr_span(argument.expr)
@@ -406,7 +406,7 @@ sema_data_infer_query_callback: fn(call_name: String, row: Type, argument: CallA
     }
 }
 
-sema_data_query_push_argument: fn(argument: CallArg, value: TExpr?, source_args: &[CallArg], argument_types: &[Type], typed: &[TExpr]) -> Bool {
+sema_data_query_push_argument: fn(argument: CallArg, value: TExpr?, source_args: ^[CallArg], argument_types: ^[Type], typed: ^[TExpr]) -> Bool {
     checked: value ?? return false
     source_args.push(argument.copy())
     argument_types.push(checked.ty)
@@ -454,7 +454,7 @@ sema_data_group_sum_numeric: fn(value: Type?) -> Bool Never! {
 // String/Float projection. `DataTracked` and `DataWatch` are the maintained
 // sources and live views of the same rows. Every call lowers onto its receiver
 // Core row with the receiver as the first argument.
-sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_type: sema_data_query_receiver(name, parameters, method)
     if receiver_type == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
     complete := true
@@ -667,7 +667,7 @@ sema_data_event_time_receiver: fn(name: String, parameters: [Type], method: Stri
     ""
 }
 
-sema_data_event_time_callback: fn(method: String, element: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDataQueryCallback {
+sema_data_event_time_callback: fn(method: String, element: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDataQueryCallback {
     required: Type.Fn{params: [Type]{element}, ret: None, effect_bound: Val([EffectRowEntry]{}), param_contract: None, call_metadata: None, return_view_provenance: None}
     checked: sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDataQueryCallback{value: None, result: None}
     if checked.ty == {
@@ -691,7 +691,7 @@ sema_data_event_time_is_datetime: fn(ty: Type) -> Bool Never! {
 
 // `window`'s first argument is positional; the lateness and the late-event
 // policy are named so the two durations cannot be swapped.
-sema_data_event_time_labels: fn(method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
+sema_data_event_time_labels: fn(method: String, args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool {
     names: if method == "window" -> [String]{"", "watermark", "late"} else -> [String]{""}
     valid := true
     loop (index, argument) in args {
@@ -717,7 +717,7 @@ sema_data_event_time_labels: fn(method: String, args: [CallArg], diagnostics: &[
     valid
 }
 
-sema_data_try_event_time_method: fn(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_data_try_event_time_method: fn(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_type: sema_data_event_time_receiver(name, parameters, method)
     if receiver_type == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
     least: if method == "window" -> 2 else -> 1
@@ -823,7 +823,7 @@ sema_data_list_query_handle: fn() -> String Never! {
 // (`[T].query(sql)`): an in-memory row list runs one checked SQL query into the
 // deferred `Query<T>` carrier. The call lowers onto the list-query receiver row
 // with the list as its first argument.
-sema_data_check_list_query: fn(receiver: Expr, receiver_value: TExpr, row: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_data_check_list_query: fn(receiver: Expr, receiver_value: TExpr, row: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 1 {
         diagnostics.push(sema_wrong_core_arity("query", 1, args.len(), span))
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -843,7 +843,7 @@ sema_data_check_list_query: fn(receiver: Expr, receiver_value: TExpr, row: Type,
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
-sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     resolved_ty := sema_call_resolved_type(receiver_value.ty, environment, program)
     if resolved_ty == .Apply(name, parameters) {
         query: sema_data_try_query_method(receiver, receiver_value, name, parameters, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1011,7 +1011,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
 // `t.<setting>(…)` on a `Test` value: one argument of the row's kind (none or
 // a Bool for a Switch, two Ints `i, n` for a Shard), lowered to the runtime
 // handle op that appends the setting's plan line.
-sema_data_check_test_setting: fn(row: TestSettingRow, receiver: Expr, receiver_value: TExpr, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_data_check_test_setting: fn(row: TestSettingRow, receiver: Expr, receiver_value: TExpr, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     site: "Test.{row.name}"
     if type_args.len() != 0 {
         sema_data_check_explicit_type_args(site, type_args, 0, span, diagnostics)
@@ -1134,7 +1134,7 @@ sema_data_argument_is_borrowed: fn(argument: Expr, scopes: SemaScopeTable) -> Bo
     }
 }
 
-sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     known_type: sema_data_type_name(ty) ?? ""
     if !sema_data_is_json_name(known_type) {
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -1221,7 +1221,7 @@ sema_data_core_param: fn(label: String, ty: Type, convention: AccessConvention, 
     SemaCallParam{label: label, name: label, zone: zone, default: default, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
-sema_data_core_param_access: fn(record: CoreCallRecord, index: Int, span: Span, diagnostics: &[Diagnostic]) -> AccessConvention? {
+sema_data_core_param_access: fn(record: CoreCallRecord, index: Int, span: Span, diagnostics: ^[Diagnostic]) -> AccessConvention? {
     if sema_call_core_access(record, index) == .Val(access) -> return Val(access)
     if index >= record.signature.arity && index < record.signature.max_arity {
         return Val(AccessConvention.Read)
@@ -1230,7 +1230,7 @@ sema_data_core_param_access: fn(record: CoreCallRecord, index: Int, span: Span, 
     None
 }
 
-sema_data_core_emit: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], type_args: [Type], result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_data_core_emit: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], type_args: [Type], result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     accesses := [AccessConvention]{}
     loop index in 0..<typed_args.len() {
         access: sema_data_core_param_access(record, index, span, diagnostics) ?? return None
@@ -1239,9 +1239,9 @@ sema_data_core_emit: fn(record: CoreCallRecord, call_name: String, source_args: 
     sema_data_core_emit_with_accesses(record, call_name, source_args, argument_types, typed_args, accesses, type_args, result_type, span, expected, environment, program, scopes, state, context, diagnostics)
 }
 
-// One checked CoreCall over explicit parameter accesses: a `&` slot lends the
+// One checked CoreCall over explicit parameter accesses: a `^` slot lends the
 // caller's place for the call (the registry row only says it is borrowed).
-sema_data_core_emit_with_accesses: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], accesses: [AccessConvention], type_args: [Type], result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_data_core_emit_with_accesses: fn(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], accesses: [AccessConvention], type_args: [Type], result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     updated_source_args := source_args
     if argument_types.len() != typed_args.len() || updated_source_args.len() != typed_args.len() || accesses.len() != typed_args.len() {
         diagnostics.push(sema_error("E0003", span, "`{call_name}` has an incomplete checked argument list", "the checked CoreCall node stores every checked argument in the registry ABI order", "repair the Core call body"))
@@ -1270,7 +1270,7 @@ sema_data_core_emit_with_accesses: fn(record: CoreCallRecord, call_name: String,
 }
 
 // `exactly_one_type_arg`: a typed decode/query call names one target type.
-sema_data_core_target_type: fn(type_args: [Type], name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Type? {
+sema_data_core_target_type: fn(type_args: [Type], name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Type? {
     if type_args.len() != 1 {
         diagnostics.push(sema_error("E0119", span, "`{name}` expects exactly one type argument, got {type_args.len()}", "a typed decode call needs one target type", "write `{name}<Target>(...)` with one target type"))
         return None
@@ -1350,7 +1350,7 @@ sema_data_is_db_decode: fn(target: SemaCallDirectTarget, environment: SemaScopeE
 // answers for a generic codec's head, so `Wrap<Plain>` passes it even when
 // `Plain` has no wire form. The applied value is E2411 at the argument
 // (a non-codable type argument fails at the use site).
-sema_data_encode_check_value: fn(target: SemaCallDirectTarget, args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_data_encode_check_value: fn(target: SemaCallDirectTarget, args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if target.symbol.name != "to_string" || args.len() != 1 -> return true
     encoder := false
     loop module_name in ["core.encoding.json", "core.encoding.toml", "core.encoding.yaml"] {
@@ -1383,7 +1383,7 @@ sema_data_encode_check_value: fn(target: SemaCallDirectTarget, args: [CallArg], 
 // row-array `Dyn` tree `csv.parse` returns (Docs/Spec/Reference/core-library.md
 // `csv.to_string`); any other Encode value is E0112 (Rust `core_call` csv
 // `to_string`). The checked call carries the inferred `T` of `rows`.
-sema_data_csv_check_rows: fn(args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_data_csv_check_rows: fn(args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if args.len() != 1 -> return true
     rows: if checked.kind == {
         .Call(_, inferred, _) -> {
@@ -1425,7 +1425,7 @@ sema_data_csv_generic_param: fn(name: String, environment: SemaScopeEnvironment)
 
 // `db.decode<T>(row)` passes the column renames of T's fields after the row
 // (sema_data_db_names).
-sema_data_db_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [CallArg]? {
+sema_data_db_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> [CallArg]? {
     target: sema_data_core_target_type(type_args, "decode", span, environment, program, diagnostics) ?? return None
     bound := args
     bound.push(CallArg{convention: AccessConvention.Read, expr: sema_data_db_names(target, environment, program, span), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: Val(CallLabel{name: "names", span: span}), spread: false})
@@ -1436,7 +1436,7 @@ sema_data_db_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, env
 // defaults. Its env-name table is no argument: decode reads
 // `T.__env_names`, which each instance answers for its concrete record
 // (sema_expression_trait_constant, JetIR ir_decode_env_names).
-sema_data_sys_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [CallArg]? {
+sema_data_sys_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> [CallArg]? {
     bound := args
     params := [SemaCallParam]{
         sema_data_core_param("prefix", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span, id: AST_NODE_GENERATED})),
@@ -1460,7 +1460,7 @@ sema_data_sys_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, en
 // `args.decode<T>()` calls the decoder the `#CLI` expansion gives `T`
 // (sema_cli_entry_projections): it parses the process arguments through the
 // same spec as `run: fn(args: T)`.
-sema_data_args_decode: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_data_args_decode: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() != 0 {
         sema_data_arity_diagnostic("core.args.decode", 0, args.len(), span, diagnostics)
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1498,7 +1498,7 @@ sema_data_args_decode: fn(args: [CallArg], type_args: [Type], span: Span, expect
 // `args.decode<T>()` is compiler-owned with no Core registry row: its body is
 // the `#CLI` expansion of `T`, so (like `ui.mount`) it resolves through the
 // import before the registry route.
-sema_call_try_args_decode: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_try_args_decode: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.args" || member != "decode" {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
@@ -1515,7 +1515,7 @@ sema_data_core_decode_member: fn(module_name: String, member: String) -> Bool Ne
     member == "decode" || (module_name == "core.encoding.xml" && member == "decode_bytes")
 }
 
-sema_data_core_try_decode: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck? {
+sema_data_core_try_decode: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck? {
     updated_args := args
     if !sema_data_core_decode_member(module_name, member) -> return None
     if module_name == "core.encoding.json" && type_args.len() == 0 {
@@ -1677,7 +1677,7 @@ sema_data_analytics_sql_columns: fn(sql: String) -> [String] Never! {
     columns
 }
 
-sema_data_check_analytics_sql_schema: fn(row: Type, query: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_data_check_analytics_sql_schema: fn(row: Type, query: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     sql: sema_data_analytics_sql_literal(query) ?? return
     name: sema_data_type_name(row) ?? return
     definition: sema_serde_type_definition(environment, program, name) ?? return
@@ -1699,7 +1699,7 @@ sema_data_check_analytics_sql_schema: fn(row: Type, query: Expr, span: Span, env
     }
 }
 
-sema_call_try_data_core_call: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_try_data_core_call: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     decoder: sema_data_core_try_decode(module_name, member, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if decoder == .Val(result) -> return result
     if module_name == "core.data" && member == "schema" {
@@ -1760,7 +1760,7 @@ sema_call_try_data_core_call: fn(module_name: String, member: String, args: [Cal
 // row is one `value` column. An explicit `data.schema<T>(rows)` checks `rows`
 // as `[T]`. The source schema receives the rows and the column names and type
 // names this check derives.
-sema_data_check_schema: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_data_check_schema: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if type_args.len() > 1 || args.len() != 1 {
         if type_args.len() > 1 {
             sema_data_check_explicit_type_args("core.data.schema", type_args, 1, span, diagnostics)
@@ -1807,7 +1807,7 @@ sema_data_check_schema: fn(args: [CallArg], type_args: [Type], span: Span, expec
     SemaDirectSpecialCheck{handled: true, value: Val(result)}
 }
 
-sema_data_schema_columns: fn(row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [{name: String, type_name: String}] {
+sema_data_schema_columns: fn(row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> [{name: String, type_name: String}] {
     single: [{name: String, type_name: String}]{{name: "value", type_name: sema_data_schema_type_name(row)}}
     owner_name: if row == {
         .Named(name) | .Apply(name, _) -> name

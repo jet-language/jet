@@ -56,7 +56,7 @@ LogSpan: struct {
     name: fn(self) -> String Never! { self.name }
 
     impl Close {
-        close: fn(&&self) { rt.span_close(self) }
+        close: fn(^^self) { rt.span_close(self) }
     }
 }
 
@@ -147,7 +147,7 @@ span: fn(name: String) -[Log]> LogSpan Never! {
 
 /// End `span` before its block does; it takes the span, so a span closes
 /// once.
-close: fn(span: &&LogSpan) -[Log]> Never! {}
+close: fn(span: ^^LogSpan) -[Log]> Never! {}
 
 /// Select the record sink. `stderr` (JSON lines on stderr) and the `json`,
 /// `jsonl` and `text` file sinks are supported. An unsupported kind, or a
@@ -406,7 +406,7 @@ priv internal: module {
         0
     }
 
-    put_pair: fn(pairs: &[FilterPair], path: String, rank: Int) {
+    put_pair: fn(pairs: ^[FilterPair], path: String, rank: Int) {
         loop i in 0..<pairs.len() {
             if pairs[i].path == path {
                 pairs[i] = FilterPair{path: path, rank: rank}

@@ -17,13 +17,13 @@ JetCLIFillGoal: struct {
     expected: String,
 }
 
-jet_cli_fill_function_info: fn(function: Func, infos: &[JetCLIFillFunction]) Never! {
+jet_cli_fill_function_info: fn(function: Func, infos: ^[JetCLIFillFunction]) Never! {
     if function.params.len() == 0 && function.return_type == .Val(ty) {
         infos.push(JetCLIFillFunction{name: function.name, return_type: type_name(ty)})
     }
 }
 
-jet_cli_fill_function_infos: fn(items: [Item], infos: &[JetCLIFillFunction]) Never! {
+jet_cli_fill_function_infos: fn(items: [Item], infos: ^[JetCLIFillFunction]) Never! {
     loop item in items {
         if item == {
             .Func(function) -> { jet_cli_fill_function_info(function, infos) }
@@ -59,7 +59,7 @@ jet_cli_fill_card: fn(rows: [TTypedGoal], span: Span) -> String Never! {
     card
 }
 
-jet_cli_fill_expr: fn(tree: BodyTree, expression: Int, rows: [TTypedGoal], goals: &[JetCLIFillGoal]) Never! {
+jet_cli_fill_expr: fn(tree: BodyTree, expression: Int, rows: [TTypedGoal], goals: ^[JetCLIFillGoal]) Never! {
     node: body_node(tree, expression)
     if node.kind == .Never(reason, _) && reason == "todo" {
         goals.push(JetCLIFillGoal{span: node.span, expected: jet_cli_fill_card(rows, node.span)})

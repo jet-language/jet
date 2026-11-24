@@ -312,7 +312,7 @@ clock_field: fn(clock: String) -> String Never! {
 }
 
 // A span's time in ns on `clock`; wall time when the span lacks that clock.
-span_ns: fn(span: Span, clock: String, notes: &[String]) -> Float Never! {
+span_ns: fn(span: Span, clock: String, notes: ^[String]) -> Float Never! {
     name: clock_field(clock)
     if name != "" {
         if number_field(span.args, name) == .Val(value) -> return value
@@ -334,7 +334,7 @@ any_in: fn(indices: [Int], set: [Bool]) -> Bool Never! {
     false
 }
 
-measure_row: fn(kinds: [String], excluded: [String], spans: [Span], clock: String, notes: &[String]) -> Measure Never! {
+measure_row: fn(kinds: [String], excluded: [String], spans: [Span], clock: String, notes: ^[String]) -> Measure Never! {
     included := [Bool]{}
     loop span in spans -> included.push(span.kind_is_text && kinds.contains(span.kind))
     ns := ZERO
@@ -416,7 +416,7 @@ LabelEntry: struct {
     items: Float,
 }
 
-detail: fn(spans: [Span], kind: String, clock: String, notes: &[String]) -> [LabelEntry] Never! {
+detail: fn(spans: [Span], kind: String, clock: String, notes: ^[String]) -> [LabelEntry] Never! {
     entries := [LabelEntry]{}
     loop span in spans {
         if !span.kind_is_text || span.kind != kind -> next

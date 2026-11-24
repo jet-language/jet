@@ -1,0 +1,47 @@
+use {
+    path_case_files: core.files
+    path_case_process: core.process
+    path_case_sys: core.sys
+    jet_foundation.[PATH_CASE_LEXICON_PATH, path_case_diagnostic, path_case_disk_findings, path_case_file_check, path_case_findings, path_case_title]
+}
+
+#Test("path case: a name is TitleCase with the lexicon's acronyms in capitals") {
+    assert_eq(path_case_title("Tls"), "TLS")
+    assert_eq(path_case_title("jet_cli"), "JetCLI")
+    assert_eq(path_case_title("HTTPServer"), "HTTPServer")
+    assert(path_case_file_check("Core/Net/TLS.jet") == None, "a name in its spelling passes")
+    found: path_case_file_check("Core/Net/Tls.jet") ?? panic("a lowered acronym is a finding")
+    assert_eq(found.spelled, "TLS.jet")
+}
+
+#Test("path case: the sweep reports a lowercase folder and keeps a module folder") {
+    findings: path_case_findings([String]{"Core/net/TLS.jet", "Examples/App/geo/module.jet"}, [String]{})
+    assert(findings.len() == 1, "only the lowercase folder breaks the rule, got {findings.len()}")
+    assert_eq(findings[0].path, "Core/net")
+    assert_eq(findings[0].spelled, "Net")
+}
+
+#Test("path case: on disk the rule holds only below the lexicon's home, and reports each name once") {
+    root: "{path_case_sys.temp_dir()}/jet-path-case-{path_case_process.current_pid()}"
+    if path_case_files.exists(root) {
+        path_case_files.remove_all(root) ?? panic("clear {root}: {err}")
+    }
+    path_case_files.create_dir_all("{root}/Core/Net") ?? panic("create {root}: {err}")
+    path_case_files.write("{root}/Core/Net/Tls.jet", "tls: fn() {{}}\n") ?? panic("write: {err}")
+    path_case_files.write("{root}/Core/Net/Udp.jet", "udp: fn() {{}}\n") ?? panic("write: {err}")
+    outside: path_case_disk_findings([String]{"{root}/Core/Net/Tls.jet"})
+    assert(outside.len() == 0, "outside a repository the rule finds nothing, got {outside.len()}")
+    marker: "{root}/{PATH_CASE_LEXICON_PATH}"
+    path_case_files.create_dir_all("{root}/Compiler/JetFoundation/Data/Syntax") ?? panic("create marker folder: {err}")
+    path_case_files.write(marker, "// home\n") ?? panic("write marker: {err}")
+    placed: path_case_disk_findings([String]{"{root}/Core/Net/Tls.jet", "{root}/Core/Net/Udp.jet", "{root}/Core/Net/Tls.jet"})
+    path_case_files.remove_all(root) ?? panic("remove {root}: {err}")
+    assert(placed.len() == 2, "each lowered acronym is reported once, got {placed.len()}")
+    assert_eq(placed[0].named, "{root}/Core/Net/Tls.jet")
+    assert_eq(placed[0].finding.path, "Core/Net/Tls.jet")
+    assert_eq(placed[0].finding.spelled, "TLS.jet")
+    assert_eq(placed[1].finding.spelled, "UDP.jet")
+    diagnostic: path_case_diagnostic(placed[0].finding)
+    assert_eq(diagnostic.code, "L0536")
+    assert_eq(diagnostic.what, "`Core/Net/Tls.jet`: `Tls` writes an acronym in lowercase; write `TLS`")
+}

@@ -137,7 +137,7 @@ impl PackageFacts {
     }
 
     // Load and merge the root's declared Config files.
-    compose_configs: fn(&self, dir: String) -[FS, Env]> PackageParseError! {
+    compose_configs: fn(^self, dir: String) -[FS, Env]> PackageParseError! {
         resolver: AuthorityResolver.open(dir) ?? return Err(pkg_authority_package_error(err))
         directory: resolver.checked_directory(".") ?? return Err(pkg_authority_package_error(err))
         self.compose_configs_checked(resolver, directory)
@@ -145,7 +145,7 @@ impl PackageFacts {
 
     // Resolve every declared Config before changing any fact; a failure
     // leaves the facts (and `resolved_config_paths`) untouched.
-    compose_configs_checked: fn(&self, resolver: AuthorityResolver, directory: CheckedDirectory) -[FS, Env]> PackageParseError! {
+    compose_configs_checked: fn(^self, resolver: AuthorityResolver, directory: CheckedDirectory) -[FS, Env]> PackageParseError! {
         if resolver.revalidate_directory(directory) == .Err(error) {
             return Err(pkg_authority_package_error(error))
         }
@@ -382,7 +382,7 @@ impl PackageFacts {
         Ok(entry.file.move())
     }
 
-    command_entries: fn(self, resolver: AuthorityResolver, candidates: &&[CheckedFile], command: String) -[FS, Env]> [PackageFunctionEntry] PackageEntryError! {
+    command_entries: fn(self, resolver: AuthorityResolver, candidates: ^^[CheckedFile], command: String) -[FS, Env]> [PackageFunctionEntry] PackageEntryError! {
         if self.discover_function_entries_from_files(resolver, candidates, command, false, false) == {
             .Ok(found) -> Ok(found)
             .Err(error) -> Err(pkg_entry_error(self.origin, error.message()))
@@ -471,7 +471,7 @@ impl PackageFacts {
     // `build: fn` share the file set, scanner, and revalidation boundary. The
     // listing is taken: each file that declares `wanted` moves into the first
     // entry for it, and a further line in the same file names it by path.
-    discover_function_entries_from_files: fn(self, resolver: AuthorityResolver, source_files: &&[CheckedFile], wanted: String, exclude_imported: Bool, include_manifest: Bool) -[FS, Env]> [PackageFunctionEntry] AuthorityError! {
+    discover_function_entries_from_files: fn(self, resolver: AuthorityResolver, source_files: ^^[CheckedFile], wanted: String, exclude_imported: Bool, include_manifest: Bool) -[FS, Env]> [PackageFunctionEntry] AuthorityError! {
         candidates := source_files.move()
         if include_manifest {
             if resolver.checked_manifest(".") == {
@@ -575,7 +575,7 @@ pkg_path_under_any: fn(relative: String, directories: [String]) -> Bool Never! {
     false
 }
 
-pkg_sorted_checked_files: fn(input: &&[CheckedFile]) -> [CheckedFile] Never! {
+pkg_sorted_checked_files: fn(input: ^^[CheckedFile]) -> [CheckedFile] Never! {
     out := input.move()
     out.sort_by(fn(a, b) { a.relative <=> b.relative })
     out
@@ -627,7 +627,7 @@ pkg_discover_config_path: fn(resolver: AuthorityResolver, name: String) -[FS, En
 }
 
 // Compose Configs, then guarantees, defaults, and members (the `load` path).
-pkg_load_compose_and_validate: fn(facts: &PackageFacts, resolver: AuthorityResolver) -[FS, Env]> PackageParseError! {
+pkg_load_compose_and_validate: fn(facts: ^PackageFacts, resolver: AuthorityResolver) -[FS, Env]> PackageParseError! {
     directory: resolver.checked_directory(".") ?? return Err(pkg_authority_package_error(err))
     facts.compose_configs_checked(resolver, directory)
     facts.validate_guarantees()

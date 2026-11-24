@@ -118,7 +118,7 @@ sema_contract_result_mode: fn(carrier: Type, binding: Type) -> TContractResultMo
 
 // The binding local carries the symbol `#Post` reads of `result` resolve to,
 // so lowering binds the checked return value under that identity.
-sema_contract_result_for_function: fn(return_type: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String) -> TContractResult Never! {
+sema_contract_result_for_function: fn(return_type: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, owner: String) -> TContractResult Never! {
     carrier: sema_effective_return_type(return_type)
     binding: sema_contract_success_type(return_type)
     mode: sema_contract_result_mode(carrier, binding)
@@ -177,7 +177,7 @@ sema_contract_purity_diagnostic: fn(kind: String, span: Span) -> Diagnostic {
     sema_error("E0139", span, "a `#{kind}` condition can't do I/O", "a contract is checked at every call and must be a pure claim about values", "move the effect out; keep only a pure test")
 }
 
-sema_contract_check_pure_delta: fn(start: Int, context: SemaCheckContext, kind: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_contract_check_pure_delta: fn(start: Int, context: SemaCheckContext, kind: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool {
     valid := true
     loop index in start..<context.call_facts.len() {
         fact: context.call_facts[index]
@@ -189,7 +189,7 @@ sema_contract_check_pure_delta: fn(start: Int, context: SemaCheckContext, kind: 
     valid
 }
 
-sema_contract_merge_context_delta: fn(source: SemaCheckContext, call_start: Int, view_start: Int, name_start: Int, comptime_start: Int, copy_start: Int, destination: &SemaCheckContext) Never! {
+sema_contract_merge_context_delta: fn(source: SemaCheckContext, call_start: Int, view_start: Int, name_start: Int, comptime_start: Int, copy_start: Int, destination: ^SemaCheckContext) Never! {
     loop index in call_start..<source.call_facts.len() {
         destination.call_facts.push(source.call_facts[index])
     }
@@ -639,7 +639,7 @@ sema_contract_result_ident_in_expr: fn(expr: Expr) -> Span? {
 
 // `reads` gains the binding id of every name the condition reads: the check
 // runs on a snapshot of `state`, so the caller files those reads itself.
-sema_contract_check_expr: fn(expr: Expr, expected: Type, kind: String, forbid_result: Bool, check_purity: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, reads: &[U32:Bool], tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_contract_check_expr: fn(expr: Expr, expected: Type, kind: String, forbid_result: Bool, check_purity: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, reads: ^[U32:Bool], tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if forbid_result {
         if sema_contract_result_ident_in_expr(expr) == .Val(result_span) {
             diagnostics.push(sema_error("E0144", result_span, "`result` isn't available in a `#Pre` condition", "`result` names the return value, which only exists once the function has returned — a `#Pre` condition runs at entry, before there is one", "use `result` only in a `#Post` condition"))
@@ -799,14 +799,14 @@ sema_contract_make: fn(kind: TContractKind, condition: TExpr, message: TExpr, en
 // `owner` is the function owner key plus a `post` segment: a body local named
 // `result` lives in the function frame itself, so the contract binding needs
 // an identity of its own once both are lowered by symbol.
-sema_contract_result_binding_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String, ty: Type, span: Span) -> Symbol Never! {
+sema_contract_result_binding_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, owner: String, ty: Type, span: Span) -> Symbol Never! {
     result_owner: "{owner}/post"
     module_name: sema_scope_environment_module_text(environment, program)
     id: sema_symbol_id(program, context, SymbolKind.Local, module_name, result_owner, "result")
     Symbol{id: id, kind: SymbolKind.Local, name: "result", module_identity: environment.module_identity, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
 }
 
-sema_contract_check_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
+sema_contract_check_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaContractDeclaration {
     declared_return := func.return_type
     if program.registration_graph == .Val(graph) && declared_return == .Val(declared) {
         declared_return = Val(sema_type_resolve_declared_with_generics(graph, declared, environment.module_identity, environment.generic_params))
@@ -1053,14 +1053,14 @@ sema_contract_function_checks_calls: fn(environment: SemaScopeEnvironment, progr
     facts.call_checks > 0
 }
 
-sema_contract_generated_argument_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol Never! {
+sema_contract_generated_argument_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol Never! {
     name: "contract_arg_{span.start}_{index}"
     module_name: sema_scope_environment_module_text(environment, program)
     id: sema_symbol_id(program, context, SymbolKind.Local, module_name, owner, name)
     Symbol{id: id, kind: SymbolKind.Local, name: parameter_name, module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
-sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {
+sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: ^TCallArg, call_span: Span, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, bindings: ^[TStmt]) -> TLocal Never! {
     original := argument.value
     init := original
     local := checked_generated_local("contract_arg_{call_span.start}_{index}", call_span, original.ty)
@@ -1088,7 +1088,7 @@ sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaP
 // `target` is the callee's symbol: its clauses' declared sites are read in
 // the callee's own module (sema_contract_pre_sites). `recall` is the call
 // as written, which a `#Post` decided while building computes again.
-sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractRecall?, args: &[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractCall? {
+sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractRecall?, args: ^[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaContractCall? {
     any_required := false
     loop clause in func.pre {
         if clause.required -> any_required = true
@@ -1170,7 +1170,7 @@ sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractR
 // this call while building, by the one staged-value evaluator, over the
 // pinned arguments, once: the first check stages it, and the staged pass
 // reads its answer. One that holds needs no run-time check.
-sema_contract_required_answer: fn(marker: String, condition: Expr, source_span: Span, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: &SemaCheckContext) -> SemaContractAnswer {
+sema_contract_required_answer: fn(marker: String, condition: Expr, source_span: Span, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: ^SemaCheckContext) -> SemaContractAnswer {
     staged: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), source_span, call_span) ?? {
         _ := sema_comptime_body_capture(context, environment, program, scopes, marker, condition, Type.Bool, source_span, call_span)
         return sema_contract_answer(SemaContractVerdict.Staged)
@@ -1186,7 +1186,7 @@ sema_contract_required_answer: fn(marker: String, condition: Expr, source_span: 
 // building. `result` is the call's own value: the staged-value evaluator
 // computes `recall` again over the pinned arguments, keyed by the clause's
 // span, and a later check decides `cond` with `result` holding that value.
-sema_contract_required_post_answer: fn(func: Func, clause: ContractClause, recall: SemaContractRecall?, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, reads: &[U32:Bool], tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractAnswer {
+sema_contract_required_post_answer: fn(func: Func, clause: ContractClause, recall: SemaContractRecall?, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, reads: ^[U32:Bool], tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaContractAnswer {
     written: recall ?? return sema_contract_fails(None, "only a call by name is computed again while building, and this call goes through a method or a function value")
     // An unannotated callee keeps the default `Err!` until the bundle failure
     // solve settles it, so before the solve its call is computed like any
@@ -1248,14 +1248,14 @@ sema_contract_required_post_answer: fn(func: Func, clause: ContractClause, recal
 // rejects nothing, which a rule run that fails gives. A check without the
 // registration graph (a compile-time run's own program) hears no rule; the
 // compile's own check of the same call does.
-sema_contract_rule_hears: fn(marker: String, callee: String, answer: SemaContractAnswer, target: SymbolID, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_contract_rule_hears: fn(marker: String, callee: String, answer: SemaContractAnswer, target: SymbolID, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     if answer.verdict == SemaContractVerdict.Fails && program.registration_graph == .Val(graph) {
         rule: sema_contract_rule(graph, marker, callee, answer.condition, answer.reason)
         owner: sema_scope_function_owner_key(scopes)
         if sema_comptime_body_value_find(context, environment.module_identity, owner, rule.span, call_span) == .Val(landed) {
             return !sema_call_rule_rejects(landed.value, call_span, diagnostics)
         }
-        call: sema_rule_call_value(Val(target), callee, call_span, call_span, [CallArg]{}, None, None, call_span, owner, environment, program, scopes, state, tail_store, context)
+        call: sema_rule_call_value(graph, Val(target), callee, call_span, call_span, [CallArg]{}, None, None, call_span, owner, environment, program, scopes, state, tail_store, context)
         sema_call_rule_stage(context, environment, owner, rule, call, call_span)
     }
     true

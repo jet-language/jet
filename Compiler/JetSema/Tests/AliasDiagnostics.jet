@@ -45,7 +45,7 @@ FILE_MODULE_PACKAGE: "source-root:user"
 // The diagnostics for `main_source`, a module whose `use geo` imports the
 // file module `geo_source` beside it. Both sit in a source root, whose
 // modules keep their `priv` declarations to themselves.
-file_module_diagnostics: fn(main_source: &&String, geo_source: &&String) -> [Diagnostic] {
+file_module_diagnostics: fn(main_source: ^^String, geo_source: ^^String) -> [Diagnostic] {
     table := module_table()
     main_id: module_intern(table, "user/main")
     geo_id: module_intern(table, "user/geo")
@@ -81,7 +81,7 @@ file_module_diagnostics: fn(main_source: &&String, geo_source: &&String) -> [Dia
 // The coded reports of file_module_diagnostics. Finalization repeats the
 // declaration pass's reports beside its own (`jet check` shows each once), so
 // a row repeated is listed once.
-file_module_reports: fn(main_source: &&String, geo_source: &&String) -> String {
+file_module_reports: fn(main_source: ^^String, geo_source: ^^String) -> String {
     rows := [String]{}
     loop diagnostic in file_module_diagnostics(main_source.move(), geo_source.move()) {
         row: "{diagnostic.code}: {diagnostic.what}"
@@ -91,7 +91,7 @@ file_module_reports: fn(main_source: &&String, geo_source: &&String) -> String {
 }
 
 // Where each E0605 of file_module_diagnostics points, as `start..end`.
-file_module_private_spans: fn(main_source: &&String) -> String {
+file_module_private_spans: fn(main_source: ^^String) -> String {
     rows := [String]{}
     loop diagnostic in file_module_diagnostics(main_source.move(), secret_geo_source()) {
         if diagnostic.code != "E0605" -> next

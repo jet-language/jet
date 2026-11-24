@@ -113,7 +113,8 @@ and source history for work tracking and recovery.
 
 Every folder is TitleCase and writes acronyms in capitals (`Tests/`,
 `Compiler/JetCLI/`). Jet module folders and data trees keep the names their
-tools require; `Tests/Guards/acronym_path_case.jet` enforces the rule. Keep the top level small: new tooling goes under
+tools require; `jet check` reports a name that breaks the rule
+(Jet.AcronymPathCase) and `Tests/Guards/AcronymPathCase` enforces it. Keep the top level small: new tooling goes under
 `Tools/`, new documentation under `Docs/`. Never commit build output, scratch
 files, or one-off run artifacts.
 

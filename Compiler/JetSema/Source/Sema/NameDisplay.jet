@@ -7,17 +7,17 @@ sema_name_strip_prefix: fn(name: String, prefix: String) -> String Never! {
     name.slice(prefix.len(), name.len())
 }
 
-sema_name_display_add: fn(facts: &NameFacts, module_index: Int, module_alias: String, internal: String, display: String) Never! {
+sema_name_display_add: fn(facts: ^NameFacts, module_index: Int, module_alias: String, internal: String, display: String) Never! {
     facts.display_paths.push(NameDisplayPath{module_index: module_index, internal_path: "{module_alias}.{internal}", display_path: display})
 }
 
-sema_name_display_methods: fn(facts: &NameFacts, module_index: Int, module_alias: String, internal: String, display: String, methods: [Func]) Never! {
+sema_name_display_methods: fn(facts: ^NameFacts, module_index: Int, module_alias: String, internal: String, display: String, methods: [Func]) Never! {
     loop method in methods {
         sema_name_display_add(facts, module_index, module_alias, "{internal}.{method.name}", "{display}.{method.name}")
     }
 }
 
-sema_name_display_item: fn(facts: &NameFacts, module_index: Int, module_alias: String, scope: String, internal_prefix: String, display_prefix: String, item: Item) Never! {
+sema_name_display_item: fn(facts: ^NameFacts, module_index: Int, module_alias: String, scope: String, internal_prefix: String, display_prefix: String, item: Item) Never! {
     type_prefix: sema_inline_type_prefix(scope)
     value_prefix: sema_genmod_value_name(scope, "")
     if item == {
@@ -95,7 +95,7 @@ sema_name_display_selected: fn(item: Item, type_prefix: String, value_prefix: St
     }
 }
 
-sema_name_plain_display_paths: fn(facts: &NameFacts, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
+sema_name_plain_display_paths: fn(facts: ^NameFacts, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
     scope: sema_inline_type_alias(source_path)
     type_prefix: sema_inline_type_prefix(scope)
     loop item in items {
@@ -112,7 +112,7 @@ sema_name_plain_display_paths: fn(facts: &NameFacts, module_index: Int, module_a
     }
 }
 
-sema_name_add_display_paths: fn(facts: &NameFacts, module_index: Int, module_alias: String, items: [Item]) Never! {
+sema_name_add_display_paths: fn(facts: ^NameFacts, module_index: Int, module_alias: String, items: [Item]) Never! {
     loop item in items {
         if item == .CodeModule(instance) {
             if instance.instance_identity != None {
@@ -139,7 +139,7 @@ sema_name_add_display_paths: fn(facts: &NameFacts, module_index: Int, module_ali
 // The file-level types `items` holds that a module spelled `display` lifted
 // under `scope`'s compiler-owned prefix, each keyed by its generated name
 // (`M3GeoPoint` -> `geo.Point`, sema_name_lifted_under).
-sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, paths: &[String:String]) Never! {
+sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, paths: ^[String:String]) Never! {
     type_prefix: sema_inline_type_prefix(scope)
     loop item in items {
         name := ""
@@ -159,7 +159,7 @@ sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, p
     }
 }
 
-sema_name_plain_type_paths: fn(code_module: CodeModule, source_path: String, items: [Item], paths: &[String:String]) Never! {
+sema_name_plain_type_paths: fn(code_module: CodeModule, source_path: String, items: [Item], paths: ^[String:String]) Never! {
     sema_name_lifted_type_paths(items, sema_inline_type_alias(source_path), source_path, paths)
     if code_module.body == .Val(body) {
         loop item in body {
@@ -173,7 +173,7 @@ sema_name_plain_type_paths: fn(code_module: CodeModule, source_path: String, ite
 // Every lifted inline-module and generic-module-instance type of one
 // module's items, keyed by its generated name, the same projection
 // sema_name_add_display_paths records for tooling.
-sema_name_generated_type_paths: fn(items: [Item], paths: &[String:String]) Never! {
+sema_name_generated_type_paths: fn(items: [Item], paths: ^[String:String]) Never! {
     loop item in items {
         if item == .CodeModule(instance) {
             if {
@@ -255,7 +255,7 @@ sema_name_type_leaf: fn(items: [Item], name: String) -> String Never! {
 
 // The path of every module with a body in `items`' module tree (`outer`,
 // `outer.inner`), as the lifted member identities spell them.
-sema_name_module_paths: fn(items: [Item], prefix: String, paths: &[String]) Never! {
+sema_name_module_paths: fn(items: [Item], prefix: String, paths: ^[String]) Never! {
     loop item in items {
         if item == .CodeModule(child) {
             if child.body == .Val(body) {
@@ -272,7 +272,7 @@ sema_name_module_paths: fn(items: [Item], prefix: String, paths: &[String]) Neve
 // source path (`__jet_loud_dtotal` -> `loud.total`). The identity is matched
 // by re-encoding, never decoded: a module name such as `my_data` keeps its
 // underscores unescaped there, so decoding it would misread `_d` as `.`.
-sema_name_lifted_function_paths: fn(items: [Item], paths: &[String:String]) Never! {
+sema_name_lifted_function_paths: fn(items: [Item], paths: ^[String:String]) Never! {
     modules := [String]{}
     sema_name_module_paths(items, "", modules)
     if modules.len() == 0 {
@@ -338,7 +338,7 @@ sema_name_display_text: fn(text: String, paths: [String:String]) -> String Never
 // compiler-owned name (`boxed.Entry` -> `M5BoxedEntry`) that the type checks
 // print, and a lifted function its member identity (`__jet_boxed_dput`);
 // every diagnostic names both by their source paths instead.
-sema_name_display_diagnostics: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
+sema_name_display_diagnostics: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) Never! {
     if diagnostics.len() == 0 {
         return
     }
@@ -423,7 +423,7 @@ sema_name_template_first_span: fn(items: [Item], definition_id: String) -> Span?
 // `:`) is about the template text the edit rewrites for every instance, so it
 // stays at that text; a non-error one is reported once, by the template's
 // first instance.
-sema_name_at_instance: fn(diagnostic: &&Diagnostic, instance: SemaNameInstance) -> Diagnostic? Never! {
+sema_name_at_instance: fn(diagnostic: ^^Diagnostic, instance: SemaNameInstance) -> Diagnostic? Never! {
     original: diagnostic.span ?? return Val(diagnostic)
     if original.start >= instance.span.start && original.end <= instance.span.end -> return Val(diagnostic)
     if diagnostic.edit != None {

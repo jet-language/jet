@@ -28,7 +28,7 @@ use {
 }
 
 // copy: SharedCycleParity's shared_cycle_diagnostics, under this package name.
-hole_header_errors: fn(failures: &[String], source: String) -> [Diagnostic]? {
+hole_header_errors: fn(failures: ^[String], source: String) -> [Diagnostic]? {
     parsed := parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> return Val(parsed.diagnostics.move())
     table := module_table()
@@ -81,14 +81,14 @@ hole_header_applied: fn(source: String, diagnostic: Diagnostic) -> String {
     text
 }
 
-hole_header_clean: fn(failures: &[String], source: String) {
+hole_header_clean: fn(failures: ^[String], source: String) {
     errors: hole_header_errors(failures, source) ?? return
     loop error in errors -> failures.push("unexpected {error.code}: {error.what} in {source}")
 }
 
 // One error `code` whose what and fix hold `what` and `fix`. `applied` is the
 // source with its fix applied, or "" when the fix has no edit.
-hole_header_expect: fn(failures: &[String], source: String, code: String, what: String, fix: String, applied: String) {
+hole_header_expect: fn(failures: ^[String], source: String, code: String, what: String, fix: String, applied: String) {
     errors: hole_header_errors(failures, source) ?? return
     if errors.len() != 1 {
         codes := [String]{}
@@ -116,7 +116,7 @@ hole_header_expect: fn(failures: &[String], source: String, code: String, what: 
 
 HOLE_NOISY: "noisy: fn(n: Int) -> Int {{\n    print(\"checking {{n}}\")\n    n\n}}\n"
 
-HOLE_GROW: "grow: fn(items: &[Int]) -> Int {{\n    items.push(0)\n    items.len()\n}}\n"
+HOLE_GROW: "grow: fn(items: ^[Int]) -> Int {{\n    items.push(0)\n    items.len()\n}}\n"
 
 HOLE_ARMS: " {{\n        4 -> print(\"four\")\n        else -> print(\"other\")\n    }}\n}}\n"
 

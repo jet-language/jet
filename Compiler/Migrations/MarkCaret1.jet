@@ -1,0 +1,248 @@
+// Toolchain a0.0.47: the write mark is `^` and the take mark is `^^`, so each
+// `&` that marks a write and each `&&` that marks a take becomes one, in every
+// position: a parameter or field type (`xs: &[Int]`), a receiver and its
+// footprint (`&self.[a, b]`), a function type's parameter (`fn(&&Words)`), a
+// lambda's parameter, a call argument (`grow(&xs)`), a receiver mark at the
+// start of a line (`&xs.push(4)`), a window (`edit: &xs[a..<b]`), a written
+// match subject (`if &shape == {…}`) and a task capture (`task &&name`).
+// `&` and `&&` keep their operator meanings, so a sign is a mark when its
+// line before it is blank or ends in a keyword (`if`, `in`, `task`,
+// `return`, ...) or in a byte a mark follows (`(`, `,`, `:`, `=`, `[`, `{`,
+// `<`, `>`, a code span's backtick), and a name, `[` or `(` follows it at
+// once. Each rewrite keeps the sign's width (`&` to `^`, `&&` to `^^`), so
+// every offset and column stays where it was. The plan reads the lexer's
+// tokens: a Jet source's code, its plain and raw strings whole (the Jet they
+// quote) and the code spans of its comments; a string that quotes C or Rust
+// stays as written. A Markdown file's ```jet fences are read whole and its
+// prose by code spans; a case file's comment lines are read by code spans
+// and its other lines whole; any other text, such as an expected output or a
+// diagnostic snapshot, is read whole. A run of three or more signs, an HTML
+// entity (`&amp;`) and Rust's `&mut` stay as written.
+use {
+    jet_lexer.[lex_generated, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING]
+}
+
+// The words after which a sign starts an operand rather than continuing one.
+MARK_CARET1_KEYWORDS: [String]{"task", "if", "return", "in", "else", "match", "yield", "then", "for", "while", "and", "or", "not", "break", "defer"}
+
+// Text that only C or Rust quoted in a string or a code span holds.
+MARK_CARET1_FOREIGN: [String]{"#include", "#[", "(void)", "int64_t", "static ", "pthread_", "memcpy(", "::", "let mut ", "&str", "JNIEnv"}
+
+// Rewrites the marks of one file: a Jet source (`source`, or a `.jet` or
+// `.template` path), a Markdown file, or any other text.
+mark_caret1_file: fn(path: String, text: String, source: Bool) -> MigrationOutcome {
+    if !text.contains("&") {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    bytes := text.bytes()
+    count: if {
+        source || path.ends_with(".jet") || path.ends_with(".template") -> mark_caret1_source(bytes)
+        path.ends_with(".md") -> mark_caret1_markdown(bytes)
+        path.ends_with(".case") -> mark_caret1_case(bytes)
+        else -> mark_caret1_text(bytes, 0, bytes.len())
+    }
+    if count == 0 {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    MigrationOutcome{text: String.from_bytes(bytes) ?? panic("{path}: the rewrite is not UTF-8"), rewritten: count, skipped: [String]{}}
+}
+
+// A Jet source by its tokens: each sign in code, each string's contents
+// whole and each comment's code spans.
+mark_caret1_source: fn(bytes: ^[U8]) -> Int {
+    lexed: lex_generated(bytes.copy())
+    count := 0
+    loop token in lexed.tokens {
+        kind: token.kind
+        if {
+            kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> count += mark_caret1_spans(bytes, token.span.start, token.span.end)
+            kind == TOKEN_STRING || kind == TOKEN_RAW_STRING -> count += mark_caret1_quoted(bytes, token.span.start, token.span.end)
+            kind == TOKEN_AMP || kind == TOKEN_AND_AND -> count += mark_caret1_code(bytes, token.span.start, token.span.end - token.span.start)
+            else -> {}
+        }
+    }
+    count
+}
+
+// One sign in code, read against the rest of its line.
+mark_caret1_code: fn(bytes: ^[U8], at: Int, width: Int) -> Int {
+    line := at
+    loop line > 0 && bytes[line - 1] != 10 -> line -= 1
+    if !mark_caret1_is_mark(bytes, at, width, line, bytes.len()) -> return 0
+    loop index in at..<(at + width) -> bytes[index] = U8{94}
+    1
+}
+
+// A string literal's contents, between its run of opening quote bytes and
+// the matching closing run.
+mark_caret1_quoted: fn(bytes: ^[U8], start: Int, end: Int) -> Int {
+    quote := 0
+    loop start + quote < end && bytes[start + quote] == bytes[start] -> quote += 1
+    if end - start < quote * 2 -> return 0
+    mark_caret1_quoted_jet(bytes, start + quote, end - quote)
+}
+
+// Quoted text from `lo` to `hi` read whole, unless it quotes C or Rust.
+mark_caret1_quoted_jet: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
+    contents: mark_caret1_word(bytes, lo, hi)
+    if MARK_CARET1_FOREIGN.any(fn(foreign) { contents.contains(foreign) }) -> return 0
+    mark_caret1_text(bytes, lo, hi)
+}
+
+// A case file line by line: a `#` comment line by its code spans, any other
+// line whole.
+mark_caret1_case: fn(bytes: ^[U8]) -> Int {
+    count := 0
+    start := 0
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != 10 -> end += 1
+        comment: mark_caret1_word(bytes, start, end).trim_start().starts_with("#")
+        count += if comment -> mark_caret1_spans(bytes, start, end) else -> mark_caret1_quoted_jet(bytes, start, end)
+        start = end + 1
+    }
+    count
+}
+
+// Each sign from `lo` to `hi` that is a mark, read with `lo` as the start of
+// its text; returns how many it rewrote.
+mark_caret1_text: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
+    count := 0
+    index := lo
+    loop index < hi {
+        if bytes[index] != 38 {
+            index += 1
+            next
+        }
+        run := index
+        loop run < hi && bytes[run] == 38 -> run += 1
+        width: run - index
+        if width <= 2 && mark_caret1_is_mark(bytes, index, width, lo, hi) {
+            loop at in index..<run -> bytes[at] = U8{94}
+            count += 1
+        }
+        index = run
+    }
+    count
+}
+
+// Whether the sign of `width` at `at` is a mark: a name, `[` or `(` follows
+// it at once, and nothing before it on its line (back to `lo`) ends an
+// operand, a keyword aside. A sign alone in a code span (`&`) is a mark
+// unless its line speaks of operators.
+mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int) -> Bool {
+    after: at + width
+    if at > 0 && bytes[at - 1] == 96 && after < bytes.len() && bytes[after] == 96 {
+        return mark_caret1_bare_mark(bytes, at)
+    }
+    if after >= hi -> return false
+    next_byte: bytes[after]
+    if next_byte == 91 || next_byte == 40 {
+        return mark_caret1_starts_operand(bytes, at, lo)
+    }
+    if !mark_caret1_name_byte(next_byte) || (next_byte >= 48 && next_byte <= 57) -> return false
+    word_end := after
+    loop word_end < hi && mark_caret1_name_byte(bytes[word_end]) -> word_end += 1
+    // An HTML entity (`&amp;`) and Rust's `&mut` are not Jet.
+    if word_end < hi && bytes[word_end] == 59 -> return false
+    if mark_caret1_word(bytes, after, word_end) == "mut" -> return false
+    mark_caret1_starts_operand(bytes, at, lo)
+}
+
+// The words of a line that names `&` or `&&` as an operator rather than as
+// a mark.
+MARK_CARET1_OPERATOR_WORDS: [String]{"`||`", "`|`", "`&~`", "`!`", "logical", "bit", "Bit", "operator", "condition", "short-circuit", "AND", "conjunction", "Bool", "chain"}
+
+// Whether a sign alone in a code span at `at` is a mark: its line names no
+// operator.
+mark_caret1_bare_mark: fn(bytes: [U8], at: Int) -> Bool {
+    start := at
+    loop start > 0 && bytes[start - 1] != 10 -> start -= 1
+    end := at
+    loop end < bytes.len() && bytes[end] != 10 -> end += 1
+    line: mark_caret1_word(bytes, start, end)
+    !MARK_CARET1_OPERATOR_WORDS.any(fn(word) { line.contains(word) })
+}
+
+// Whether a sign at `at` starts an operand: the line before it, back to
+// `lo` or a quoted line break (`\n`), is blank, or ends in a keyword or in a
+// byte a mark follows: `(`, `,`, `:`, `=`, `[`, `{`, `<`, `>` (`->`) or the
+// backtick opening a code span. Any other byte, such as an operand's end or a
+// query string's `=***`, makes the sign an operator or plain text.
+mark_caret1_starts_operand: fn(bytes: [U8], at: Int, lo: Int) -> Bool {
+    before := at - 1
+    loop before >= lo && (bytes[before] == 32 || bytes[before] == 9) -> before -= 1
+    if before < lo || bytes[before] == 10 -> return true
+    last: bytes[before]
+    if mark_caret1_name_byte(last) {
+        start := before
+        loop start > lo && mark_caret1_name_byte(bytes[start - 1]) -> start -= 1
+        // A quoted escape (`\n`, `\t`) ends a line or a gap, not a word.
+        if start > lo && bytes[start - 1] == 92 -> start += 1
+        if start > before -> return true
+        return MARK_CARET1_KEYWORDS.contains(mark_caret1_word(bytes, start, before + 1))
+    }
+    if last == 61 && before > lo && !(bytes[before - 1] == 58 || bytes[before - 1] == 32 || bytes[before - 1] == 9) {
+        return false
+    }
+    last == 40 || last == 44 || last == 58 || last == 61 || last == 91 || last == 123 || last == 60 || last == 62 || last == 96
+}
+
+mark_caret1_name_byte: fn(byte: U8) -> Bool {
+    (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 95
+}
+
+mark_caret1_word: fn(bytes: [U8], start: Int, end: Int) -> String {
+    String.from_bytes(bytes[start..<end]) ?? ""
+}
+
+// The code spans from `lo` to `hi`, each read whole unless it quotes C or
+// Rust: the bytes between two single backticks on one line.
+mark_caret1_spans: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
+    count := 0
+    index := lo
+    loop index < hi {
+        if bytes[index] != 96 {
+            index += 1
+            next
+        }
+        run := index
+        loop run < hi && bytes[run] == 96 -> run += 1
+        if run - index != 1 {
+            index = run
+            next
+        }
+        close := index + 1
+        loop close < hi && bytes[close] != 96 && bytes[close] != 10 -> close += 1
+        if close >= hi || bytes[close] != 96 {
+            index = close
+            next
+        }
+        count += mark_caret1_quoted_jet(bytes, index + 1, close)
+        index = close + 1
+    }
+    count
+}
+
+// A Markdown file: each ```jet fence is read whole and each line of prose by
+// its code spans. Other fences stay as written.
+mark_caret1_markdown: fn(bytes: ^[U8]) -> Int {
+    count := 0
+    start := 0
+    // Inside a fence: 1 for a ```jet fence, 2 for any other; 0 outside.
+    fence := 0
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != 10 -> end += 1
+        trimmed: mark_caret1_word(bytes, start, end).trim()
+        if {
+            fence != 0 && trimmed == "```" -> fence = 0
+            fence == 1 -> count += mark_caret1_text(bytes, start, end)
+            fence == 2 -> {}
+            trimmed.starts_with("```") -> fence = if trimmed == "```jet" || trimmed.starts_with("```jet ") -> 1 else -> 2
+            else -> count += mark_caret1_spans(bytes, start, end)
+        }
+        start = end + 1
+    }
+    count
+}

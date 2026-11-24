@@ -84,7 +84,7 @@ diagnostic summary; syntax-only receipts do not establish borrow correctness.
 A held stage0-only job being READY means it is prepared for scheduling, not
 that its semantic check passed. In Codegen poll and comptime-budget emission,
 `span := builder.current_span` snapshots the source span before write-access to
-`&builder`; `span:` would retain a builder view across those mutations.
+`^builder`; `span:` would retain a builder view across those mutations.
 
 Runtime process-edge fixtures decode the committed Trap/Scheduler report
 literals (static texts, or signed little-endian I64 word rows) through one
@@ -950,7 +950,7 @@ use `'static`. The [borrowed view example](../../Tests/Run/Ownership/BorrowedVie
 covers a multi-parameter return, chained and stored length reads, indexing,
 and iteration without converting the borrowed slice to a list.
 
-Read-only text and collection leaves accept `&str`, whether the checked caller
+Read-only text and collection leaves accept `^str`, whether the checked caller
 holds an owned String or a sema-proven String view. Both Rust emitters lend
 that carrier directly to builtin receivers and operands; they do not
 materialize a view for those reads. A leaf that stores text owns it at that
@@ -1737,7 +1737,7 @@ Cargo runs, so helpers that share a target build at once. A helper with
 dependencies reads the host Cargo registry through a memory-backed bubblewrap
 overlay (`--overlay-src`/`--tmp-overlay`, bubblewrap 0.11 or newer, checked by
 the backend probe): Cargo's writes end with the sandbox and nothing is copied.
-A raw `extern rust` call whose parameter takes `&` or `&&` is a sema error
+A raw `extern rust` call whose parameter takes `^` or `^^` is a sema error
 (`E0702`) outside `#Unsafe`, so it fails before any Cargo work.
 `check`, `run` and `build` share this realization and its
 `E0703`/`E0704`/`E0705` errors, including canonical declaration hints and separate
@@ -1858,7 +1858,7 @@ publishes the entry module's checked C surface, and `#Import(c)` names a C
 function that the library calls. This follows D-ADOPT-GUEST1=A: both directions
 use the same sema-owned C-safe type law. D-FFI-UNIFY1=A keeps the generated
 bridge, descriptor, and native symbol as one mechanism. Where a declaration
-uses D-FFI-CAP1=A, `&` is exclusive for that call and `&&` transfers ownership;
+uses D-FFI-CAP1=A, `^` is exclusive for that call and `^^` transfers ownership;
 the host must obey that declaration rather than infer ownership from a header.
 An `#Import(c)` that names one of the Jet runtime's own C exports (the generated
 RUNTIME_C_EXPORTS table) must be an audited `#[Import(c), Unsafe("…")]`
@@ -2004,9 +2004,15 @@ under the compiler-speed method below.
 end, not a second checker. `Compiler/JetQueries` is a demand cache
 for file inputs and derived query values. The bounded loader prepares open or
 discovered sources with at most eight workers and consumes them in stable
-order. The server answers requests one at a time in arrival order, so a
-`$/cancelRequest` always names a request that has already been answered and
-is ignored. D-LSP2 requires every advertised LSP feature to have named coverage
+order. The server is single-threaded and answers requests one at a time in
+arrival order. Before answering a request, it reads, without waiting, all
+input that has already arrived (`core.term.take_within` with a zero wait,
+journaled like every stdin read) and frames each complete message into its
+queue. A request whose `$/cancelRequest` is already queued is answered with
+RequestCancelled (-32800) without running. A request that has started runs
+to its end, and a later cancel of it is ignored. A document whose newer edit
+is queued is not published until that edit is applied. D-LSP2 requires
+every advertised LSP feature to have named coverage
 in `Compiler/JetLSP/Tests/LSP/` or `Tests/Cases/LSP/`; the server must
 not advertise speculative features.
 

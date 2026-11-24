@@ -20,7 +20,7 @@ provider_producer_record: fn(provider: String, immutable_source: String, source_
 // additive typed facts with one provenance source. The two carrier fields are
 // left out of that native document so cache and lock refreshes never grow it
 // recursively.
-provider_refresh_provider_facts: fn(producer: &ProducerRecord, reference: String) ProviderError! {
+provider_refresh_provider_facts: fn(producer: ^ProducerRecord, reference: String) ProviderError! {
     carriers: [String]{PROVIDER_SHARED_FACTS, PROVIDER_SHARED_FACTS_DIGEST}
     native := producer
     native.facts = provider_without_keys(producer.facts, carriers)

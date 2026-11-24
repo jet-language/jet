@@ -43,7 +43,7 @@ LSPFixtureChecker: struct {
             LSPChecked{diagnostics: diagnostics, modules: modules, index: Val(index), symbols: symbols}
         }
 
-        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+        stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
             bytes := [U8]{}
             loop overlay in overlays.move() {
                 if overlay.path == entry -> bytes = overlay.source.bytes()
@@ -68,7 +68,7 @@ LSPFixtureChecker: struct {
             answers
         }
 
-        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             sites := [Int]{}
             loop overlay in overlays {
                 if overlay.path != entry -> next
@@ -122,7 +122,7 @@ lsp_test_json: fn(text: String) -> Dyn Never! {
 lsp_test_server: fn() -> LSPServer Never! { lsp_server(LSPFixtureChecker{}) }
 
 // Opens `text` at `uri` as version 1, unpublished.
-lsp_test_open: fn(server: &LSPServer, uri: String, text: String) Never! {
+lsp_test_open: fn(server: ^LSPServer, uri: String, text: String) Never! {
     params: lsp_test_json("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"languageId\":\"jet\",\"version\":1,\"text\":{foundation_json_quote(text)}}}}}")
     assert_eq(lsp_update_document(server.diagnostic_state, Val(params), is_open: true), Val(uri))
 }
@@ -135,21 +135,21 @@ lsp_test_main_server: fn() -> LSPServer Never! {
 }
 
 // Records the document's check as its publication, as didOpen does.
-lsp_test_publish: fn(server: &LSPServer, uri: String) {
+lsp_test_publish: fn(server: ^LSPServer, uri: String) {
     doc: server.diagnostic_state.docs.get(uri) ?? panic("{uri} is not open")
     server.published[uri] = server.check(doc)
 }
 
 // The whole response to one request with id 1.
-lsp_test_response: fn(server: &LSPServer, method: String, params: String) -> Dyn {
+lsp_test_response: fn(server: ^LSPServer, method: String, params: String) -> Dyn {
     lsp_test_json(lsp_handle_request(server, method, Val(lsp_test_json(params)), Dyn.Int(1)))
 }
 
-lsp_test_result: fn(server: &LSPServer, method: String, params: String) -> Dyn {
+lsp_test_result: fn(server: ^LSPServer, method: String, params: String) -> Dyn {
     lsp_member(lsp_test_response(server, method, params), "result") ?? panic("{method} answered without a result")
 }
 
-lsp_test_error_code: fn(server: &LSPServer, method: String, params: String) -> Int {
+lsp_test_error_code: fn(server: ^LSPServer, method: String, params: String) -> Int {
     error: lsp_member(lsp_test_response(server, method, params), "error") ?? panic("{method} answered without an error")
     lsp_test_int(error, "code")
 }

@@ -465,13 +465,13 @@ ProtoParser: struct {
         }
     }
 
-    take_word: fn(&self, what: String) -> String DataBindError! {
+    take_word: fn(^self, what: String) -> String DataBindError! {
         word: self.word_at(0) ?? return Err(DataBindError{message: "proto expected {what}"})
         self.pos += 1
         Ok(word)
     }
 
-    take_string: fn(&self, what: String) -> String DataBindError! {
+    take_string: fn(^self, what: String) -> String DataBindError! {
         token: self.token_at(0) ?? return Err(DataBindError{message: "proto expected {what}"})
         if token == {
             .StringLiteral(value) -> {
@@ -482,7 +482,7 @@ ProtoParser: struct {
         }
     }
 
-    expect_symbol: fn(&self, expected: String, what: String) DataBindError! {
+    expect_symbol: fn(^self, expected: String, what: String) DataBindError! {
         if !self.symbol_at(0, expected) {
             return Err(DataBindError{message: "proto expected {what}"})
         }
@@ -491,7 +491,7 @@ ProtoParser: struct {
 
     // `[.]segment(.segment)*`; a keyword segment is allowed only when it is
     // a scalar type name.
-    parse_type_name: fn(&self) -> String DataBindError! {
+    parse_type_name: fn(^self) -> String DataBindError! {
         name := ""
         if self.symbol_at(0, ".") {
             name = "."
@@ -513,7 +513,7 @@ ProtoParser: struct {
         Ok(name)
     }
 
-    parse_qualified_name: fn(&self, what: String) -> String DataBindError! {
+    parse_qualified_name: fn(^self, what: String) -> String DataBindError! {
         first: self.take_word(what)
         if !pkg_data_is_proto_identifier(first) {
             return Err(DataBindError{message: "proto name {first} is invalid"})
@@ -531,7 +531,7 @@ ProtoParser: struct {
     }
 
     // `name` or `(custom.name).field...`.
-    parse_option_name: fn(&self) -> String DataBindError! {
+    parse_option_name: fn(^self) -> String DataBindError! {
         if !self.symbol_at(0, "(") -> return self.parse_qualified_name("an option name")
         self.pos += 1
         qualified: self.parse_qualified_name("an option name")
@@ -548,7 +548,7 @@ ProtoParser: struct {
         Ok(name)
     }
 
-    parse_option_value: fn(&self) -> ProtoOptionValue DataBindError! {
+    parse_option_value: fn(^self) -> ProtoOptionValue DataBindError! {
         if self.symbol_at(0, "{{") {
             self.pos += 1
             loop !self.symbol_at(0, "}}") {
@@ -617,21 +617,21 @@ ProtoParser: struct {
         }
     }
 
-    parse_option_assignment: fn(&self) -> {name: String, value: ProtoOptionValue} DataBindError! {
+    parse_option_assignment: fn(^self) -> {name: String, value: ProtoOptionValue} DataBindError! {
         name: self.parse_option_name()
         self.expect_symbol("=", "an option equals sign")
         value: self.parse_option_value()
         Ok({name: name, value: value})
     }
 
-    parse_option_statement: fn(&self) -> {name: String, value: ProtoOptionValue} DataBindError! {
+    parse_option_statement: fn(^self) -> {name: String, value: ProtoOptionValue} DataBindError! {
         _: self.take_word("option")
         assignment: self.parse_option_assignment()
         self.expect_symbol(";", "an option semicolon")
         Ok(assignment)
     }
 
-    parse_field_options: fn(&self) DataBindError! {
+    parse_field_options: fn(^self) DataBindError! {
         self.expect_symbol("[", "field options")
         if self.symbol_at(0, "]") {
             return Err(DataBindError{message: "proto field options cannot be empty"})
@@ -650,7 +650,7 @@ ProtoParser: struct {
         }
     }
 
-    parse_integer: fn(&self, what: String, signed: Bool) -> Int DataBindError! {
+    parse_integer: fn(^self, what: String, signed: Bool) -> Int DataBindError! {
         sign := 1
         if signed && (self.symbol_at(0, "+") || self.symbol_at(0, "-")) {
             if self.symbol_at(0, "-") -> sign = -1
@@ -670,7 +670,7 @@ ProtoParser: struct {
         Ok(value * sign)
     }
 
-    parse_reserved: fn(&self, signed: Bool, maximum: Int) -> ProtoReserved DataBindError! {
+    parse_reserved: fn(^self, signed: Bool, maximum: Int) -> ProtoReserved DataBindError! {
         _: self.take_word("reserved")
         reserved := ProtoReserved.empty()
         loop {
@@ -732,7 +732,7 @@ ProtoParser: struct {
         }
     }
 
-    parse_extensions: fn(&self) DataBindError! {
+    parse_extensions: fn(^self) DataBindError! {
         _: self.take_word("extensions")
         loop {
             start: self.parse_integer("an extension number", false)
@@ -759,7 +759,7 @@ ProtoParser: struct {
         }
     }
 
-    parse_field: fn(&self) -> ProtoField DataBindError! {
+    parse_field: fn(^self) -> ProtoField DataBindError! {
         label: pkg_ascii_lower(self.word_at(0) ?? "")
         repeated := false
         optional := false
@@ -807,14 +807,14 @@ ProtoParser: struct {
         Ok(ProtoField{wire_name: wire_name, type_name: type_name, repeated: repeated, optional: optional, number: number})
     }
 
-    declare_message: fn(&self, source_name: String) DataBindError! {
+    declare_message: fn(^self, source_name: String) DataBindError! {
         if self.enum_names.contains(source_name) || self.message_names.contains(source_name) {
             return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
         }
         self.message_names.push(source_name.copy())
     }
 
-    declare_enum: fn(&self, source_name: String) DataBindError! {
+    declare_enum: fn(^self, source_name: String) DataBindError! {
         if self.message_names.contains(source_name) || self.enum_names.contains(source_name) {
             return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
         }
@@ -832,7 +832,7 @@ ProtoParser: struct {
         }
     }
 
-    parse_message: fn(&self, parent: String?) -> String DataBindError! {
+    parse_message: fn(^self, parent: String?) -> String DataBindError! {
         _: self.take_word("message")
         short_name: self.take_word("a message name")
         if !pkg_data_is_proto_identifier(short_name) || pkg_data_is_proto_keyword(short_name) {
@@ -919,7 +919,7 @@ ProtoParser: struct {
         Err(DataBindError{message: "proto message {source_name} is not closed"})
     }
 
-    parse_enum: fn(&self, parent: String?) -> String DataBindError! {
+    parse_enum: fn(^self, parent: String?) -> String DataBindError! {
         _: self.take_word("enum")
         short_name: self.take_word("an enum name")
         if !pkg_data_is_proto_identifier(short_name) || pkg_data_is_proto_keyword(short_name) {
@@ -1008,7 +1008,7 @@ ProtoParser: struct {
         Err(DataBindError{message: "proto enum {source_name} is not closed"})
     }
 
-    parse_syntax: fn(&self) DataBindError! {
+    parse_syntax: fn(^self) DataBindError! {
         _: self.take_word("syntax")
         if self.syntax_seen {
             return Err(DataBindError{message: "proto has more than one syntax declaration"})
@@ -1022,7 +1022,7 @@ ProtoParser: struct {
         self.syntax_seen = true
     }
 
-    parse_package: fn(&self) DataBindError! {
+    parse_package: fn(^self) DataBindError! {
         _: self.take_word("package")
         if self.package != None {
             return Err(DataBindError{message: "proto has more than one package declaration"})
@@ -1037,7 +1037,7 @@ ProtoParser: struct {
         self.package = Val(package)
     }
 
-    parse_import: fn(&self) DataBindError! {
+    parse_import: fn(^self) DataBindError! {
         _: self.take_word("import")
         if self.is_word(0, "public") || self.is_word(0, "weak") -> self.pos += 1
         path: self.take_string("an import path")
@@ -1049,7 +1049,7 @@ ProtoParser: struct {
 
     // Header declarations (syntax, package, imports, file options) precede
     // the first message or enum; at least one message is required.
-    parse: fn(&self) -> ProtoSchema DataBindError! {
+    parse: fn(^self) -> ProtoSchema DataBindError! {
         if self.lex_error == {
             .Val(message) -> return Err(DataBindError{message: message})
             .None -> {}

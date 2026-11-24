@@ -236,7 +236,7 @@ point_read_string: fn(radix: Int, x: String, y: String) -> Point EcpError! {
 }
 
 /// Make pt the point at infinity (mbedtls_ecp_set_zero).
-set_zero: fn(pt: &Point) EcpError! {
+set_zero: fn(pt: ^Point) EcpError! {
     bn.lset(pt.x, 1)
     bn.lset(pt.y, 1)
     bn.lset(pt.z, 0)
@@ -344,7 +344,7 @@ empty_field: fn() -> Field Never! {
 /// A random generator that always fails, for operations that need none.
 NoRNG: struct {
     impl RNG {
-        fill: fn(&self, out: &[U8]) -> Bool Never! { false }
+        fill: fn(^self, out: ^[U8]) -> Bool Never! { false }
     }
 }
 
@@ -489,21 +489,21 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 // ---------------------------------------------------------------------------
 
 /// x[i] += x[j] + nothing, accumulating the carry into c (add64 of p192).
-#Overflow(.Wrapping) add_limb: fn(x: &[U64], i: Int, v: U64, c: U64) -> U64 Never! {
+#Overflow(.Wrapping) add_limb: fn(x: ^[U64], i: Int, v: U64, c: U64) -> U64 Never! {
     t: x[i] + v
     x[i] = t
     c + bn.ct_lt(t, v)
 }
 
 /// x[i] += c; the carry out (carry64 of p192).
-#Overflow(.Wrapping) carry_limb: fn(x: &[U64], i: Int, c: U64) -> U64 Never! {
+#Overflow(.Wrapping) carry_limb: fn(x: ^[U64], i: Int, c: U64) -> U64 Never! {
     t: x[i] + c
     x[i] = t
     bn.ct_lt(t, c)
 }
 
 /// x += v over `limbs` limbs; the carry out.
-#Overflow(.Wrapping) add_word_in: fn(x: &[U64], limbs: Int, v: U64) -> U64 Never! {
+#Overflow(.Wrapping) add_word_in: fn(x: ^[U64], limbs: Int, v: U64) -> U64 Never! {
     c := v
     loop i in 0..<limbs {
         t: x[i] + c
@@ -514,7 +514,7 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 }
 
 /// x += b over `limbs` limbs; the carry out.
-#Overflow(.Wrapping) add_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
+#Overflow(.Wrapping) add_in: fn(x: ^[U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
         t: x[i] + c
@@ -527,7 +527,7 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 }
 
 /// x -= b over `limbs` limbs; the borrow out.
-#Overflow(.Wrapping) sub_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
+#Overflow(.Wrapping) sub_in: fn(x: ^[U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
         z: bn.ct_lt(x[i], c)
@@ -539,7 +539,7 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 }
 
 /// mbedtls_ecp_mod_p192_raw: 2^192 = 2^64 + 1 mod p.
-#Overflow(.Wrapping) raw_p192: fn(x: &[U64]) Never! {
+#Overflow(.Wrapping) raw_p192: fn(x: ^[U64]) Never! {
     c := U64{0}
     v := x[3]
     c = add_limb(x, 0, v, c)
@@ -575,7 +575,7 @@ ld32: fn(x: [U64], j: Int) -> I64 Never! {
 }
 
 /// Store the low 32 bits of cur as chunk i of x.
-st32: fn(x: &[U64], i: Int, cur: I64) Never! {
+st32: fn(x: ^[U64], i: Int, cur: I64) Never! {
     v: wrapping(U64{cur}) & U64{0xffffffff}
     w: x[i /% 2]
     x[i /% 2] = if i %% 2 == 1 -> w & U64{0xffffffff} | v << 32 else -> w & U64{0xffffffff00000000} | v
@@ -591,7 +591,7 @@ carry32: fn(cur: I64) -> I64 Never! { cur >> 32 }
 /// the top chunk folds back in with the signs in `fix`. False when a carry
 /// is left over, which no input below p^2 produces. The accumulator is a
 /// fixed word (it stays within 2^40 of zero), so no step tests the value.
-#Overflow(.Wrapping) chunk_reduce: fn(x: &[U64], x_limbs: Int, ops: [Int], fix: [Int], top: Int, rounds: Int) -> Bool Never! {
+#Overflow(.Wrapping) chunk_reduce: fn(x: ^[U64], x_limbs: Int, ops: [Int], fix: [Int], top: Int, rounds: Int) -> Bool Never! {
     i := 0
     cur := ld32(x, 0)
     loop k in 0..<ops.len() {
@@ -789,7 +789,7 @@ P384_OPS: [Int]{
 P384_FIX: [Int]{1, -1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0}
 
 /// mbedtls_ecp_mod_p521_raw: 2^521 = 1 mod p. s is 9 limbs of scratch.
-#Overflow(.Wrapping) raw_p521: fn(x: &[U64], s: &[U64]) Never! {
+#Overflow(.Wrapping) raw_p521: fn(x: ^[U64], s: ^[U64]) Never! {
     loop i in 0..<9 -> s[i] = x[9 + i]
     carry: bn.core_mla(x, 0, 9, s, 9, U64{1} << 55)
     loop i in 9..<18 -> x[i] = U64{0}
@@ -800,7 +800,7 @@ P384_FIX: [Int]{1, -1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0}
 }
 
 /// mbedtls_ecp_mod_p255_raw: 2^256 = 38 mod p. s is 4 limbs of scratch.
-#Overflow(.Wrapping) raw_p255: fn(x: &[U64], s: &[U64]) Never! {
+#Overflow(.Wrapping) raw_p255: fn(x: ^[U64], s: ^[U64]) Never! {
     loop i in 0..<4 -> s[i] = x[4 + i]
     carry := bn.core_mla(x, 0, 4, s, 4, U64{38})
     loop i in 4..<8 -> x[i] = U64{0}
@@ -813,7 +813,7 @@ P384_FIX: [Int]{1, -1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0}
 
 /// mbedtls_ecp_mod_p448_raw: 2^448 = 2^224 + 1 mod p. m and q are 8 limbs
 /// of scratch.
-#Overflow(.Wrapping) raw_p448: fn(x: &[U64], m: &[U64], q: &[U64]) Never! {
+#Overflow(.Wrapping) raw_p448: fn(x: ^[U64], m: ^[U64], q: ^[U64]) Never! {
     loop i in 0..<7 -> m[i] = x[7 + i]
     m[7] = U64{0}
     loop i in 7..<14 -> x[i] = U64{0}
@@ -839,7 +839,7 @@ P384_FIX: [Int]{1, -1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0}
 
 /// ecp_mod_koblitz: 2^bits = r mod p for p = 2^bits - r. a1 holds
 /// bits / 64 + 1 limbs and m one more, both scratch.
-#Overflow(.Wrapping) raw_koblitz: fn(x: &[U64], r: U64, bits: Int, a1: &[U64], m: &[U64]) Never! {
+#Overflow(.Wrapping) raw_koblitz: fn(x: ^[U64], r: U64, bits: Int, a1: ^[U64], m: ^[U64]) Never! {
     shift: bits %% 64
     adjust: if shift != 0 -> 1 else -> 0
     pl: bits /% 64 + adjust
@@ -876,7 +876,7 @@ kind_bits: fn(kind: FieldKind) -> Int Never! {
 
 /// Reduce the 2 * limbs(p) limbs of x with the fast reduction of `kind`.
 /// m and q are scratch of at least 9 limbs. False on a leftover carry.
-raw_reduce: fn(kind: FieldKind, x: &[U64], m: &[U64], q: &[U64]) -> Bool Never! {
+raw_reduce: fn(kind: FieldKind, x: ^[U64], m: ^[U64], q: ^[U64]) -> Bool Never! {
     if kind == {
         .P192 -> raw_p192(x)
         .P224 -> return chunk_reduce(x, 8, P224_OPS, P224_FIX, 6, 1)
@@ -896,7 +896,7 @@ raw_reduce: fn(kind: FieldKind, x: &[U64], m: &[U64], q: &[U64]) -> Bool Never! 
 /// The fast reduction of curve `id` on the x_limbs limbs of x, which must
 /// be twice the limbs of p (mbedtls_ecp_mod_p<curve>_raw). The result is
 /// below 2 p. FeatureUnavailable for a curve without one (Brainpool).
-mod_p_raw: fn(id: GroupID, x: &[U64], x_limbs: Int) EcpError! {
+mod_p_raw: fn(id: GroupID, x: ^[U64], x_limbs: Int) EcpError! {
     kind: field_kind(id)
     bits: kind_bits(kind)
     if bits == 0 -> return Err(.FeatureUnavailable)
@@ -950,7 +950,7 @@ modp: fn(grp: EcpGroup, x: bn.Mpi) -> bn.Mpi EcpError! {
 }
 
 /// x = x mod p for x in (-p, 2 p) after an addition or subtraction.
-mod_fix: fn(grp: EcpGroup, x: &bn.Mpi) EcpError! {
+mod_fix: fn(grp: EcpGroup, x: ^bn.Mpi) EcpError! {
     loop x.s < 0 && bn.cmp_int(x, 0) != 0 {
         t: bn.add_mpi(x, grp.p)
         bn.set_mpi(x, t)
@@ -1025,7 +1025,7 @@ fe_work: fn(n: Int) -> FeWork Never! {
     FeWork{wide: cipher.words(2 * n + 2), m: cipher.words(n + 2), q: cipher.words(n + 2), g: cipher.words(n), i: cipher.words(n)}
 }
 
-fe_work_wipe: fn(w: &FeWork) Never! {
+fe_work_wipe: fn(w: ^FeWork) Never! {
     cipher.wipe_words(w.wide)
     cipher.wipe_words(w.m)
     cipher.wipe_words(w.q)
@@ -1045,7 +1045,7 @@ fe_tmp: fn(n: Int) -> FeTmp Never! {
     FeTmp{t0: cipher.words(n), t1: cipher.words(n), t2: cipher.words(n), t3: cipher.words(n)}
 }
 
-fe_tmp_wipe: fn(t: &FeTmp) Never! {
+fe_tmp_wipe: fn(t: ^FeTmp) Never! {
     cipher.wipe_words(t.t0)
     cipher.wipe_words(t.t1)
     cipher.wipe_words(t.t2)
@@ -1053,23 +1053,23 @@ fe_tmp_wipe: fn(t: &FeTmp) Never! {
 }
 
 /// Element k of a flat array of n-limb elements into d.
-fe_load: fn(d: &[U64], src: [U64], k: Int, n: Int) Never! {
+fe_load: fn(d: ^[U64], src: [U64], k: Int, n: Int) Never! {
     loop i in 0..<n -> d[i] = src[k * n + i]
 }
 
 /// s into element k of a flat array of n-limb elements.
-fe_store: fn(dst: &[U64], k: Int, s: [U64], n: Int) Never! {
+fe_store: fn(dst: ^[U64], k: Int, s: [U64], n: Int) Never! {
     loop i in 0..<n -> dst[k * n + i] = s[i]
 }
 
 /// d = s - p when that does not borrow, else s; s below 2 p.
-fe_final: fn(f: Field, d: &[U64], s: [U64]) Never! {
+fe_final: fn(f: Field, d: ^[U64], s: [U64]) Never! {
     c: bn.core_sub(d, s, f.p, f.n)
     _: bn.core_add_if(d, f.p, f.n, c)
 }
 
 /// d = a * b.
-fe_mul: fn(f: Field, w: &FeWork, d: &[U64], a: [U64], b: [U64]) Never! {
+fe_mul: fn(f: Field, w: ^FeWork, d: ^[U64], a: [U64], b: [U64]) Never! {
     if f.kind == .Mont {
         bn.core_montmul(d, a, b, f.n, f.p, f.n, f.mm, w.wide)
         return
@@ -1080,7 +1080,7 @@ fe_mul: fn(f: Field, w: &FeWork, d: &[U64], a: [U64], b: [U64]) Never! {
 }
 
 /// x = x * b.
-fe_mul_in: fn(f: Field, w: &FeWork, x: &[U64], b: [U64]) Never! {
+fe_mul_in: fn(f: Field, w: ^FeWork, x: ^[U64], b: [U64]) Never! {
     if f.kind == .Mont {
         bn.core_montmul(w.m, x, b, f.n, f.p, f.n, f.mm, w.wide)
         bn.copy_limbs(x, w.m, f.n)
@@ -1092,10 +1092,10 @@ fe_mul_in: fn(f: Field, w: &FeWork, x: &[U64], b: [U64]) Never! {
 }
 
 /// d = a^2.
-fe_sqr: fn(f: Field, w: &FeWork, d: &[U64], a: [U64]) Never! { fe_mul(f, w, d, a, a) }
+fe_sqr: fn(f: Field, w: ^FeWork, d: ^[U64], a: [U64]) Never! { fe_mul(f, w, d, a, a) }
 
 /// x = x^2.
-fe_sqr_in: fn(f: Field, w: &FeWork, x: &[U64]) Never! {
+fe_sqr_in: fn(f: Field, w: ^FeWork, x: ^[U64]) Never! {
     if f.kind == .Mont {
         bn.core_montmul(w.m, x, x, f.n, f.p, f.n, f.mm, w.wide)
         bn.copy_limbs(x, w.m, f.n)
@@ -1107,21 +1107,21 @@ fe_sqr_in: fn(f: Field, w: &FeWork, x: &[U64]) Never! {
 }
 
 /// d = a + b.
-#Overflow(.Wrapping) fe_add: fn(f: Field, d: &[U64], a: [U64], b: [U64]) Never! {
+#Overflow(.Wrapping) fe_add: fn(f: Field, d: ^[U64], a: [U64], b: [U64]) Never! {
     c: bn.core_add(d, a, b, f.n)
     borrow: sub_in(d, f.p, f.n)
     _: bn.core_add_if(d, f.p, f.n, borrow & (c ~ U64{1}))
 }
 
 /// x = x + b.
-#Overflow(.Wrapping) fe_add_in: fn(f: Field, x: &[U64], b: [U64]) Never! {
+#Overflow(.Wrapping) fe_add_in: fn(f: Field, x: ^[U64], b: [U64]) Never! {
     c: add_in(x, b, f.n)
     borrow: sub_in(x, f.p, f.n)
     _: bn.core_add_if(x, f.p, f.n, borrow & (c ~ U64{1}))
 }
 
 /// x = 2 x.
-#Overflow(.Wrapping) fe_dbl_in: fn(f: Field, x: &[U64]) Never! {
+#Overflow(.Wrapping) fe_dbl_in: fn(f: Field, x: ^[U64]) Never! {
     c: x[f.n - 1] >> 63
     bn.core_shift_l(x, f.n, 1)
     borrow: sub_in(x, f.p, f.n)
@@ -1129,25 +1129,25 @@ fe_sqr_in: fn(f: Field, w: &FeWork, x: &[U64]) Never! {
 }
 
 /// d = 3 a.
-fe_mul3: fn(f: Field, d: &[U64], a: [U64]) Never! {
+fe_mul3: fn(f: Field, d: ^[U64], a: [U64]) Never! {
     fe_add(f, d, a, a)
     fe_add_in(f, d, a)
 }
 
 /// d = a - b.
-fe_sub: fn(f: Field, d: &[U64], a: [U64], b: [U64]) Never! {
+fe_sub: fn(f: Field, d: ^[U64], a: [U64], b: [U64]) Never! {
     c: bn.core_sub(d, a, b, f.n)
     _: bn.core_add_if(d, f.p, f.n, c)
 }
 
 /// x = x - b.
-fe_sub_in: fn(f: Field, x: &[U64], b: [U64]) Never! {
+fe_sub_in: fn(f: Field, x: ^[U64], b: [U64]) Never! {
     c: sub_in(x, b, f.n)
     _: bn.core_add_if(x, f.p, f.n, c)
 }
 
 /// x = -x when cond is 1, in constant time (MPI_ECP_COND_NEG).
-fe_cond_neg: fn(f: Field, w: &FeWork, x: &[U64], cond: #Secret U64) Never! {
+fe_cond_neg: fn(f: Field, w: ^FeWork, x: ^[U64], cond: #Secret U64) Never! {
     nz: bn.core_check_zero_ct(x, f.n)
     _: bn.core_sub(w.m, f.p, x, f.n)
     bn.core_cond_assign(x, w.m, f.n, nz & cond)
@@ -1167,7 +1167,7 @@ fe_eq: fn(f: Field, a: [U64], b: [U64]) -> Bool Never! {
 
 /// d = a^-1, constant time; for a zero a, d is unspecified (jac_normalize
 /// masks it out).
-fe_inv: fn(f: Field, w: &FeWork, d: &[U64], a: [U64]) Never! {
+fe_inv: fn(f: Field, w: ^FeWork, d: ^[U64], a: [U64]) Never! {
     bn.core_gcd_modinv_odd(w.g, w.i, true, a, f.n, f.p, f.n)
     if f.kind == .Mont {
         bn.core_montmul(d, w.i, f.r3, f.n, f.p, f.n, f.mm, w.wide)
@@ -1177,7 +1177,7 @@ fe_inv: fn(f: Field, w: &FeWork, d: &[U64], a: [U64]) Never! {
 }
 
 /// x = x R mod p for a Mont field; x is below p.
-fe_to_mont_in: fn(f: Field, w: &FeWork, x: &[U64]) Never! {
+fe_to_mont_in: fn(f: Field, w: ^FeWork, x: ^[U64]) Never! {
     if f.kind != .Mont {
         return
     }
@@ -1186,7 +1186,7 @@ fe_to_mont_in: fn(f: Field, w: &FeWork, x: &[U64]) Never! {
 }
 
 /// The field form of x, which must be in [0, p).
-fe_from_mpi: fn(f: Field, w: &FeWork, d: &[U64], x: bn.Mpi) Never! {
+fe_from_mpi: fn(f: Field, w: ^FeWork, d: ^[U64], x: bn.Mpi) Never! {
     bn.zero_limbs(d, f.n)
     m: if x.p.len() < f.n -> x.p.len() else -> f.n
     bn.copy_limbs(d, x.p, m)
@@ -1194,7 +1194,7 @@ fe_from_mpi: fn(f: Field, w: &FeWork, d: &[U64], x: bn.Mpi) Never! {
 }
 
 /// The number a field element stands for.
-fe_to_mpi: fn(f: Field, w: &FeWork, a: [U64]) -> bn.Mpi Never! {
+fe_to_mpi: fn(f: Field, w: ^FeWork, a: [U64]) -> bn.Mpi Never! {
     out := cipher.words(f.n)
     bn.copy_limbs(out, a, f.n)
     if f.kind == .Mont {
@@ -1220,28 +1220,28 @@ jac_new: fn(n: Int) -> JacPoint Never! {
     JacPoint{x: cipher.words(n), y: cipher.words(n), z: cipher.words(n)}
 }
 
-jac_wipe: fn(r: &JacPoint) Never! {
+jac_wipe: fn(r: ^JacPoint) Never! {
     cipher.wipe_words(r.x)
     cipher.wipe_words(r.y)
     cipher.wipe_words(r.z)
 }
 
 /// r = q.
-jac_assign: fn(f: Field, r: &JacPoint, q: JacPoint) Never! {
+jac_assign: fn(f: Field, r: ^JacPoint, q: JacPoint) Never! {
     bn.copy_limbs(r.x, q.x, f.n)
     bn.copy_limbs(r.y, q.y, f.n)
     bn.copy_limbs(r.z, q.z, f.n)
 }
 
 /// r = infinity, as (1, 1, 0).
-jac_set_zero: fn(f: Field, r: &JacPoint) Never! {
+jac_set_zero: fn(f: Field, r: ^JacPoint) Never! {
     bn.copy_limbs(r.x, f.one, f.n)
     bn.copy_limbs(r.y, f.one, f.n)
     bn.zero_limbs(r.z, f.n)
 }
 
 /// The field form of pt; its Z must be 0 or 1 and X, Y below p.
-jac_from_point: fn(f: Field, w: &FeWork, r: &JacPoint, pt: Point) Never! {
+jac_from_point: fn(f: Field, w: ^FeWork, r: ^JacPoint, pt: Point) Never! {
     if bn.cmp_int(pt.z, 0) == 0 {
         jac_set_zero(f, r)
         return
@@ -1253,7 +1253,7 @@ jac_from_point: fn(f: Field, w: &FeWork, r: &JacPoint, pt: Point) Never! {
 
 /// The point r stands for; r must be normalized (Z = 1) or infinity. Z is
 /// read with no test of it: 1 when it is not zero.
-jac_to_point: fn(f: Field, w: &FeWork, r: JacPoint) -> Point Never! {
+jac_to_point: fn(f: Field, w: ^FeWork, r: JacPoint) -> Point Never! {
     z := cipher.words(1)
     z[0] = bn.core_check_zero_ct(r.z, f.n)
     Point{x: fe_to_mpi(f, w, r.x), y: fe_to_mpi(f, w, r.y), z: bn.Mpi{s: 1, p: z}}
@@ -1261,7 +1261,7 @@ jac_to_point: fn(f: Field, w: &FeWork, r: JacPoint) -> Point Never! {
 
 /// r = 2 r (ecp_double_jac): dbl-1998-cmo-2 for a = -3, with the a = 0
 /// shortcut, and the general formula otherwise.
-jac_double: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint) Never! {
+jac_double: fn(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint) Never! {
     if {
         f.a_kind == A_MINUS_3 -> {
             // M = 3 (X + Z^2) (X - Z^2)
@@ -1309,7 +1309,7 @@ jac_double: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint) Never! {
 
 /// r = r + q for q affine (Z = 1) or infinity (ecp_add_mixed, Cohen et al.,
 /// 2-7 and 2-12). False when q's Z is neither.
-jac_add_mixed: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, q: JacPoint) -> Bool Never! {
+jac_add_mixed: fn(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint, q: JacPoint) -> Bool Never! {
     if fe_is_zero(f, r.z) {
         jac_assign(f, r, q)
         return true
@@ -1346,14 +1346,14 @@ jac_add_mixed: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, q: JacPoint) ->
 }
 
 /// r = q when cond is 1, in constant time.
-jac_cond_assign: fn(f: Field, r: &JacPoint, q: JacPoint, cond: #Secret U64) Never! {
+jac_cond_assign: fn(f: Field, r: ^JacPoint, q: JacPoint, cond: #Secret U64) Never! {
     bn.core_cond_assign(r.x, q.x, f.n, cond)
     bn.core_cond_assign(r.y, q.y, f.n, cond)
     bn.core_cond_assign(r.z, q.z, f.n, cond)
 }
 
 /// r = infinity, as (1, 1, 0), when cond is 1, in constant time.
-jac_cond_set_zero: fn(f: Field, r: &JacPoint, cond: #Secret U64) Never! {
+jac_cond_set_zero: fn(f: Field, r: ^JacPoint, cond: #Secret U64) Never! {
     bn.core_cond_assign(r.x, f.one, f.n, cond)
     bn.core_cond_assign(r.y, f.one, f.n, cond)
     keep: bn.ct_mask(cond ~ U64{1})
@@ -1367,7 +1367,7 @@ jac_cond_set_zero: fn(f: Field, r: &JacPoint, cond: #Secret U64) Never! {
 /// computed into `spare` first. Without it r = ±q is the one branch,
 /// `comb_meets_t`, which comb_core's invariant rules out; the result is 1
 /// when that branch ran, else 0.
-jac_add_affine: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, qx: [U64], qy: [U64], spare: &JacPoint, complete: Bool) -> Int Never! {
+jac_add_affine: fn(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint, qx: [U64], qy: [U64], spare: ^JacPoint, complete: Bool) -> Int Never! {
     r_inf: bn.core_check_zero_ct(r.z, f.n) ~ U64{1}
     if complete {
         jac_assign(f, spare, r)
@@ -1432,7 +1432,7 @@ jac_add_affine: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, qx: [U64], qy:
 /// r = (X/Z^2, Y/Z^3, 1) unless r is infinity (ecp_normalize_jac), with no
 /// test of Z: the inverse runs on Z whatever it is, and an infinite r is
 /// set back to (1, 1, 0) by mask.
-jac_normalize: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint) Never! {
+jac_normalize: fn(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint) Never! {
     finite: bn.core_check_zero_ct(r.z, f.n)
     fe_inv(f, w, t.t0, r.z)
     fe_mul_in(f, w, r.y, t.t0)
@@ -1445,7 +1445,7 @@ jac_normalize: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint) Never! {
 
 /// Randomize r's Jacobian coordinates with a random l in [2, p): (l^2 X,
 /// l^3 Y, l Z) (ecp_randomize_jac).
-jac_randomize: fn<R: RNG>(f: Field, w: &FeWork, r: &JacPoint, rng: &R) EcpError! {
+jac_randomize: fn<R: RNG>(f: Field, w: ^FeWork, r: ^JacPoint, rng: ^R) EcpError! {
     l := cipher.words(f.n)
     bn.core_random(l, U64{2}, f.p, f.n, rng) ?? return Err(random_error(err))
     fe_to_mont_in(f, w, l)
@@ -1459,7 +1459,7 @@ jac_randomize: fn<R: RNG>(f: Field, w: &FeWork, r: &JacPoint, rng: &R) EcpError!
 
 /// Normalize the points idx of the flat Jacobian arrays jx, jy, jz with one
 /// inversion (ecp_normalize_jac_many, HAC 14.61 Montgomery's trick).
-jac_normalize_many: fn(f: Field, w: &FeWork, t: &FeTmp, jx: &[U64], jy: &[U64], jz: &[U64], idx: [Int]) Never! {
+jac_normalize_many: fn(f: Field, w: ^FeWork, t: ^FeTmp, jx: ^[U64], jy: ^[U64], jz: ^[U64], idx: [Int]) Never! {
     n: f.n
     m: idx.len()
     if m == 0 {
@@ -1512,14 +1512,14 @@ jac_normalize_many: fn(f: Field, w: &FeWork, t: &FeTmp, jx: &[U64], jy: &[U64], 
 }
 
 /// Load point k of the flat arrays into r.
-jac_load: fn(r: &JacPoint, jx: [U64], jy: [U64], jz: [U64], k: Int, n: Int) Never! {
+jac_load: fn(r: ^JacPoint, jx: [U64], jy: [U64], jz: [U64], k: Int, n: Int) Never! {
     fe_load(r.x, jx, k, n)
     fe_load(r.y, jy, k, n)
     fe_load(r.z, jz, k, n)
 }
 
 /// Store r as point k of the flat arrays.
-jac_store: fn(jx: &[U64], jy: &[U64], jz: &[U64], k: Int, r: JacPoint, n: Int) Never! {
+jac_store: fn(jx: ^[U64], jy: ^[U64], jz: ^[U64], k: Int, r: JacPoint, n: Int) Never! {
     fe_store(jx, k, r.x, n)
     fe_store(jy, k, r.y, n)
     fe_store(jz, k, r.z, n)
@@ -1532,7 +1532,7 @@ jac_store: fn(jx: &[U64], jy: &[U64], jz: &[U64], k: Int, r: JacPoint, n: Int) N
 /// The comb table of the affine point (px, py) for window `wnd` and `d`
 /// digits (ecp_precompute_comb): T[i] = sum of 2^(d j) P over the bits j of
 /// i, as X then Y of each point in field form.
-comb_precompute: fn(f: Field, w: &FeWork, t: &FeTmp, px: [U64], py: [U64], wnd: Int, d: Int) -> [U64] Never! {
+comb_precompute: fn(f: Field, w: ^FeWork, t: ^FeTmp, px: [U64], py: [U64], wnd: Int, d: Int) -> [U64] Never! {
     n: f.n
     ts: 1 << (wnd - 1)
     jx := cipher.words(ts * n)
@@ -1592,7 +1592,7 @@ comb_precompute: fn(f: Field, w: &FeWork, t: &FeTmp, px: [U64], py: [U64], wnd: 
 
 /// (rx, ry) = the table entry digit i names, negated for its sign bit, read
 /// in constant time from every entry (ecp_select_comb).
-comb_select: fn(f: Field, w: &FeWork, table: [U64], ts: Int, i: #Secret U64, rx: &[U64], ry: &[U64]) Never! {
+comb_select: fn(f: Field, w: ^FeWork, table: [U64], ts: Int, i: #Secret U64, rx: ^[U64], ry: ^[U64]) Never! {
     n: f.n
     ii: (i & U64{0x7f}) >> 1
     loop j in 0..<ts {
@@ -1656,7 +1656,7 @@ comb_recode_scalar: fn(grp: EcpGroup, m: bn.Mpi, d: Int, wnd: Int) -> {k: [U64],
 /// jac_add_affine's one declassified branch, which comb_meets_t's invariant
 /// keeps untaken; the last runs complete. The result counts the times the
 /// branch ran: 0 for every m in [1, N).
-comb_core: fn<R: RNG>(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, table: [U64], ts: Int, k: [#Secret U64], d: Int, rng: &R, blind: Bool{true}) -> Int EcpError! {
+comb_core: fn<R: RNG>(f: Field, w: ^FeWork, t: ^FeTmp, r: ^JacPoint, table: [U64], ts: Int, k: [#Secret U64], d: Int, rng: ^R, blind: Bool{true}) -> Int EcpError! {
     txi := jac_new(f.n)
     spare := jac_new(f.n)
     comb_select(f, w, table, ts, k[d], r.x, r.y)
@@ -1678,14 +1678,14 @@ comb_core: fn<R: RNG>(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, table: [U64
 /// R = m P on a short Weierstrass curve (ecp_mul_comb). G uses the static
 /// table with a window one wider; any other point builds its table. With
 /// `blind` the start point is randomized from rng.
-mul_comb: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, blind: Bool{true}) -> Point EcpError! {
+mul_comb: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R, blind: Bool{true}) -> Point EcpError! {
     meets := 0
     mul_comb_counted(grp, m, pt, rng, meets, blind: blind)
 }
 
 /// mul_comb adding to `meets` the count of comb_core's declassified branch,
 /// which its test holds at 0.
-mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, meets: &Int, blind: Bool{true}) -> Point EcpError! {
+mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R, meets: ^Int, blind: Bool{true}) -> Point EcpError! {
     f: grp.f
     n: f.n
     p_eq_g: bn.cmp_mpi(pt.y, grp.g.y) == 0 && bn.cmp_mpi(pt.x, grp.g.x) == 0
@@ -1733,7 +1733,7 @@ mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, meets
 
 /// `err`, once a failed comb's running point, scratch and recoded scalar
 /// digits are wiped.
-comb_failed: fn(r: &JacPoint, t: &FeTmp, w: &FeWork, k: &[U64], err: &&EcpError) -> EcpError Never! {
+comb_failed: fn(r: ^JacPoint, t: ^FeTmp, w: ^FeWork, k: ^[U64], err: ^^EcpError) -> EcpError Never! {
     jac_wipe(r)
     fe_tmp_wipe(t)
     fe_work_wipe(w)
@@ -1747,7 +1747,7 @@ comb_failed: fn(r: &JacPoint, t: &FeTmp, w: &FeWork, k: &[U64], err: &&EcpError)
 
 /// One ladder step (ecp_double_add_mxz, RFC 7748 section 5): (rx : rz) =
 /// 2 (rx : rz) and (sx : sz) = (rx : rz) + (sx : sz), given d = x(S - R).
-mxz_double_add: fn(f: Field, w: &FeWork, t: &FeTmp, rx: &[U64], rz: &[U64], sx: &[U64], sz: &[U64], d: [U64]) Never! {
+mxz_double_add: fn(f: Field, w: ^FeWork, t: ^FeTmp, rx: ^[U64], rz: ^[U64], sx: ^[U64], sz: ^[U64], d: [U64]) Never! {
     fe_add(f, t.t0, rx, rz)
     fe_sub(f, t.t1, rx, rz)
     fe_add(f, t.t2, sx, sz)
@@ -1770,7 +1770,7 @@ mxz_double_add: fn(f: Field, w: &FeWork, t: &FeTmp, rx: &[U64], rz: &[U64], sx: 
 
 /// R = m P on a Montgomery curve with the x/z ladder (ecp_mul_mxz); the
 /// start point is randomized from rng.
-mul_mxz: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R) -> Point EcpError! {
+mul_mxz: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R) -> Point EcpError! {
     f: grp.f
     n: f.n
     w := fe_work(n)
@@ -1820,7 +1820,7 @@ mul_mxz: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R) -> Point EcpEr
 
 /// m P after checking m and P (ecp_mul_restartable_internal). Without
 /// `blind` the comb skips randomization, as mbedtls with no RNG.
-mul_internal: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, blind: Bool{true}) -> Point EcpError! {
+mul_internal: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R, blind: Bool{true}) -> Point EcpError! {
     check_privkey(grp, m)
     check_pubkey(grp, pt)
     if group_type(grp) == {
@@ -1833,7 +1833,7 @@ mul_internal: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, blind: Bo
 /// R = m P (mbedtls_ecp_mul), constant time in m, with the intermediate
 /// point randomized from rng. m must be a valid private key and P a valid
 /// public point.
-ecp_mul: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R) -> Point EcpError! {
+ecp_mul: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: ^R) -> Point EcpError! {
     mul_internal(grp, m, pt, rng)
 }
 
@@ -1959,7 +1959,7 @@ privkey_valid: fn(grp: EcpGroup, d: bn.Mpi) -> Bool Never! {
 
 /// A clamped Montgomery private key with top bit `high_bit`
 /// (mbedtls_ecp_gen_privkey_mx).
-gen_privkey_mx: fn<R: RNG>(high_bit: Int, rng: &R) -> bn.Mpi EcpError! {
+gen_privkey_mx: fn<R: RNG>(high_bit: Int, rng: ^R) -> bn.Mpi EcpError! {
     n_bytes: high_bit /% 8 + 1
     d := bn.fill_random(n_bytes, rng)
     bn.shift_r(d, 8 * n_bytes - high_bit - 1)
@@ -1971,13 +1971,13 @@ gen_privkey_mx: fn<R: RNG>(high_bit: Int, rng: &R) -> bn.Mpi EcpError! {
 }
 
 /// A uniform private key in [1, N) (mbedtls_ecp_gen_privkey_sw).
-gen_privkey_sw: fn<R: RNG>(n: bn.Mpi, rng: &R) -> bn.Mpi EcpError! {
+gen_privkey_sw: fn<R: RNG>(n: bn.Mpi, rng: ^R) -> bn.Mpi EcpError! {
     d: bn.random(1, n, rng) ?? return Err(random_error(err))
     Ok(d)
 }
 
 /// A private key for grp (mbedtls_ecp_gen_privkey).
-gen_privkey: fn<R: RNG>(grp: EcpGroup, rng: &R) -> bn.Mpi EcpError! {
+gen_privkey: fn<R: RNG>(grp: EcpGroup, rng: ^R) -> bn.Mpi EcpError! {
     if group_type(grp) == {
         .Montgomery -> gen_privkey_mx(grp.nbits, rng)
         .ShortWeierstrass -> gen_privkey_sw(grp.n, rng)
@@ -1986,19 +1986,19 @@ gen_privkey: fn<R: RNG>(grp: EcpGroup, rng: &R) -> bn.Mpi EcpError! {
 }
 
 /// A key pair (d, d G') for base point g (mbedtls_ecp_gen_keypair_base).
-gen_keypair_base: fn<R: RNG>(grp: EcpGroup, g: Point, rng: &R) -> {d: bn.Mpi, q: Point} EcpError! {
+gen_keypair_base: fn<R: RNG>(grp: EcpGroup, g: Point, rng: ^R) -> {d: bn.Mpi, q: Point} EcpError! {
     d: gen_privkey(grp, rng)
     q: ecp_mul(grp, d, g, rng)
     Ok({d: d, q: q})
 }
 
 /// A key pair (d, d G) (mbedtls_ecp_gen_keypair).
-gen_keypair: fn<R: RNG>(grp: EcpGroup, rng: &R) -> {d: bn.Mpi, q: Point} EcpError! {
+gen_keypair: fn<R: RNG>(grp: EcpGroup, rng: ^R) -> {d: bn.Mpi, q: Point} EcpError! {
     gen_keypair_base(grp, grp.g, rng)
 }
 
 /// A fresh key pair on curve `id` (mbedtls_ecp_gen_key).
-gen_key: fn<R: RNG>(id: GroupID, rng: &R) -> Keypair EcpError! {
+gen_key: fn<R: RNG>(id: GroupID, rng: ^R) -> Keypair EcpError! {
     grp: group_load(id)
     pair: gen_keypair(grp, rng)
     Ok(Keypair{grp: grp, d: pair.d.move(), q: pair.q.move()})
@@ -2006,7 +2006,7 @@ gen_key: fn<R: RNG>(id: GroupID, rng: &R) -> Keypair EcpError! {
 
 /// Set key's public point, loading curve `id` into an empty key
 /// (mbedtls_ecp_set_public_key). BadInput when key has another curve.
-set_public_key: fn(id: GroupID, key: &Keypair, q: Point) EcpError! {
+set_public_key: fn(id: GroupID, key: ^Keypair, q: Point) EcpError! {
     if {
         key.grp.id == .Unknown -> key.grp = group_load(id)
         key.grp.id != id -> return Err(.BadInput)
@@ -2017,7 +2017,7 @@ set_public_key: fn(id: GroupID, key: &Keypair, q: Point) EcpError! {
 /// Load curve `id` and private key buf into key, keeping its public point
 /// (mbedtls_ecp_read_key): big-endian for Weierstrass curves, RFC 7748
 /// little-endian and clamped for X25519 and X448. On failure key.d is empty.
-read_key: fn(id: GroupID, key: &Keypair, buf: [U8]) EcpError! {
+read_key: fn(id: GroupID, key: ^Keypair, buf: [U8]) EcpError! {
     key.grp = group_load(id)
     if read_key_into(key, buf) == {
         .Ok(_) -> {}
@@ -2028,7 +2028,7 @@ read_key: fn(id: GroupID, key: &Keypair, buf: [U8]) EcpError! {
     }
 }
 
-read_key_into: fn(key: &Keypair, buf: [U8]) EcpError! {
+read_key_into: fn(key: ^Keypair, buf: [U8]) EcpError! {
     if group_type(key.grp) == {
         .Montgomery -> {
             if {
@@ -2093,7 +2093,7 @@ write_public_key: fn(key: Keypair, format: PointFormat, buflen: Int) -> [U8] Ecp
 
 /// Check that public_key and private_key hold the same public point and
 /// that private_key's d gives it (mbedtls_ecp_check_pub_priv).
-check_pub_priv: fn<R: RNG>(public_key: Keypair, private_key: Keypair, rng: &R) EcpError! {
+check_pub_priv: fn<R: RNG>(public_key: Keypair, private_key: Keypair, rng: ^R) EcpError! {
     if public_key.grp.id == .Unknown || public_key.grp.id != private_key.grp.id || !point_eq(public_key.q, private_key.q) {
         return Err(.BadInput)
     }
@@ -2102,7 +2102,7 @@ check_pub_priv: fn<R: RNG>(public_key: Keypair, private_key: Keypair, rng: &R) E
 }
 
 /// key.q = key.d G (mbedtls_ecp_keypair_calc_public).
-calc_public: fn<R: RNG>(key: &Keypair, rng: &R) EcpError! {
+calc_public: fn<R: RNG>(key: ^Keypair, rng: ^R) EcpError! {
     key.q = ecp_mul(key.grp, key.d, key.grp.g, rng)
 }
 

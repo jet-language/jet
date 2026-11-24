@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A value that can&#39;t be copied has one owner, so giving it away must be marked where it happens</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Declare the parameter or receiver with the take mark `&amp;&amp;`, or call `.move()` where the value is given away.</p>
+<p class="diag-copy fix" data-registry-field="fix">Declare the parameter or receiver with the take mark `^^`, or call `.move()` where the value is given away.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>Jet.MissingMoveMarker</code>: <code>Tests/UI/close_value_stored_then_used.stderr</code>.</p>
 <pre class="diag">Error: Jet.UseAfterMove: `a.id` was consumed by the struct literal, so it can&#39;t be used here
@@ -95,7 +95,7 @@ Error: Jet.MissingMoveMarker: `r` cannot be moved from borrowed storage
  54 | from_parameter: fn(r: Res) -&gt; Holder { Holder{item: r} }
     |                                                     ^
  Why: `r` is a read or write parameter, so its caller keeps the value, and `Res` can&#39;t be copied into the struct literal
- Fix: Declare the parameter `r: &amp;&amp;Res` so the caller hands the value over
+ Fix: Declare the parameter `r: ^^Res` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -87,7 +87,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_subcompositor", "zxdg_decoration_manager_v1", "wl_seat"}
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -127,13 +127,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -145,7 +145,7 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
 }
 
@@ -158,7 +158,7 @@ fake_version: fn(interface: String) -> Int {
 
 // A configure of 400 x 300 in `states` (xdg_toplevel's: 1 maximized,
 // 4 activated).
-fake_configure: fn(f: &Fake, states: [Int]) {
+fake_configure: fn(f: ^Fake, states: [Int]) {
     f.serial += 1
     serial: f.serial
     f.configures.push(serial)
@@ -185,7 +185,7 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
 }
 
 // The four bytes of pixel (x, y) of `buffer` as stored.
-fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
+fake_pixel: fn(f: ^Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
     if buffer.pool >= f.fds.len() || x < 0 || y < 0 || x >= buffer.width || y >= buffer.height {
         fake_fail(f, "pixel {x},{y} is outside buffer {buffer.id}")
         return [U8]{}
@@ -202,7 +202,7 @@ fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
 
 // The content's commit: an ack, the content's buffer, and the chrome its
 // own commit cached.
-fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
+fake_commit: fn(f: ^Fake) -[Env, Net, Time]> {
     f.commits += 1
     acked: f.acked
     f.acked = -1
@@ -247,7 +247,7 @@ fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
 // 11 units right of a button's center, on the ring 11 to 12.5 units out,
 // halfway down the 34-unit header, which is dark otherwise. The centers
 // are 8 + 9 units in from the window's right edge, then 28 apart.
-fake_report: fn(f: &Fake) {
+fake_report: fn(f: ^Fake) {
     chrome: fake_buffer(f, f.chrome_shown) ?? {
         fake_fail(f, "the chrome shows no wl_buffer")
         return
@@ -265,25 +265,25 @@ fake_report: fn(f: &Fake) {
 }
 
 // wl_keyboard events, with their serials.
-fake_key: fn(f: &Fake, serial: Int, code: Int, state: Int) {
+fake_key: fn(f: ^Fake, serial: Int, code: Int, state: Int) {
     keyboard: f.keyboard
     fake_event(f, keyboard, 3, fake_words([Int]{serial, serial * 10, code, state}))
 }
 
 // A press and release of evdev key `code` at serials `serial` and the next.
-fake_tap: fn(f: &Fake, serial: Int, code: Int) {
+fake_tap: fn(f: ^Fake, serial: Int, code: Int) {
     fake_key(f, serial, code, 1)
     fake_key(f, serial + 1, code, 0)
 }
 
-fake_mods: fn(f: &Fake, serial: Int, depressed: Int) {
+fake_mods: fn(f: ^Fake, serial: Int, depressed: Int) {
     keyboard: f.keyboard
     fake_event(f, keyboard, 4, fake_words([Int]{serial, depressed, 0, 0, 0}))
 }
 
 // The keymap rides with its wl_keyboard.keymap event in one message: the
 // text and its NUL in shared memory, format 1 (XKB text v1).
-fake_keymap: fn(f: &Fake) -[Env, Net, Time]> {
+fake_keymap: fn(f: ^Fake) -[Env, Net, Time]> {
     fake_flush(f)
     bytes := KEYMAP.bytes().copy()
     bytes.push(U8{0})
@@ -337,7 +337,7 @@ KEY_F6: 64
 KEY_F10: 68
 
 // Each settled state: report it, then the next keys.
-fake_phase: fn(f: &Fake) -[Env, Net, Time]> {
+fake_phase: fn(f: ^Fake) -[Env, Net, Time]> {
     fake_report(f)
     phase: f.phase
     f.phase += 1
@@ -390,7 +390,7 @@ fake_phase: fn(f: &Fake) -[Env, Net, Time]> {
     fake_event(f, toplevel, 1, [U8]{})
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -520,7 +520,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
 }
 
 // Handles every complete request in the inbox.
-fake_dispatch: fn(f: &Fake) -[Env, Net, Time]> {
+fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

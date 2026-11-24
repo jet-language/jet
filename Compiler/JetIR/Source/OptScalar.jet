@@ -34,7 +34,7 @@
 // overlap or leave the storage, or when a field is itself an aggregate.
 use jet_foundation.[compiler_threads_single]
 
-ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Never! {
+ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Never! {
     has_stack := false
     loop op in f.op {
         if op == .StackAddress {
@@ -333,7 +333,7 @@ OptScalarExtras: struct {
 // not lends its candidate sides where they are loose and refuses them
 // otherwise, which can unsettle other copies, so this repeats until nothing
 // changes. Returns the fields the rewritten copies bring.
-ir_opt_resolve_copies: fn(m: IRModule, copies: [OptScalarCopy], rewrite: &[Bool], candidate: &[Bool], lent: &[Bool], offsets: [[Int]], rows: [[Int]]) -> OptScalarExtras Never! {
+ir_opt_resolve_copies: fn(m: IRModule, copies: [OptScalarCopy], rewrite: ^[Bool], candidate: ^[Bool], lent: ^[Bool], offsets: [[Int]], rows: [[Int]]) -> OptScalarExtras Never! {
     loop {
         extras := OptScalarExtras{offsets: [[Int]]{}, rows: [[Int]]{}}
         loop _ in 0..<candidate.len() {
@@ -471,7 +471,7 @@ ir_opt_fields_end: fn(m: IRModule, offsets: [Int], rows: [Int]) -> Int Never! {
 // fields to the target address; only fields inside the copied range. An
 // address operand points at the range's first byte, whether it is a
 // storage's own address or a view.
-ir_opt_copy_fields: fn(code: &IROptCode, f: IRFunction, candidate: [Bool], distinct: [[Int]], entry: OptScalarCopy, line: Int) Never! {
+ir_opt_copy_fields: fn(code: ^IROptCode, f: IRFunction, candidate: [Bool], distinct: [[Int]], entry: OptScalarCopy, line: Int) Never! {
     target: entry.target >= 0 && candidate[entry.target]
     source: entry.source >= 0 && candidate[entry.source]
     k := 0
@@ -532,7 +532,7 @@ IROptCode: struct {
     line: [Int],
 }
 
-ir_opt_code_put: fn(code: &IROptCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
+ir_opt_code_put: fn(code: ^IROptCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
     code.op.push(op.copy())
     code.dst.push(dst)
     code.a.push(a)
@@ -603,7 +603,7 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
         m := ir_module_new()
         word: ir_word_row(m)
         ptr: ir_pointer_row(m)
-        // Callee 0: record_log(&self, delta) mutates field at offset 0 only.
+        // Callee 0: record_log(^self, delta) mutates field at offset 0 only.
         callee := ir_function_new("record_log", "test:disjoint.jet.record_log", "", "disjoint.jet", 1)
         p_self: ir_slot(callee, ptr, IRSlotKind.Param, ir_intern_name(m, "self"), 1)
         p_delta: ir_slot(callee, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
@@ -635,8 +635,8 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
         m.functions.push(bump)
 
         // Caller: 24-byte local struct `s` (log@0, hits@8, tag@16); holds two
-        // disjoint field borrows `h = &s.hits` and `t = &s.tag` across
-        // `&self.log` calls `record_log(s, 5)` and `record_log(s, 3)` plus `bump(h)`.
+        // disjoint field borrows `h = ^s.hits` and `t = ^s.tag` across
+        // `^self.log` calls `record_log(s, 5)` and `record_log(s, 3)` plus `bump(h)`.
         run := ir_function_new("run", "test:disjoint.jet.run", "", "disjoint.jet", 10)
         run.result = word
         s: ir_slot(run, ptr, IRSlotKind.Local, ir_intern_name(m, "s"), 10)

@@ -1,0 +1,24 @@
+# workspace/symbol outlines every saved file below the workspace folder, here a
+# copy of Compiler/JetFoundation (some two hundred modules) plus a probe whose
+# comment holds forty two-byte characters before its written types; its last
+# type ends past the file's character count. The answer names the probe's
+# function and the package's own Span, and the server stays up to answer
+# shutdown. The outline used to read written type names as a character slice
+# at byte offsets, so a file like the probe stopped the server.
+copy: {root}/Compiler/JetFoundation foundation
+write: foundation/Source/Probe.jet = "// ññññññññññññññññññññññññññññññññññññññññ\nprobe_glyph_width: fn(span: Span) -> Span { span }\n"
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://{work}/foundation\",\"capabilities\":{}}}"
+recv lsp until $.id = 1 within 30s
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"probe_glyph\"}}"
+recv lsp until $.id = 2 within 60s
+stdout: ~ "\"name\":\"probe_glyph_width\"" # the probe's function
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Span\"}}"
+recv lsp until $.id = 3 within 60s
+stdout: ~ "\"name\":\"Span\"" # the package's own Span
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99 within 30s
+json: stdout doc $.result = null
+close lsp
+exit: any # the server exit status after close is not part of this contract

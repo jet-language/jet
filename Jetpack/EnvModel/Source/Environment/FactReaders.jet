@@ -292,7 +292,7 @@ envmodel_language_token: fn(value: CtValue, field: String) -> String Environment
 
 // Apply one lifecycle field to `lifecycle`. Returns false when `name` is not a
 // lifecycle field.
-envmodel_lifecycle_from_field: fn(lifecycle: &EnvironmentLifecycle, name: String, value: CtValue) -> Bool EnvironmentFactError! {
+envmodel_lifecycle_from_field: fn(lifecycle: ^EnvironmentLifecycle, name: String, value: CtValue) -> Bool EnvironmentFactError! {
     if name == {
         ENV_FIELD_FORMATTER -> lifecycle.formatter = Val(envmodel_formatter_from_value(value))
         "dotenv" -> lifecycle.dotenv = envmodel_dotenv_from_value(value)
@@ -762,7 +762,7 @@ envmodel_sorted_keys: fn<V>(map: [String:V]) -> [String] Never! {
     names
 }
 
-envmodel_push_labeled: fn(lines: &[String], label: String, values: [String]) {
+envmodel_push_labeled: fn(lines: ^[String], label: String, values: [String]) {
     loop value in values -> lines.push("{label}={value}\n")
 }
 
