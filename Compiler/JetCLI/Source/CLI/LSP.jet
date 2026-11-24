@@ -22,8 +22,13 @@ JetCLILSPChecker: struct {
             alone: jet_cli_lsp_unsaved_loose(entry)
             entry_path: jet_cli_overlay_path(entry)
             given := [JetCLIOverlay]{}
+            // The entry's slot in `given`: its open text is what a report with
+            // no origin of its own names.
+            entry_slot := -1
             loop overlay in overlays {
-                if !alone || jet_cli_overlay_path(overlay.path) == entry_path {
+                same: jet_cli_overlay_path(overlay.path) == entry_path
+                if !alone || same {
+                    if same -> entry_slot = given.len()
                     given.push(JetCLIOverlay{path: overlay.path.copy(), source: overlay.source.copy()})
                 }
             }
@@ -47,12 +52,13 @@ JetCLILSPChecker: struct {
                         lsp_write_log("internal compiler error checking `{entry}`: {problem}").drop("standard error is the log; a failed log write has nowhere to go")
                     }
                     diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+                    reports: jet_cli_lsp_reports(entry, given, entry_slot, diagnostics)
                     if result.doc_modules.len() == 0 {
-                        return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
+                        return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer, reports: reports}
                     }
                     index: jet_cli_checked_semindex(result)
                     symbols: semindex_build_symbols(index, result.doc_modules)
-                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer, choices: jet_cli_lsp_choices(result.doc_modules)}
+                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer, choices: jet_cli_lsp_choices(result.doc_modules), reports: reports}
                 }
             }
         }
@@ -71,6 +77,14 @@ JetCLILSPChecker: struct {
             run.answers
         }
     }
+}
+
+// Each diagnostic's `jet check --json` report, its paths absolute as the
+// editor's URIs are. A report with no origin of its own names the entry's
+// open text, at `slot` in `given`.
+jet_cli_lsp_reports: fn(entry: String, given: [JetCLIOverlay], slot: Int, diagnostics: [Diagnostic]) -> [String] Never! {
+    if slot < 0 -> return jet_cli_reports_json(None, entry, "", diagnostics)
+    jet_cli_reports_json(None, entry, given[slot].source, diagnostics)
 }
 
 // The automatic choices the checked modules record, by module and line, as

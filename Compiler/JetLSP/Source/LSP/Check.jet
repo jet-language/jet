@@ -20,7 +20,9 @@ LSPOverlay: struct {
 // are the checked user modules (path, source, items) in load order.
 // `producer` is what made the entry, when it is a module the last `jet build`
 // of its package generated. `choices` are the automatic choices the checked
-// modules record, as `jet inspect choices` lists them.
+// modules record, as `jet inspect choices` lists them. `reports` are the
+// `jet.report` objects of `diagnostics`, by index, when the host renders
+// them; a published diagnostic carries its own as `data`.
 LSPChecked: struct {
     diagnostics: [Diagnostic],
     modules: [JetDriverDocModule],
@@ -28,6 +30,7 @@ LSPChecked: struct {
     symbols: [SemSymbol],
     producer: LSPProducer?{None},
     choices: [LSPChoice]{[LSPChoice]{}},
+    reports: [String]{[String]{}},
 }
 
 // What made a generated module, as the build that made it recorded it
