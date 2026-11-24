@@ -262,13 +262,13 @@ sema_eval_walk_for: fn(probes: SemaEvalProbes, module_identity: ModuleID, span: 
 
 // The node at `span` is about to be checked: a statement when `statement`,
 // otherwise an expression. Each probe it answers checks its expressions here.
-sema_eval_probe_visit: fn(span: Span, statement: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) {
-    loop asked in sema_eval_walk_matches(context.eval_walk, program, span, statement) {
+sema_eval_probe_visit: fn(span: Span, statement: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) {
+    loop asked in sema_eval_walk_matches(check.context.eval_walk, program, span, statement) {
         answers := [SemaEvalProbeAnswer]{}
         loop (expression, value) in asked.expressions {
-            answers.push(sema_eval_probe_check(value, asked.row, expression, asked.exact, context.eval_walk.function, environment, program, scopes, state, tail_store, context))
+            answers.push(sema_eval_probe_check(value, asked.row, expression, asked.exact, environment, program, scopes, check))
         }
-        sema_eval_walk_store(context.eval_walk, asked.local, asked.exact, answers)
+        sema_eval_walk_store(check.context.eval_walk, asked.local, asked.exact, answers)
     }
 }
 
@@ -357,20 +357,22 @@ sema_eval_answer_put: fn(answers: ^[SemaEvalProbeAnswer], answer: ^^SemaEvalProb
 // solve settles the compiled function's failure (sema_eval_probe_function).
 // A bare name of a non-scalar local is lent (sema_eval_probe_lends): the
 // compiled function takes it, so returning it as-is is no refusal (E0120).
-sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, function: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: SemaCheckContext) -> SemaEvalProbeAnswer {
-    probe_state := sema_ownership_state_snapshot(state)
-    probe_context := sema_check_context_snapshot(context)
+sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> SemaEvalProbeAnswer {
+    probe_state := sema_ownership_state_snapshot(check.state)
+    probe_context := sema_check_context_snapshot(check.context)
     // The probe's own check answers no probe.
     probe_context.eval_walk = SemaEvalWalk{}
     probe_context.fresh_expr_ids = true
     probe_context.lambda_escapes = Val(false)
     span: expr_span(value)
-    lent: sema_eval_probe_lends(value, scopes, context)
+    lent: sema_eval_probe_lends(value, scopes, check.context)
     lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Expr{value: value}, span: span, meta: ast_empty_lambda_meta()}
     expected: Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     diagnostics := [Diagnostic]{}
-    checked: sema_expression_lambda_with_host(lambda, Val(expected), environment, program, scopes, probe_state, tail_store, probe_context, diagnostics, false, false, false, true)
-    answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}, lent: lent}
+    sema_body_check_swap(check, probe_state, probe_context)
+    checked: sema_expression_lambda_with_host(lambda, Val(expected), environment, program, scopes, check, diagnostics, false, false, false, true)
+    sema_body_check_swap(check, probe_state, probe_context)
+    answer := SemaEvalProbeAnswer{probe: probe, expression: expression, function: check.context.eval_walk.function, exact: exact, span: span, complete: false, value_type: None, captures: [TCapture]{}, refusals: [Diagnostic]{}, effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}}, lent: lent}
     loop diagnostic in diagnostics.move() {
         if diagnostic.severity != DIAGNOSTIC_ERROR || (diagnostic.detail ?? "").starts_with(sema_failure_obligation_mark()) || (lent && diagnostic.code == "E0120") {
             next

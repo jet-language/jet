@@ -166,3 +166,85 @@ SemaBodyCheck: struct {
 The other parts of criterion E do not depend on this record and are
 hour-sized: splitting `CheckProgram.jet` and `Statements.jet` by concern, and
 replacing string-built lookup keys with typed keys.
+
+## 5. The cutover as landed
+
+The seven-part record of section 1 failed review (A1, A2, A5). Its redesign is
+the three-part `SemaBodyCheck` of section 4, and that is what landed.
+
+**Correction to P3.** P3 says Core has no swap or take primitive. That is
+true of Core's library, but the language has the idiom without one: moving an
+owned value out of a place and refilling that place in the same function
+passes the ownership checker and copies nothing.
+
+```jet
+held: check.state
+check.state = state
+state = held
+```
+
+So a function holding a second ownership state or context can still call a
+function that takes the record. It swaps its own part into the record, makes
+the call, and swaps the part back. `Scopes.jet` names this idiom once:
+`sema_body_check_swap_state`, `sema_body_check_swap_context` and
+`sema_body_check_swap`. P3's conclusion about building a record from borrowed
+parts stands. Swapping makes building one unnecessary.
+
+**One pass.** A single codemod run made the switch over all of JetSema. No
+caller outside JetSema takes the parts. The run's rules:
+
+1. A function whose signature takes `state: ^SemaOwnershipState`,
+   `tail_store: ^SemaStatementTailStore` and `context: ^SemaCheckContext`
+   takes `check: ^SemaBodyCheck` in their place. It reads its parts as
+   `check.state`, `check.tail_store` and `check.context`. Nine functions that
+   took a state and a context are converted with the rest:
+   `sema_expr_number_name_read`, `sema_expr_number_constant_read`,
+   `sema_expr_number_constant_reread`, `sema_expr_number_operand_read`,
+   `sema_expr_number_target_retype`, `sema_expr_check_identifier`,
+   `sema_expr_check_shared_identifier`, `sema_expr_check_comptime_name` and
+   `sema_string_view_materialize`. They call converted functions, and three
+   of the number reads made a throwaway tail store for those calls.
+2. The entries `sema_function_check_pass`, `sema_check_comptime_item_in` and
+   `sema_marker_rules_check_static_sites` make the record
+   (`sema_body_check_init()`) where they made the three locals.
+3. A call that passes the record's own three parts passes `check`.
+4. A call that passes the shared tail store with another ownership state or
+   context is a check on that other state or context. The swap idiom wraps
+   its statement.
+5. A short table of named rows covers the sites whose shape the rules above
+   do not cover. The run applies each row exactly once and refuses to write
+   on a miss. The rows cover:
+   - the record and its swap helpers;
+   - five locals named `check` that would shadow the record;
+   - the three throwaway tail stores of rule 1;
+   - two swaps whose statement opens a block;
+   - the default-argument check in another module, on the owner scope's state;
+   - the default-value check's arena, traded rather than rebuilt;
+   - the contract checks, which check pre and post clauses on a state of their
+     own;
+   - the eval probe, which reads its function from the record.
+6. `jet fmt` then reshapes the 24 statements that the rename made too long or
+   the dropped arguments made short enough to join. No file gains a formatter
+   finding.
+
+| Measure (JetSema) | Before | After |
+|---|---|---|
+| Functions taking `check: ^SemaBodyCheck` | 0 | 562 |
+| Part parameters (`state`, `tail_store`, `context` borrows) | 2,153 | 495 |
+| Parameters, all functions | 33,352 | 32,250 |
+| Lines | 224,867 | 224,966 |
+| Bytes | 13,479,887 | 13,423,036 |
+| `.copy()` calls | 2,445 | 2,445 |
+
+The run converted 556 signatures and renamed 7,156 part uses. It collapsed
+1,643 calls, dropping 3,290 arguments, and wrapped 12 checks on another
+state or context in swaps. The part parameters that remain belong to two
+groups:
+
+- 463 functions that take some of the parts but not all three: 243 take a
+  state alone, 182 a context alone, 32 a state and a context, and 6 a tail
+  store.
+- The three swap helpers.
+
+The switch leaves the `jet check` reports for JetSema, JetDriver and JetCLI
+unchanged.

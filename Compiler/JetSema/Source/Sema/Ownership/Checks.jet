@@ -1123,29 +1123,29 @@ sema_ownership_release_loans_from: fn(state: ^SemaOwnershipState, depth: Int) Ne
 // windowed, or pinned again after the view's last use. A window no name
 // carries (`if ^x.session == {…}` in value position) ends before the next
 // statement, nested ones included: no view is recorded for it at all.
-sema_ownership_release_dead_views: fn(state: ^SemaOwnershipState, statement: Stmt, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) {
-    loop index in 0..<state.views.len() {
-        fact: state.views[index]
+sema_ownership_release_dead_views: fn(check: ^SemaBodyCheck, statement: Stmt) {
+    loop index in 0..<check.state.views.len() {
+        fact: check.state.views[index]
         if !fact.active || fact.lexical -> next
-        if sema_ownership_last_use_statement(statement, fact.carrier) || sema_ownership_name_live_after(fact.carrier, tail_store, context) {
+        if sema_ownership_last_use_statement(statement, fact.carrier) || sema_ownership_name_live_after(fact.carrier, check.tail_store, check.context) {
             next
         }
         descendant_live := false
-        loop child in state.views {
-            if child.active && child.lexical && sema_ownership_view_descends_from(state, child, fact.seq) {
+        loop child in check.state.views {
+            if child.active && child.lexical && sema_ownership_view_descends_from(check.state, child, fact.seq) {
                 descendant_live = true
                 break
             }
         }
         if descendant_live -> next
-        state.views[index].active = false
-        sema_ownership_release_view_loans(state, fact.seq, fact.carrier_id)
+        check.state.views[index].active = false
+        sema_ownership_release_view_loans(check.state, fact.seq, fact.carrier_id)
     }
-    loan_index := state.loans.len()
+    loan_index := check.state.loans.len()
     loop loan_index > 0 {
         loan_index -= 1
-        if state.loans[loan_index].statement_window && state.loans[loan_index].carrier_fact_seq < 0 {
-            _ := state.loans.remove(loan_index, .Slot)
+        if check.state.loans[loan_index].statement_window && check.state.loans[loan_index].carrier_fact_seq < 0 {
+            _ := check.state.loans.remove(loan_index, .Slot)
         }
     }
 }
@@ -1166,7 +1166,7 @@ sema_ownership_release_view_loans: fn(state: ^SemaOwnershipState, seq: Int, carr
 // view the value alone reads is not yet "used in this statement": with no
 // later use it is dead at the write. Release such views before the target
 // write check.
-sema_ownership_release_value_only_views: fn(state: ^SemaOwnershipState, target: LValue, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) {
+sema_ownership_release_value_only_views: fn(check: ^SemaBodyCheck, target: LValue) {
     target_expr: if target == {
         .Local(name, span) -> Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
         // copy: `base` is a payload of read parameter `target`, which keeps the original; field `base` of the new Expr.Field owns this one
@@ -1174,22 +1174,22 @@ sema_ownership_release_value_only_views: fn(state: ^SemaOwnershipState, target: 
         // copy: `base`, `index` and `kind` are payloads of read parameter `target`, which keeps the originals; the new Expr.Index's fields own `base`, `index` and `kind`
         .Index(base, index, span, kind) -> Expr.Index{base: base.copy(), index: index.copy(), span: span, kind: kind.copy(), id: AST_NODE_GENERATED}
     }
-    loop index in 0..<state.views.len() {
-        fact: state.views[index]
+    loop index in 0..<check.state.views.len() {
+        fact: check.state.views[index]
         if !fact.active || fact.lexical -> next
-        if sema_ownership_last_use_expr(target_expr, fact.carrier) || sema_ownership_name_live_after(fact.carrier, tail_store, context) {
+        if sema_ownership_last_use_expr(target_expr, fact.carrier) || sema_ownership_name_live_after(fact.carrier, check.tail_store, check.context) {
             next
         }
         descendant_live := false
-        loop child in state.views {
-            if child.active && child.lexical && sema_ownership_view_descends_from(state, child, fact.seq) {
+        loop child in check.state.views {
+            if child.active && child.lexical && sema_ownership_view_descends_from(check.state, child, fact.seq) {
                 descendant_live = true
                 break
             }
         }
         if descendant_live -> next
-        state.views[index].active = false
-        sema_ownership_release_view_loans(state, fact.seq, fact.carrier_id)
+        check.state.views[index].active = false
+        sema_ownership_release_view_loans(check.state, fact.seq, fact.carrier_id)
     }
 }
 

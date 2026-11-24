@@ -1752,62 +1752,60 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             sema_scope_bind_definition_site(scopes, graph, func)
         }
     }
-    state := sema_ownership_state_init()
-    state.fixed_length_write_params = updated.fixed_length_write_params
-    state.share_known = share_known
-    state.static_roots = sema_function_static_roots(updated, program, module_identity)
-    state.persist_roots = sema_function_persist_roots(program, module_identity)
-    tail_store := sema_statement_tail_store_init()
+    check := sema_body_check_init()
+    check.state.fixed_length_write_params = updated.fixed_length_write_params
+    check.state.share_known = share_known
+    check.state.static_roots = sema_function_static_roots(updated, program, module_identity)
+    check.state.persist_roots = sema_function_persist_roots(program, module_identity)
     // A raw protocol impl method (Comparable.compare, Display.display, …)
     // checks its body against the declared return, not the failure rail.
     effective_return := sema_checked_return_type(func.return_type, raw_protocol_return)
     effective_return = sema_function_resolve_declared(updated, program, effective_return, module_identity, generic_params)
-    sema_scope_enter(scopes, state, owner_key)
+    sema_scope_enter(scopes, check.state, owner_key)
     scopes.return_type = Val(effective_return)
     scopes.failure_carrier = Val(sema_failure_carrier(Val(effective_return)))
     scopes.loop_depth = 0
     scopes.ownership_call_depth = 0
     scopes.comptime_execution_depth = 0
     if func.is_comptime -> scopes.comptime_execution_depth = 1
-    context := sema_check_context_init()
-    context.host_hooks = host_hooks
-    context.number_retypes_known = number_known
-    context.generic_params = generic_params
+    check.context.host_hooks = host_hooks
+    check.context.number_retypes_known = number_known
+    check.context.generic_params = generic_params
     if func.return_type != None {
-        context.failure_contract_source = sema_failure_contract_source(func.return_type)
+        check.context.failure_contract_source = sema_failure_contract_source(func.return_type)
     }
     if func.return_type == .Val(.Result(success, _)) {
         // copy: `success` is a payload of `func`, which keeps the original; the repair fact owns this one
         if func.return_type_span == .Val(return_span) {
-            context.failure_repair = Val(SemaFailureRepair{return_span: return_span, success: success.copy(), declaration_end: func.span.end})
+            check.context.failure_repair = Val(SemaFailureRepair{return_span: return_span, success: success.copy(), declaration_end: func.span.end})
         }
     }
     // A lifted inline-module member reports its own body under its source name.
-    context.function_name = sema_inline_member_source_name(func.name)
+    check.context.function_name = sema_inline_member_source_name(func.name)
     // The written success names E0113's alias: the failure solver's `T Never!`
     // and the default `T Err!` both show as T.
     if func.return_type == .Val(written) {
-        context.return_alias = if written == .Result(success, error) && (sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) || error == (Type.Named{name: "Err"})) -> sema_call_alias_shown(success, updated, program) else -> sema_call_alias_shown(written, updated, program)
+        check.context.return_alias = if written == .Result(success, error) && (sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) || error == (Type.Named{name: "Err"})) -> sema_call_alias_shown(success, updated, program) else -> sema_call_alias_shown(written, updated, program)
     }
     // #6281 c176: the union solve reads this body's default `Err` route as
     // sema_failure_union_infer does: a top-level candidate other than the
     // entry `run`, which keeps the `Unit Err!` exit contract.
     if function_kind == .TopLevel && sema_failure_inference_candidate(func) {
         if program.registration_graph == .Val(graph) {
-            context.failure_union_inferable = func.name != "run" || graph.entry_module_identity != module_identity
+            check.context.failure_union_inferable = func.name != "run" || graph.entry_module_identity != module_identity
         }
     }
-    context.arithmetic_policy = sema_function_arithmetic_policy(func.markers)
-    context.runtime_policy = sema_function_runtime_policy(func.markers)
-    context.compiler_generated = func.compiler_generated && !sema_test_synthetic_function(func) && !sema_policy_wrapper_function(func) && !sema_computed_field_getter_function(func)
-    context.marker_check_call = None
-    if func.marker_check && func.name == "check" && func.params.len() >= 2 -> context.marker_check_call = Val("{func.params[1].name}")
-    context.return_view_declared = func.declared_return_view_provenance != None
-    if !context.compiler_generated && stand_in == None {
-        context.eval_walk = sema_eval_walk_open(program, module_identity, func.span, owner_key)
+    check.context.arithmetic_policy = sema_function_arithmetic_policy(func.markers)
+    check.context.runtime_policy = sema_function_runtime_policy(func.markers)
+    check.context.compiler_generated = func.compiler_generated && !sema_test_synthetic_function(func) && !sema_policy_wrapper_function(func) && !sema_computed_field_getter_function(func)
+    check.context.marker_check_call = None
+    if func.marker_check && func.name == "check" && func.params.len() >= 2 -> check.context.marker_check_call = Val("{func.params[1].name}")
+    check.context.return_view_declared = func.declared_return_view_provenance != None
+    if !check.context.compiler_generated && stand_in == None {
+        check.context.eval_walk = sema_eval_walk_open(program, module_identity, func.span, owner_key)
     }
     if !complete {
-        sema_check_unsupported(context, "the generic parameters of `{func.name}` could not be resolved against the registration graph")
+        sema_check_unsupported(check.context, "the generic parameters of `{func.name}` could not be resolved against the registration graph")
     }
     // The declared signature's failure
     // domains and `Never` slots (E2417, E2422).
@@ -1831,7 +1829,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             }
             if diagnostics.len() > bare_start {
                 complete = false
-                context.bare_generic_signature = true
+                check.context.bare_generic_signature = true
             }
         }
     }
@@ -1853,8 +1851,8 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         complete = false
     }
     // copy: a shared-facts handle and its frontier, not the facts.
-    context.comptime_body_values = updated.comptime_body_values.copy()
-    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.ContextAttached)
+    check.context.comptime_body_values = updated.comptime_body_values.copy()
+    sema_comptime_body_work_count(check.context.comptime_body_values, SemaComptimeBodyWorkOperation.ContextAttached)
     unsafe_gate_valid := true
     if func.is_unsafe {
         unsafe_source: sema_effect_source_from_function_key(func, owner_key)
@@ -1867,7 +1865,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     if !sema_function_header_check_root_params(func, is_method, diagnostics) -> complete = false
     sema_function_header_lint_positional_bools(func, is_method, diagnostics)
-    if !sema_function_header_supported(func, context) -> complete = false
+    if !sema_function_header_supported(func, check.context) -> complete = false
     // `self` is only a method's receiver; outside a type body or `impl` it
     // would silently be an ordinary parameter. An external `Type.method`
     // header left a function has an unresolved target, which E0301 reports;
@@ -1875,7 +1873,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     if !is_method && !func.compiler_generated && func.external_type == None && !sema_is_error_conversion_function(func) {
         loop param in func.params {
             if param.name == "self" {
-                diagnostics.push(sema_self_outside_method(context.function_name, param.name_span))
+                diagnostics.push(sema_self_outside_method(check.context.function_name, param.name_span))
                 complete = false
                 break
             }
@@ -1890,7 +1888,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         }
     }
     if func.is_pure && stand_in == None {
-        sema_check_pure_live_blocks(context.function_name, func.body, diagnostics)
+        sema_check_pure_live_blocks(check.context.function_name, func.body, diagnostics)
     }
 
     params := [TParameter]{}
@@ -1913,7 +1911,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         // A `group: Group` parameter is the caller's live group: a `task` in
         // this body spawns into it, and the caller's `task.group` joins it.
         if parameter_ty == (Type.Named{name: "Group"}) {
-            sema_taskgroup_push_parameter(context, func.params[param_index].name)
+            sema_taskgroup_push_parameter(check.context, func.params[param_index].name)
         }
         // E0502: a map in a declared parameter type needs a key-eligible key.
         if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, diagnostics) {
@@ -1925,40 +1923,45 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         if func.params[param_index].default != None && !func.params[param_index].script_variable && !forward_defaults.contains(param_index) {
             default_context := sema_check_context_init()
             default_context.is_snapshot = true
-            default_context.unsafe_depth = context.unsafe_depth
+            default_context.unsafe_depth = check.context.unsafe_depth
             default_context.generic_params = generic_params.copy()
-            default_context.host_hooks = context.host_hooks
+            default_context.host_hooks = check.context.host_hooks
             // The default's node ids are the function's ids.
-            default_context.next_expr_id = context.next_expr_id
+            default_context.next_expr_id = check.context.next_expr_id
             // The default's TypeIDs are the function's: it interns into the
             // function's type delta.
-            sema_check_delta_pass(context.type_delta, default_context.type_delta)
-            // The default's flat nodes are rows of the function's arena: it
-            // lends its arena to the default's check and takes it back.
-            default_context.arena = context.arena.move()
+            sema_check_delta_pass(check.context.type_delta, default_context.type_delta)
+            // The default's flat nodes are rows of the function's arena: the
+            // two contexts trade arenas for the default's check and trade back.
+            function_arena: check.context.arena
+            check.context.arena = default_context.arena
+            default_context.arena = function_arena
             // Checked on the live ownership state inside a fork and rolled back.
-            default_fork: sema_ownership_fork(state)
+            default_fork: sema_ownership_fork(check.state)
             // A `#caller` default checks as the location literal each call
             // gets; a `#here` default is E2428.
             declared_default: func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}
             sema_site_here_default_check(declared_default, diagnostics)
             caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, scopes, caller_span)) else -> Expr?{None}
-            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, scopes, state, tail_store, default_context, diagnostics)
-            sema_check_delta_pass(default_context.type_delta, context.type_delta)
-            context.arena = default_context.arena.move()
-            default_context.arena = BodyFlat{tree: body_tree_new(), arena: body_tree_new(), into_arena: true}
-            sema_ownership_fork_rollback(state, default_fork)
-            sema_ownership_fork_close(state, default_fork)
+            sema_body_check_swap_context(check, default_context)
+            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, scopes, check, diagnostics)
+            sema_body_check_swap_context(check, default_context)
+            sema_check_delta_pass(default_context.type_delta, check.context.type_delta)
+            default_arena: check.context.arena
+            check.context.arena = default_context.arena
+            default_context.arena = default_arena
+            sema_ownership_fork_rollback(check.state, default_fork)
+            sema_ownership_fork_close(check.state, default_fork)
             if {
                 checked_default == None -> {
                     complete = false
                     loop reason in default_context.incomplete_reasons {
-                        sema_check_unsupported(context, "default of `{func.params[param_index].name}`: {reason}")
+                        sema_check_unsupported(check.context, "default of `{func.params[param_index].name}`: {reason}")
                     }
                 }
                 else -> {
                     default_expr = checked_default
-                    sema_check_context_merge_expr_ids(default_context, context)
+                    sema_check_context_merge_expr_ids(default_context, check.context)
                 }
             }
         }
@@ -1968,7 +1971,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         param_bounds: sema_expression_type_interval(parameter_ty)
         param_key: symbol_key_text(SymbolKind.Parameter, module_text, owner_key, func.params[param_index].name)
         param_symbol := Symbol{
-            id: sema_symbol_id(program, context, SymbolKind.Parameter, module_text, owner_key, func.params[param_index].name),
+            id: sema_symbol_id(program, check.context, SymbolKind.Parameter, module_text, owner_key, func.params[param_index].name),
             kind: SymbolKind.Parameter,
             name: func.params[param_index].name,
             module_identity: updated.module_identity,
@@ -1989,17 +1992,17 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
                 complete = false
             }
             else -> {
-                sema_ownership_declare_binding(state, param_symbol, true)
+                sema_ownership_declare_binding(check.state, param_symbol, true)
                 if param_index == 0 && func.params[param_index].name == "self" && func.params[param_index].convention == AccessConvention.Move && func.name == "close" && sema_function_is_consuming_close_body(func, module_identity, program) {
-                    state.close_receiver_id = SymbolID{id: param_symbol.id.id}
+                    check.state.close_receiver_id = SymbolID{id: param_symbol.id.id}
                 }
                 if function_kind == {
                     .Method(_, _) | .TraitMethod(_, _, _, _, _) -> {
                         if param_index == 0 && func.params[param_index].name == "self" {
-                            context.return_view_receiver_key = param_key.copy()
-                        } else { context.return_view_parameter_keys.push(param_key.copy()) }
+                            check.context.return_view_receiver_key = param_key.copy()
+                        } else { check.context.return_view_parameter_keys.push(param_key.copy()) }
                     }
-                    .TopLevel -> context.return_view_parameter_keys.push(param_key.copy())
+                    .TopLevel -> check.context.return_view_parameter_keys.push(param_key.copy())
                 }
             }
         }
@@ -2020,14 +2023,14 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // `#Deadline` block around it would.
     marker_position_free: scopes.position_free
     scopes.position_free = true
-    markers_valid: sema_marker_rules_check_function_markers(func, updated, program, scopes, state, tail_store, context, diagnostics)
+    markers_valid: sema_marker_rules_check_function_markers(func, updated, program, scopes, check, diagnostics)
     deadline_guards := [TContextGuard]{}
     loop marker in func.markers {
         if stand_in != None || !markers_valid || !sema_marker_is_hook(marker, MarkerHook.Deadline) || marker.negated || marker.args.len() != 1 {
             next
         }
         if marker.args[0] == .Expr(value) {
-            limit: sema_check_expression(value, None, updated, program, scopes, state, tail_store, context, diagnostics) ?? next
+            limit: sema_check_expression(value, None, updated, program, scopes, check, diagnostics) ?? next
             deadline_guards.push(sema_stmt_deadline_guard(limit, marker.span))
         }
     }
@@ -2054,12 +2057,12 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // `#Kernel(.parallel)` (E1102); its effect and body obligations wait for
     // the effect rows (Kernel.jet).
     if func.kernel == .Val(kernel) {
-        if !sema_kernel_check_declaration(func, kernel, is_method, params, effective_return, updated, program, scopes, context, diagnostics) {
+        if !sema_kernel_check_declaration(func, kernel, is_method, params, effective_return, updated, program, scopes, check.context, diagnostics) {
             complete = false
         }
     }
-    if func.is_unsafe && unsafe_gate_valid -> context.unsafe_depth = 1
-    contract: sema_contract_check_function(func, updated, program, scopes, state, tail_store, context, diagnostics)
+    if func.is_unsafe && unsafe_gate_valid -> check.context.unsafe_depth = 1
+    contract: sema_contract_check_function(func, updated, program, scopes, check, diagnostics)
     if !contract.complete -> complete = false
 
     body := [TStmt]{}
@@ -2073,36 +2076,36 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         returns_value: sema_function_returns_value(effective_return) && !sema_function_promises_never(func)
         if func.body.len() > 0 && func.body[func.body.len() - 1] == .Expr(tail) {
             if {
-                returns_value -> context.value_tail_span = Val(expr_span(tail))
+                returns_value -> check.context.value_tail_span = Val(expr_span(tail))
                 func.return_type_span == None && !func.compiler_generated -> {
-                    context.lost_tail_span = Val(expr_span(tail))
+                    check.context.lost_tail_span = Val(expr_span(tail))
                 }
                 else -> {}
             }
         }
         if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Switch(_, _, _, table_span) {
-            context.value_tail_span = Val(table_span)
+            check.context.value_tail_span = Val(table_span)
         }
         // A last-line `#Unsafe { … }` region checks its body as the value
         // block, so the region's own last line is the value.
         if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Unsafe(_, _, unsafe_body, _) {
-            context.value_tail_span = sema_stmt_value_tail_marker(unsafe_body)
+            check.context.value_tail_span = sema_stmt_value_tail_marker(unsafe_body)
         }
         // A fallback-free arm table followed by a default return needs no `else`
         // arm; imported Core bodies and generated functions have no user source
         // to fix, so only user code is linted (L0513, L0530).
         if returns_value {
-            sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, context.fallback_tables, diagnostics)
+            sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, check.context.fallback_tables, diagnostics)
         }
-        statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, state, tail_store, context, diagnostics, 0)
+        statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, check, diagnostics, 0)
         // The caller's group joins every task this body spawned into a `Group`
         // parameter, so those handles owe no `join` here.
-        sema_taskgroup_mark_spawns_owned(context, SemaTaskGroupOrigin.Parameter, scopes, state, diagnostics)
-        context.lost_tail_span = None
-        context.value_tail_span = None
-        context.fallback_tables = [Int]{}
-        loop site in state.share_found -> share_found.push(site)
-        loop retype in context.number_retypes_found -> number_found.push(retype)
+        sema_taskgroup_mark_spawns_owned(check.context, SemaTaskGroupOrigin.Parameter, scopes, check.state, diagnostics)
+        check.context.lost_tail_span = None
+        check.context.value_tail_span = None
+        check.context.fallback_tables = [Int]{}
+        loop site in check.state.share_found -> share_found.push(site)
+        loop retype in check.context.number_retypes_found -> number_found.push(retype)
         if !statements.complete -> complete = false
         if !sema_check_never_fallthrough(func, updated, program, scopes, diagnostics) {
             complete = false
@@ -2110,7 +2113,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         sema_lint_inferred_never_return(func, owner_key, updated, program, diagnostics)
         sema_function_header_external_target(func, diagnostics, diagnostics_start)
         // A value body reports E0114 when it can reach its end without a value.
-        if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, scopes, diagnostics) {
+        if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, check.context.function_name, scopes, diagnostics) {
             complete = false
         }
         // Validation borrows the original checked rows. Once that loan ends the
@@ -2126,49 +2129,49 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // Unused-binding lints and E0514 address authored code; a
     // compiler-generated body (derived codec scaffolding) binds every slot it
     // may need.
-    if !context.compiler_generated && stand_in == None {
-        sema_ownership_finalize_references(state, diagnostics)
-        sema_ownership_report_never_written(state, diagnostics)
+    if !check.context.compiler_generated && stand_in == None {
+        sema_ownership_finalize_references(check.state, diagnostics)
+        sema_ownership_report_never_written(check.state, diagnostics)
     }
     // The context's facts move to the caller's lists; each emptied field is
     // set again so the spent context still moves whole into the result.
-    call_facts.extend(context.call_facts.move())
-    context.call_facts = [SemaCallSiteFact]{}
-    comptime_requests.extend(context.comptime_requests.move())
-    context.comptime_requests = [SemaComptimeRequest]{}
+    call_facts.extend(check.context.call_facts.move())
+    check.context.call_facts = [SemaCallSiteFact]{}
+    comptime_requests.extend(check.context.comptime_requests.move())
+    check.context.comptime_requests = [SemaComptimeRequest]{}
     // Each reference names the body that recorded it, so a reader keys a
     // local in that body's symbols whatever its span. A nested check that
     // ran its own body keeps its name.
-    loop index in 0..<context.name_references.len() {
-        if context.name_references[index].body == "" {
-            context.name_references[index].body = owner_key
+    loop index in 0..<check.context.name_references.len() {
+        if check.context.name_references[index].body == "" {
+            check.context.name_references[index].body = owner_key
         }
     }
-    name_references.extend(context.name_references.move())
-    context.name_references = [SemaNameReferenceFact]{}
-    if stand_in == None -> sema_single_use_leave_scope(scopes, state, diagnostics) else {
-        sema_scope_leave(scopes, state)
+    name_references.extend(check.context.name_references.move())
+    check.context.name_references = [SemaNameReferenceFact]{}
+    if stand_in == None -> sema_single_use_leave_scope(scopes, check.state, diagnostics) else {
+        sema_scope_leave(scopes, check.state)
     }
     source_line := sema_source_line_at(updated.source_segments, func.name_span)
     if source_line == None {
         complete = false
-        sema_check_unsupported(context, "no source segment covers the declaration of `{func.name}` at offset {func.name_span.start}")
+        sema_check_unsupported(check.context, "no source segment covers the declaration of `{func.name}` at offset {func.name_span.start}")
     }
     return_view_provenance := ViewProvenanceMap?{None}
     if stand_in == None {
-        return_view_provenance = sema_function_return_view_provenance(func, context.return_view_provenance, diagnostics, complete)
+        return_view_provenance = sema_function_return_view_provenance(func, check.context.return_view_provenance, diagnostics, complete)
     }
     if !complete {
-        return sema_function_result(None, owner_key, context.move())
+        return sema_function_result(None, owner_key, check.context.move())
     }
     source_line_value: source_line ?? {
-        return sema_function_result(None, owner_key, context.move())
+        return sema_function_result(None, owner_key, check.context.move())
     }
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
     visibility := TVisibility.Private
     if func.is_pub -> visibility = TVisibility.Public
-    effects := TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: context.module_writes.move()}
-    context.module_writes = [TEffectSpan]{}
+    effects := TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: check.context.module_writes.move()}
+    check.context.module_writes = [TEffectSpan]{}
     if stand_in == .Val(seal_facts) -> effects = seal_facts.effects
     unsafe_gate := TUnsafeGate?{None}
     if func.is_unsafe && unsafe_gate_valid && func.unsafe_reason != None {
@@ -2177,7 +2180,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         line: sema_source_line_at(updated.source_segments, unsafe_span) ?? source_line_value
         unsafe_gate = Val(TUnsafeGate{file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, unsafe_span), line: line, reason: reason, enabled: true, fenced: false})
     }
-    sema_place_borrow_function(body, params, place_borrow_receiver, program, context)
+    sema_place_borrow_function(body, params, place_borrow_receiver, program, check.context)
     memo: sema_function_header_memo_config(func)
     // `#Scalar` keeps every loop of the body on the scalar path: its loops
     // record no loop proof (LoopFacts.jet).
@@ -2232,7 +2235,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         memo_bound: memo.bound,
         memo_unbounded: memo.unbounded,
         is_reactive: func.is_reactive,
-        reactive_upgrades: context.reactive_upgrades,
+        reactive_upgrades: check.context.reactive_upgrades,
         body: body.move(),
         is_inline: func.is_inline,
         is_inline_always: func.is_inline_always,
@@ -2241,23 +2244,23 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         uses_stack_sentry: false,
         max_depth: func.max_depth,
         kind: function_kind,
-        origin_facts: context.origin_facts.move(),
-        typed_goals: context.typed_goals.move(),
-        index_proofs: context.index_proofs.move(),
+        origin_facts: check.context.origin_facts.move(),
+        typed_goals: check.context.typed_goals.move(),
+        index_proofs: check.context.index_proofs.move(),
         pre: if contract.complete -> contract.pre.move() else -> [TContract]{},
         effect_scope: effect_scope,
         effect_scope_regions: sema_authority_scope_regions(func.body, func.name),
     }
     // The checker's tree ends here, as the function's flat body; nodes the
     // checker gave no id take flat-local ones.
-    context.origin_facts = [TOriginProjection]{}
-    context.typed_goals = [TTypedGoal]{}
-    context.index_proofs = [TIndexProof]{}
-    arena_tree := context.arena.tree.move()
-    arena_syntax := context.arena.arena_syntax.move()
-    context.arena.tree = body_tree_new()
-    context.arena.arena_syntax = [Type]{}
-    flat := body_flat_function(built.move(), arena_tree.move(), arena_syntax.move(), program, context)
+    check.context.origin_facts = [TOriginProjection]{}
+    check.context.typed_goals = [TTypedGoal]{}
+    check.context.index_proofs = [TIndexProof]{}
+    arena_tree := check.context.arena.tree.move()
+    arena_syntax := check.context.arena.arena_syntax.move()
+    check.context.arena.tree = body_tree_new()
+    check.context.arena.arena_syntax = [Type]{}
+    flat := body_flat_function(built.move(), arena_tree.move(), arena_syntax.move(), program, check.context)
     if sema_footprint_has_receiver(func) {
         if program.registration_graph == .Val(graph) {
             if sema_registration_module_index(graph, flat.module_identity) == .Val(module_index) {
@@ -2266,16 +2269,16 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         }
     }
     scopes.type_delta = [InternerDelta]{}
-    if context.type_delta.len() > 0 {
-        if context.type_delta.pop() == .Val(delta) {
+    if check.context.type_delta.len() > 0 {
+        if check.context.type_delta.pop() == .Val(delta) {
             if delta_has_rows(delta) {
                 scopes.type_delta.push(delta)
             }
         }
     }
-    if stand_in == None -> return sema_function_result(Val(flat), owner_key, context.move())
+    if stand_in == None -> return sema_function_result(Val(flat), owner_key, check.context.move())
     flat.stand_in = true
-    result := sema_function_result(Val(flat), owner_key, context.move())
+    result := sema_function_result(Val(flat), owner_key, check.context.move())
     result.failure = Val(stand_in.failure)
     result
 }

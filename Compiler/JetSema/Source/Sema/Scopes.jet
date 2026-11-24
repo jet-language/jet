@@ -1145,6 +1145,15 @@ SemaCheckContext: struct {
     is_snapshot: Bool{false},
 }
 
+// The parts one body check owns: its entry makes them and they end with it.
+// Checker functions borrow the record whole, or lend single parts
+// (`check.state`) to a helper that takes only those.
+SemaBodyCheck: struct {
+    state: SemaOwnershipState,
+    tail_store: SemaStatementTailStore,
+    context: SemaCheckContext,
+}
+
 // A `:=` number name (`binding`, its name's span) takes `ty`, the type its use
 // at `use_span` needs where its default type is refused.
 SemaNumberRetype: struct {
@@ -1796,6 +1805,33 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         failure_direct_source: false,
         arrow_loop_body: false,
     }
+}
+
+sema_body_check_init: fn() -> SemaBodyCheck Never! {
+    SemaBodyCheck{state: sema_ownership_state_init(), tail_store: sema_statement_tail_store_init(), context: sema_check_context_init()}
+}
+
+// A check on another ownership state (a snapshot, a lambda's, a default's
+// owner scope) swaps it into the record and back after: the first call puts
+// `state` in the record's place and the record's own state in `state`, and a
+// second call undoes it. Nothing is copied.
+sema_body_check_swap_state: fn(check: ^SemaBodyCheck, state: ^SemaOwnershipState) Never! {
+    held: check.state
+    check.state = state
+    state = held
+}
+
+// sema_body_check_swap_state for the check context.
+sema_body_check_swap_context: fn(check: ^SemaBodyCheck, context: ^SemaCheckContext) Never! {
+    held: check.context
+    check.context = context
+    context = held
+}
+
+// Both swaps: a check on another state and context.
+sema_body_check_swap: fn(check: ^SemaBodyCheck, state: ^SemaOwnershipState, context: ^SemaCheckContext) Never! {
+    sema_body_check_swap_state(check, state)
+    sema_body_check_swap_context(check, context)
 }
 
 sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Never! {
