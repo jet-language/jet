@@ -2462,13 +2462,14 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
 // outside the builtin family only through an impl written for it (`impl
 // Int.Named`), so without one the bound is unmet, not unknown. An exact
 // number literal's type (`Decimal`, `Fraction`) has no row where core.math
-// is not imported and is judged the same way. A builtin family bound keeps
-// its own rules, and any other type without a row stays unknown.
+// is not imported and is judged the same way, and so is a function type,
+// which no impl can name. A builtin family bound keeps its own rules, and
+// any other type without a row stays unknown.
 sema_type_bound_satisfied_builtin_target: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int) -> Bool? {
     builtin: if actual_resolved == {
-        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .List(_) | .Map(_, _, _) | .FixedList(_, _) | .Option(_) | .Tuple(_) -> true
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .List(_) | .Map(_, _, _) | .FixedList(_, _) | .Option(_) | .Tuple(_) | .Fn(_, _, _, _, _, _) -> true
         .Named(name) -> name == "Decimal" || name == "Fraction"
-        .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Shared(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !builtin || sema_type_builtin_trait_symbol(bound_name) != None -> return None
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
