@@ -1,4 +1,6 @@
-# Port of tests/corelib_parts/runtime.rs::tracked_origin_is_a_folded_optional_fact; guest source unchanged.
+# Port of tests/corelib_parts/runtime.rs::tracked_origin_is_a_folded_optional_fact. The guest's literal `3.5` is spelled
+# `Float{3.5}`: the original's literal was a Copy Float, and a bare `3.5` is now a Decimal, which `copied: speed` would move.
+# A moved local reads no origin, so the bare spelling would no longer test a copy.
 # ORACLE-LITERAL: tests/corelib_parts/runtime.rs:1818.
 fixture: Fixtures/TrackedOriginIsAFoldedOptionalFact
 step aot: jet build fixture.jet
