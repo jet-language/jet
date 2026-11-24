@@ -329,15 +329,18 @@ the same way.
 
 The orchestrator works the open epochs in the owner's epoch order, which Tower
 records as each epoch's `order`, until every criterion is met. This is a
-standing owner order (2026-11-24): two of the four agents always work the first
-unfinished epoch in that order, and when it is done they move one epoch along.
-The other two burn down the open cards, of any epoch, that are closest to
-completion by remaining workload: the estimated work to meet every open
+standing owner order (2026-11-24): the orchestrator runs at most three
+subagents at a time, never more, reviewers and helpers included: two epoch
+workers and one closer. The two epoch workers always work the first unfinished
+epoch in that order, and when it is done they move one epoch along. The closer
+burns down the open cards, of any epoch, that are closest to completion by
+remaining workload: the estimated work to meet every open
 criterion with its named proof, never the criteria count. The orchestrator
 ranks the candidate cards by that estimate, smallest first, after reading each
 card's criteria against the code; the ranking and each card's estimate are
-logged on Tower. The two agents take disjoint halves of the ranking and close
-cards in order. A card closes only on real work. Every criterion is met by
+logged on Tower. The closer takes the ranking in order and closes one card at
+a time. Before every spawn the orchestrator counts its running subagents; a
+fourth is never started, and an agent it replaces is stopped first. A card closes only on real work. Every criterion is met by
 its named proof run green on `dev` against the landed commit, or is marked
 obsolete or duplicate where a recorded owner decision or a landed commit
 makes it so. Rewording, splitting, moving or re-scoping criteria to make a
