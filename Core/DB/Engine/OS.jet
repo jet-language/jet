@@ -2,7 +2,7 @@
 // SQLite 3.45.0 (os_unix.c, its posix-advisory-lock io methods and the
 // no-op lock methods of temporary files), the sqlite3Os* wrappers of os.c
 // and the ChaCha20 generator of random.c. The system calls are the
-// core.db.__vfs_* host leaves (Compiler/JetRuntime/Source/HostDBVfs.jet);
+// jet.runtime.db vfs_* leaves (Compiler/JetRuntime/Source/HostDBVfs.jet);
 // each answers its result or the negated errno, and this file maps the
 // errno to the result code os_unix.c reports.
 //
@@ -29,9 +29,10 @@
 //   block instead of per st_blksize block; the final size is the same.
 // - verifyDbFile only logs through sqlite3_log, which has no consumer here,
 //   so it is omitted; so is the fork check that reseeds the generator.
-// The core.db.__vfs_* host leaves and core.mem.__process_shared.
+// The jet.runtime.db vfs_* leaves and core.mem.__process_shared.
 use {
     core: core
+    rt: jet.runtime.db
     base: __core_db_base
     __core_db_base.[SQLError]
 }
@@ -297,7 +298,7 @@ os_lock_error: fn(errno: Int, ioerr: Int) -> Int Never! {
 // unixFileLock: one fcntl record-lock call on [start, start+len) of the
 // file; 0, or the negated errno.
 os_file_lock: fn(fd: Int, kind: Int, start: Int, len: Int) -[DB]> Int Never! {
-    core.db.__vfs_lock(fd, OS_F_OFD_SETLK, kind, start, len)
+    rt.vfs_lock(fd, OS_F_OFD_SETLK, kind, start, len)
 }
 
 // sqlite3OsOpen (os.c) and unixOpen with fillInUnixFile. `path` None asks
@@ -338,7 +339,7 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
         loop n > 0 && bytes[n] != OS_DOT {
             if bytes[n] == OS_DASH {
                 db: os_bytes_text(bytes, n)
-                mode: core.db.__vfs_mode(db)
+                mode: rt.vfs_mode(db)
                 if mode < 0 -> return Err(base.fail(base.IOERR_FSTAT))
                 open_mode = mode
                 owner_of = db
@@ -348,16 +349,16 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
         }
     } else if is_delete { open_mode = 384 } else if flags & OPEN_URI != 0 {
         if modeof == .Val(source) {
-            mode: core.db.__vfs_mode(source)
+            mode: rt.vfs_mode(source)
             if mode < 0 -> return Err(base.fail(base.IOERR_FSTAT))
             open_mode = mode
         }
     }
-    fd := core.db.__vfs_open(name, open_flags, open_mode)
+    fd := rt.vfs_open(name, open_flags, open_mode)
     rc := base.OK
     if fd < 0 {
         errno: 0 - fd
-        if is_new_jrnl && errno == OS_EACCES && core.db.__vfs_access(name, OS_F_OK) != 0 {
+        if is_new_jrnl && errno == OS_EACCES && rt.vfs_access(name, OS_F_OK) != 0 {
             // The journal's directory is not writable.
             rc = base.READONLY_DIRECTORY
         } else if errno != OS_EISDIR && is_readwrite {
@@ -365,7 +366,7 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
             flags = flags & ((OPEN_READWRITE | OPEN_CREATE) ~ U32_MASK) | OPEN_READONLY
             open_flags = open_flags & ((OS_O_RDWR | OS_O_CREAT) ~ U32_MASK) | OS_O_RDONLY
             is_readonly = true
-            fd = core.db.__vfs_open(name, open_flags, open_mode)
+            fd = rt.vfs_open(name, open_flags, open_mode)
         }
     }
     if fd < 0 {
@@ -374,9 +375,9 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
     }
     if open_mode != 0 && flags & (OPEN_WAL | OPEN_MAIN_JOURNAL) != 0 {
         // robustFchown: a root process gives the journal its database's owner.
-        _: core.db.__vfs_chown_like(fd, owner_of)
+        _: rt.vfs_chown_like(fd, owner_of)
     }
-    if is_delete -> _: core.db.__vfs_unlink(name)
+    if is_delete -> _: rt.vfs_unlink(name)
     ctrl := 0
     if is_delete -> ctrl |= UNIXFILE_DELETE
     if is_readonly -> ctrl |= UNIXFILE_RDONLY
@@ -394,10 +395,10 @@ os_open: fn(path: String?, flags_in: Int, psow: Bool{true}, modeof: String?{None
     file.readonly_shm = readonly_shm
     if !no_lock {
         // findInodeInfo: the inode the file was opened on.
-        inode: core.db.__vfs_fd_inode(fd)
+        inode: rt.vfs_fd_inode(fd)
         if inode < 0 {
             file.last_errno = 0 - inode
-            _: core.db.__vfs_close(fd)
+            _: rt.vfs_close(fd)
             return Err(base.fail(base.IOERR))
         }
         file.inode = inode
@@ -419,7 +420,7 @@ os_close: fn(file: &DBFile) -[DB]> Never! {
         return
     }
     os_unlock(file, LOCK_NONE) ?? ()
-    _: core.db.__vfs_close(file.fd)
+    _: rt.vfs_close(file.fd)
     file.fd = -1
     file.lock = LOCK_NONE
 }
@@ -427,7 +428,7 @@ os_close: fn(file: &DBFile) -[DB]> Never! {
 // sqlite3OsRead: unixRead (seekAndRead) of `amt` bytes at `offset` into
 // buf[0..<amt]. A short read zero-fills the rest and is IOERR_SHORT_READ.
 os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) -[DB]> SQLError! {
-    got: core.db.__vfs_read(file.fd, offset, buf, 0, amt)
+    got: rt.vfs_read(file.fd, offset, buf, 0, amt)
     if got == amt -> return Ok()
     if got < 0 {
         file.last_errno = 0 - got
@@ -444,7 +445,7 @@ os_read: fn(file: &DBFile, buf: &[U8], amt: Int, offset: Int) -[DB]> SQLError! {
 // sqlite3OsWrite: unixWrite of data[0..<amt] at `offset`. A short write
 // or ENOSPC is SQLITE_FULL.
 os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) -[DB]> SQLError! {
-    wrote: core.db.__vfs_write(file.fd, offset, data, 0, amt)
+    wrote: rt.vfs_write(file.fd, offset, data, 0, amt)
     if wrote >= amt -> return Ok()
     if wrote < 0 && 0 - wrote != OS_ENOSPC {
         file.last_errno = 0 - wrote
@@ -458,7 +459,7 @@ os_write: fn(file: &DBFile, data: [U8], amt: Int, offset: Int) -[DB]> SQLError! 
 os_truncate: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
     n := size
     if file.chunk > 0 -> n = ((n + file.chunk - 1) /% file.chunk) * file.chunk
-    got: core.db.__vfs_truncate(file.fd, n)
+    got: rt.vfs_truncate(file.fd, n)
     if got < 0 {
         file.last_errno = 0 - got
         return Err(base.fail(base.IOERR_TRUNCATE))
@@ -472,7 +473,7 @@ os_truncate: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
 // synced.
 os_sync: fn(file: &DBFile, flags: Int) -[DB]> SQLError! {
     if flags == 0 -> return Ok()
-    got: core.db.__vfs_sync(file.fd)
+    got: rt.vfs_sync(file.fd)
     if got < 0 {
         file.last_errno = 0 - got
         return Err(base.fail(base.IOERR_FSYNC))
@@ -480,8 +481,8 @@ os_sync: fn(file: &DBFile, flags: Int) -[DB]> SQLError! {
     if file.ctrl & UNIXFILE_DIRSYNC != 0 {
         dirfd: os_open_directory(file.path)
         if dirfd >= 0 {
-            _: core.db.__vfs_sync(dirfd)
-            _: core.db.__vfs_close(dirfd)
+            _: rt.vfs_sync(dirfd)
+            _: rt.vfs_close(dirfd)
         }
         file.ctrl &= UNIXFILE_DIRSYNC ~ 255
     }
@@ -500,7 +501,7 @@ os_open_directory: fn(path: String) -[DB]> Int Never! {
     if ii > 0 -> dir = os_bytes_text(bytes, ii) else if n > 0 && bytes[0] == OS_SLASH -> dir = "/" else {
         dir = "."
     }
-    fd: core.db.__vfs_open(dir, OS_O_RDONLY, 0)
+    fd: rt.vfs_open(dir, OS_O_RDONLY, 0)
     if fd < 0 -> return -1
     fd
 }
@@ -508,7 +509,7 @@ os_open_directory: fn(path: String) -[DB]> Int Never! {
 // sqlite3OsFileSize: unixFileSize. A size of 1 reads as 0 (findInodeInfo's
 // msdos workaround, ticket #3260).
 os_file_size: fn(file: &DBFile) -[DB]> Int SQLError! {
-    size: core.db.__vfs_size(file.fd)
+    size: rt.vfs_size(file.fd)
     if size < 0 {
         file.last_errno = 0 - size
         return Err(base.fail(base.IOERR_FSTAT))
@@ -610,7 +611,7 @@ os_unlock: fn(file: &DBFile, level: Int) -[DB]> SQLError! {
 os_check_reserved_lock: fn(file: &DBFile) -[DB]> Bool SQLError! {
     if file.ctrl & UNIXFILE_NOLOCK != 0 -> return Ok(false)
     if file.lock > LOCK_SHARED -> return Ok(true)
-    got: core.db.__vfs_lock(file.fd, OS_F_OFD_GETLK, OS_F_WRLCK, RESERVED_BYTE, 1)
+    got: rt.vfs_lock(file.fd, OS_F_OFD_GETLK, OS_F_WRLCK, RESERVED_BYTE, 1)
     if got < 0 {
         file.last_errno = 0 - got
         return Err(base.fail(base.IOERR_CHECKRESERVEDLOCK))
@@ -632,7 +633,7 @@ os_set_chunk_size: fn(file: &DBFile, size: Int) Never! { file.chunk = size }
 // of each new block and at the last byte.
 os_size_hint: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
     if file.chunk <= 0 -> return Ok()
-    current: core.db.__vfs_size(file.fd)
+    current: rt.vfs_size(file.fd)
     if current < 0 -> return Err(base.fail(base.IOERR_FSTAT))
     target: ((size + file.chunk - 1) /% file.chunk) * file.chunk
     if target <= current -> return Ok()
@@ -640,7 +641,7 @@ os_size_hint: fn(file: &DBFile, size: Int) -[DB]> SQLError! {
     at := (current /% SIZE_HINT_BLOCK) * SIZE_HINT_BLOCK + SIZE_HINT_BLOCK - 1
     loop at < target + SIZE_HINT_BLOCK - 1 {
         if at >= target -> at = target - 1
-        wrote: core.db.__vfs_write(file.fd, at, zero, 0, 1)
+        wrote: rt.vfs_write(file.fd, at, zero, 0, 1)
         if wrote != 1 -> return Err(base.fail(base.IOERR_WRITE))
         at += SIZE_HINT_BLOCK
     }
@@ -678,7 +679,7 @@ os_temp_filename: fn() -[DB]> String Never! { os_get_tempname() ?? "" }
 // names the inode it was opened on (renamed or unlinked) has moved.
 os_has_moved: fn(file: DBFile) -[DB]> Bool Never! {
     if file.inode < 0 -> return false
-    inode: core.db.__vfs_inode(file.path)
+    inode: rt.vfs_inode(file.path)
     inode < 0 || inode != file.inode
 }
 
@@ -719,7 +720,7 @@ os_device_characteristics: fn(file: &DBFile) -> Int Never! {
 // `dir_sync` the directory is then fsynced (a directory that cannot be
 // opened is ignored, one that cannot be synced is IOERR_DIR_FSYNC).
 os_delete: fn(path: String, dir_sync: Bool) -[DB]> SQLError! {
-    got: core.db.__vfs_unlink(path)
+    got: rt.vfs_unlink(path)
     if got < 0 {
         if 0 - got == OS_ENOENT -> return Err(base.fail(base.IOERR_DELETE_NOENT))
         return Err(base.fail(base.IOERR_DELETE))
@@ -727,8 +728,8 @@ os_delete: fn(path: String, dir_sync: Bool) -[DB]> SQLError! {
     if dir_sync {
         dirfd: os_open_directory(path)
         if dirfd >= 0 {
-            synced: core.db.__vfs_sync(dirfd)
-            _: core.db.__vfs_close(dirfd)
+            synced: rt.vfs_sync(dirfd)
+            _: rt.vfs_close(dirfd)
             if synced < 0 -> return Err(base.fail(base.IOERR_DIR_FSYNC))
         }
     }
@@ -738,8 +739,8 @@ os_delete: fn(path: String, dir_sync: Bool) -[DB]> SQLError! {
 // sqlite3OsAccess: unixAccess. EXISTS is true for a path stat(2) finds that
 // is not an empty regular file; READWRITE is access(R_OK|W_OK).
 os_access: fn(path: String, flags: Int) -[DB]> Bool Never! {
-    if flags == ACCESS_EXISTS -> return core.db.__vfs_exists(path, false)
-    core.db.__vfs_access(path, OS_W_OK_R_OK) == 0
+    if flags == ACCESS_EXISTS -> return rt.vfs_exists(path, false)
+    rt.vfs_access(path, OS_W_OK_R_OK) == 0
 }
 
 // unixFullPathname's path under construction (struct DBPath). `out` holds
@@ -780,7 +781,7 @@ os_path_append_one: fn(p: &DBPath, name: [U8]) -[DB]> Never! {
         return
     }
     at: String.from_bytes(p.out.copy()) ?? ""
-    mode: core.db.__vfs_lstat_mode(at)
+    mode: rt.vfs_lstat_mode(at)
     if mode < 0 {
         if 0 - mode != OS_ENOENT -> p.rc = base.CANTOPEN
         return
@@ -794,7 +795,7 @@ os_path_append_one: fn(p: &DBPath, name: [U8]) -[DB]> Never! {
         return
     }
     p.symlinks += 1
-    link: core.db.__vfs_readlink(at)
+    link: rt.vfs_readlink(at)
     got: link.count_bytes()
     if got <= 0 || got >= MAX_PATHLEN {
         p.rc = base.CANTOPEN
@@ -831,7 +832,7 @@ os_full_pathname: fn(path: String) -[DB]> FullPath SQLError! {
     p := DBPath{rc: base.OK, symlinks: 0, out: [U8]{}, capacity: MAX_PATHNAME + 1}
     bytes: path.bytes()
     if bytes.len() == 0 || bytes[0] != OS_SLASH {
-        cwd: core.db.__vfs_cwd()
+        cwd: rt.vfs_cwd()
         if cwd.count_bytes() == 0 -> return Err(base.fail(base.CANTOPEN))
         os_path_append_all(p, cwd.bytes())
     }
@@ -906,7 +907,7 @@ os_shm_system_lock: fn(file: &DBFile, kind: Int, ofst: Int, n: Int) -[DB]> Int N
 // read-only one is left unlocked and answers READONLY_CANTINIT. A DMS
 // write lock held elsewhere (another connection initializing) is BUSY.
 os_shm_lock_dms: fn(file: &DBFile) -[DB]> Int Never! {
-    got: core.db.__vfs_lock(file.shm.fd, OS_F_OFD_GETLK, OS_F_WRLCK, SHM_DMS, 1)
+    got: rt.vfs_lock(file.shm.fd, OS_F_OFD_GETLK, OS_F_WRLCK, SHM_DMS, 1)
     rc := base.OK
     if got < 0 -> rc = base.IOERR_LOCK else if got == OS_F_UNLCK {
         if file.shm.readonly {
@@ -914,7 +915,7 @@ os_shm_lock_dms: fn(file: &DBFile) -[DB]> Int Never! {
             rc = base.READONLY_CANTINIT
         } else {
             rc = os_shm_system_lock(file, OS_F_WRLCK, SHM_DMS, 1)
-            if rc == base.OK && core.db.__vfs_truncate(file.shm.fd, 3) < 0 {
+            if rc == base.OK && rt.vfs_truncate(file.shm.fd, 3) < 0 {
                 rc = base.IOERR_SHMOPEN
             }
         }
@@ -928,26 +929,26 @@ os_shm_lock_dms: fn(file: &DBFile) -[DB]> Int Never! {
 // falling back to read-only) and take the DMS lock. READONLY_CANTINIT
 // leaves the shared memory open but unlocked.
 os_shm_open: fn(file: &DBFile) -[DB]> Int Never! {
-    mode: core.db.__vfs_mode(file.path)
+    mode: rt.vfs_mode(file.path)
     if mode < 0 -> return base.IOERR_FSTAT
     name: "{file.path}-shm"
     fd := -1
     readonly := false
     if !file.readonly_shm {
-        fd = core.db.__vfs_open(name, OS_O_RDWR | OS_O_CREAT | OS_O_NOFOLLOW, mode)
+        fd = rt.vfs_open(name, OS_O_RDWR | OS_O_CREAT | OS_O_NOFOLLOW, mode)
     }
     if fd < 0 {
-        fd = core.db.__vfs_open(name, OS_O_RDONLY | OS_O_NOFOLLOW, mode)
+        fd = rt.vfs_open(name, OS_O_RDONLY | OS_O_NOFOLLOW, mode)
         if fd < 0 -> return base.CANTOPEN
         readonly = true
     }
     // robustFchown: a root process gives the -shm file its database's owner.
-    _: core.db.__vfs_chown_like(fd, file.path)
+    _: rt.vfs_chown_like(fd, file.path)
     file.shm = DBShm{open: true, fd: fd, path: name, readonly: readonly, unlocked: false, n_region: 0, sz_region: 0, shared_mask: 0, excl_mask: 0}
     rc: os_shm_lock_dms(file)
     if rc != base.OK && rc != base.READONLY_CANTINIT {
         // shm_open_err: unixShmPurge.
-        _: core.db.__vfs_close(fd)
+        _: rt.vfs_close(fd)
         file.shm = os_shm_closed()
     }
     rc
@@ -974,7 +975,7 @@ os_shm_map: fn(file: &DBFile, region: Int, sz_region: Int, extend: Bool, mapped:
     if file.shm.n_region < n_req {
         n_byte: n_req * sz_region
         file.shm.sz_region = sz_region
-        size: core.db.__vfs_size(file.shm.fd)
+        size: rt.vfs_size(file.shm.fd)
         if size < 0 -> return base.IOERR_SHMSIZE
         if size < n_byte && !extend {
             if file.shm.readonly -> return base.READONLY
@@ -983,7 +984,7 @@ os_shm_map: fn(file: &DBFile, region: Int, sz_region: Int, extend: Bool, mapped:
         if size < n_byte {
             zero: [U8]{U8{0}}
             loop pg in (size /% SHM_EXTEND_PAGE)..<(n_byte /% SHM_EXTEND_PAGE) {
-                if core.db.__vfs_write(file.shm.fd, pg * SHM_EXTEND_PAGE + SHM_EXTEND_PAGE - 1, zero, 0, 1) != 1 {
+                if rt.vfs_write(file.shm.fd, pg * SHM_EXTEND_PAGE + SHM_EXTEND_PAGE - 1, zero, 0, 1) != 1 {
                     return base.IOERR_SHMSIZE
                 }
             }
@@ -998,7 +999,7 @@ os_shm_map: fn(file: &DBFile, region: Int, sz_region: Int, extend: Bool, mapped:
 // Read `n` bytes of the shared memory at byte `offset` into buf[at..].
 // What lies past the end of the file reads as zero.
 os_shm_read: fn(file: &DBFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> Int Never! {
-    got: core.db.__vfs_read(file.shm.fd, offset, buf, at, n)
+    got: rt.vfs_read(file.shm.fd, offset, buf, at, n)
     if got < 0 -> return base.IOERR_SHMMAP
     loop i in got..<n -> buf[at + i] = U8{0}
     base.OK
@@ -1006,7 +1007,7 @@ os_shm_read: fn(file: &DBFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> 
 
 // Write data[at..<at+n] to the shared memory at byte `offset`.
 os_shm_write: fn(file: &DBFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Int Never! {
-    if core.db.__vfs_write(file.shm.fd, offset, data, at, n) != n -> return base.IOERR_SHMMAP
+    if rt.vfs_write(file.shm.fd, offset, data, at, n) != n -> return base.IOERR_SHMMAP
     base.OK
 }
 
@@ -1047,8 +1048,8 @@ os_shm_unmap: fn(file: &DBFile, delete: Bool) -[DB]> Never! {
     if !file.shm.open {
         return
     }
-    if delete && file.shm.fd >= 0 -> _: core.db.__vfs_unlink(file.shm.path)
-    if file.shm.fd >= 0 -> _: core.db.__vfs_close(file.shm.fd)
+    if delete && file.shm.fd >= 0 -> _: rt.vfs_unlink(file.shm.path)
+    if file.shm.fd >= 0 -> _: rt.vfs_close(file.shm.fd)
     file.shm = os_shm_closed()
 }
 
@@ -1058,10 +1059,10 @@ os_shm_unmap: fn(file: &DBFile, delete: Bool) -[DB]> Never! {
 os_randomness: fn(n: Int) -[DB]> [U8] Never! {
     buf := [U8]{}
     loop _i in 0..<n -> buf.push(U8{0})
-    got: core.db.__vfs_random(buf)
+    got: rt.vfs_random(buf)
     if got == n -> return buf
     loop i in 0..<n -> buf[i] = U8{0}
-    t := core.db.__vfs_now_ms() /% 1000
+    t := rt.vfs_now_ms() /% 1000
     loop i in 0..<8 {
         if i < n -> buf[i] = U8{t & 255}
         t = t >> 8
@@ -1070,14 +1071,14 @@ os_randomness: fn(n: Int) -[DB]> [U8] Never! {
 }
 
 // sqlite3OsSleep: unixSleep; the microseconds slept.
-os_sleep: fn(micros: Int) -[DB]> Int Never! { core.db.__vfs_sleep(micros) }
+os_sleep: fn(micros: Int) -[DB]> Int Never! { rt.vfs_sleep(micros) }
 
 // sqlite3OsCurrentTimeInt64: unixCurrentTimeInt64, the Julian day number
 // times 86400000.
-os_current_time: fn() -[DB]> Int Never! { 24405875 * 8640000 + core.db.__vfs_now_ms() }
+os_current_time: fn() -[DB]> Int Never! { 24405875 * 8640000 + rt.vfs_now_ms() }
 
 // The time it is by the clock os_current_time reads, in Unix milliseconds.
-os_unix_ms: fn() -[DB]> Int Never! { core.db.__vfs_now_ms() }
+os_unix_ms: fn() -[DB]> Int Never! { rt.vfs_now_ms() }
 
 // The process-wide sqlite3_temp_directory (PRAGMA temp_store_directory).
 OSTempDirectory: struct {
@@ -1110,7 +1111,7 @@ os_temp_file_dir: fn() -[DB]> String? Never! {
     candidates.push("/tmp")
     candidates.push(".")
     loop dir in candidates {
-        if core.db.__vfs_exists(dir, true) && core.db.__vfs_access(dir, OS_X_OK_W_OK) == 0 {
+        if rt.vfs_exists(dir, true) && rt.vfs_access(dir, OS_X_OK_W_OK) == 0 {
             return Val(dir)
         }
     }
@@ -1139,7 +1140,7 @@ os_get_tempname: fn() -[DB]> String SQLError! {
         name: "{dir}/etilqs_{tail}"
         if name.count_bytes() > MAX_PATHNAME - 2 || limit > 10 -> return Err(base.fail(base.ERROR))
         limit += 1
-        if core.db.__vfs_access(name, OS_F_OK) != 0 -> return Ok(name)
+        if rt.vfs_access(name, OS_F_OK) != 0 -> return Ok(name)
     }
 }
 
