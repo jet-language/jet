@@ -185,43 +185,71 @@ BUILTIN_STATIC_ROWS: #run { [BuiltinStaticRow]{
     {module_name: "core.crypto.vault", owner: "KeyUnlock", method: "Passphrase", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.Named{name: "Secret"}}}, parameter_convention: AccessConvention.Read, return_type: Type.Named{name: "KeyUnlock"}, lowering: BuiltinStaticLowering.CoreCall{module_name: "core.crypto", member: "__vault_unlock_passphrase"}, arity_code: "E0104"},
 } }
 
-// Numeric destination owners (`numeric_type_from_name`) and their host words.
-BUILTIN_NUMERIC_KINDS: #run { [BuiltinNumericKind]{
-    {name: "Int", ty: Type.Int, rust: "i64", integer: true, fixed: false, signed: true, bits: 64},
-    {name: "I8", ty: Type.IntN{signed: true, bits: 8}, rust: "i8", integer: true, fixed: true, signed: true, bits: 8},
-    {name: "I16", ty: Type.IntN{signed: true, bits: 16}, rust: "i16", integer: true, fixed: true, signed: true, bits: 16},
-    {name: "I32", ty: Type.IntN{signed: true, bits: 32}, rust: "i32", integer: true, fixed: true, signed: true, bits: 32},
-    {name: "I64", ty: Type.IntN{signed: true, bits: 64}, rust: "i64", integer: true, fixed: true, signed: true, bits: 64},
-    {name: "U8", ty: Type.IntN{signed: false, bits: 8}, rust: "u8", integer: true, fixed: true, signed: false, bits: 8},
-    {name: "U16", ty: Type.IntN{signed: false, bits: 16}, rust: "u16", integer: true, fixed: true, signed: false, bits: 16},
-    {name: "U32", ty: Type.IntN{signed: false, bits: 32}, rust: "u32", integer: true, fixed: true, signed: false, bits: 32},
-    {name: "U64", ty: Type.IntN{signed: false, bits: 64}, rust: "u64", integer: true, fixed: true, signed: false, bits: 64},
-    {name: "Float", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
-    {name: "F64", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
-    {name: "F32", ty: Type.Float32, rust: "f32", integer: false, fixed: false, signed: true, bits: 32},
-} }
+// Numeric destination owners (`numeric_type_from_name`) and their host
+// words: Int, Float, and every family size the Prelude names
+// (FOUNDATION_SIZE_ALIASES, `U8: Unsigned<8>`). A size's facts are its
+// family's: a Signed or Unsigned size is a fixed whole number of its bits,
+// an IEEE size a float of one sign bit plus its exponent and fraction bits.
+BUILTIN_NUMERIC_KINDS: #run builtin_numeric_family_kinds()
 
-// Destination-owned `from_<source>` spellings (`NUMERIC_CONVERSION_SOURCES`;
-// the semantic symbol catalog reads it too). A built-in owner keeps only the
-// rows whose head is F32 or Float (`F32.from_int`, `Float.from_f32`): between
-// two whole-number types `T{x}` is the one conversion, and an integer head
-// takes a Float by `Int{f}`. A distinct numeric type keeps every row of its
-// base (`UserID.from_int`).
-BUILTIN_NUMERIC_SOURCES: #run { [BuiltinNumericSource]{
-    {method: "from_i8", source: "I8"},
-    {method: "from_i64", source: "I64"},
-    {method: "from_i16", source: "I16"},
-    {method: "from_i32", source: "I32"},
-    {method: "from_int", source: "Int"},
-    {method: "from_u8", source: "U8"},
-    {method: "from_u16", source: "U16"},
-    {method: "from_u32", source: "U32"},
-    {method: "from_u64", source: "U64"},
-    {method: "from_f32", source: "F32"},
-    {method: "from_float", source: "Float"},
-    {method: "from_decimal", source: "Decimal"},
-    {method: "from_fraction", source: "Fraction"},
-} }
+builtin_numeric_family_kinds: fn() -> [BuiltinNumericKind] Never! {
+    kinds := [BuiltinNumericKind]{
+        {name: "Int", ty: Type.Int, rust: "i64", integer: true, fixed: false, signed: true, bits: 64},
+        {name: "Float", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
+    }
+    loop alias in FOUNDATION_SIZE_ALIASES {
+        ty: foundation_family_type(alias.family, alias.sizes) ?? panic("`{alias.name}` names no family size")
+        integer: alias.family != "IEEE"
+        signed: alias.family != "Unsigned"
+        bits: if integer -> alias.sizes[0] else -> 1 + alias.sizes[0] + alias.sizes[1]
+        word: if {
+            !integer -> "f"
+            signed -> "i"
+            else -> "u"
+        }
+        kinds.push(BuiltinNumericKind{name: alias.name.copy(), ty: ty, rust: "{word}{bits}", integer: integer, fixed: integer, signed: signed, bits: bits})
+    }
+    kinds
+}
+
+// Destination-owned `from_<source>` spellings; the semantic symbol catalog
+// and Tools/Agent/CoreSurfaceLedger.jet read them too. One rule names them:
+// a source type's conversion is `from_` and its own name in lower case. That
+// gives `from_int`, `from_<size>` for each Prelude family size that is its
+// own type's name (`from_u8`, `from_f32`; F64 is Float, so it is
+// `from_float`), `from_float`, and the exact numbers' `from_decimal` and
+// `from_fraction`. A built-in owner keeps only the rows whose head is F32 or
+// Float (`F32.from_int`, `Float.from_f32`): between two whole-number types
+// `T{x}` is the one conversion, and an integer head takes a Float by
+// `Int{f}`. A distinct numeric type keeps every row of its base
+// (`UserID.from_int`).
+BUILTIN_NUMERIC_SOURCES: #run builtin_numeric_family_sources()
+
+builtin_numeric_family_sources: fn() -> [BuiltinNumericSource] Never! {
+    sources := [BuiltinNumericSource]{{method: "from_int", source: "Int"}}
+    loop alias in FOUNDATION_SIZE_ALIASES {
+        ty: foundation_family_type(alias.family, alias.sizes) ?? panic("`{alias.name}` names no family size")
+        if type_name(ty) != alias.name -> next
+        sources.push(BuiltinNumericSource{method: "from_{alias.name.lower()}", source: alias.name.copy()})
+    }
+    sources.push(BuiltinNumericSource{method: "from_float", source: "Float"})
+    sources.push(BuiltinNumericSource{method: "from_decimal", source: "Decimal"})
+    sources.push(BuiltinNumericSource{method: "from_fraction", source: "Fraction"})
+    sources
+}
+
+#Test("each family size converts by its own name, with its family's host word") {
+    methods := [String]{}
+    loop row in BUILTIN_NUMERIC_SOURCES -> methods.push(row.method.copy())
+    assert_eq(methods.join(" "), "from_int from_i8 from_i16 from_i32 from_i64 from_u8 from_u16 from_u32 from_u64 from_f32 from_float from_decimal from_fraction")
+    words := [String]{}
+    loop kind in BUILTIN_NUMERIC_KINDS -> words.push("{kind.name}:{kind.rust}:{kind.bits}")
+    assert_eq(words.join(" "), "Int:i64:64 Float:f64:64 I8:i8:8 I16:i16:16 I32:i32:32 I64:i64:64 U8:u8:8 U16:u16:16 U32:u32:32 U64:u64:64 F32:f32:32 F64:f64:64")
+    f64: builtin_numeric_kind("F64") ?? panic("F64 is a numeric kind")
+    assert(f64.ty == Type.Float && !f64.integer && !f64.fixed)
+    u8: builtin_numeric_kind("U8") ?? panic("U8 is a numeric kind")
+    assert(u8.ty == Type.IntN{signed: false, bits: 8} && u8.fixed && !u8.signed)
+}
 
 builtin_numeric_kind: fn(name: String) -> BuiltinNumericKind? {
     loop kind in BUILTIN_NUMERIC_KINDS {

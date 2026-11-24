@@ -58,6 +58,10 @@ BUILTIN_METHODS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet
 
 BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet"
 
+// The Prelude's family size aliases (`U8: Unsigned<8>`), whose `from_<size>`
+// conversions BuiltinStatics generates.
+PRELUDE_PATH: "Core/Prelude/Prelude.jet"
+
 COLLECTIONS_PATH: "Compiler/JetFoundation/Source/Collections.jet"
 
 CORE_SOURCE_PARTS_PATH: "Compiler/Prelude/CoreSourceParts.tsv"
@@ -1541,6 +1545,8 @@ STATIC_ROW: Regex{"\x7Bmodule_name: \x22([^\x22]*)\x22, owner: \x22([^\x22]+)\x2
 
 CONVERSION_ROW: Regex{"\{{method: \x22([^\x22]+)\x22, source: \x22[^\x22]+\x22\}}"}
 
+SIZE_ALIAS_ROW: Regex{"^([A-Z][A-Za-z0-9]*): (Signed|Unsigned|IEEE)<([0-9, ]+)>$"}
+
 SEMA_LITERAL: Regex{"\x22([A-Za-z_][A-Za-z0-9_]*)\x22"}
 
 INVENTORY_ROW: Regex{"^(fixed_sig|receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)\s*\}}$"}
@@ -1599,6 +1605,15 @@ jet_receiver_tables: fn(root: String, module_paths: [String:[String]]) -[FS]> Re
             method: conversion.group(1) ?? ""
             if !numeric.contains(method) -> numeric.push(method)
         }
+    }
+    // builtin_numeric_family_sources: each Prelude family size that is its
+    // own type's name converts by `from_<size>`. `F64: IEEE<11, 52>` is
+    // Float, whose `from_float` row the scan above reads.
+    loop line in split_lines(read_source(root, PRELUDE_PATH) ?? return Err(err)) {
+        alias: SIZE_ALIAS_ROW.match(line) ?? next
+        if (alias.group(2) ?? "") == "IEEE" && (alias.group(3) ?? "") == "11, 52" -> next
+        method: "from_{(alias.group(1) ?? "").lower()}"
+        if !numeric.contains(method) -> numeric.push(method)
     }
     sema_names := [String:Bool]{}
     walk_sema(root, SEMA_SOURCE_DIR, sema_names) ?? return Err(err)
