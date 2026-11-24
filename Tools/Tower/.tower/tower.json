@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113750,
+    "rev": 113773,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31219,11 +31219,11 @@
         {
           "n": 1,
           "text": "`jet repl` starts and keeps bindings across inputs, and `1 + 2` prints 3. Proof: `jet test Compiler --profile cases --filter Repl/repl_all_complex_binding_shapes_survive_across_turns`, a scripted pty case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:25.884Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases Repl/repl_all_complex_binding_shapes_survive_across_turns; PASS 1/1; probe: `1 + 2` prints `3 : Int`. The case uses stdin, not a pty",
+          "at": "2026-11-24T08:33:05.598Z"
         },
         {
           "n": 2,
@@ -31263,11 +31263,11 @@
         {
           "n": 7,
           "text": "A REPL input that needs authority asks once under the #5949 rules and names the effect, and a pure input never asks. Proof: `jet test Compiler --profile cases --filter Repl/repl_cli_allow_and_deny_flags_control_non_tty_execution` and a pty case for the prompt.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:28.769Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases Repl/repl_cli_allow_and_deny_flags_control_non_tty_execution; cases Repl/repl_tty_session_names_each_effect_once (pty); PASS 1/1; PASS 1/1; the effect is named once with no prompt; pure turns asked nothing in the probe",
+          "at": "2026-11-24T08:33:06.554Z"
         },
         {
           "n": 8,
@@ -31321,7 +31321,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-07T09:50:33.240Z",
-      "updated": "2026-11-24T04:18:12.244Z",
+      "updated": "2026-11-24T08:33:06.554Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 14
     },
@@ -33531,29 +33531,29 @@
         {
           "n": 7,
           "text": "(was #6126) fn build sets a declared setting to different values for two targets; each target's artifact reads its own value through `$build.settings.<key>`, and the value folds at build time. Golden output on every tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:16:11.914Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: golden OutputSettings; PASS 1/1; the case builds at O0, O1 and O2 (--release), checks both outputs' own settings each time, and checks that `jet run` gives the defaults",
+          "at": "2026-11-24T08:33:02.478Z"
         },
         {
           "n": 8,
           "text": "(was #6126) Code reads target hardware facts (word size, pointer size, cache-line size, CPU feature set) at build time; they follow the selected target, not the host, proved by a cross-target build whose facts differ from the host's.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:16:12.731Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases build_output_facts_follow_its_toolchain; PASS 1/1; aarch64 output reads [neon] and the aarch64 triple, host reads [sse2]. Word size is not printed by the case; probe: an i686 toolchain output reads word 32, pointer 32",
+          "at": "2026-11-24T08:33:03.455Z"
         },
         {
           "n": 9,
           "text": "(was #6126) Setting an undeclared key, or a value of the wrong type, for a target gives a registered diagnostic with a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:16:13.553Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: ui OutputSetting (OutputSettingUndeclared, OutputSettingWrongType); PASS 2/2 |",
+          "at": "2026-11-24T08:33:04.536Z"
         },
         {
           "n": 10,
@@ -33586,7 +33586,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:30.927Z",
-      "updated": "2026-11-24T00:27:57.913Z",
+      "updated": "2026-11-24T08:33:04.536Z",
       "updatedBy": "Orchestrator"
     },
     {
@@ -52850,11 +52850,11 @@
         {
           "n": 16,
           "text": "A `build: fn` that reads a constant marked #StepLimit compiles and runs on every tier; today it is an internal compiler error (\"constant … without a declaration\", found by G1Generation-2 on the batch 17 compiler while fixing c15). Proof: `jet test Compiler --profile cases --filter build_fn_reads_a_step_limit_constant`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T05:36:25.677Z",
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases build_fn_reads_a_step_limit_constant; PASS 1/1 (debug and release builds) |",
+          "at": "2026-11-24T08:32:55.528Z",
           "proof": {
             "profile": "cases",
             "filter": "build_fn_reads_a_step_limit_constant"
@@ -52866,7 +52866,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-24T08:32:53.997Z",
+      "updated": "2026-11-24T08:32:55.528Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 16
     },
@@ -57897,11 +57897,11 @@
         {
           "n": 9,
           "text": "The 4 known-failing rows this card owns (rehomed by #6843 c7) pass and leave Tests/known-failing.tsv: FactReads/nominal_layout_intrinsic_in_comptime_helper_agrees_on_tiers, CoreLib/tracked_origin_is_a_folded_optional_fact, FactReads/typed_fact_fixture_matches_aot_default_and_o0, GateLedger/source_gate_kinds_keep_their_written_reasons. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:27:25.737Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases, each of the 4 rows one at a time; PASS 4/4; no row in known-failing.tsv",
+          "at": "2026-11-24T08:32:56.521Z"
         }
       ],
       "refs": [],
@@ -57913,7 +57913,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:43.897Z",
-      "updated": "2026-11-24T06:34:20.831Z",
+      "updated": "2026-11-24T08:32:56.521Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -58463,11 +58463,11 @@
         {
           "n": 32,
           "text": "A check rule hears a module constant (including a constant naming a constant) and a `Path{…}` literal as known values, as sema_rule_known_row's doc comment states; today only plain literal rows are heard (probe rule3 on tip18), so a static-path rule would wrongly reject router.get(CACHE_PATH, …) and router.custom(BAN, …).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T07:11:50.107Z",
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases Metaprogramming/check_rule_hears_constants_and_path_literals; PASS 1/1 |",
+          "at": "2026-11-24T08:33:01.446Z",
           "proof": {
             "profile": "cases",
             "filter": "Metaprogramming/check_rule_hears_constants_and_path_literals"
@@ -58508,7 +58508,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T07:54:49.658Z",
+      "updated": "2026-11-24T08:54:42.193Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 34
     },
@@ -58726,11 +58726,11 @@
         {
           "n": 12,
           "text": "The 2 known-failing rows this card owns (rehomed by #6843 c7) pass and leave Tests/known-failing.tsv: AutoDerivePolicy/rejected_auto_traits_fail_in_sema_before_codegen, AutoDerivePolicy/same_named_dependency_type_keeps_its_own_auto_derive_policy. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:27:44.713Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases, the 2 AutoDerivePolicy rows; PASS 2/2; neither row in known-failing",
+          "at": "2026-11-24T08:32:58.442Z"
         },
         {
           "n": 13,
@@ -58748,11 +58748,11 @@
         {
           "n": 14,
           "text": "A generic function used at both `[T]` and `[T#N]` gets two distinct instances: on batch16 the `[T#N]` call ran the `[T]` instance (O0 printed [2, 0] for [1, 2] then SIGSEGV; O1/O2 ICE 'argument 0 s138 of Aggregate/8 ([U8#2]) for parameter Aggregate/24 ([U8])'), and a struct with both a `[U8]` and a `[U8#N]` field (or I16) derives its codecs without the '[U8] where [U8] is expected' ICE (ConcreteHeadReview probes p4, p5, p9, $JET_SCRATCH_ROOT/tmp/orch/ballot/concretehead/review-probes). Holds under every D-IMPL-CONCRETEHEAD1 option.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T06:33:06.410Z",
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases ConcreteHead/fixed_and_growable_list_instances_; PASS 2/2 |",
+          "at": "2026-11-24T08:32:59.407Z",
           "proof": {
             "profile": "cases",
             "filter": "ConcreteHead/fixed_and_growable_list_instances_"
@@ -58761,11 +58761,11 @@
         {
           "n": 15,
           "text": "Codec impl diagnostics name the real rule (ConcreteHeadReview q5, q6, q7, q9 on batch16): an overlapping impl is refused as an overlap, not '`impl Many` takes no type parameters'; a type that is not Codable is reported as such, not 'No trait named `Encode` is in scope'; no Fix line suggests `impl [Int:String].Decode` (a head every option refuses) or the nonexistent `Level.from_U8` (from_int exists). Each has its UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T06:33:07.254Z",
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: ui codec_impl_; PASS 5/5; probe: Level.from_u8(U8{1}) resolves on J",
+          "at": "2026-11-24T08:33:00.407Z",
           "proof": {
             "profile": "ui",
             "filter": "codec_impl_"
@@ -58780,7 +58780,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T06:35:35.853Z",
+      "updated": "2026-11-24T08:33:00.407Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -58917,11 +58917,11 @@
         {
           "n": 9,
           "text": "The network handle types (TCPListener, TCPStream, UDPSocket, UnixListener, UnixStream, WsConn, WsMessage) are declared in Core with their methods (impl blocks in Core/Net and Core/Web/Ws), and the compiler's handle-op row table (from #3147 c8) shrinks to the runtime leaves those bodies call. Proof: `jet test Compiler/JetSema/Tests/CompilerOwnedTypeNames.jet` lists none of the seven as compiler-owned.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:55:49.961Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: jet test Compiler/JetSema/Tests/CompilerOwnedTypeNames.jet; 131 passed, 0 failed; all seven types stay unknown. Ws.jet is in Core/Net, not Core/Web",
+          "at": "2026-11-24T08:32:57.493Z"
         }
       ],
       "refs": [],
@@ -58933,7 +58933,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-24T04:18:14.147Z",
+      "updated": "2026-11-24T08:32:57.493Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -64991,11 +64991,11 @@
         {
           "n": 9,
           "text": "Through the real LSP on the self-hosted index, renaming an enum variant crosses sibling modules (leading-dot and bare patterns) and leaves same-spelled cases and `#Rename` wire names alone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:42.152Z",
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/lsp_rename_variant_across_modules; PASS 1/1 |",
+          "at": "2026-11-24T08:33:17.130Z",
           "proof": {
             "profile": "cases",
             "filter": "LSP/lsp_rename_variant_across_modules"
@@ -65022,11 +65022,11 @@
         {
           "n": 12,
           "text": "The known-failing row this card owns (rehomed by #6843 c7) passes and leaves Tests/known-failing.tsv: LSP/lsp_generated_definition_uses_selected_buildplan_identity. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:27:21.946Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/lsp_generated_definition_uses_selected_buildplan_identity; PASS 1/1; not in known-failing",
+          "at": "2026-11-24T08:33:18.895Z"
         }
       ],
       "refs": [],
@@ -65037,7 +65037,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:50.327Z",
-      "updated": "2026-11-24T06:34:12.492Z",
+      "updated": "2026-11-24T08:33:18.895Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 12
     },
@@ -65063,11 +65063,11 @@
         {
           "n": 1,
           "text": "Hover, references and completion find identifiers from lexer tokens, with no private text scanner in Compiler/JetLSP. Proof: `jet test Compiler --profile cases --filter LSP/lsp_hover_` and `--filter lsp/lsp_references_finds_all_uses` pass, and JetLSP has no character-class identifier scanner (`git grep -n -E 'is_ident_(start|char)' -- Compiler/JetLSP` prints nothing).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:45.169Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/lsp_hover_; cases LSP/lsp_references_finds_all_uses; 9 PASS 1 KNOWN-FAILING (exit 0); PASS 1/1; the known-failing hover row is typestate facts, owned by #6921. The card's lowercase `lsp/...` filter matches nothing. The is_ident grep over Compiler/JetLSP found nothing",
+          "at": "2026-11-24T08:33:07.512Z"
         },
         {
           "n": 2,
@@ -65120,11 +65120,11 @@
         {
           "n": 6,
           "text": "Semantic tokens give retired local `view`/`.view` spellings no identifier or method token, while View<T> and ViewMut<T> stay type tokens.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:49.092Z",
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words; PASS 1/1 |",
+          "at": "2026-11-24T08:33:08.466Z",
           "proof": {
             "profile": "cases",
             "filter": "LSP/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words"
@@ -65133,11 +65133,11 @@
         {
           "n": 7,
           "text": "The token classifier follows current syntax and handles comments, strings, incremental edits and qualified names without skip heuristics. Proof: `jet test Compiler --profile cases --filter LSP/lsp_semantic_tokens_` passes, delta fallback included.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:50.032Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/lsp_semantic_tokens_; PASS 3/3 |",
+          "at": "2026-11-24T08:33:09.507Z"
         },
         {
           "n": 8,
@@ -65190,11 +65190,11 @@
         {
           "n": 12,
           "text": "The known-failing row this card owns (rehomed by #6843 c7) passes and leaves Tests/known-failing.tsv: LSP/lsp_checked_text_contract_survives_editor_navigation. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:27:51.537Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/lsp_checked_text_contract_survives_editor_navigation; PASS 1/1; not in known-failing",
+          "at": "2026-11-24T08:33:10.428Z"
         }
       ],
       "refs": [],
@@ -65205,7 +65205,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:51.221Z",
-      "updated": "2026-11-24T06:34:15.081Z",
+      "updated": "2026-11-24T08:33:10.428Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 12
     },
@@ -65311,20 +65311,20 @@
         {
           "n": 8,
           "text": "Opening a file with a type error publishes the same diagnostics (code, range, message) as `jet check` on that file. Proof: `jet test Compiler --profile cases --filter LSP/lsp_checked_imported_diagnostics_and_repairs`. (was #4917 c2)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:12:02.222Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/lsp_checked_imported_diagnostics_and_repairs; PASS 1/1; probe: `jet check` on the same unsaved text gives the case's E0107 x3 (from line 4) and E0766 (2:27, same message)",
+          "at": "2026-11-24T08:33:12.756Z"
         },
         {
           "n": 9,
           "text": "The editor extension in Tools/Editors starts `jet self lsp` with no extra settings; a scripted smoke test opens a file and receives its diagnostics. Proof: `jet test Compiler --profile cases --filter LSP/editor_extension_starts_lsp`. (was #4917 c4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:12:03.267Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases LSP/editor_extension_starts_lsp; PASS 1/1 |",
+          "at": "2026-11-24T08:33:14.767Z"
         },
         {
           "n": 10,
@@ -65445,7 +65445,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-24T07:41:35.993Z",
+      "updated": "2026-11-24T08:33:14.767Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 19
     },
@@ -136526,6 +136526,691 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-24T07:41:35.993Z"
+    },
+    {
+      "id": "D-RULE-REWRITE1",
+      "cardId": "c0e6znz4",
+      "group": "language",
+      "title": "How a Core declaration attaches a value computed while building, such as a route's contract, to each call",
+      "situation": "Card #6851 c3 deletes HTTPRouting.jet (1,482 lines) and HTTP.jet (590 lines). Their checks move into Core marker rules under D-CORE-CHECK1=A. A rule can only refuse a call, and `expand` runs once per marked declaration. But the checker also changes each call. It rewrites `router.post(p, h)` into `router.__route(verb, p, wrapped, contract)`, where the contract is JSON computed while building. It wraps a typed or zero-argument handler in a synthesized `fn(HTTPRequest)` lambda. This ballot asks how a Core declaration attaches such a value to each call. D-RULE-BODYFACTS1 decides how the contract learns the handler's body, and D-RULE-WRITTEN1 decides how a rule sees an interpolated literal. The two files go only when all three leave sema, with the route table, the App route path, the form methods, middleware and the shared lookups.",
+      "gist": "How does a Core declaration attach a value computed while building, such as a route's contract, to each call?",
+      "lesson": "Languages take one of two paths. Some let a library compute an extra argument at each call: C++ default arguments with `source_location::current()`, and Zig comptime parameters. Others let it replace the call: Swift expression macros, C# interceptors and Rust macros. The first keeps the call's meaning. The second can do anything.",
+      "explainer": "A post office clerk staples a receipt to each registered parcel. The rule book can describe the receipt each parcel gets (A). It can let the clerk swap the parcel for a different one (B). The compiler's own clerk can keep the job (C). Or the receipt can be written when the parcel arrives (D).",
+      "story": "Ana's `router.post(\"/orders\", place)` must register place's contract, so `web.openapi(router)` lists POST /orders with an `Order` body and its 202 and 400 responses. A package router, `kit.router`, wants the same for its own `route` method. Today only `core.http`'s router and `web.App` get contracts, because the compiler knows their method names. Under the recommended answer, Ana's program and her diagnostics stay the same.",
+      "inWild": "// C++20: void log(std::string_view m, std::source_location at = std::source_location::current());\n// Zig: fn get(comptime path: []const u8, handler: anytype) void { comptime check(path); }\n// Swift: #route(\"/orders\", place) expands to a call the macro writes.\n// C# 12 (experimental): [InterceptsLocation(...)] redirects one call site to another method.",
+      "detail": "The program this ballot and its two siblings use, written as today's tests write it (Tests/UI/http_route_invalid_literal.jet, Tests/Run/Net/BackendBattery/run.jet). `web.openapi` is fallible, so the print handles its error. Without `?? …` the program fails with Jet.MissingErrorConversion (probe p4).\n\n```\nuse {\n    http: core.http\n    server: core.http.server\n    web: core.web\n}\n\nOrder: struct { item: String, quantity: Int }\nReceipt: struct { order_id: Int }\n\nplace: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {\n    order: req.json<Order>() ?? return Ok(server.response(400, \"bad order\"))\n    Ok(server.json(202, Receipt{order_id: order.quantity}))\n}\n\nrun: fn() {\n    router := http.router()\n    id: \"42\"\n    router.get(\"/users/{id}\", place)   // line 18: E2805, brace interpolation\n    router.post(\"/orders\", place)      // contract: body Order; 202 Receipt, 400\n    print(web.openapi(router) ?? \"openapi failed\")\n}\n```\n\nWhat sema does with `router.post` today. `sema_call_try_http_router` (HTTPRouting.jet:1170) checks the path literal (:466), the pattern grammar and the handler's shape (:1247). It binds each handler input to a path field, a query parameter or the body, and checks Decode admissibility. It wraps a typed or zero-argument handler in a `fn(HTTPRequest)` lambda (`sema_http_mux_route_handler`, :1345, :1452-1482). It checks the callback's middleware and ownership.\n\nIt reads the handler's body (:859, :1020) and renders JSON schemas of the input, body and response types (:535-614). It builds the contract JSON (`sema_http_route_contract`, :1107-1168) and records the route for E2804 (:1416-1427). Finally it emits `router.__route(verb, path, wrapped, contract)` (:1391-1411). For `App`, the targets are `__http_route`, `__http_route_dynamic` and `__http_route_custom` (Core/Web/Web.jet:496-512). All four targets take `at: SourceLocation{#caller}`, and a run-time App pattern's contract is completed when it registers.\n\n`web.form(M, action: a)` becomes `core.web.forms.input(\"M\", fields)` and then `core.web.forms.typed(input, \"a\")` (HTTP.jet:397-434). Its value depends only on the model type and the action's name. A `#Web.Form` marker's `expand` can emit the fields once per model type (D-META-LADDER1's second step). So web.form needs no per-call value under any option here.\n\nPrecedents in Jet, probed on the batch 20 compiler. A plain default may read an earlier parameter, and it is computed per call (`loud: String{shout(path)}`, probe p3b). `at: SourceLocation{#caller}` is computed per call, and a wrapper forwards it by declaring the same default (D-SITE-CALLER1). `#Pre(#run …)` is ratified to decide its predicate per call with the call's argument facts (D-JAI-GENERIC1, D-PRE-COMPILE1).\n\nToday `#Pre(#run …)` does that only for a literal argument. A module constant or a forwarded parameter is Jet.CompileTimeReadsRuntimeValue, reported at the declaration rather than the call (p2b, p2c, p2g). D-PRE-COMPILE1 counts a constant as known. `#run` inside a larger value, a parameter default included, is Jet.UnsupportedCompileTimeValue (p1, p3). `.reflect()` on a function-typed parameter is Jet.UnknownMethod (p2). D-CORE-CHECK1's implementation decision M3 moves `#Pre` onto a check rule with a per-call self; it has not landed.\n\nRatified limits. D-META-LADDER1=A says Jet has no macros, and no call-site expansion is registered. D-META-RECONCILE1=A says written code means what its file says, and in standard code no rewrite happens. D-JAI-CODE1, as narrowed by D-META-COMPILER1=A, removed `#Expand` and `name!()`. A call-site rewrite in standard code needs those decisions reopened.\n\nWhat the contract needs. The handler's parameters and types, which a heard argument's FunctionInfo carries once c30 lands, but only for a bare named function. A lambda, `mod.f` or a method value stays None (p8), although D-CORE-CHECK1=A promises a FunctionInfo for 'a function or lambda argument'. Nested type schemas need TypeId reflection (D-RULE-TYPEARGS1, c26). The body facts are D-RULE-BODYFACTS1's. The path, method and source line are in the route table when the route registers.\n\nSites that go under A, B or D: the lowering (:1391-1411), the handler wrap (:1345, :1452-1482) and the contract builder (:1107-1168) with its schema rendering (:535-614). So do the handler-shape and input-binding E2805s (:1170-1340) and HTTP.jet's `web.form` lowering (:274-437). Sites no option here moves: the E2804 route table (:1416-1427, Methods.jet:1506), which needs state across calls, and the App `route`/`page`/`layout` path (Methods.jet:1954-2035). HTTPMount.jet mounts structs only; it has no router variants.\n\nc3 deletes all of HTTP.jet, not only `web.form`. `app.middleware(mw)` is lowered to `__http_middleware` (HTTP.jet:149-176, Methods.jet:1963) after a capture-crossing check that reads sema's ownership facts (:117-147). Under A it becomes an ordinary Core method, but the crossing check needs a declared crossing that no ballot here provides. `sema_call_http_mux_source_call` (:185-213) emits every lowered call and goes with the lowering.\n\nThe typed form's methods (:439-590) rename `form.validate(…)` and others to `core.web.forms.typed_*` members. They also lower a leading-dot selector `.email` to the String \"email\". The renames become ordinary Core methods, but the selector needs a per-model field type, which no ballot here settles. `server.json`'s E2411 admission (:74-93) waits on D-RULE-TYPEARGS1.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A per-call parameter, computed while building from the handler",
+          "detail": "A parameter's default may be `#run` over earlier parameters. At each call, the build evaluates it with those parameters bound to the call's argument facts, as `#Pre(#run …)` is ratified to work (D-JAI-GENERIC1). The route's default reads only the handler, so a run-time path, such as an App's dynamic route, needs nothing more.\n\nThe route table completes the path half of the contract when the route registers: canonical path, path or query placement, operation id, and provenance from `at`. `route_add_dynamic` already does this for App. The check rule hears both the path and the handler, so it keeps the input-binding E2805s for a static path while building. A handler that is neither a named function nor a lambda is refused at the call, as today (:1247).\n\nA call may write the parameter only by forwarding its own caller's parameter that has the same default, as a `#caller` default is forwarded (D-SITE-CALLER1). Any other written value is refused, so a contract cannot be forged. `router.post(\"/orders\", place)` stays a call of `post`, and `kit.router` declares and forwards the same parameter.",
+          "technical": "New: `#run` inside a parameter default, reading earlier parameters, decided per call with the call's facts. Today only `#Pre(#run …)` reaches that, and only for literals (p2b, p3). Spellings.jet's `#Pre(#run {{ … }}, \"…\")` row lists where `#run` around an expression is decided per call. It gains the parameter default (I7). It is the same `#run` meaning, so no spelling is added (I9). Also new: the forwarding rule and its refusal code.\n\nGates before A can land, each owned by card #6851. First, lambda and qualified-name handlers heard as FunctionInfo, as D-CORE-CHECK1=A states (c30; p8 shows None today). Second, `.reflect()` on a function-typed parameter (p2). Third, nested type schemas through TypeId (D-RULE-TYPEARGS1, c26). Fourth, the body facts D-RULE-BODYFACTS1 settles. Fifth, the handler adaptation below.\n\nSixth, the capture check every handler gets today (HTTPRouting.jet:1348, HTTP.jet:117-147). It refuses a lambda handler that captures state which cannot cross to request workers. No Core parameter can yet declare that crossing, which D-CONC-CROSS1=A's one prover checks. The same gap holds under B and D.\n\nA default that cannot be computed reports at the call with the default's error type, so E2805 'no complete checked endpoint contract' keeps its text. Today a forwarded value is reported at the declaration instead (p2c), which M3 must fix. Hover and `jet inspect` must show the computed argument.\n\nCosts. One comptime-child evaluation per distinct handler, cached by handler identity, not one per call. Rule dispatch costs about 46.5 µs per heard call today, against c22's 1 µs budget. Each reflect is a 43 to 229 µs host round trip (D-RULE-TYPEARGS1 review). So a handler with three nested types costs about 0.2 to 0.7 ms until c22 is met.\n\nA does not remove the handler adaptation. Jet has no overloading (p11), so no Core spelling takes `fn()`, `fn(Int)` and `fn(Int, HTTPRequest)` under one name. A generic adapter needs one impl per input type (p10). Until D-RULE-TYPEARGS1's typed handler params land, sema keeps `sema_http_mux_route_handler` (about 30 lines) behind a declared role. The cross-call E2804 table also stays in sema.",
+          "code": "// PROPOSED, Core/HTTP/Router.jet\npost: fn(\n    &self,\n    path: String,\n    handler: fn(HTTPRequest) -> HTTPResponse HTTPError!,\n    contract: HandlerContract{#run handler_contract(handler.reflect())},\n    at: SourceLocation{#caller},\n) { self.__route(\"POST\", path, handler, contract, at) }\n\n// PROPOSED, a package router forwards both computed parameters\nget: fn(&self, path: String, handler: fn(HTTPRequest) -> HTTPResponse HTTPError!, contract: HandlerContract{#run handler_contract(handler.reflect())}, at: SourceLocation{#caller}) {\n    self.inner.get(path, handler, contract: contract, at: at)\n}\n\n// Under every option, web.form's fields come from #Web.Form's expand, once per model type\n#Web.Form Checkout: struct { email: String, quantity: Int }"
+        },
+        {
+          "key": "B",
+          "name": "A rule may replace its call",
+          "detail": "A check rule may end by replacing the call it heard with a call of another function or method of the marking module. The new call passes the original arguments by position, plus values the rule computed. Sema checks the replacement as an ordinary call. `router.post(\"/orders\", place)` becomes `router.__route(\"POST\", \"/orders\", place, contract)`, one to one with today's lowering.",
+          "technical": "New: a `replace` result on CompilerCall, such as `call.replace(with: \"__route\", args: [...])`. Each arg is `.Arg(index)` or `.Value(dyn)`. The target must be declared by the module that declares the marker; without that limit, the rule could call anything. The replacement keeps the call's span. A failed check of the replacement reports at the call, with a note naming the rule. Two rules replacing one call is an error.\n\nRatified limits. D-META-LADDER1=A says 'no call-site expansion is registered'. D-META-RECONCILE1=A says that in standard code 'no rewrite happens'. B needs both reopened. B also cannot produce today's handler wrap: a replacement argument is an original argument or a computed value, never a synthesized lambda.\n\nCosts. A call no longer means its callee. Go to definition, hover, `jet inspect`, coverage and stack traces must each say which rule replaced what. And this is a general rewrite power, which D-CORE-CHECK1 left out: rules hear and refuse.",
+          "code": "// PROPOSED, Core/HTTP/Router.jet\nRoutes: struct {\n    impl Marker {\n        sites: [.Type],\n        check: fn(self, call: CompilerCall) {\n            verb: route_verb(call.name.text) ?? return\n            contract: route_contract(verb, call.args[0], call.args[1].function ?? return)\n            call.replace(with: \"__route\", args: [.Value(.Text(verb.wire())), .Arg(0), .Arg(1), .Value(.Text(contract))])\n        }\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep the lowering in sema, reached through declared roles",
+          "detail": "Sema keeps computing the contract and lowering the call, as today. Core declares the targets as roles, for example `#Builtin.Role(.RouteRegister) __route`, so CoreReach.jet names no helper. Rules validate; sema lowers. This is the strongest form of keeping the checker.",
+          "technical": "The case at its strongest. The lowering already passes every route and form snapshot and every run test, with no new language surface. It runs in process, with no comptime-child round trip and no 46.5 µs per heard call. The contract is built from the handler's AST and sema's type tables, so D-RULE-BODYFACTS1 is moot for this route. The handler wrap stays where it is. Every tool already understands the call.\n\nA library lowering is a bounded list the compiler owns, as Go's encoding/json special-cases `[]byte`. Costs: c3's criterion to delete HTTPRouting.jet (1,482 lines) and HTTP.jet (590 lines) is not met. The static-path rules still move. A package router cannot get contracts, so c7 (a user package gets the same checks) is not met for routes. Core keeps a privilege a package lacks.",
+          "code": "// Core/HTTP/Router.jet under C: a role, no new language form\n#Builtin.Role(.RouteRegister) __route: fn(&self, method: String, path: String, handler: fn(HTTPRequest) -> HTTPResponse HTTPError!, contract: String) { … }"
+        },
+        {
+          "key": "D",
+          "name": "Compute the contract at run time; the rule only refuses",
+          "detail": "The check rule refuses bad paths and handlers while building. `post` builds its contract at run time from the handler's retained reflection when it registers. No value crosses from build time to the call.",
+          "technical": "Needs the handler's FunctionInfo and its body facts retained in the binary for every route handler. Today they exist only while building. 'Complete contract' failures move from build errors to run-time panics, unless the rule also computes the contract while building. Then the work is done twice, once in the comptime child and once in the program.\n\nThe binary also grows by the retained facts. Only the path half is free at run time: the table already completes a run-time App pattern's contract when it registers.",
+          "code": "// PROPOSED, Core/HTTP/Router.jet\npost: fn(&self, path: String, handler: fn(HTTPRequest) -> HTTPResponse HTTPError!) {\n    self.__route(\"POST\", path, handler, route_contract(.Post, path, handler.reflect()))\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++",
+          "note": "A default argument such as `std::source_location::current()` is evaluated at each call site, not at the declaration (C++20, [support.srcloc]). That is A's shape: the callee states what each call gets.",
+          "code": "void post(std::string_view path, Handler h, std::source_location at = std::source_location::current());"
+        },
+        {
+          "lang": "Swift",
+          "note": "Expression macros (SE-0382) replace the macro use with code the macro writes. The use is spelled `#name`, so a reader sees that it is rewritten. B's plain-looking call has no such mark.",
+          "code": "let r = #route(\"/orders\", place)"
+        },
+        {
+          "lang": "C#",
+          "note": "C# 12 interceptors, shipped as an experimental feature (dotnet/roslyn docs/features/interceptors.md), let a source generator redirect one call site to another method. A reader of the call cannot see the redirect, which is B's cost.",
+          "code": "[InterceptsLocation(\"Program.cs\", line: 19, character: 12)]\nstatic void Post(this Router r, string p, Handler h) { … }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps every call meaning its callee, which D-META-LADDER1=A and D-META-RECONCILE1=A require of standard code. It extends the per-call evaluation Jet already ratified for `#Pre(#run …)` and `#caller`. It gives a package router exactly what Core's router has. Because the default reads only the handler, run-time App paths keep working.",
+        "gains": [
+          "HTTPRouting.jet's lowering and contract builder leave sema; `post` is an ordinary Core function.",
+          "A package router declares and forwards the same parameter.",
+          "No call is replaced, so tools need no rewrite tracking.",
+          "web.form needs no new form: its fields come once per model type from `#Web.Form`'s expand."
+        ],
+        "losses": [
+          {
+            "loss": "One new parameter form: a `#run` default over earlier parameters, which a call may write only by forwarding.",
+            "mitigation": "Plain defaults over earlier parameters and `#caller` forwarding already exist (p3b). Only `#run` in that place is new, and M3's per-call `#Pre` evaluation needs the same evaluator anyway."
+          },
+          {
+            "loss": "Build cost: one comptime evaluation per distinct handler plus its reflects, about 0.2 to 0.7 ms per handler until c22's 1 µs dispatch budget is met.",
+            "mitigation": "Cached by handler identity, so a handler used on ten routes is computed once. c22 and the reflect cost are on card #6851, and A does not land before c22's measurement passes."
+          },
+          {
+            "loss": "A cannot land before six gates: lambda FunctionInfo (c30), `.reflect()` on a function parameter, nested schemas through TypeId (c26), D-RULE-BODYFACTS1's body facts, the handler adaptation and a declared handler crossing.",
+            "mitigation": "Each gate is on card #6851. Until all hold, today's lowering stays and no program changes. The vote fixes the direction, not the landing date."
+          },
+          {
+            "loss": "Typed and zero-argument handlers need an adaptation Core cannot spell yet. At least 17 test and example files pass typed lambdas and 32 pass `fn()`; Jet has no overloading (p11).",
+            "mitigation": "Sema keeps `sema_http_mux_route_handler` behind a declared role until D-RULE-TYPEARGS1's typed handler params replace it. No handler is rewritten."
+          },
+          {
+            "loss": "E2804 across calls still needs the per-binding route table in sema.",
+            "mitigation": "The table also serves App pages, convention files and marked methods, so it moves with that mechanism on card #6851, not with this ballot. The run-time table already refuses a duplicate when a route registers."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A call-site rewrite in standard code, which D-META-LADDER1=A and D-META-RECONCILE1=A rule out. It needs both reopened, and every tool must track it."
+          },
+          {
+            "key": "C",
+            "reason": "About 2,000 lines stay in sema, Core keeps a privilege no package has, and c7 fails for routes."
+          },
+          {
+            "key": "D",
+            "reason": "Retains handler facts in every binary and turns build errors into run-time failures, or computes the contract twice."
+          }
+        ],
+        "tradeoff": "One new per-call parameter form with six landing gates, for no call rewriting and no Core privilege."
+      },
+      "hybrid": "This ballot is one of three for card #6851 c3. D-RULE-BODYFACTS1 decides how the contract learns a handler's body, and D-RULE-WRITTEN1 decides how a rule sees an interpolated literal. A plausible mixed answer is A here with C on D-RULE-BODYFACTS1: Core computes the contract per call from facts sema hands over. HTTPRouting.jet then keeps the body walk, about 370 lines, until it moves too.",
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: RewriteReview. The adversarial review attacked the recommendation. Probes on batch 20 showed B conflicts with D-META-LADDER1 and D-META-RECONCILE1, and A holds within six named gates, including the handler adaptation and capture check the draft omitted."
+      },
+      "checkInstructions": "Check HTTPRouting.jet `sema_call_try_http_router` (:1170-1414), `sema_http_mux_route_handler` (:1452-1482), `sema_http_route_contract` (:1107-1168) and `sema_http_route_table_record` (:1416-1427). Check HTTP.jet's middleware and capture check (:117-213), its `web.form` lowering (:274-437) and its form methods (:439-590). Check Core/Web/Web.jet's App targets (:496-512).\n\nCheck Spellings.jet's `#Pre(#run {{ … }}, \"…\")`, `#caller` and `meta.rewrite_body` rows. Check D-META-LADDER1, D-META-RECONCILE1 and D-CONC-CROSS1 in Docs/Spec/syntax-decisions.md, and D-CORE-CHECK1's M3 and c22 on card #6851. The probes are p1-p11 in $JET_SCRATCH_ROOT/tmp/orch/ballot/rewrite1/.",
+      "surface": {
+        "gist": "How does a Core declaration attach a value computed while building to each call?",
+        "lesson": "A library either computes an extra argument at each call or replaces the call. The first keeps the call's meaning.",
+        "trio": {
+          "current": {
+            "note": "Sema rewrites the call and passes the contract it built.",
+            "code": "target: if { !app -> \"__route\" … }\nreturn sema_call_http_mux_source_call(receiver_value, target, route_args, …)"
+          },
+          "wild": {
+            "lang": "C++",
+            "note": "A default argument computed at each call site.",
+            "code": "std::source_location at = std::source_location::current()"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Per-call parameter",
+            "gist": "`contract: HandlerContract{#run handler_contract(…)}` is computed for each handler; the path half is completed when the route registers.",
+            "gains": [
+              "Calls keep their meaning.",
+              "Packages get the same power.",
+              "Run-time App paths keep working."
+            ],
+            "losses": [
+              "One new parameter form.",
+              "Six landing gates on card #6851."
+            ],
+            "proposed": {
+              "code": "contract: HandlerContract{#run handler_contract(handler.reflect())}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Rule replaces the call",
+            "gist": "A check rule swaps the call for `__route(…)`.",
+            "gains": [
+              "One to one with today's lowering."
+            ],
+            "losses": [
+              "Ruled out by D-META-LADDER1 and D-META-RECONCILE1.",
+              "Tools must track rewrites."
+            ],
+            "proposed": {
+              "code": "call.replace(with: \"__route\", args: [.Value(verb), .Arg(0), .Arg(1), .Value(contract)])"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep it in sema",
+            "gist": "Sema lowers through declared roles; rules only refuse.",
+            "gains": [
+              "No new surface; already passes every test."
+            ],
+            "losses": [
+              "About 2,000 lines stay.",
+              "Core keeps a privilege; c7 fails."
+            ],
+            "proposed": {
+              "code": "#Builtin.Role(.RouteRegister) __route: fn(…) { … }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Contract at run time",
+            "gist": "`post` builds the contract when it registers.",
+            "gains": [
+              "No per-call build value."
+            ],
+            "losses": [
+              "Handler facts ship in binaries; errors move to run time."
+            ],
+            "proposed": {
+              "code": "self.__route(\"POST\", path, handler, route_contract(.Post, path, handler.reflect()))"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It extends Jet's ratified per-call evaluation and keeps every call meaning its callee, as standard code must.",
+          "gains": [
+            "The lowering leaves sema.",
+            "Package routers get the same power."
+          ],
+          "losses": [
+            {
+              "loss": "One new parameter form, and six gates before it lands.",
+              "mitigation": "Its evaluation is the one M3 needs for `#Pre(#run …)`; each gate is on card #6851."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A call-site rewrite that ratified decisions rule out."
+            },
+            {
+              "key": "C",
+              "reason": "About 2,000 lines and a Core privilege stay."
+            },
+            {
+              "key": "D",
+              "reason": "Build errors become run-time failures."
+            }
+          ],
+          "tradeoff": "A new parameter form, for no rewriting and no privilege."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "RewriteReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T08:54:39.733Z"
+    },
+    {
+      "id": "D-RULE-BODYFACTS1",
+      "cardId": "c0e6znz4",
+      "group": "language",
+      "title": "How a Core rule learns what a handler's body reads and returns",
+      "situation": "A route's contract names its request body type and its responses. Today sema finds them by walking the handler's AST, not its checked tree. It looks for `json<T>()` on a receiver named as a request parameter (HTTPRouting.jet:928-1025). It reads the return paths whose value is a call named `response`, `json` or `empty_response`, following local aliases (:656-926). It matches the last name segment, not the callee's symbol, and drops other paths silently (probe p5). A router route is E2805 only when no path is recognized (:1165, :1387; p6). An App route is never refused, and its `web.openapi` then fails at run time (p7). FunctionInfo carries no fact about the calls a function makes. This ballot decides how a Core rule learns them, for the contract D-RULE-REWRITE1 attaches to each call.",
+      "gist": "How does a Core rule learn what a handler's body reads and returns?",
+      "lesson": "Web frameworks get a handler's contract from its signature (FastAPI's annotations, Axum's extractors, ASP.NET's typed results) or from its body (Jet today). Signature contracts need no body access. Body contracts need a compiler that shares what it saw.",
+      "explainer": "To write the receipt, the clerk must know what is in the letter. The sender may list it on the envelope (B). The post office may mark the forms it cares about, so the clerk hears whenever a letter uses one (A). The compiler's clerk may keep reading letters and pass on a note (C). Or the clerk may open every letter (D).",
+      "story": "Ana's `place` reads `req.json<Order>()` and returns `server.json(202, Receipt{…})` or `server.response(400, …)`. Her OpenAPI document must say exactly that. Today a 404 she returns through a helper is silently left out of it (p5).",
+      "inWild": "// FastAPI: def place(order: Order) -> Receipt  (the signature is the contract)\n// Axum: async fn place(Json(order): Json<Order>) -> (StatusCode, Json<Receipt>)\n// ASP.NET minimal APIs: Results<Accepted<Receipt>, BadRequest> place(Order order)\n// Spring: @RequestBody Order order, ResponseEntity<Receipt>",
+      "detail": "The program is the one in D-RULE-REWRITE1's detail. What the contract reads today, exactly. The type argument of the first `json<T>()` call on a request parameter, anywhere in the body. For each recognized return path, the response call's status and its value's type, which the walk guesses from the syntax (:740-772), or its text. A path that ends in anything else is left out of the contract, and the build succeeds.\n\nProbe p5 on batch 20: a 404 returned through a helper, a 400 returned through a helper and a body decoded in a helper are all missing from the OpenAPI document. A router route with no recognized path gets E2805 'HTTP route handler has no complete checked endpoint contract' (p6). Its Fix text asks for a typed `HTTPResponse` constructor on every handler path, but the rule needs only one.\n\nAn App route is never refused (p7). Its `web.openapi` then fails at run time with 'checked OpenAPI route contract has no responses' (Core/Web/Web.jet:4302).\n\nWhat already exists. FunctionInfo has two body-derived facts, `reaches_panic` and `arithmetic: [ArithmeticOperationInfo]` (CoreRecordRows.jet:477-478). CompilerCall carries caller, callee, module, span, name, args and receiver (:250-256), but no type arguments. Sema publishes each checked body as a flat BodyTree (JetFoundation Facts/Body.jet).\n\nD-JAI-CODE1, narrowed but still ratified, keeps `c.nodes()` over a `Code` value. It is 'a typed, read-only tree with kinds, children, locations and, after checking, types'. `meta.rewrite_body` already names a heard function's body as `#{f.body}`. `c.nodes()` has no row in Spellings.jet, so it is not built.\n\nSites that go if body facts leave sema: HTTPRouting.jet `sema_http_route_find_json_*` (:928-1025) and `sema_http_route_response_*` (:656-926), about 370 lines.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Recorded calls: calls of a marked callee are listed in their caller's FunctionInfo",
+          "detail": "Core marks the calls it cares about: `#Recorded` on `HTTPRequest.json`, `server.json`, `server.response` and `server.empty_response`. For each function, the build lists that function's calls of recorded callees in its FunctionInfo. Each is the `CompilerCall` value a check rule already hears: callee, name, arguments with their types and known values, and span.\n\nA second list holds the recorded calls whose value a return path returns, following local aliases. The route contract reads `handler.recorded` and `handler.returns`. Ana's `place` is unchanged.",
+          "technical": "New: a `#Recorded` Prelude marker, registered in the syntax registry beside `#Pre` (I7). Two FunctionInfo fields, `recorded: [CompilerCall]` and `returns: [CompilerCall]`. One CompilerCall field, `type_args: [TypeId]`, since a call's explicit type arguments reach no field today. D-RULE-TYPEARGS1 covers a type's arguments, not a call's. Every heard call gets `type_args` too, empty for most calls.\n\nNo new record. A recorded call keeps the shape rules already hear, so no `RecordedCall` duplicates CompilerCall (I8). The fields follow `reaches_panic` and `arithmetic`: sema digests the checked body and Core reads the digest. It is a fact list, not a second tree view beside `c.nodes()`.\n\nSema fills both lists from the checked body and matches callees by symbol (`CompilerCall.callee`), so a user function named `json` no longer counts. Only the module that declares a callee can mark it. Behavior is kept: the rule rejects only when `returns` is empty on a router (today's :1165). Cost: one list per function that calls a recorded callee, filled during the walk sema already does. Only marked calls cross to the comptime child.\n\nThe alias and return-path search stays in sema. It becomes a generic digest that serves any marked callee, and the HTTP names leave. Gates: a lambda handler needs c30 to deliver the FunctionInfo D-CORE-CHECK1=A states (p8). A type argument's own arguments keep their identity only through D-RULE-TYPEARGS1 (c26). Gaps kept from today: a `json<T>()` call or a response made inside a helper is not seen (p5).",
+          "code": "// PROPOSED, Core/HTTP/Request.jet\n#Recorded\njson: fn<T: Decode>(self) -> T HTTPError! { … }\n\n// PROPOSED, in handler_contract\nbody: handler.recorded.find(fn(c) { c.callee == \"core.http.HTTPRequest.json\" })?.type_args[0]\nif handler.returns.len() == 0 -> reject(IncompleteContract{}, at: handler)"
+        },
+        {
+          "key": "B",
+          "name": "The handler's signature states its contract",
+          "detail": "Typed handlers: the request body is a parameter and the responses are the return type. The contract reads `handler.signature` alone, which c30 provides for a named function once it lands. No body facts at all. Ana's `place` changes.",
+          "technical": "New: parameter and return types the router recognizes, such as `Json<T>` and a response union, plus the router's adaptation from `HTTPRequest`. That adaptation is typed handler params, which wait on D-RULE-TYPEARGS1. Every handler in Tests and Examples that the contract walk reads today is rewritten. The 400 path becomes a response case and is no longer an early return. This is the FastAPI and Axum model, and it is the only option where the contract is visible at the declaration.",
+          "code": "// PROPOSED, Ana's handler under B\nplace: fn(order: Json<Order>) -> Responses<Accepted<Receipt>, BadRequest> {\n    .Accepted(Receipt{order_id: order.quantity})\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep the body walk in sema, handing Core the result",
+          "detail": "Sema keeps reading handler bodies and hands Core the result as a fact on the heard argument, `CompilerArg.route: RouteFacts?`. It could also hand over the finished contract text. Rules and Core functions consume it. This is the strongest form of keeping the checker.",
+          "technical": "The case at its strongest. Exposing any part of a body to libraries turns compiler internals into language surface. Rust gives procedural macros only tokens and Swift gives macros only syntax. The walk is about 370 tested lines, and the contract is an HTTP notion, so a general mechanism serves one client.\n\nCosts: HTTPRouting.jet's body walk stays, so the file is not deleted. The walk reads the AST and guesses local types from syntax (:740-772), so it keeps matching callees by name. The fact is HTTP-specific, so a package framework gets contracts only for `HTTPRequest.json` and Core's response helpers. And CompilerArg gains a domain field.",
+          "code": "// sema keeps sema_http_route_find_json_body and _response_statements;\n// PROPOSED, Core reads:\nbody: call.args[1].route?.body"
+        },
+        {
+          "key": "D",
+          "name": "A general query over the checked body",
+          "detail": "FunctionInfo gains `body: Code`, the heard function's checked body as the `Code` value D-JAI-CODE1 already defines and `#{f.body}` already names. The contract walks `handler.body.nodes()`, the typed read-only tree D-JAI-CODE1 keeps, for `json<T>()` calls and return paths.",
+          "technical": "The most general option, and the only one whose view is already ratified: D-JAI-CODE1's `c.nodes()` gives kinds, children, locations and types. D adds one field. Costs: `c.nodes()` is not built (no Spellings.jet row). Every heard handler's whole body crosses to the comptime child, at a 43 to 229 µs host round trip plus its size.\n\nThe rule re-implements alias following and return-path search, so about 370 lines move from sema into Core rather than going away. And a rule could depend on how a body is written, such as an alias or a helper call. Refactoring a handler could then change its contract in ways its signature does not show, as today.",
+          "code": "// PROPOSED\nloop node in handler.body.nodes() { if node.kind == .MethodCall && node.name == \"json\" { … } }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python (FastAPI)",
+          "note": "The handler's annotations are the contract; FastAPI reads them at startup and never reads the body (fastapi.tiangolo.com, 'Request Body' and 'Response Model').",
+          "code": "@app.post(\"/orders\", status_code=202)\ndef place(order: Order) -> Receipt: ..."
+        },
+        {
+          "lang": "Rust (Axum)",
+          "note": "Extractors in the signature say what the request yields; the return type says what is sent. OpenAPI crates such as utoipa add attributes on the handler (`#[utoipa::path(responses(...))]`).",
+          "code": "async fn place(Json(order): Json<Order>) -> (StatusCode, Json<Receipt>)"
+        },
+        {
+          "lang": "C# (ASP.NET Core)",
+          "note": "Minimal APIs read `TypedResults` return types, such as `Results<Accepted<T>, BadRequest>`, for OpenAPI metadata. A handler returning a plain `IResult` gets none, as a Jet helper response gets none today.",
+          "code": "static Results<Accepted<Receipt>, BadRequest> Place(Order order) => …"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps Ana's program as it is. It lets Core, and any package, declare exactly which calls it needs to hear about, and it exposes no other body detail. It follows the digest shape FunctionInfo already uses for `arithmetic`, and it reuses CompilerCall. D's tree view stays the general tool once it is built.",
+        "gains": [
+          "The HTTP-only walk leaves sema; a generic digest replaces it.",
+          "A package framework marks its own request and response calls.",
+          "Callees match by symbol, not by name, and only marked calls become visible."
+        ],
+        "losses": [
+          {
+            "loss": "A new Prelude marker, two FunctionInfo fields and `CompilerCall.type_args`.",
+            "mitigation": "The FunctionInfo fields reuse CompilerCall, so no record is added, and follow `arithmetic`'s precedent. The marker is registered like `#Pre`. `type_args` is empty for calls with no type arguments, and any rule that checks a generic call needs it anyway."
+          },
+          {
+            "loss": "A body type or a response made inside a helper is still not seen.",
+            "mitigation": "No worse than today (p5). A signature contract (B) stays open as a later addition, and `returns` could later follow a callee's own `returns` with no new surface."
+          },
+          {
+            "loss": "Lambda handlers need a FunctionInfo for lambdas.",
+            "mitigation": "D-CORE-CHECK1=A already promises one; card #6851 c30 owns delivering it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It rewrites every existing handler and waits on D-RULE-TYPEARGS1's typed handler params."
+          },
+          {
+            "key": "C",
+            "reason": "The body walk and an HTTP-only field stay in the compiler."
+          },
+          {
+            "key": "D",
+            "reason": "Its view is ratified but unbuilt, ships whole bodies to the comptime child, and moves the walk into Core instead of removing it."
+          }
+        ],
+        "tradeoff": "A marker, two FunctionInfo fields and one CompilerCall field, for unchanged handlers and no body API."
+      },
+      "hybrid": "This ballot is one of three for card #6851 c3. D-RULE-REWRITE1 decides how the contract reaches each call, and its option A reads these facts as a gate. A plausible mixed answer is C here with A on D-RULE-REWRITE1: sema keeps the walk and hands Core the result. HTTPRouting.jet then keeps about 370 lines.",
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: RewriteReview. The adversarial review attacked the recommendation. Probes on batch 20 showed E2805 fires only when no path is recognized, and A now reuses CompilerCall, adds `type_args` and holds within c30 and D-RULE-TYPEARGS1."
+      },
+      "checkInstructions": "Check HTTPRouting.jet `sema_http_route_find_json_*` (:928-1025), `sema_http_route_response_*` (:656-926) and the E2805 contract site (:1387-1389), reached only when no path is recognized (:1165). Check JetFoundation Source/Facts/Body.jet and the FunctionInfo and CompilerCall rows in JetFoundation Registry/CoreRecordRows.jet (:250-256, :471-482). Check D-JAI-CODE1 in Docs/Spec/syntax-decisions.md. The probes are p5, p6, p7 and p8 in $JET_SCRATCH_ROOT/tmp/orch/ballot/rewrite1/.",
+      "surface": {
+        "gist": "How does a Core rule learn what a handler's body reads and returns?",
+        "lesson": "Frameworks read a handler's contract from its signature or from its body. A body contract needs the compiler to share what it saw.",
+        "trio": {
+          "current": {
+            "note": "Sema walks the handler's AST for `json<T>()`.",
+            "code": "if method == \"json\" && type_args.len() == 1 { … return Val(type_args[0]) }"
+          },
+          "wild": {
+            "lang": "Rust (Axum)",
+            "note": "The signature is the contract.",
+            "code": "async fn place(Json(order): Json<Order>) -> (StatusCode, Json<Receipt>)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Recorded calls",
+            "gist": "Calls of `#Recorded` callees are listed in FunctionInfo as CompilerCall values.",
+            "gains": [
+              "Handlers unchanged.",
+              "Packages mark their own calls."
+            ],
+            "losses": [
+              "A marker, two fields and `CompilerCall.type_args`."
+            ],
+            "proposed": {
+              "code": "#Recorded\njson: fn<T: Decode>(self) -> T HTTPError! { … }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Signature contract",
+            "gist": "The body type is a parameter; responses are the return type.",
+            "gains": [
+              "No body facts at all."
+            ],
+            "losses": [
+              "Every handler is rewritten."
+            ],
+            "proposed": {
+              "code": "place: fn(order: Json<Order>) -> Responses<Accepted<Receipt>, BadRequest>"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep it in sema",
+            "gist": "Sema walks the body and hands Core the result.",
+            "gains": [
+              "Body internals stay private."
+            ],
+            "losses": [
+              "The walk stays; the field is HTTP-only."
+            ],
+            "proposed": {
+              "code": "call.args[1].route?.body"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Body query",
+            "gist": "FunctionInfo exposes the checked body as D-JAI-CODE1's `Code`.",
+            "gains": [
+              "Fully general; the view is already ratified."
+            ],
+            "losses": [
+              "Unbuilt; whole bodies cross to the child; the walk moves into Core."
+            ],
+            "proposed": {
+              "code": "handler.body.nodes()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Handlers stay as written, and only the calls Core marks become visible.",
+          "gains": [
+            "The HTTP-only walk leaves sema.",
+            "Packages get the same power."
+          ],
+          "losses": [
+            {
+              "loss": "A marker, two FunctionInfo fields and `CompilerCall.type_args`.",
+              "mitigation": "Both lists reuse CompilerCall, as `arithmetic` digests a body."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Rewrites every handler."
+            },
+            {
+              "key": "C",
+              "reason": "The walk stays in the compiler."
+            },
+            {
+              "key": "D",
+              "reason": "Unbuilt, and the walk moves into Core."
+            }
+          ],
+          "tradeoff": "A marker and three fields, for unchanged handlers."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "RewriteReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T08:54:41.034Z"
+    },
+    {
+      "id": "D-RULE-WRITTEN1",
+      "cardId": "c0e6znz4",
+      "group": "language",
+      "title": "Which field tells a check rule that an argument is an interpolated String literal, and what the rule can print from it",
+      "situation": "A heard argument's `value` is the value the build knows, or None. `\"/users/{id}\"` interpolates a run-time `id`, so it is heard as None, like any String known only at run time (probe p1). Sema tells them apart by reading the AST (`sema_http_route_interpolated_source`, HTTPRouting.jet:430). So the snapshot `http_route_invalid_literal` reports 'Invalid HTTP route `/users/{id}`: brace interpolation is not allowed in route patterns'. Card #6851 c34 asks for this fact through D-CORE-CHECK1's CompilerCall surface, or a ballot. This is that ballot. It is independent of D-RULE-REWRITE1 and D-RULE-BODYFACTS1, but HTTPRouting.jet is deleted only when all three move their checks out of sema.",
+      "gist": "Which field on CompilerArg tells a rule that an argument is an interpolated literal, and what can the rule print from it?",
+      "lesson": "Checkers that refuse a format usually read the literal as written: Go vet's printf check, Roslyn analyzers over interpolated strings, Swift macros over string segments. A checker that sees only values cannot tell 'written with holes' from 'unknown'.",
+      "explainer": "The clerk needs to know whether an address was handwritten with blanks to fill in, or is simply missing. Telling the clerk 'it had blanks' (B) lets him refuse it. Showing him the address as written, blanks marked (A), lets him quote it back in the refusal. Handing him a photocopy of the envelope (E) makes him read the handwriting himself.",
+      "story": "Ana writes `router.get(\"/users/{id}\", place)` meaning a route parameter. The error must quote her pattern, `/users/{id}`, and say braces are interpolation.",
+      "inWild": "// Go vet printf: checks the format only when the argument is a literal (or a constant).\n// Roslyn: InterpolatedStringExpressionSyntax gives each text part and each hole.\n// Swift macros: StringLiteralExprSyntax.segments lists string and expression segments.\n// C# 10: [CallerArgumentExpression] passes another argument's source text.",
+      "detail": "The program is the one in D-RULE-REWRITE1's detail; line 18 is Ana's. What E2805 needs, exactly. (1) That the argument is a String literal with at least one hole. (2) The literal rendered with each hole as `{name}` when the hole is a bare name, and `{…}` otherwise (probe p9). This is `sema_http_route_interpolated_source`'s rendering. (3) The argument's span, which CompilerArg already has.\n\nA `#run \"/teams/{{name}}\"` value reaches the rule through `value` only when bound first, as `TEAM: #run …` or a local (p1, p1b). Written directly as the argument, batch 20 refuses it with Jet.UnsupportedCompileTimeValue before any rule runs.\n\nI4 (card #6851) requires every remaining code to keep its UI snapshot. An option that cannot print (2) changes `http_route_invalid_literal` unless a separate decision changes its wording.\n\nCallers of today's literal check, which would read the same field: router and mux registrations (HTTPRouting.jet:1189, :1202) and App `route`, `page` and `layout` (Methods.jet:1979). `app.mount`'s prefix (HTTPMount.jet:577) reads a constant string. Webhook paths and cron lines are marker arguments, which CompilerArg does not reach. Later SQL and format-string rules could read the field too.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`written: [CompilerWrittenPart]?`, an interpolated literal's parts",
+          "detail": "CompilerArg gains `written`: when the argument is a String literal with at least one hole, its parts as written, text segments and holes. Otherwise it is None. A hole carries its name when it is a bare name, and its span. E2805 renders `/users/{id}` itself and keeps its snapshot exactly.",
+          "technical": "New: one Prelude enum, `CompilerWrittenPart: enum { Text(text: String), Hole(name: String?, span: SourceSpan) }`, and the field `written: [CompilerWrittenPart]?`. There is no wrapper struct. Sema fills it in `sema_rule_call_arg` (CheckRules.jet:268) from the argument's expression, only for an interpolated literal. Every other argument gets None, so a plain literal, a constant or a run-time value costs nothing. `sema_rule_call_arg` does not take the expression today; A adds that parameter at its callers.\n\nFilling it only when there is a hole drops the draft's second use, telling a plain literal from a constant. No current check needs that. It would also let a rule refuse a spelling while accepting the same value written as a constant.\n\nE2805: `written != None` is (1), and the parts joined with `{name}` or `{…}` are (2). It is exact. If Jet ever folds an interpolation over constant locals into a known `value` such as \"/users/42\", `written` still marks the argument, so the rule keeps refusing it.",
+          "code": "// PROPOSED, in the route rule\nif path.written == .Val(parts) {\n    reject(InvalidRoute{pattern: render_holes(parts), reason: \"brace interpolation is not allowed in route patterns\"}, at: path)\n}"
+        },
+        {
+          "key": "B",
+          "name": "`interpolated: Bool`",
+          "detail": "CompilerArg gains `interpolated: Bool`, true when the argument is a String literal with at least one hole. The rule can refuse it, but cannot quote the pattern.",
+          "technical": "The smallest field. For E2805 it gives (1) but not (2). The rule can say 'brace interpolation is not allowed in route patterns', but not 'Invalid HTTP route `/users/{id}`'. CompilerCall offers no way to read source text by span. So `http_route_invalid_literal`'s snapshot changes (I4 fails) unless its wording changes, for example to 'Invalid HTTP route: brace interpolation is not allowed in route patterns'. That wording change needs its own decision.",
+          "code": "// PROPOSED\nif path.interpolated -> reject(InvalidRoute{pattern: \"\", reason: \"brace interpolation is not allowed in route patterns\"}, at: path)"
+        },
+        {
+          "key": "C",
+          "name": "`literal: CompilerLiteral?`, a literal-kind enum",
+          "detail": "CompilerArg gains `literal`, the argument's literal kind: `.Plain`, `.Interpolated(pattern: String)`, `.Constant(name: String)` or `.Computed`. It is None when the argument is not a literal or a constant. `.Interpolated` carries the rendered pattern, so E2805 is exact.",
+          "technical": "With `.Interpolated(pattern)`, E2805 gets (1) and (2). Without that payload, C is B. The compiler owns the rendering (`{name}` / `{…}`), so every rule quotes holes the same way and none can quote differently. `.Constant(name)` lets E2805 and E2808 name a constant in their text, which no current snapshot needs. Cost: a five-case enum whose cases mix syntax (interpolated) and provenance (constant).",
+          "code": "// PROPOSED\nif path.literal == .Val(.Interpolated(pattern)) -> reject(InvalidRoute{pattern: pattern, reason: \"brace interpolation is not allowed in route patterns\"}, at: path)"
+        },
+        {
+          "key": "D",
+          "name": "Keep the interpolation check in sema",
+          "detail": "Sema keeps `sema_http_route_check_literal`'s interpolation branch and reports it before any rule runs. The Core rule handles every other path problem. CompilerArg is unchanged.",
+          "technical": "The case at its strongest. Rules today hear values, not syntax, and a value check gives the same answer when `\"/users/{id}\"` is moved into a local. A syntax field invites rules that refuse a spelling and accept the same value written another way. D-CORE-CHECK1's text does not state this as a rule; it lists CompilerArg's fields, with no syntax field.\n\nThe check is about 20 lines and already exact. It covers router, mux and App paths with one function (HTTPRouting.jet:1189, :1202; Methods.jet:1979). Costs: HTTPRouting.jet is not deleted, since the literal check and its helper stay, so c3 is not met. The check is keyed to Core's route methods, so a package router cannot give the same message (c7).",
+          "code": "// sema keeps, HTTPRouting.jet:466\nif sema_http_route_interpolated_source(argument.expr) == .Val(source) {\n    diagnostics.push(sema_http_route_invalid_diagnostic(source, \"brace interpolation is not allowed in route patterns\", argument.span))\n}"
+        },
+        {
+          "key": "E",
+          "name": "`text: String`, the argument's source text",
+          "detail": "CompilerArg gains `text`, the argument exactly as written in the source, for every argument. The rule looks for an unescaped `{` in a literal's text and quotes it.",
+          "technical": "The C# 10 `[CallerArgumentExpression]` and Rust `stringify!` shape: the source text of an argument. It is the most general field, and other rules could quote any argument. Costs: the rule must parse Jet's string syntax itself, including `{{` escapes, raw strings and multi-line literals, so the lexer's rules are duplicated in Core.\n\nIt quotes a non-bare hole in full (`/u/{id.len()}`), not as `{…}`, so the snapshot holds only for bare holes and p9's `/u/{…}` changes. Every heard argument carries a string, so a call heard 1,000 times copies 1,000 texts to the comptime child. And text is a spelling, not a meaning, so rules can depend on formatting.",
+          "code": "// PROPOSED\nif path.text.starts_with(\"\\\"\") && has_unescaped_brace(path.text) -> reject(InvalidRoute{pattern: unquote(path.text), …}, at: path)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go (vet)",
+          "note": "The printf analyzer checks a format string only when it is a literal or constant. Since Go 1.24, a call whose only argument is a computed format gets a separate 'non-constant format string' finding. So the analyzer tells 'as written' from 'unknown'.",
+          "code": "fmt.Printf(\"%d\", s) // vet: wrong type for %d\nfmt.Printf(f)       // vet (Go 1.24+): non-constant format string"
+        },
+        {
+          "lang": "C# (Roslyn)",
+          "note": "An analyzer sees an interpolated string's `Contents`: text parts and interpolations, each with its expression and span (InterpolatedStringExpressionSyntax). That is A's shape.",
+          "code": "foreach (var part in node.Contents) { if (part is InterpolationSyntax hole) … }"
+        },
+        {
+          "lang": "Swift (macros)",
+          "note": "A macro sees `StringLiteralExprSyntax.segments`, string and expression segments (swift-syntax). A macro that refuses interpolation tests for an expression segment and quotes the literal.",
+          "code": "for segment in literal.segments { if case .expressionSegment = segment { … } }"
+        },
+        {
+          "lang": "C# 10",
+          "note": "A parameter marked `[CallerArgumentExpression(\"value\")]` receives another argument's source text as a string. That is E's shape, and the callee must parse the text itself.",
+          "code": "static void Check(bool value, [CallerArgumentExpression(\"value\")] string? text = null)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Only A and C keep E2805's snapshot exactly. A gives the rule the literal's parts and leaves the rendering to Core, as Roslyn and Swift macros do. Filled only for an interpolated literal, it adds no cost to other arguments and exposes no other spelling. C fixes one rendering in the compiler and mixes syntax with provenance. E duplicates the lexer in Core and misquotes non-bare holes.",
+        "gains": [
+          "E2805's 'brace interpolation' snapshot holds exactly, so HTTPRouting.jet's literal check can go.",
+          "Router, mux, App and package routers use the same field.",
+          "If constant interpolations are ever folded into values, the rule still refuses them."
+        ],
+        "losses": [
+          {
+            "loss": "Rules can see that a String argument is an interpolated literal, and its parts.",
+            "mitigation": "Only interpolated literals are visible, never a local's initializer, a constant or a plain literal. Moving the literal into a local gives `written: None`, as today's sema check does."
+          },
+          {
+            "loss": "One new Prelude enum and one CompilerArg field.",
+            "mitigation": "It is filled only for interpolated literals, from the expression sema already holds; every other argument gets None at no cost."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It cannot quote the pattern, so the snapshot changes without a wording decision."
+          },
+          {
+            "key": "C",
+            "reason": "It is exact only with a payload, and then it is A with the rendering fixed in the compiler."
+          },
+          {
+            "key": "D",
+            "reason": "A route check stays in sema, c3 is not met, and package routers cannot give the message."
+          },
+          {
+            "key": "E",
+            "reason": "Core must re-parse Jet's string syntax, a non-bare hole is quoted in full, and every argument carries its text."
+          }
+        ],
+        "tradeoff": "One enum that exposes an interpolated literal's parts, for an exact snapshot and no route code in sema."
+      },
+      "hybrid": "This ballot is one of three for card #6851 c3, with D-RULE-REWRITE1 and D-RULE-BODYFACTS1. Its answer does not depend on theirs. Choosing D here keeps HTTPRouting.jet alive whatever they decide.",
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: RewriteReview. The adversarial review attacked the recommendation. Probes on batch 20 confirmed only A and C keep E2805's snapshot, and A now fills one enum only for interpolated literals, beside a new source-text option E."
+      },
+      "checkInstructions": "Check HTTPRouting.jet `sema_http_route_interpolated_source` (:430-448) and `sema_http_route_check_literal` (:466-475) with its callers (:1189, :1202, Methods.jet:1979). Check Tests/UI/http_route_invalid_literal.jet and its stderr snapshot. Check CheckRules.jet `sema_rule_call_arg` (:268) and the CompilerArg rows in JetFoundation Registry/CoreRecordRows.jet (:259-263). The probes are p1, p1b and p9 in $JET_SCRATCH_ROOT/tmp/orch/ballot/rewrite1/.",
+      "surface": {
+        "gist": "Which field tells a rule that an argument is an interpolated literal, and what can it print?",
+        "lesson": "Value-only checkers cannot tell 'written with holes' from 'unknown'.",
+        "trio": {
+          "current": {
+            "note": "Sema renders the literal's holes from the AST.",
+            "code": "hole: if inner == .Ident(name, _, _) -> name else -> \"…\"\nsource = \"{source}{{{hole}}}\""
+          },
+          "wild": {
+            "lang": "C# (Roslyn)",
+            "note": "An analyzer reads an interpolated string's parts.",
+            "code": "foreach (var part in node.Contents) { … }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`written: [CompilerWrittenPart]?`",
+            "gist": "An interpolated literal's text parts and holes; None otherwise.",
+            "gains": [
+              "E2805 exact.",
+              "Core renders the pattern."
+            ],
+            "losses": [
+              "One enum and one field."
+            ],
+            "proposed": {
+              "code": "path.written == .Val(parts)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "`interpolated: Bool`",
+            "gist": "Only whether it has holes.",
+            "gains": [
+              "Smallest."
+            ],
+            "losses": [
+              "Cannot quote `/users/{id}`; the snapshot changes."
+            ],
+            "proposed": {
+              "code": "if path.interpolated -> reject(…)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Literal-kind enum",
+            "gist": "`.Interpolated(pattern)` and other kinds.",
+            "gains": [
+              "E2805 exact with a payload."
+            ],
+            "losses": [
+              "Mixes syntax and provenance; the rendering is fixed in the compiler."
+            ],
+            "proposed": {
+              "code": "path.literal == .Val(.Interpolated(pattern))"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep it in sema",
+            "gist": "Sema reports interpolation before rules run.",
+            "gains": [
+              "Rules stay value-only."
+            ],
+            "losses": [
+              "HTTPRouting.jet stays; packages cannot match it."
+            ],
+            "proposed": {
+              "code": "sema_http_route_check_literal(…)"
+            }
+          },
+          {
+            "key": "E",
+            "name": "`text: String`",
+            "gist": "Every argument's source text.",
+            "gains": [
+              "Most general."
+            ],
+            "losses": [
+              "Core re-parses string syntax; `{…}` holes are quoted in full."
+            ],
+            "proposed": {
+              "code": "has_unescaped_brace(path.text)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It keeps E2805 exact and leaves the rendering to Core.",
+          "gains": [
+            "The snapshot holds.",
+            "Packages use the same field."
+          ],
+          "losses": [
+            {
+              "loss": "Rules see an interpolated literal's parts.",
+              "mitigation": "Only interpolated literals; a local or a constant gives None."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Cannot quote the pattern."
+            },
+            {
+              "key": "C",
+              "reason": "A with a compiler-fixed rendering."
+            },
+            {
+              "key": "D",
+              "reason": "A route check stays in sema."
+            },
+            {
+              "key": "E",
+              "reason": "Core re-parses string syntax."
+            }
+          ],
+          "tradeoff": "One enum, for an exact snapshot."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "RewriteReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T08:54:42.193Z"
     }
   ],
   "questions": [
@@ -138872,6 +139557,167 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T08:54:42.194Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-RULE-WRITTEN1",
+      "note": "Which field tells a check rule that an argument is an interpolated String literal, and what the rule can print from it"
+    },
+    {
+      "at": "2026-11-24T08:54:41.035Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-RULE-BODYFACTS1",
+      "note": "How a Core rule learns what a handler's body reads and returns"
+    },
+    {
+      "at": "2026-11-24T08:54:39.733Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-RULE-REWRITE1",
+      "note": "How a Core declaration attaches a value computed while building, such as a route's contract, to each call"
+    },
+    {
+      "at": "2026-11-24T08:33:18.895Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0s1vode",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-24T08:33:17.130Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0s1vode",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-24T08:33:14.768Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-24T08:33:12.756Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0mbiq9g",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-24T08:33:10.428Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06tzcrf",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-24T08:33:09.507Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06tzcrf",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T08:33:08.466Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06tzcrf",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-24T08:33:07.512Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06tzcrf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-24T08:33:06.554Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0bk3yid",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T08:33:05.598Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0bk3yid",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-24T08:33:04.536Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-24T08:33:03.455Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-24T08:33:02.478Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T08:33:01.446Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-24T08:33:00.407Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-24T08:32:59.407Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-24T08:32:58.442Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-24T08:32:57.493Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06r6neu",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-24T08:32:56.521Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-24T08:32:55.528Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gy2j07",
+      "note": "#16"
+    },
     {
       "at": "2026-11-24T08:32:53.997Z",
       "by": "Orchestrator",
