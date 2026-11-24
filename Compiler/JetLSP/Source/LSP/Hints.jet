@@ -5,7 +5,7 @@
 // it, and a range past the end of the document stops at its end.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, failure_contract_shown_return, foundation_byte_text, foundation_json_quote, type_name]
+    jet_foundation.[ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, failure_contract_shown_return, foundation_json_quote, type_name]
     jet_lexer.[Lexed, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, token_text]
     jet_semindex.[SemCallable, SemDef, SemIndex]
 }
@@ -52,12 +52,10 @@ lsp_checked_inlay_hints: fn(view: LSPView) -> [LSPInlayHint] Never! {
     hints := [LSPInlayHint]{}
     index: view.checked.index ?? return hints
     module_path: view.module_path ?? return hints
-    bytes: view.doc.text.bytes()
     loop definition in index.definitions {
         def: definition.def
         if def.module_path != module_path -> next
-        // A definition a derive or marker generated has no written name here.
-        if def.def_span.end > bytes.len() || foundation_byte_text(bytes, def.def_span.start, def.def_span.end) != def.name -> next
+        if !lsp_source_spells(view.doc.text, def.def_span, def.name) -> next
         if def.kind == {
             .Local(_, ty) -> {
                 if ty == .Val(shown) -> hints.push(LSPInlayHint{at: def.def_span.end, label: ": {type_name(shown)}", kind: Val(LSP_INLAY_HINT_TYPE)})
@@ -89,8 +87,8 @@ lsp_breadcrumb_hints: fn(checked: LSPChecked, index: SemIndex, def: SemDef, hint
         if member.module_path == def.module_path && declaration == .Val(span) {
             if span.start <= member.span.start && member.span.end <= span.end -> next
         }
-        written: checked.modules[lsp_module_index(checked, member.module_path) ?? next].source.bytes()
-        if member.span.end > written.len() || foundation_byte_text(written, member.span.start, member.span.end) != member.name -> next
+        module_ref: checked.modules[lsp_module_index(checked, member.module_path) ?? next]
+        if !lsp_source_spells(module_ref.source, member.span, member.name) -> next
         loop definition in index.definitions {
             if definition.def.identity != member.identity -> next
             if definition.def.kind == .Function(callable) {
