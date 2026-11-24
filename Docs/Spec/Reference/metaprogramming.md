@@ -533,6 +533,14 @@ of the type it describes, the one a field of that type reads as its `type`,
 so `field.type.identity == Ore.reflect().identity.identity` holds for a field
 of type `Ore`.
 
+A field's or case's `key(format)` is the key its `#Rename` gives it under a
+codec format's label, or `None` when no label names that format:
+`#Rename(name: "x_pos", msgpack: "px")` reads `Val("px")` for
+`key("msgpack")` and `None` for `key("cbor")`. A format label is the `name` of
+a `core.encoding.Format` impl, Core's or a package's, so a package that adds a
+codec reads its own keys through `key`
+([`MsgpackRename`](../../../Examples/Modules/Packages/MsgpackRename/run.jet)).
+
 An enum's `cases` is a `[CaseInfo]`, one per leaf case in declaration order;
 every other type's is empty. A case inside a group is one leaf: in
 `P: enum { Quit, Action { Text(String) } }` the case `Action.Text` has the

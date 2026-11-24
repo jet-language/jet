@@ -30,6 +30,7 @@ use {
         NamedSpan,
         OperatorMarker,
         Param,
+        RENAME_PARAMETERS,
         ParamZone,
         Span,
         StructDef,
@@ -72,6 +73,7 @@ use {
         TSerdeAttributeKind,
         TSerdeCodec,
         TShapeFieldNames,
+        TShapeFormatName,
         TStructLayout,
         TTargetOS,
         TTraitDef,
@@ -345,17 +347,26 @@ sema_checked_ascii_upper: fn(text: String) -> String Never! {
 sema_checked_shape_names: fn(name: String) -> TShapeFieldNames Never! {
     TShapeFieldNames{
         text: name,
-        json: None,
-        cbor: None,
-        csv: None,
-        toml: None,
-        yaml: None,
-        xml: None,
+        formats: [TShapeFormatName]{},
         args: name.replace("_", "-"),
         env: sema_checked_ascii_upper(name.replace("-", "_")),
         db: None,
         layout: None,
     }
+}
+
+// The codec format keys of a `#Rename`: each label beyond its own
+// parameters names a format (sema_marker_rules_marker_signature_bindings
+// checks the name), with its written text.
+sema_checked_rename_formats: fn(marker: Marker) -> [TShapeFormatName] Never! {
+    formats := [TShapeFormatName]{}
+    loop label in marker.arg_labels {
+        written: label ?? next
+        if RENAME_PARAMETERS.contains(written.name) -> next
+        key: sema_checked_marker_text_label(marker, written.name) ?? next
+        formats.push(TShapeFormatName{format: written.name, name: key})
+    }
+    formats
 }
 
 sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShapeFieldNames Never! {
@@ -367,12 +378,7 @@ sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShap
     if rename == .Val(rename_marker) {
         names = TShapeFieldNames{
             text: names.text,
-            json: sema_checked_marker_text_label(rename_marker, "json"),
-            cbor: sema_checked_marker_text_label(rename_marker, "cbor"),
-            csv: sema_checked_marker_text_label(rename_marker, "csv"),
-            toml: sema_checked_marker_text_label(rename_marker, "toml"),
-            yaml: sema_checked_marker_text_label(rename_marker, "yaml"),
-            xml: sema_checked_marker_text_label(rename_marker, "xml"),
+            formats: sema_checked_rename_formats(rename_marker),
             args: sema_checked_marker_text_label(rename_marker, "args") ?? names.args,
             env: sema_checked_marker_text_label(rename_marker, "env") ?? names.env,
             db: sema_checked_marker_text_label(rename_marker, "db"),
@@ -380,9 +386,7 @@ sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShap
         }
     }
     // `#Arg(env:)` names the field's environment fallback.
-    if sema_registration_cli_arg_text(field.serde_markers, "env") == .Val(env) {
-        names = TShapeFieldNames{text: names.text, json: names.json, cbor: names.cbor, csv: names.csv, toml: names.toml, yaml: names.yaml, xml: names.xml, args: names.args, env: env, db: names.db, layout: names.layout}
-    }
+    if sema_registration_cli_arg_text(field.serde_markers, "env") == .Val(env) -> names.env = env
     names
 }
 

@@ -1,7 +1,7 @@
 // XML's public boundary. Tree/event/lexical policy lives in one private Core
 // engine reused from origin/port/compiler@3aab69fde; every tier calls this API.
 use {
-    core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
+    core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits, Format, FormatError]
     core.prelude.[min, max]
     mem: core.mem
     stream: __core_encoding_stream
@@ -127,6 +127,41 @@ parse_bytes: fn(bytes: [U8], options: XMLParseOptions{XMLParseOptions.safe()}) -
 
 to_string: fn(tree: Dyn) -> String XMLError! {
     kernel.render_document(tree) ?? return Err(kernel.public_error(err))
+}
+
+/// XML as a `Format`: read as `parse_bytes` reads it and written as
+/// `to_bytes` writes it.
+///
+/// ```jet
+/// tree: parse("<a><b>t</b></a>") ?? panic("{err}")
+/// back: Codec.read(Codec.write(tree) ?? panic("{err}")) ?? panic("{err}")
+/// (to_string(back) ?? "") == (to_string(tree) ?? "") // => true
+/// ```
+Codec: struct {
+    impl Format {
+        name: "xml",
+
+        read: fn(bytes: [U8]) -> Dyn FormatError! {
+            tree: parse_bytes(bytes) ?? return Err(FormatError{format: "xml", reason: err.reason})
+            Ok(tree)
+        }
+
+        write: fn(tree: Dyn) -> [U8] FormatError! {
+            bytes: to_bytes(tree) ?? return Err(FormatError{format: "xml", reason: err.reason})
+            Ok(bytes)
+        }
+    }
+}
+
+#Test("the XML format writes a document and reads it back") {
+    tree: parse("<a x=\"1\"><b>t</b></a>") ?? panic("XML")
+    bytes: Codec.write(tree) ?? panic("write")
+    back: Codec.read(bytes) ?? panic("read")
+    assert_eq(to_string(back) ?? panic("render"), to_string(tree) ?? panic("render"))
+    if Codec.read("<a>".bytes()) == {
+        .Ok(_) -> { panic("an unclosed element read as XML") }
+        .Err(failure) -> assert_eq(failure.format, "xml")
+    }
 }
 
 to_bytes: fn(tree: Dyn, options: XMLRenderOptions{XMLRenderOptions.safe()}) -> [U8] XMLError! {

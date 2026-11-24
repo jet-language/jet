@@ -1,9 +1,11 @@
 use jet_foundation.[
     ASTTables,
+    CORE_FORMAT_NAMES,
     Diagnostic,
     Expr,
     ExprNode,
     Item,
+    MARKER_RENAME,
     MarkerDecl,
     ModuleID,
     MarkerDeclParam,
@@ -36,6 +38,10 @@ SemaScopeMembersMarkerRegistry: struct {
     known_marker_names: [String],
     function_allowed_markers: [String],
     block_allowed_markers: [String],
+    // The codec formats `#Rename` takes a label for: Core's
+    // (CORE_FORMAT_NAMES) and each `impl Format` name the graph's programs
+    // declare (sema_scope_members_add_format_names).
+    format_names: [String],
 }
 
 SemaScopeMembersDeclaredTypeArgument: struct {
@@ -211,6 +217,7 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
         known_marker_names: [String]{},
         function_allowed_markers: [String]{},
         block_allowed_markers: [String]{},
+        format_names: CORE_FORMAT_NAMES,
     }
     if !sema_scope_members_registry_add_applied_catalog(registry, catalog) -> return None
     current_module_found := false
@@ -229,7 +236,9 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
     }
     // A group's members may have the same written name as caller-local rows.
     // Their canonical identity selects the declaration, never that name.
+    renames := false
     loop marker in sema_marker_rules_collect_program(program) {
+        if marker.name == MARKER_RENAME -> renames = true
         if marker.declaration_module == None -> next
         resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
         declaration := resolved.declaration ?? next
@@ -238,6 +247,43 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
             return None
         }
     }
+    // Only a `#Rename` reads the format names, so a program without one
+    // skips the graph's scan.
+    if renames -> sema_scope_members_add_format_names(registry.format_names, graph)
+    Val(registry)
+}
+
+// Append the `name` of each `impl Format` block a graph program declares,
+// written as one plain string, as the driver reads an `impl Language`
+// block's root (jet_driver_language_root). The trait is matched by name, so
+// a package's codec needs no compiler change.
+sema_scope_members_add_format_names: fn(names: &[String], graph: SemaRegistrationGraph) Never! {
+    loop row in graph.modules {
+        loop item in row.program.items {
+            if item == .Struct(definition) {
+                loop block in definition.trait_impls {
+                    if block.trait_name != "Format" -> next
+                    loop constant in block.constants {
+                        if constant.name == "name" && constant.value == .Str(parts, _, _) {
+                            if parts.len() == 1 && parts[0] == .Lit(text) {
+                                sema_scope_members_append_name(names, text)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// `catalog` with the format names of every `impl Format` block a graph
+// program declares (sema_scope_members_add_format_names), so a builtin
+// `#Rename`'s labels (MarkerRules.jet
+// sema_marker_rules_check_rule_signature) take a package's codec as they
+// take Core's.
+sema_scope_members_with_format_names: fn(catalog: SemaScopeMembersMarkerRegistry?, graph: SemaRegistrationGraph) -> SemaScopeMembersMarkerRegistry? {
+    registry := catalog ?? return None
+    sema_scope_members_add_format_names(registry.format_names, graph)
     Val(registry)
 }
 

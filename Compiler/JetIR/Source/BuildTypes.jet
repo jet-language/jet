@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
     jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
-    jet_foundation.[symbol_key_leaf, symbol_key_names]
+    jet_foundation.[TShapeFormatName, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -4207,7 +4207,7 @@ ir_compiler_owned_variant: fn(name: String, payload: IRCompilerOwnedPayload) -> 
 ir_compiler_owned_fields: fn(record_fields: [TypeTupleField]) -> [TField] Never! {
     loop field in record_fields -> TField{
         name: field.name.copy(),
-        shape_names: TShapeFieldNames{text: field.name.copy(), json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: field.name.copy(), env: field.name.copy(), db: None, layout: None},
+        shape_names: TShapeFieldNames{text: field.name.copy(), formats: [TShapeFormatName]{}, args: field.name.copy(), env: field.name.copy(), db: None, layout: None},
         skip: false,
         ty: field.ty.copy(),
         span: Span{start: 0, end: 0},

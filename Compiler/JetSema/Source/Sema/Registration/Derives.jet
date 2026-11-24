@@ -422,6 +422,7 @@ sema_derive_static_method: fn(expansion: SemaDeriveExpansion, receiver: Expr, me
     wanted := ""
     if argument == .Str(text) -> wanted = text
     if wanted == "" -> return None
+    if method == "key" -> return Val(sema_derive_format_key(owner, wanted))
     if method == "has_method" {
         return Val(CtValue.Bool{value: sema_derive_named_row(owner, "methods", wanted) != None})
     }
@@ -476,6 +477,36 @@ sema_derive_marker_value: fn(owner: CtValue, written: String) -> CtValue Never! 
             }
         }
         return CtValue.Present{value: CtValue.Struct{type_name: wanted, fields: fields}}
+    }
+    absent
+}
+
+// `field.key(format)` over a reflected field or case: the text its
+// `#Rename` labels under `format`, or the absent String when no `#Rename` on
+// it labels that format. The same read outside a template is JetEval
+// jet_eval_reflection_format_key.
+sema_derive_format_key: fn(owner: CtValue, format: String) -> CtValue Never! {
+    absent: CtValue.Failed{report: CtReport.Clean{ty: Type.String}}
+    rows: if sema_derive_struct_field(owner, "markers") == .Val(.List(values)) -> values else -> {
+        return absent
+    }
+    loop row in rows {
+        name: if sema_derive_struct_field(row, "name") == .Val(.Str(text)) -> text else -> {
+            next
+        }
+        if sema_derive_marker_leaf(name) != "Rename" -> next
+        arguments: if sema_derive_struct_field(row, "args") == .Val(.List(values)) -> values else -> {
+            next
+        }
+        loop argument in arguments {
+            label: if sema_derive_struct_field(argument, "name") == .Val(.Str(written)) -> written else -> {
+                next
+            }
+            if label != format -> next
+            if sema_derive_struct_field(argument, "value") == .Val(.Str(key)) {
+                return CtValue.Present{value: CtValue.Str{value: key}}
+            }
+        }
     }
     absent
 }

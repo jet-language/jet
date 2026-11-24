@@ -517,7 +517,7 @@ ir_decode_env_names: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, own
                 loop field in fields {
                     if field.computed || field.skip -> next
                     env_name: TComptimeValue.String{value: field.shape_names.env.copy()}
-                    key: TComptimeValue.String{value: (field.shape_names.json ?? field.shape_names.text).copy()}
+                    key: TComptimeValue.String{value: field.shape_names.format_key("json") ?? field.shape_names.text.copy()}
                     rows.push(TComptimeValue.Struct{type_name: "Tuple", fields: [TComptimeField]{TComptimeField{name: "env_name", value: env_name}, TComptimeField{name: "key", value: key}}})
                 }
             }

@@ -1,6 +1,9 @@
 use {
     core: core
-    core.data.[DataAuthority, DataError, DataErrorKind, DataFormat, DataFreshness, DataInvalidationCause, DataLoader, DataLoaderKind, DataLoaderStatus, DataSnapshotIdentity, DataSourceIdentity, DataStream]
+    core.data.[DataAuthority, DataError, DataErrorKind, DataFormat, DataFreshness, DataInvalidationCause, DataLimits, DataLoader, DataLoaderKind, DataLoaderStatus, DataSnapshotIdentity, DataSourceIdentity, DataStream]
+    core.encoding.[Format]
+    cbor: core.encoding.cbor
+    json: core.encoding.json
 }
 
 loader_error: fn(kind: DataErrorKind, reason: String, operation: String) -> DataError Never! {
@@ -124,16 +127,19 @@ stream: fn<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
     if loader.canceled {
         return Err(loader_error(DataErrorKind.State, "loader stream was canceled", source_path<T>(loader)))
     }
+    if loader.format == None {
+        return Err(loader_error(DataErrorKind.Bridge, "a loader made by `file_as` or `url_as` streams with `stream_as`", source_path<T>(loader)))
+    }
     bytes_opt := loader.payload
     if bytes_opt == None && loader.offline -> bytes_opt = loader.last_good
     bytes: bytes_opt ?? return Err(loader_error(DataErrorKind.State, "loader has no bound payload", source_path<T>(loader)))
     text: String.from_bytes(bytes) ?? return Err(loader_error(DataErrorKind.Decode, "loader payload is not UTF-8", source_path<T>(loader)))
     rows := [T]{}
-    if loader.format == DataFormat.CSV {
+    if loader.format == Val(DataFormat.CSV) {
         rows = core.data.csv<T>(text) ?? return Err(loader_error(DataErrorKind.Decode, "CSV stream decode failed", source_path<T>(loader)))
-    } else if loader.format == DataFormat.JSON {
+    } else if loader.format == Val(DataFormat.JSON) {
         rows = core.data.json<T>(text) ?? return Err(loader_error(DataErrorKind.Decode, "JSON stream decode failed", source_path<T>(loader)))
-    } else if loader.format == DataFormat.JSONL {
+    } else if loader.format == Val(DataFormat.JSONL) {
         rows = decode_jsonl<T>(text) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL stream decode failed", source_path<T>(loader)))
     } else {
         return Err(loader_error(DataErrorKind.Bridge, "provider-backed stream is required for this format", source_path<T>(loader)))
@@ -142,6 +148,55 @@ stream: fn<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
         return Err(loader_error(DataErrorKind.Limit, "max_output_rows exceeded", "data.loader.stream"))
     }
     core.data.stream.from_items<T>(rows)
+}
+
+/// The rows of a loader made by `core.data.file_as` or `url_as` over the
+/// `Format` `F`: `F.read` gives the payload's tree, which decodes as the rows.
+/// A URL loader's payload is bound by its provider (`bind`); a file loader's
+/// by `core.files.data.read`.
+///
+/// ```jet
+/// remote := core.data.url_as<Int, json.Codec>("https://example.test/rows", "network", DataLimits.safe()) ?? panic("{err}")
+/// bind<Int>(remote, "[1, 2]".bytes()) ?? panic("{err}")
+/// rows := stream_as<Int, json.Codec>(remote) ?? panic("{err}")
+/// (core.data.stream.collect<Int>(rows) ?? panic("{err}")) == [Int]{1, 2} // => true
+/// local: core.data.file_as<Int, json.Codec>("rows.json", DataLimits.safe()) ?? panic("{err}")
+/// local.codec == Val("json") // => true
+/// ```
+stream_as: fn<T: Decode, F: Format>(loader: DataLoader<T>) -> DataStream<T> DataError! {
+    if loader.canceled {
+        return Err(loader_error(DataErrorKind.State, "loader stream was canceled", source_path<T>(loader)))
+    }
+    if loader.codec != Val(F.name) {
+        return Err(loader_error(DataErrorKind.Bridge, "this loader was not made over the `{F.name}` format", source_path<T>(loader)))
+    }
+    bytes_opt := loader.payload
+    if bytes_opt == None && loader.offline -> bytes_opt = loader.last_good
+    bytes: bytes_opt ?? return Err(loader_error(DataErrorKind.State, "loader has no bound payload", source_path<T>(loader)))
+    tree: F.read(bytes) ?? return Err(loader_error(DataErrorKind.Decode, "{err}", source_path<T>(loader)))
+    rows: tree.decode<[T]>() ?? return Err(loader_error(DataErrorKind.Decode, "`{F.name}` stream decode failed", source_path<T>(loader)))
+    if rows.len() > loader.limits.max_output_rows {
+        return Err(loader_error(DataErrorKind.Limit, "max_output_rows exceeded", "data.loader.stream"))
+    }
+    core.data.stream.from_items<T>(rows)
+}
+
+#Test("a loader over a Format streams the rows that format reads") {
+    loader := core.data.url_as<Int, json.Codec>("https://example.test/rows", "network", DataLimits.safe()) ?? panic("loader")
+    assert(loader.format == None)
+    bind<Int>(loader, "[1, 2]".bytes()) ?? panic("bind")
+    rows := stream_as<Int, json.Codec>(loader.copy()) ?? panic("stream")
+    assert_eq(core.data.stream.collect<Int>(rows) ?? panic("collect"), [Int]{1, 2})
+    if stream_as<Int, cbor.Codec>(loader.copy()) == {
+        .Ok(_) -> { panic("a JSON loader streamed through CBOR") }
+        .Err(failure) -> {
+            assert_eq(failure.reason, "this loader was not made over the `cbor` format")
+        }
+    }
+    if stream<Int>(loader) == {
+        .Ok(_) -> { panic("a JSON-codec loader streamed as a Core data format") }
+        .Err(failure) -> assert_eq(failure.kind, DataErrorKind.Bridge)
+    }
 }
 
 accepts_payload: fn<T>(loader: DataLoader<T>) -> Bool Never! {

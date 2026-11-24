@@ -1,0 +1,27 @@
+// The codec formats Core declares, read while the compiler builds: the
+// `name` of each `impl Format` block of Core's codec modules, in this order.
+// A package declares a format the same way, and sema reads its blocks from
+// the programs it checks, so a new format needs no compiler change. Each
+// name is a `#Rename` label: `#Rename(name: "id", json: "ID")`.
+CORE_FORMAT_NAMES: #run core_format_names(
+    [String]{
+        embed_file("toolchain:Core/Encoding/JSON.jet"),
+        embed_file("toolchain:Core/Encoding/CBOR.jet"),
+        embed_file("toolchain:Core/Encoding/CSV.jet"),
+        embed_file("toolchain:Core/Encoding/TOML.jet"),
+        embed_file("toolchain:Core/Encoding/YAML.jet"),
+        embed_file("toolchain:Core/Encoding/XML.jet"),
+    },
+)
+
+core_format_names: fn(sources: [String]) -> [String] {
+    names := [String]{}
+    loop source in sources {
+        loop name in trait_impl_strings(source, "Format", "name") -> names.push(name)
+    }
+    names
+}
+
+#Test("Core's formats are the `impl Format` names of its codec modules") {
+    assert_eq(CORE_FORMAT_NAMES, [String]{"json", "cbor", "csv", "toml", "yaml", "xml"})
+}

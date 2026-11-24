@@ -6461,7 +6461,9 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     canonical_markers: sema_marker_module_effect_roots_are_canonical(graph)
     applied_opt: if canonical_markers -> SEMA_PRELUDE_APPLIED_CATALOG else -> sema_marker_module_applied_catalog(graph)
     if applied_opt == .Val(applied) {
-        graph.marker_catalog = if canonical_markers -> SEMA_PRELUDE_MARKER_REGISTRY else -> sema_marker_module_catalog_registry(applied)
+        // A `#Rename` format label is any `impl Format` name the graph
+        // declares, a package's beside Core's.
+        graph.marker_catalog = sema_scope_members_with_format_names(if canonical_markers -> SEMA_PRELUDE_MARKER_REGISTRY else -> sema_marker_module_catalog_registry(applied), graph)
         unknown_rules := [[Diagnostic]]{}
         if graph.marker_catalog == .Val(catalog) {
             found := sema_marker_module_check_threads(graph, applied, catalog, threads, unknown_rules)

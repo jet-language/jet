@@ -436,7 +436,10 @@ sema_marker_rules_label: fn(marker: Marker, index: Int) -> String? {
     None
 }
 
-sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppliedRuleSignature) -> [SemaMarkerRuleArgumentBinding]? {
+// `formats` holds the codec format names a `#Rename` takes a label for
+// beyond its parameters (SemaScopeMembersMarkerRegistry.format_names); None
+// takes any such label, for a caller that reads only the bound parameters.
+sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppliedRuleSignature, formats: [String]?) -> [SemaMarkerRuleArgumentBinding]? {
     if marker.args.len() != marker.arg_labels.len() -> return None
     bindings := [SemaMarkerRuleArgumentBinding]{}
     // Rust `rule_signature_bindings`: a bare `#Unsafe` binds nothing; its
@@ -479,6 +482,8 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
         }
         return Val(bindings)
     }
+    rename: sema_marker_is_hook(marker, MarkerHook.Rename)
+    format_labels := [String]{}
     next_positional := 0
     saw_named := false
     loop source_index in 0..<marker.args.len() {
@@ -492,6 +497,14 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
                 selected := Int?{None}
                 loop (index, parameter) in signature.params {
                     if parameter.name == name -> selected = Val(index)
+                }
+                // A `#Rename` label naming a codec format, not a parameter.
+                if rename && selected == None {
+                    if format_labels.contains(name) -> return None
+                    if formats == .Val(names) && !names.contains(name) -> return None
+                    format_labels.push(name)
+                    bindings.push(SemaMarkerRuleArgumentBinding{source_index: source_index, parameter_index: None, kind: TAppliedRuleArgKind.String})
+                    next
                 }
                 index: selected ?? return None
                 if supplied[index] && !meta -> return None
@@ -577,6 +590,13 @@ sema_marker_rules_signature_error: fn(marker: Marker, signature: TAppliedRuleSig
     expected := sema_marker_rules_signature_text(marker.name, signature)
     fix := if declared -> "match the declared signature `{expected}`" else -> "match the registered signature `{expected}`"
     sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", fix)
+}
+
+// E0930 for a `#Rename` whose labels match neither its parameters nor a
+// codec format's name, or repeat one: the message lists the formats.
+sema_marker_rules_rename_error: fn(marker: Marker, signature: TAppliedRuleSignature, formats: [String]) -> Diagnostic {
+    expected: sema_marker_rules_signature_text(marker.name, signature)
+    sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}` or a format label", "beside its parameters, `#{marker.name}` takes one label per codec format, the `name` of a `Format` impl: {formats.join(", ")}", "match `{expected}`, label a format once, or import the package that implements the format")
 }
 
 // The path an argument names; an `Effect` argument may name it denied, as
@@ -908,8 +928,9 @@ sema_marker_rules_unknown_variant_error: fn(marker: Marker, menu: TAppliedRuleAr
 }
 
 sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?, declared: Bool, owns_menu: Bool, registry: SemaScopeMembersMarkerRegistry, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue], facts: &[SemaMarkerRuleArgumentFact], comptime_sources: &[SemaComptimeItemSource], comptime_requests: &[SemaComptimeRequest], diagnostics: &[Diagnostic]) -> Bool {
-    bindings: sema_marker_rules_marker_signature_bindings(marker, signature) ?? {
-        diagnostics.push(sema_marker_rules_signature_error(marker, signature, declared))
+    bindings: sema_marker_rules_marker_signature_bindings(marker, signature, Val(registry.format_names)) ?? {
+        failure: if sema_marker_is_hook(marker, MarkerHook.Rename) -> sema_marker_rules_rename_error(marker, signature, registry.format_names) else -> sema_marker_rules_signature_error(marker, signature, declared)
+        diagnostics.push(failure)
         return false
     }
     valid := true
@@ -1918,7 +1939,7 @@ sema_marker_rules_user_argument_error: fn(registry: SemaScopeMembersMarkerRegist
         return Val(sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` is a marker group and takes no arguments", "a group names a fixed stack of markers; it has no parameters for arguments to bind", "write `#{marker.name}` without parentheses"))
     }
     declared: sema_marker_rules_declared_signature(rule)
-    bindings: sema_marker_rules_marker_signature_bindings(marker, declared.signature) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
+    bindings: sema_marker_rules_marker_signature_bindings(marker, declared.signature, Val(registry.format_names)) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
     loop binding in bindings {
         argument: sema_marker_rules_marker_expression(marker, binding.source_index) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
         expected := declared.variadic_expected_type.copy()

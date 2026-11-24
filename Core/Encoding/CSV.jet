@@ -1,6 +1,6 @@
 use {
     core: core
-    core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, __DecodeSource, __Decoding]
+    core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, Format, FormatError, __DecodeSource, __Decoding]
     json: core.encoding.json
     base64: core.encoding.base64
     stream: __core_encoding_stream
@@ -448,6 +448,44 @@ parse: fn(text: String, delimiter: String{","}, header: Bool{false}, skip_blank:
         items.push(Dyn.Array(fields))
     }
     Ok(Dyn.Array(items))
+}
+
+/// CSV as a `Format`: UTF-8 text whose tree is `parse`'s, one array of text
+/// cells per record, written back as `to_string` writes it.
+///
+/// ```jet
+/// tree: parse("a,b\n1,2\n") ?? panic("{err}")
+/// back: Codec.read(Codec.write(tree) ?? panic("{err}")) ?? panic("{err}")
+/// to_string(back) == to_string(tree) // => true
+/// ```
+Codec: struct {
+    impl Format {
+        name: "csv",
+
+        read: fn(bytes: [U8]) -> Dyn FormatError! {
+            text: String.from_bytes(bytes) ?? return Err(FormatError{format: "csv", reason: "the bytes are not UTF-8"})
+            tree: parse(text) ?? return Err(FormatError{format: "csv", reason: err.display_text()})
+            Ok(tree)
+        }
+
+        write: fn(tree: Dyn) -> [U8] FormatError! {
+            if !(tree == .Array(_)) {
+                return Err(FormatError{format: "csv", reason: "CSV writes an array of rows or records"})
+            }
+            Ok(to_string(tree).bytes())
+        }
+    }
+}
+
+#Test("the CSV format writes rows and reads them back") {
+    tree: parse("a,b\n1,2\n") ?? panic("CSV")
+    bytes: Codec.write(tree) ?? panic("write")
+    back: Codec.read(bytes) ?? panic("read")
+    assert_eq(to_string(back), to_string(tree))
+    if Codec.write(Dyn.Int(1)) == {
+        .Ok(_) -> { panic("a number wrote as CSV") }
+        .Err(failure) -> assert_eq(failure.reason, "CSV writes an array of rows or records")
+    }
 }
 
 // `rows` is a list of row arrays or records, or the row-array tree `parse`

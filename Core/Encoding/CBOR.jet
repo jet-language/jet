@@ -1,7 +1,7 @@
 use {
     core: core
     // Whole-value and bounded streaming CBOR; typed `decode<T>` reads the parsed tree.
-    core.encoding.[Dyn, DataEvent, EncodingError, EncodingLimits]
+    core.encoding.[Dyn, DataEvent, EncodingError, EncodingLimits, Format, FormatError]
     stream: __core_encoding_stream
     math: core.math
     parser: __core_encoding_cbor_parse
@@ -268,6 +268,42 @@ encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
 
 parse: fn(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}}) -> Dyn CBORError! {
     parser.parse(bytes, options)
+}
+
+/// CBOR as a `Format`: read as `parse` reads it, written in preferred
+/// (not canonical) form.
+///
+/// ```jet
+/// bytes: Codec.write(Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Text("a")})) ?? panic("{err}")
+/// bytes == [U8]{130, 1, 97, 97} // => true
+/// back: Codec.read(bytes) ?? panic("{err}")
+/// (Codec.write(back) ?? panic("{err}")) == bytes // => true
+/// ```
+Codec: struct {
+    impl Format {
+        name: "cbor",
+
+        read: fn(bytes: [U8]) -> Dyn FormatError! {
+            tree: parse(bytes) ?? return Err(FormatError{format: "cbor", reason: err.display_text()})
+            Ok(tree)
+        }
+
+        write: fn(tree: Dyn) -> [U8] FormatError! {
+            bytes: encode(tree, false) ?? return Err(FormatError{format: "cbor", reason: err.display_text()})
+            Ok(bytes)
+        }
+    }
+}
+
+#Test("the CBOR format writes a tree and reads it back") {
+    bytes: Codec.write(Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Text("a")})) ?? panic("write")
+    assert_eq(bytes, [U8]{130, 1, 97, 97})
+    back: Codec.read(bytes) ?? panic("read")
+    assert_eq(Codec.write(back) ?? panic("rewrite"), bytes)
+    if Codec.read([U8]{}) == {
+        .Ok(_) -> { panic("no bytes read as CBOR") }
+        .Err(failure) -> assert_eq(failure.format, "cbor")
+    }
 }
 
 // Typed `decode<T>(bytes)`: the parsed tree decodes into the target. A parse

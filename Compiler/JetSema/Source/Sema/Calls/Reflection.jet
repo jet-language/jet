@@ -710,6 +710,11 @@ sema_call_reflection_method_return: fn(type_name: String, method: String, args: 
         if method == "name" || method == "path" -> return Val(Type.String)
         if method == "fields" -> return Val(Type.List{element: Type.Named{name: "Field"}})
     }
+    // `field.key(format)`: the field's `#Rename` key under that codec format.
+    if (type_name == "FieldInfo" || type_name == "CaseInfo") && method == "key" {
+        if args.len() != 1 || args[0] != Type.String -> return None
+        return Val(Type.Option{inner: Type.String})
+    }
     if type_name == "TypeInfo" && method == "has_method" {
         if args.len() != 1 || args[0] != Type.String -> return None
         return Val(Type.Bool)
@@ -727,9 +732,8 @@ sema_call_reflection_metadata_owner: fn(ty: Type) -> String? {
 
 sema_call_reflection_metadata_method: fn(owner: String, method: String) -> Bool Never! {
     if owner == "TypeInfo" -> return method == "has_method" || method == "marker"
-    if owner == "FieldInfo" || owner == "CaseInfo" || owner == "MethodInfo" || owner == "FunctionInfo" {
-        return method == "marker"
-    }
+    if owner == "FieldInfo" || owner == "CaseInfo" -> return method == "marker" || method == "key"
+    if owner == "MethodInfo" || owner == "FunctionInfo" -> return method == "marker"
     false
 }
 

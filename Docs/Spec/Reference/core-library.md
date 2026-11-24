@@ -4362,6 +4362,15 @@ payload bytes; applications decode the lexeme to a supported scalar first.
 The standard formats are exposed as `core.encoding.base32`, `base64`, `binary`,
 `cbor`, `csv`, `hex`, `ini`, `json`, `jsonl`, `toml`, `xml`, and `yaml`.
 
+A codec format is a `Format` impl: `core.encoding.Format` asks for a `name`
+(the format's `#Rename` label) and `read(bytes) -> Dyn FormatError!` /
+`write(tree) -> [U8] FormatError!` between bytes and a `Dyn` tree. `json`,
+`cbor`, `csv`, `toml`, `yaml` and `xml` each export a `Codec` struct that
+implements it, and a package adds a format the same way: its `impl Format`
+makes its `name` a `#Rename` label (`#Rename(name: "id", msgpack: "i")`) and
+a format `core.data.file_as` / `url_as` load through. A `FormatError` carries
+the `format` name and the `reason`.
+
 #### Typed codecs and validation
 
 A parser returns a `Dyn` (or a format-specific document). A typed codec
@@ -4732,6 +4741,7 @@ run: fn() {
 | `track<T, K>(rows, fn(row) { key })` | `DataTracked<T, K> DataError!` | Attach maintained keyed state to owned rows. |
 | `file<T>(path, format, limits)` / `file_member<T>(path, member, format, limits)` | `DataLoader<T> DataError!` | Build a typed file or archive-member loader. |
 | `url<T>(url, format, authority, limits)` / `database<T>(query, parameters, authority, limits)` | `DataLoader<T> DataError!` | Build an authority-bound remote or SQL loader. |
+| `file_as<T, F: Format>(path, limits)` / `url_as<T, F: Format>(url, authority, limits)` | `DataLoader<T> DataError!` | Build a file or remote loader over a `Format` impl, a package's codec as well as Core's; its `format` is None and its `codec` is `F.name`, so `loader.stream_as` reads it and `snapshot` refuses it with a `Bridge` error. |
 | `value<T>(value, limits)` / `load_default<T>(locator)` / `load<T>(locator, limits)` | `DataLoader<T> DataError!` | Load an owned value or source locator with explicit limits. |
 | `csv<T>(text)` / `json<T>(text)` | `[T] DataError!` | Decode typed CSV or JSON input. |
 | `snapshot(loader)` | `-[FS, Net, DB]> DataSnapshot<T> DataError!` | Materialize a source snapshot. A local file loader snapshots the bytes `core.files.data.read` bound; an unread file loader is a `Bridge` error. |
@@ -4824,6 +4834,7 @@ are terminal or revisioned lifecycle operations, not ordinary query filters.
 | `loader.offline(loader, enabled)` | `Unit` | Enable or disable offline reads from a retained last-good snapshot. |
 | `loader.mark_stale(loader, cause)` | `Unit` | Mark a snapshot stale with a typed cause. |
 | `loader.stream<T>(loader)` | `DataStream<T> DataError!` | Open a bounded stream; no payload or cancellation is an error. |
+| `loader.stream_as<T, F: Format>(loader)` | `DataStream<T> DataError!` | Open a bounded stream over a `file_as` / `url_as` loader: `F.read` turns the bound bytes into a tree, which decodes to rows by their text (`json`) keys; a loader over another format is a `Bridge` error. |
 
 The loader stream supports CSV, JSON, and JSONL payloads subject to
 `DataLimits.max_output_rows`; unsupported formats and unavailable providers

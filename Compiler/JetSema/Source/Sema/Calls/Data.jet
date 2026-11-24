@@ -1427,7 +1427,7 @@ sema_data_db_names: fn(target: Type, environment: SemaScopeEnvironment, program:
         }
         names: sema_checked_field_shape_names(definition, field)
         column: names.db ?? names.text
-        key: names.json ?? names.text
+        key: names.format_key("json") ?? names.text
         if column == key -> next
         db_name: Expr.Str{parts: [StrPart]{StrPart.Lit{text: column}}, span: span, id: AST_NODE_GENERATED}
         key_text: Expr.Str{parts: [StrPart]{StrPart.Lit{text: key}}, span: span, id: AST_NODE_GENERATED}
