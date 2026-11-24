@@ -49,6 +49,7 @@ use jet_foundation.[
     core_call_accepts_arity,
     core_call_coverage_contains,
     core_call_source_member,
+    core_call_source_role,
     core_call_projection,
     core_call_typed_signature,
     core_call_typed_signature_for,
@@ -700,7 +701,7 @@ sema_call_core_native_resource_consumer: fn(module_name: String, member: String,
 
 sema_call_core_has_explicit_source_target: fn(module_name: String, member: String) -> Bool Never! {
     row: core_call(module_name, member) ?? return false
-    row.symbol == CoreCallSymbol.SourceOwned && row.source_target != None
+    row.symbol == CoreCallSymbol.SourceOwned && (row.source_target != None || row.source_role != None)
 }
 
 // The no-OS call boundary is checked before choosing either a source-owned
@@ -1193,25 +1194,21 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
         }
     }
     normalized: sema_call_core_normalized_source_record(record, args, type_args)
+    if core_call_source_role(normalized) == .Val(role) {
+        graph: program.registration_graph ?? return None
+        filler: sema_core_role_function(graph, role) ?? {
+            diagnostics.push(sema_missing_core_role(role, span))
+            return None
+        }
+        return sema_call_core_run_source(record, filler.module_identity, filler.name, args, span, type_args, result_type, expected, environment, program, diagnostics)
+    }
     if core_call_source_member(normalized) == .Val(member) {
         path: sema_call_core_source_path(record.module_name, member) ?? return None
         identity: sema_call_core_module_identity(environment, program, path.module_name) ?? {
             diagnostics.push(sema_error("E0902", span, "source-owned Core module `{path.module_name}` is not loaded", "this declaration has no host implementation route", "load the owning Core source package"))
             return None
         }
-        target: sema_call_core_source_target(environment, program, identity, path.member, type_args, span, true, diagnostics) ?? {
-            diagnostics.push(sema_error("E0902", span, "source-owned Core call `{record.module_name}.{member}` has no checked source target", "this declaration must execute its owning Jet function", "load the matching Core source export"))
-            return None
-        }
-        params: sema_call_params_from_type(target.signature) ?? return None
-        if params.len() != args.len() {
-            diagnostics.push(sema_error("E0902", span, "source-owned Core target `{member}` has the wrong normalized arity", "the checked source signature must accept every normalized argument", "use the matching Core source export"))
-            return None
-        }
-        source_args: sema_call_core_source_arguments(args, params, environment, program)
-        callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
-        value: sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: type_args, args: source_args}, span)
-        return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
+        return sema_call_core_run_source(record, identity, path.member, args, span, type_args, result_type, expected, environment, program, diagnostics)
     }
     value := sema_tree_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, fallibility: fallibility}, span)
     // Rust passes the slot type to a call only as an inference hint: a Core
@@ -1219,6 +1216,24 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
     // branch accepts its divergence.
     if result_type == (Type.Named{name: "Never"}) -> return Val(value)
     sema_expr_expected(value, expected, environment, program, diagnostics)
+}
+
+// A source-owned Core call as a call of the Core function `name` of module
+// `identity` that runs it, on the normalized arguments.
+sema_call_core_run_source: fn(record: CoreCallRecord, identity: ModuleID, name: String, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
+    target: sema_call_core_source_target(environment, program, identity, name, type_args, span, true, diagnostics) ?? {
+        diagnostics.push(sema_error("E0902", span, "source-owned Core call `{record.module_name}.{record.member}` has no checked source target", "this declaration must execute its owning Jet function", "load the matching Core source export"))
+        return None
+    }
+    params: sema_call_params_from_type(target.signature) ?? return None
+    if params.len() != args.len() {
+        diagnostics.push(sema_error("E0902", span, "source-owned Core target `{name}` has the wrong normalized arity", "the checked source signature must accept every normalized argument", "use the matching Core source export"))
+        return None
+    }
+    source_args: sema_call_core_source_arguments(args, params, environment, program)
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
+    value: sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: type_args, args: source_args}, span)
+    sema_expr_expected_owned(value, expected, environment, program, diagnostics)
 }
 
 // A call of the `module_name` source function `member` on checked arguments,
@@ -1245,15 +1260,27 @@ sema_call_core_source_path: fn(module_name: String, member: String) -> {module_n
     Val({module_name: parts.join("."), member: function})
 }
 
+// The Core module and function a source-owned record's call runs: the one
+// that fills its role, else the one its source target or member names. None
+// for an adapter row, or when that function's module is not loaded.
+sema_call_core_source_function: fn(record: CoreCallRecord, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCoreRoleFunction? {
+    if core_call_source_role(record) == .Val(role) {
+        graph: program.registration_graph ?? return None
+        return sema_core_role_function(graph, role)
+    }
+    member: core_call_source_member(record) ?? return None
+    path: sema_call_core_source_path(record.module_name, member) ?? return None
+    identity: sema_call_core_module_identity(environment, program, path.module_name) ?? return None
+    Val(SemaCoreRoleFunction{module_identity: identity, name: path.member})
+}
+
 // Push the effects the Core declaration of a source-owned record writes;
 // false for an adapter row, or one whose function this program has not loaded.
 sema_call_core_declared_effects: fn(record: CoreCallRecord, environment: SemaScopeEnvironment, program: SemaProgramTables, effects: ^[String]) -> Bool Never! {
-    member: core_call_source_member(record) ?? return false
-    path: sema_call_core_source_path(record.module_name, member) ?? return false
-    identity: sema_call_core_module_identity(environment, program, path.module_name) ?? return false
+    source: sema_call_core_source_function(record, environment, program) ?? return false
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, identity) ?? return false
-        position: sema_registration_declaration_row(graph.modules[module_index], path.member) ?? return false
+        module_index: sema_registration_module_index(graph, source.module_identity) ?? return false
+        position: sema_registration_declaration_row(graph.modules[module_index], source.name) ?? return false
         if graph.modules[module_index].declarations[position] == .Func(function) {
             if function.declared_effects == .Val(row) {
                 loop entry in row -> effects.push(entry.name)

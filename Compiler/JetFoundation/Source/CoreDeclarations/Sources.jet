@@ -532,10 +532,13 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
             problems.push("{CORE_DECLARATIONS_CORE_PATH}: error_types lists {name}, which is no Core type leaf a source of its module declares #Error; drop it or mark its declaration #Error")
         }
     }
+    // Each source-owned row's function, by name; "" for a row a role routes,
+    // whose function the role table checks (E1014, E1015), not this one.
     targets := CoreDeclTexts{}
     loop row in declared.dispatchers {
         if row.kind == "receiver" || row.constructor != "CoreCallRecord.source_owned" -> next
-        core_decl_text_put(targets, "{row.module_name}.{row.record.member}", row.record.source_target ?? row.record.member)
+        target: if row.record.source_role != None -> "" else -> row.record.source_target ?? row.record.member
+        core_decl_text_put(targets, "{row.module_name}.{row.record.member}", target)
     }
     units: loop row in declared.runtime -> row.module_name
     loop row in declared.source_rows {
@@ -549,6 +552,7 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
         functions: loop line in lines if core_decl_pub_fn_name(line) != "" -> core_decl_pub_fn_name(line)
         loop member in row.members {
             target: core_decl_text_of(targets, "{row.module_name}.{member}") ?? member
+            if target == "" -> next
             if !functions.contains(target) {
                 problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not define owned member `{row.module_name}.{member}` target `{target}` in {row.path}")
             }

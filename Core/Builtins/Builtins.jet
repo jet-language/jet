@@ -48,10 +48,21 @@
 // calls of a transform: entering (TapeEnter) and leaving (TapeExit) the
 // tape, making a leaf (TapeLeaf), the untracked value (TapeValue), a
 // gradient (TapeGradient), a `vjp` pullback (TapePull) and a `jvp` tangent
-// (TapeTangent). A role's name ends in `Point` exactly when it is a point
-// constructor's, starts with `Decode` exactly when it is a decode helper's,
-// starts with `Measurement` exactly when it is a measurement helper's, and
-// starts with `Tape` exactly when it is an autodiff tape call's.
+// (TapeTangent). The `core.data` helpers a checked query runs fill roles
+// too: the `Query` stages `filter` (QueryFilter), `sort_by` (QuerySortBy),
+// `map` (QueryMap), `min` (QueryMin), `max` (QueryMax), `inner_join`
+// (QueryInnerJoin), `left_join` (QueryLeftJoin), `collect` (QueryCollect),
+// `plan` (QueryPlan) and `group_by` (QueryGroupBy), a query over a tracked
+// source (QueryTracked) or a stream (QueryStream), a grouped `count`
+// (GroupCount), `mean` (GroupMean) and `sum` by its value's numeric type
+// (GroupSumInt, GroupSumFloat, GroupSumF32, GroupSumI8 through GroupSumI64,
+// GroupSumU8 through GroupSumU64), the event-time stages `with_event_time`
+// by an `Int` (StreamWithEventTime) or a `DateTime` (StreamWithEventDatetime)
+// stamp, `key_by` (StreamKeyBy) and `window` (StreamWindow), and
+// `data.schema` (DataSchema). A role's name ends in `Point` exactly when it
+// is a point constructor's, starts with `Decode` exactly when it is a decode
+// helper's, starts with `Measurement` exactly when it is a measurement
+// helper's, and starts with `Tape` exactly when it is an autodiff tape call's.
 // The compiler runs the one Core function that fills a role and never names
 // it, so the function can be private and keep any name.
 // The rest are filled by a trait of Compiler/Prelude/Traits.jet, whose
@@ -77,6 +88,36 @@ RoleKind: enum {
     TapeGradient,
     TapePull,
     TapeTangent,
+    QueryStream,
+    StreamWithEventTime,
+    StreamWithEventDatetime,
+    StreamKeyBy,
+    StreamWindow,
+    QueryTracked,
+    QueryPlan,
+    QueryCollect,
+    QueryFilter,
+    QuerySortBy,
+    QueryMap,
+    QueryMin,
+    QueryMax,
+    QueryInnerJoin,
+    QueryLeftJoin,
+    QueryGroupBy,
+    GroupCount,
+    GroupSumInt,
+    GroupSumFloat,
+    GroupSumF32,
+    GroupSumI8,
+    GroupSumI16,
+    GroupSumI32,
+    GroupSumI64,
+    GroupSumU8,
+    GroupSumU16,
+    GroupSumU32,
+    GroupSumU64,
+    GroupMean,
+    DataSchema,
     DecodeUnder,
     DecodeList,
     DecodeFixedList,

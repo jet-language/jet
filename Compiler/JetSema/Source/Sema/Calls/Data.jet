@@ -621,7 +621,7 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
     }
     // A grouped sum runs the source reducer of its value's numeric type.
     if receiver_type == "DataGroupedQuery" && method == "sum" {
-        record.source_target = Val("core.data.{sema_data_group_sum_target(sum_value)}")
+        record.source_role = Val(sema_data_group_sum_role(sum_value))
     }
     // A filter passes its predicate as SQL before the predicate.
     if receiver_type == "Query" && method == "filter" {
@@ -686,7 +686,7 @@ sema_data_try_event_time_method: fn(receiver: Expr, receiver_value: TExpr, name:
     }
     if callback.result == .Val(stamp) {
         if sema_data_event_time_is_datetime(stamp) {
-            target = Val("core.data.__stream_with_event_datetime")
+            target = Val("StreamWithEventDatetime")
         } else if stamp != Type.Int {
             diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`with_event_time` wants the callback to return `Int` Unix seconds or a `DateTime`, but it returns {sema_type_show(stamp)}", "the result is the element's event time", "return the element's timestamp as Unix seconds or a `DateTime`"))
             complete = false
@@ -697,18 +697,19 @@ sema_data_try_event_time_method: fn(receiver: Expr, receiver_value: TExpr, name:
         diagnostics.push(sema_error("E0003", span, "event-time method `{method}` has no canonical receiver Core row", "every event-time stage lowers onto its receiver Core row", "repair the Core registry receiver rows"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if target == .Val(found) -> record.source_target = Val(found)
+    if target == .Val(found) -> record.source_role = Val(found)
     result_type: Type.Apply{name: sema_data_source_type_name(environment, program, "StreamEventTime"), args: [Type]{element}}
     value: sema_data_core_emit(record, "Stream.{method}", source_args, argument_types, typed, [Type]{element}, result_type, span, expected, environment, program, scopes, state, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
-sema_data_group_sum_target: fn(value: Type) -> String Never! {
+// The jet_builtins role of the grouped-sum reducer for a `value` column.
+sema_data_group_sum_role: fn(value: Type) -> String Never! {
     if value == {
-        .Float -> "__group_sum_float"
-        .Float32 -> "__group_sum_f32"
-        .IntN(signed, bits) -> if signed -> "__group_sum_i{bits}" else -> "__group_sum_u{bits}"
-        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> "__group_sum_int"
+        .Float -> "GroupSumFloat"
+        .Float32 -> "GroupSumF32"
+        .IntN(signed, bits) -> if signed -> "GroupSumI{bits}" else -> "GroupSumU{bits}"
+        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> "GroupSumInt"
     }
 }
 
@@ -1579,12 +1580,12 @@ sema_call_try_data_core_call: fn(module_name: String, member: String, args: [Cal
                 if {
                     sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 -> {
                         row = Val(parameters[0])
-                        query_source = Val("core.data.__query_tracked")
+                        query_source = Val("QueryTracked")
                         query_type_args = [Type]{parameters[0], parameters[1]}
                     }
                     sema_data_nominal_is(name, "DataStream") && parameters.len() == 1 -> {
                         row = Val(parameters[0])
-                        query_source = Val("core.data.__query_stream")
+                        query_source = Val("QueryStream")
                     }
                 }
             }
@@ -1598,7 +1599,7 @@ sema_call_try_data_core_call: fn(module_name: String, member: String, args: [Cal
         result_type: Type.Apply{name: sema_data_source_type_name(environment, program, "Query"), args: [Type]{row_type}}
         record := sema_call_core_record(module_name, member, args.len(), span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         // A tracked source or a stream enters the query through its own source.
-        if query_source == .Val(target) -> record.source_target = Val(target)
+        if query_source == .Val(role) -> record.source_role = Val(role)
         typed: [TExpr]{first}
         argument_types: [Type]{first_expected}
         result: sema_data_core_emit(record, "{module_name}.{member}", args, argument_types, typed, query_type_args, result_type, span, expected, environment, program, scopes, state, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}

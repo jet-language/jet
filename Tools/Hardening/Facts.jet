@@ -60,6 +60,8 @@ ParsedCore: struct {
     enums: [String:Bool],
     // Structs that declare at least one field.
     records: [String:Bool],
+    // "<role>" -> the "<module>.<fn>" its `#Builtin.Role(.<role>)` marks.
+    roles: [String:String],
     errors: [String],
 }
 
@@ -115,7 +117,7 @@ line_of: fn(text: String, needle: String) -> Int Never! {
 }
 
 parse_core: fn(sources: [SourceFile]) -> ParsedCore Never! {
-    out := ParsedCore{fns: [String:Declared]{}, returns: [String:Type]{}, types: [String:Declared]{}, methods: [String:Declared]{}, method_returns: [String:Type]{}, fields: [String:Declared]{}, enums: [String:Bool]{}, records: [String:Bool]{}, errors: [String]{}}
+    out := ParsedCore{fns: [String:Declared]{}, returns: [String:Type]{}, types: [String:Declared]{}, methods: [String:Declared]{}, method_returns: [String:Type]{}, fields: [String:Declared]{}, enums: [String:Bool]{}, records: [String:Bool]{}, roles: [String:String]{}, errors: [String]{}}
     loop row in CORE_SOURCE_OWNED_ROWS {
         source := SourceFile?{None}
         loop file in sources {
@@ -141,6 +143,12 @@ parse_into: fn(out: ^ParsedCore, module_name: String, file: SourceFile) Never! {
                 key: "{module_name}.{f.name}"
                 out.fns[key.copy()] = Declared{path: file.path.copy(), line: line_at(starts, f.span.start)}
                 if f.return_type == .Val(ty) -> out.returns[key] = ty.copy()
+                loop marker in f.markers {
+                    if marker.name != "Builtin.Role" || marker.args.len() != 1 -> next
+                    if marker.args[0] == .Expr(value) {
+                        if value == .EnumLit(_, variant, _, _, _, _, _) -> out.roles["{variant}"] = key.copy()
+                    }
+                }
             }
             .Struct(s) -> {
                 out.types[s.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, s.span.start)}
@@ -320,7 +328,8 @@ surface: fn(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFi
         }
     }
     loop record in CORE_CALLS {
-        target: record.source_target ?? ""
+        target := record.source_target ?? ""
+        if record.source_role == .Val(role) -> target = core.roles.get(role) ?? ""
         loop owner in record.receiver_types {
             if owner == "" || owner.bytes()[0] == 0 -> next
             id: "receiver:{owner}.{record.member}"
@@ -368,15 +377,22 @@ module_call_row: fn(id: String, module_name: String, member: String, core: Parse
     declared_aot := false
     target := member.copy()
     source_owned := false
+    key := "{module_name}.{member}"
     if record == .Val(found) {
         declared_aot = core_call_coverage_contains(found.coverage, CORE_CALL_COVERAGE_AOT)
         if found.symbol == .SourceOwned {
             source_owned = true
-            if found.source_target == .Val(t) -> target = t.copy()
+            if found.source_target == .Val(t) {
+                target = t.copy()
+                key = "{module_name}.{t}"
+            }
+            if found.source_role == .Val(role) && core.roles.get(role) == .Val(filler) {
+                target = filler.rpartition(".").tail
+                key = filler.copy()
+            }
         }
     }
     if owned_path != None || source_owned {
-        key: "{module_name}.{target}"
         if core.fns.get(key) == .Val(at) {
             ty: core.returns.get(key)
             shown: if ty == .Val(t) -> type_text(t) else -> "Unit"
@@ -416,8 +432,8 @@ module_call_row: fn(id: String, module_name: String, member: String, core: Parse
     out
 }
 
-// `target` is a source-owned registry record's Core function
-// (`core.data.__query_filter`), "" for none.
+// `target` is a source-owned registry record's Core function, by its
+// "<module>.<fn>" key (`core.data.__query_filter`), "" for none.
 receiver_row: fn(id: String, owner: String, member: String, symbol: String, target: String, core: ParsedCore, route_files: [SourceFile], declared_aot: Bool{false}) -> SurfaceRow Never! {
     if target != "" && core.fns.get(target) == .Val(at) {
         ty: core.returns.get(target)

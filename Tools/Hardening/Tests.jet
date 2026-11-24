@@ -72,7 +72,7 @@ build_error: fn(inputs: Inputs) -> String Never! {
     assert_eq(row_of(clean, "field:BuildGraph.action_keys").status, "missing")
     broken := inputs.copy()
     broken.core_sources = edited(broken.core_sources, "Core/Text/Text.jet", "byte_count: fn(text: String)", "byte_count_gone: fn(text: String)")
-    broken.core_sources = edited(broken.core_sources, "Core/Data/Data.jet", "__query_filter: fn<T>(", "__query_filter_gone: fn<T>(")
+    broken.core_sources = edited(broken.core_sources, "Core/Data/Data.jet", "#Builtin.Role(.QueryFilter) ", "")
     broken.core_sources = edited(broken.core_sources, "Core/Build/Build.jet", "    action_keys: [BuildGraphActionKey]\n", "    action_keys_gone: [BuildGraphActionKey]\n")
     broken.route_files = edited(broken.route_files, BUILD_ROUTES_PATH, "if symbol == \"jet_reflect_of\" -> return ir_reflect_of(", "if symbol == \"jet_reflect_gone\" -> return ir_reflect_of(")
     moved: built(broken)

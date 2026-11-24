@@ -108,6 +108,10 @@ CoreCallRecord: struct {
     symbol: CoreCallSymbol,
     // Optional checked Jet export name after special-call normalization.
     source_target: String?,
+    // Core.rows `.with_source_role("QueryFilter")`: a source-owned row whose
+    // call runs the Core function that fills this jet_builtins role, found
+    // in the checked program, so neither the row nor the compiler names it.
+    source_role: String?{None},
     coverage: CoreCallCoverage,
     aot_direct: Bool,
     // Core.rows `.with_native_int_result()`. The kernel returns its `Int`
@@ -140,9 +144,18 @@ core_call_coverage_contains: fn(coverage: CoreCallCoverage, projection: Int) -> 
     coverage.bits & projection == projection
 }
 
+// The function a source-owned row's call runs, by name: its source target,
+// else its member. None for an adapter row and for a row a role routes
+// (core_call_source_role), whose function only the checked program names.
 core_call_source_member: fn(row: CoreCallRecord) -> String? Never! {
-    if row.symbol != CoreCallSymbol.SourceOwned -> return None
+    if row.symbol != CoreCallSymbol.SourceOwned || row.source_role != None -> return None
     Val(row.source_target ?? row.member)
+}
+
+// The jet_builtins role whose Core function a source-owned row's call runs.
+core_call_source_role: fn(row: CoreCallRecord) -> String? Never! {
+    if row.symbol != CoreCallSymbol.SourceOwned -> return None
+    row.source_role
 }
 
 // The checked authority boundary sema applies to a `core.plugin.load` argument.
