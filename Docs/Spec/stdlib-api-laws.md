@@ -551,8 +551,9 @@ other hosts. Neither bridge writes the operating-system environment.
 ### Realtime cancellation access
 
 `RealtimeStream.cancel(&self)` forwards its write-borrowed stream to
-`core.rt.__cancel(&self)`. The public method and its provider call both retain
-the `&self` write receiver; cancellation does not consume the stream.
+`jet.runtime.rt.cancel(stream: &RealtimeStream)`. The public method and its
+runtime call both retain the `&` write receiver; cancellation does not consume
+the stream.
 
 ## Testing evidence source policy
 

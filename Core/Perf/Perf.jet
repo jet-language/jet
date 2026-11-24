@@ -9,7 +9,10 @@ package: {
     }
 }
 
-use core: core
+use {
+    core: core
+    sys_rt: jet.runtime.sys
+}
 
 // core.perf — a process-global 0.0..=1.0 fidelity knob for adaptive work.
 // Values outside the unit interval are rejected with `PerfError.OutOfRange`.
@@ -26,7 +29,7 @@ PerfError: enum {
 }
 
 fidelity: fn() -[Env]> Float Never! {
-    encoded: core.perf.__read_bits()
+    encoded: sys_rt.perf_bits()
     if encoded == 0 -> return default_fidelity()
     core.math.from_bits(encoded - 1)
 }
@@ -39,10 +42,10 @@ override_fidelity: fn(value: Float) -[Env]> PerfError! {
     }
     // Preserve the existing f32 precision, including a negative zero.
     rounded: Float.from_f32(F32.from_float(value) ?? panic("validated fidelity cannot overflow F32"))
-    core.perf.__write_bits(core.math.to_bits(rounded) + 1)
+    sys_rt.set_perf_bits(core.math.to_bits(rounded) + 1)
 }
 
-reset_fidelity: fn() -[Env]> Never! { core.perf.__write_bits(0) }
+reset_fidelity: fn() -[Env]> Never! { sys_rt.set_perf_bits(0) }
 
 /// Under `jet perf run --lens=alloc`, keeps a heap snapshot named `name`:
 /// the program's live blocks by the line that allocated them, which

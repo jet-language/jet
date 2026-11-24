@@ -3,8 +3,8 @@
 //
 // Each member X of an interface module jet.runtime.M (the generated
 // Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet) replaces the
-// Core leaf core.M.__X, or the leaf `leaf_aliases` names for it: its
-// `dispatcher_row` in Compiler/Prelude/Core.rows and its CoreCallRecord in
+// Core leaf core.M.__X: its `dispatcher_row` in Compiler/Prelude/Core.rows
+// and its CoreCallRecord in
 // Foundation's CORE_CALLS, which the compiler computes from Core.rows while it
 // builds (Compiler/JetFoundation/Source/CoreDeclarations); this tool reads the
 // built records through `jet inspect structure --core --json` (its `calls`),
@@ -57,21 +57,6 @@ CoreLeaf: struct {
     member: String,
     effects: [String],
     symbol: String,
-}
-
-// A member named apart from the Core leaf it replaces: `member` is
-// jet.runtime.M.X, `leaf` is `core.N __Y`.
-LeafAlias: struct {
-    member: String,
-    leaf: String,
-}
-
-leaf_aliases: fn() -> [LeafAlias] Never! {
-    [LeafAlias]{
-        // The perf leaves bound in jet.runtime.sys.
-        LeafAlias{member: "jet.runtime.sys.perf_bits", leaf: "core.perf __read_bits"},
-        LeafAlias{member: "jet.runtime.sys.set_perf_bits", leaf: "core.perf __write_bits"},
-    }
 }
 
 // A runtime symbol whose members declare different rows, and the rule that
@@ -210,17 +195,11 @@ Report: struct {
 }
 
 // Every difference between the interface and the Core leaves it replaces.
-differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [String], aliases: [LeafAlias]) -> Report Never! {
+differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [String]) -> Report Never! {
     found := [String]{}
     joined := 0
     loop member in members {
-        key := "core.{member.module_name.remove_prefix("jet.runtime.")} __{member.member}"
-        loop alias in aliases {
-            if alias.member == "{member.module_name}.{member.member}" {
-                key = alias.leaf.copy()
-                break
-            }
-        }
+        key: "core.{member.module_name.remove_prefix("jet.runtime.")} __{member.member}"
         parts: key.partition(" ")
         core_module: parts.head
         leaf_name: parts.tail
@@ -324,7 +303,7 @@ runtime_effect_rows_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wai
     }
     dispatched: dispatcher_keys(read_text(DISPATCHER) ?? return Err(err))
     if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
-    report: differences(members, leaves, dispatched, leaf_aliases())
+    report: differences(members, leaves, dispatched)
     splits: row_splits()
     found := report.differences.copy()
     loop line in split_differences(members, splits) -> found.push(line.copy())
@@ -364,27 +343,9 @@ run: fn() {
         CoreLeaf{module_name: "core.net", member: "__dns_txt_lookup", effects: [String]{"Time.Wait", "Net"}, symbol: "jet_net_dns_txt_lookup"},
         CoreLeaf{module_name: "core.net", member: "__dns_ptr_lookup", effects: [String]{"Net", "Time.Wait"}, symbol: "jet_net_dns_ptr_lookup"},
     }
-    report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half", "core.net __dns_txt_lookup", "core.net __dns_ptr_lookup"}, [LeafAlias]{})
+    report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half", "core.net __dns_txt_lookup", "core.net __dns_ptr_lookup"})
     assert_eq(report.joined, 4)
     assert_eq(report.differences.join("|"), "jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): core.time.__task_timeout has a CoreCallRecord but no dispatcher_row|jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): declares -[Time.Wait]>, but core.time.__task_timeout (jet_task_timeout_duration_ns) has -[Time]>|jet.runtime.time.half (jet_time_half): core.time.__half has a dispatcher_row but no CoreCallRecord|jet.runtime.net.dns_ptr_lookup (jet_net_dns_ptr_lookup): declares -[Time.Wait]>, but core.net.__dns_ptr_lookup (jet_net_dns_ptr_lookup) has -[Net, Time.Wait]>")
-}
-
-#Test("an aliased member joins the leaf its alias names") {
-    members: [InterfaceMember]{
-        InterfaceMember{module_name: "jet.runtime.sys", member: "perf_bits", effects: [String]{"Env"}, symbol: "jet_perf_read_bits"},
-        InterfaceMember{module_name: "jet.runtime.sys", member: "simd_lanes", effects: [String]{"GPU"}, symbol: "jet_compute_simd_lanes"},
-    }
-    leaves: [CoreLeaf]{
-        CoreLeaf{module_name: "core.perf", member: "__read_bits", effects: [String]{"Env"}, symbol: "jet_perf_read_bits"},
-        CoreLeaf{module_name: "core.compute", member: "__simd_lanes", effects: [String]{}, symbol: "jet_compute_simd_lanes"},
-    }
-    aliases: [LeafAlias]{
-        LeafAlias{member: "jet.runtime.sys.perf_bits", leaf: "core.perf __read_bits"},
-        LeafAlias{member: "jet.runtime.sys.simd_lanes", leaf: "core.compute __simd_lanes"},
-    }
-    report: differences(members, leaves, [String]{"core.perf __read_bits", "core.compute __simd_lanes"}, aliases)
-    assert_eq(report.joined, 2)
-    assert_eq(report.differences.join("|"), "jet.runtime.sys.simd_lanes (jet_compute_simd_lanes): declares -[GPU]>, but core.compute.__simd_lanes (jet_compute_simd_lanes) has no effect")
 }
 
 #Test("members of one symbol declare one row unless row_splits lists it") {
