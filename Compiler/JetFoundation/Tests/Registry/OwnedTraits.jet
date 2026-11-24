@@ -3,7 +3,7 @@
 // or syntax constant keeps a second list of them.
 use {
     owned_traits_files: core.files
-    jet_foundation.[OWNED_TRAITS, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names, registration_marker_rules]
+    jet_foundation.[OWNED_OPERATOR_ROLES, OWNED_ROLE_INDEX, OWNED_ROLE_INDEX_MUT, OWNED_TRAITS, owned_operator_role, owned_role_method, owned_role_operator, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_for_role, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names, registration_marker_rules]
 }
 
 // The one file that may list the owned trait names.
@@ -30,20 +30,20 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
     found
 }
 
-#Test("owned trait rows name each trait, hook, operator and method once") {
+#Test("owned trait rows name each trait, hook, role and method once") {
     violations := [String]{}
     names := [String]{}
     hooks := [String]{}
-    symbols := [String]{}
+    roles := [String]{}
     loop owned in OWNED_TRAITS {
         hooked := false
         if names.contains(owned.name) -> violations.push("`{owned.name}` has two rows")
         names.push(owned.name)
-        loop symbol in owned.operators {
-            if symbols.contains(symbol) {
-                violations.push("`{owned.name}` repeats the operator `{symbol}`")
+        if owned.role != "" {
+            if roles.contains(owned.role) {
+                violations.push("`{owned.name}` fills the role `{owned.role}`, which another row fills")
             }
-            symbols.push(symbol)
+            roles.push(owned.role)
         }
         loop other in owned.requires {
             if owned_trait(other) == None {
@@ -57,8 +57,8 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
                 }
                 hooks.push(hook)
                 hooked = true
-                if owned.operators.len() == 0 {
-                    violations.push("`{owned.name}` has a hook and no operator")
+                if owned_role_operator(owned.role) == None {
+                    violations.push("`{owned.name}` has a hook and no operator role")
                 }
             }
             .Methods(methods, _, shares) -> {
@@ -75,14 +75,34 @@ owned_traits_quoted: fn(line: String) -> [String] Never! {
             }
             .Codec(_) | .Literal(_) | .Conversion(_) | .CheckedText | .Derived -> {}
         }
-        if !hooked && owned.operators.len() > 0 {
-            violations.push("`{owned.name}` has operators and no hook")
+        if !hooked && owned_role_operator(owned.role) != None {
+            violations.push("`{owned.name}` fills an operator role and has no hook")
         }
         if owned.auto_derive_family == .Val(family) && owned_trait(family) != None {
             violations.push("`{owned.name}`'s derive family `{family}` is also a trait")
         }
     }
     assert_eq(violations.join("\n"), "")
+}
+
+// Every role the operator grammar and the index hooks read is filled by one
+// owned trait, so `+` and `[ ]` reach a declaration, never a name.
+#Test("each operator and index role is filled by an owned trait") {
+    violations := [String]{}
+    loop row in OWNED_OPERATOR_ROLES {
+        if owned_trait_for_role(row.role) == .Val(owned) && owned.contract == .Operator(_, _) -> next
+        violations.push("`{row.symbol}` reads the role `{row.role}`, which no operator trait fills")
+    }
+    index_roles: [String]{OWNED_ROLE_INDEX, OWNED_ROLE_INDEX_MUT}
+    loop role in index_roles {
+        if owned_role_method(role) == None -> violations.push("no methods trait with one method fills the index role `{role}`")
+    }
+    assert_eq(violations.join("\n"), "")
+    assert_eq(owned_operator_role("!="), "Equal")
+    assert_eq(owned_operator_role("%"), "")
+    assert_eq(owned_role_operator("Compare"), Val("<=>"))
+    assert_eq(owned_role_method(OWNED_ROLE_INDEX), Val("get"))
+    assert_eq(owned_role_method(OWNED_ROLE_INDEX_MUT), Val("set"))
 }
 
 #Test("the table answers the marker and contract questions its readers ask") {

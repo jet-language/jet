@@ -44,6 +44,7 @@ use {
         dotted_path_split,
         dotted_path_unresolved,
         name_facts_leaf,
+        owned_role_operator,
         owned_trait,
         owned_trait_arithmetic,
         owned_trait_commutative,
@@ -1355,8 +1356,7 @@ jet_cli_inspect_plain_number: fn(name: String) -> Bool Never! {
 jet_cli_inspect_operator_symbol: fn(trait_name: String) -> String? Never! {
     if !owned_trait_arithmetic(trait_name) -> return None
     owned: owned_trait(trait_name) ?? return None
-    if owned.operators.len() == 0 -> return None
-    Val(owned.operators[0].copy())
+    owned_role_operator(owned.role)
 }
 
 // The hook method an arithmetic operator trait names, or "".

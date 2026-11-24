@@ -1,0 +1,16 @@
+# Library and user types take an operator's meaning through the role its
+# trait carries (`#Builtin.Role(.Add)` on `Add: trait` in
+# Compiler/Prelude/Traits.jet, a case of jet_builtins' RoleKind), never
+# through a trait name the compiler looks up: `+ - * /`, `== !=`, `< >=`,
+# `a[k]` and `a[k] = v` on a user type, `+` in a generic `T: Add` body at its
+# instantiation, and `*` on Core's Vec3 each call the hook of the trait that
+# fills the operator's role, on the default tier and at -O0.
+fixture: CoreRoleOperatorDispatch.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "200 125 300 100 50\nfalse true false true\n200\n150 75\n[2.0, 4.0, 8.0]\n"
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "200 125 300 100 50\nfalse true false true\n200\n150 75\n[2.0, 4.0, 8.0]\n"

@@ -14,8 +14,6 @@
 //   raw_return        its impl methods return their declared type as written,
 //                     never through the implicit failure carrier
 //   any_receiver      the impl may take `self` with any access
-//   operators         the source operators its one method implements; the
-//                     result is free when the method returns an associated type
 //   commutative       `#Commutative` on a typed impl also answers the swapped
 //                     operands (`2 * v` from `v * 2`)
 //   codec             the one method is a hand codec (`encode` or `decode`)
@@ -36,6 +34,16 @@
 //                     its methods; the facts stay here. Until that module
 //                     declares the trait, the methods written here stand in
 //
+// A `#Builtin.Role(.Add)` line right above a trait gives it a role, a case
+// of jet_builtins' RoleKind: `a + b` calls the trait that fills `Add`,
+// `a == b` the one that fills `Equal`, `a < b` the one that fills `Compare`,
+// `a[k]` the one that fills `Index` and `a[k] = v` the one that fills
+// `IndexMut`. The compiler finds those traits through their roles, never
+// through their names. A trait whose role takes a right-hand operand
+// (`Rhs: type`) is an operator trait: its one method is the hook the
+// operators call, and the result is free when the method returns an
+// associated type. Each role fills one trait.
+//
 // `Literal: module` holds the literal capabilities, named `Literal.Int` and
 // `Literal.Float`; each one's `from_literal` parameter is the literal's source,
 // and an impl writes it `#run fn`.
@@ -51,11 +59,11 @@
 // writes `#Waive(law, "reason")`.
 
 // `a + b`.
+#Builtin.Role(.Add)
 Add: trait {
     local: Bool{true},
     bare_bound: Bool{true},
     raw_return: Bool{true},
-    operators: String{"+"},
     commutative: Bool{true},
     Rhs: type,
     Output: type,
@@ -63,22 +71,22 @@ Add: trait {
 }
 
 // `a - b`.
+#Builtin.Role(.Sub)
 Sub: trait {
     local: Bool{true},
     bare_bound: Bool{true},
     raw_return: Bool{true},
-    operators: String{"-"},
     Rhs: type,
     Output: type,
     sub: fn(self, rhs: Rhs) -> Output Never!,
 }
 
 // `a * b`.
+#Builtin.Role(.Mul)
 Mul: trait {
     local: Bool{true},
     bare_bound: Bool{true},
     raw_return: Bool{true},
-    operators: String{"*"},
     commutative: Bool{true},
     Rhs: type,
     Output: type,
@@ -86,22 +94,22 @@ Mul: trait {
 }
 
 // `a / b`.
+#Builtin.Role(.Div)
 Div: trait {
     local: Bool{true},
     bare_bound: Bool{true},
     raw_return: Bool{true},
-    operators: String{"/"},
     Rhs: type,
     Output: type,
     div: fn(self, rhs: Rhs) -> Output Never!,
 }
 
 // `a == b` and `a != b`.
+#Builtin.Role(.Equal)
 Equatable: trait {
     local: Bool{true},
     bare_bound: Bool{true},
     raw_return: Bool{true},
-    operators: String{"== !="},
     auto_derive: Bool{true},
     Rhs: type,
     equal: fn(self, rhs: Rhs) -> Bool Never!,
@@ -114,11 +122,11 @@ Equatable: trait {
 }
 
 // `a <=> b` and the orderings `<`, `>`, `<=`, `>=`.
+#Builtin.Role(.Compare)
 Comparable: trait {
     local: Bool{true},
     bare_bound: Bool{true},
     raw_return: Bool{true},
-    operators: String{"<=> < > <= >="},
     auto_derive: Bool{true},
     bundle: Bool{true},
     Rhs: type,
@@ -319,6 +327,7 @@ Iterable: trait {
 }
 
 // `value[key]`.
+#Builtin.Role(.Index)
 Index: trait {
     Key: type,
     Value: type,
@@ -326,6 +335,7 @@ Index: trait {
 }
 
 // `value[key] = v`, with the key and value types of the type's `Index`.
+#Builtin.Role(.IndexMut)
 IndexMut: trait {
     shares: String{"Index"},
     set: fn(&self, k: Key, v: Value) Never!,

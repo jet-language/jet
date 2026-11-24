@@ -92,8 +92,9 @@ use {
         dimension_multiply,
         expr_source_start,
         expr_span,
-        owned_trait_for_operator,
+        owned_operator_role,
         owned_trait_for_operator_hook,
+        owned_trait_for_role,
         symbol_is_local,
         symbol_key_text,
         symbol_local_keys_count,
@@ -585,16 +586,16 @@ sema_expr_precise_complex: fn(value: TExpr, span: Span, line: Int, context: &Sem
     Val(sema_tree_node(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary}}, span))
 }
 
-// The owned operator trait a binary operator calls (`Equatable` for `!=`),
-// read from the operator symbols OWNED_TRAITS declares.
+// The owned operator trait a binary operator calls (`Equatable` for `!=`):
+// the trait that fills the operator's role.
 sema_expr_operator_trait: fn(op: BinOp) -> String? {
-    owned := owned_trait_for_operator(sema_expr_binary_name(op)) ?? return None
+    owned := owned_trait_for_role(owned_operator_role(sema_expr_binary_name(op))) ?? return None
     Val(owned.name.move())
 }
 
 // The hook method of that trait: `equal` for `!=`.
 sema_expr_operator_method: fn(op: BinOp) -> String? {
-    owned: owned_trait_for_operator(sema_expr_binary_name(op)) ?? return None
+    owned: owned_trait_for_role(owned_operator_role(sema_expr_binary_name(op))) ?? return None
     if owned.contract == .Operator(hook, _) -> return Val(hook.copy())
     None
 }

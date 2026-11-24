@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
     jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
-    jet_foundation.[StrFormat, TShapeFormatName, str_format_style, symbol_key_leaf, symbol_key_names]
+    jet_foundation.[StrFormat, TShapeFormatName, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_format_style, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -2697,17 +2697,21 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
 // The result of a generic `T: Add` body's `+` (sema
 // sema_expr_generic_bound_operator) on an instantiation whose type
 // implements the operator trait for `right_ty`: that implementation's hook
-// (`add`, `sub`, `mul`, `div`), or -1 when none is selected.
+// (`add`, `sub`, `mul`, `div`), or -1 when none is selected. The trait is the
+// one that fills the operator's role (owned_trait_for_role).
 ir_operator_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, left_ty: Type, left: Int, right_ty: Type, right: Int, span: Span) -> Int Never! {
-    trait_short: if op == {
-        .Add -> "Add"
-        .Sub -> "Sub"
-        .Mul -> "Mul"
-        .Div -> "Div"
+    symbol: if op == {
+        .Add -> "+"
+        .Sub -> "-"
+        .Mul -> "*"
+        .Div -> "/"
         .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> {
             return -1
         }
     }
+    operator_trait: owned_trait_for_role(owned_operator_role(symbol)) ?? return -1
+    if !owned_trait_arithmetic(operator_trait.name) -> return -1
+    trait_short: operator_trait.name
     if name_count(p.render_impls_keys) <= 1 -> return -1
     index: name_column_value(p.render_impls_keys, p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, left_ty)}|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, right_ty)}") ?? return -1
     function: p.functions[index]

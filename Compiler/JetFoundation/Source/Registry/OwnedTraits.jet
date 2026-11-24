@@ -72,8 +72,6 @@ OwnedTrait: struct {
     // the implicit failure carrier.
     raw_return: Bool,
     contract: OwnedContract,
-    // The source operators its hook implements: `==` and `!=` for `Equatable`.
-    operators: [String],
     // `#Commutative` on a typed impl also answers the swapped operands.
     commutative: Bool,
     // The traits every type with this one also has.
@@ -92,6 +90,11 @@ OwnedTrait: struct {
     // `Decode`): the trait's symbol key names that module, and the module's
     // declaration takes the trait's id. "" when only the compiler declares it.
     declared_in: String{""},
+    // The jet_builtins role (a RoleKind case) that its declaration's
+    // `#Builtin.Role(.X)` gives it: `Add` for `Add`, `Index` for `Index`; ""
+    // for none. What `+` or `[ ]` calls is the trait that fills the role
+    // (owned_trait_for_role), never a trait the compiler names.
+    role: String{""},
 }
 
 // One law of an owned trait: its name and the whole `#Test name: fn(…) { … }`
@@ -258,11 +261,66 @@ owned_trait_literal: fn(trait_name: String) -> Bool Never! {
     false
 }
 
-// The operator trait a source operator calls: `Equatable` for `!=`.
-owned_trait_for_operator: fn(symbol: String) -> OwnedTrait? Never! {
+// The role `[ ]` reads through (`get`) and the role `[ ] =` writes through
+// (`set`): the trait that fills each one is the index hook.
+OWNED_ROLE_INDEX: "Index"
+
+OWNED_ROLE_INDEX_MUT: "IndexMut"
+
+// A source operator and the jet_builtins role whose trait gives it meaning.
+OwnedOperatorRole: struct {
+    symbol: String,
+    role: String,
+}
+
+// The operator grammar's roles: `a + b` calls the hook of the trait that
+// fills `Add`, `a != b` that of the trait that fills `Equal`. A trait takes
+// an operator only by carrying its role.
+OWNED_OPERATOR_ROLES: [OwnedOperatorRole]{
+    OwnedOperatorRole{symbol: "+", role: "Add"},
+    OwnedOperatorRole{symbol: "-", role: "Sub"},
+    OwnedOperatorRole{symbol: "*", role: "Mul"},
+    OwnedOperatorRole{symbol: "/", role: "Div"},
+    OwnedOperatorRole{symbol: "==", role: "Equal"},
+    OwnedOperatorRole{symbol: "!=", role: "Equal"},
+    OwnedOperatorRole{symbol: "<=>", role: "Compare"},
+    OwnedOperatorRole{symbol: "<", role: "Compare"},
+    OwnedOperatorRole{symbol: ">", role: "Compare"},
+    OwnedOperatorRole{symbol: "<=", role: "Compare"},
+    OwnedOperatorRole{symbol: ">=", role: "Compare"},
+}
+
+// The owned trait that fills `role`: `Equatable` for `Equal`.
+owned_trait_for_role: fn(role: String) -> OwnedTrait? Never! {
+    if role == "" -> return None
     loop owned in OWNED_TRAITS {
-        if owned.operators.contains(symbol) -> return Val(owned)
+        if owned.role == role -> return Val(owned)
     }
+    None
+}
+
+// The role whose trait a source operator calls: `Equal` for `!=`; "" for an
+// operator no role covers.
+owned_operator_role: fn(symbol: String) -> String Never! {
+    loop row in OWNED_OPERATOR_ROLES {
+        if row.symbol == symbol -> return row.role
+    }
+    ""
+}
+
+// The first source operator the trait that fills `role` answers: `==` for
+// `Equal`; None for a role no operator reads.
+owned_role_operator: fn(role: String) -> String? Never! {
+    loop row in OWNED_OPERATOR_ROLES {
+        if row.role == role -> return Val(row.symbol)
+    }
+    None
+}
+
+// The one method of the methods trait that fills `role`: `get` for `Index`.
+owned_role_method: fn(role: String) -> String? Never! {
+    owned := owned_trait_for_role(role) ?? return None
+    if owned.contract == .Methods(methods, _, _) && methods.len() == 1 -> return Val(methods[0].name)
     None
 }
 
