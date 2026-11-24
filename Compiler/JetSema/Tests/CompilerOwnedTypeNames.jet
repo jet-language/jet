@@ -5,11 +5,11 @@
 use jet_sema.[sema_type_compiler_owned_name]
 
 #Test("each owner group makes its names writable bare") {
-    names: [String]{"TypeInfo", "CompilerReference", "SharedSnapshot", "CallingConvention", "PreparedValue", "JSON", "HVar", "FactValue", "ModGrant", "Camera", "ViewMut", "FileLines", "Ptr"}
+    names: [String]{"TypeInfo", "CompilerReference", "SharedSnapshot", "CallingConvention", "PreparedValue", "JSON", "HVar", "WsMessage", "FactValue", "ModGrant", "Camera", "ViewMut", "FileLines", "Ptr"}
     loop name in names { assert(sema_type_compiler_owned_name(name)) }
 }
 
-#Test("the host values no program names, Core's declared handles and names nothing owns stay unknown") {
-    names: [String]{"MarkerArgValue", "PreludeMarkerRecord", "UIPreviewContext", "TLSClientConfig", "WebMount", "FrameId", "IOOperation", "Authority", "TCPListener", "TCPStream", "UDPSocket", "UnixListener", "UnixStream", "WsConn", "WsMessage"}
+#Test("the host values no program names and names nothing owns stay unknown") {
+    names: [String]{"MarkerArgValue", "PreludeMarkerRecord", "UIPreviewContext", "TLSClientConfig", "WebMount", "FrameId", "IOOperation", "Authority"}
     loop name in names { assert(!sema_type_compiler_owned_name(name)) }
 }

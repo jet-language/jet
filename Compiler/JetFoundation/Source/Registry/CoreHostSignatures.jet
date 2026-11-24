@@ -149,6 +149,13 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins process_spec_plan ProcessSpec Result<ProcessPlan,IOError>
     jet_builtins process_spec_run|process_spec_run_checked ProcessSpec Result<ProcessReceipt,IOError>
     jet_builtins process_spec_spawn ProcessSpec Result<ProcessChild,IOError>
+    jet_builtins ws_conn_send_text WsConn,String Result<Unit,WsError>
+    jet_builtins ws_conn_send_bytes WsConn,[u8] Result<Unit,WsError>
+    jet_builtins ws_conn_recv WsConn Result<WsMessage,WsError>
+    jet_builtins ws_conn_close WsConn,Int,String Result<Unit,WsError>
+    jet_builtins ws_message_is_text|ws_message_is_binary|ws_message_is_close WsMessage Bool
+    jet_builtins ws_message_text WsMessage Result<String,WsError>
+    jet_builtins ws_message_bytes WsMessage Result<[u8],WsError>
     core.term confirm String Bool
     core.term choose String,[String] Result<String,IOError>
     core.term input_secret String Result<String,IOError>

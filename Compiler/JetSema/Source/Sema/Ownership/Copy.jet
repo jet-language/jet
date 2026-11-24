@@ -375,12 +375,12 @@ sema_copy_named_is_builtin_resource: fn(name: String) -> Bool Never! {
     }
 }
 
-// A runtime handle no declaration lays out, or a declaration carried as one
-// (sema_checked_nominal_key), is the value its registration describes. One
-// registered without `clone` has no `jet_rt_handle_clone_<runtime>` routine:
-// its owner is the only one, so it and every value holding it move instead
-// of copying (#6581). A handle whose copies soundly share one runtime object
-// registers `clone` (a channel `Receiver` retains its queue).
+// A runtime handle no declaration lays out (`WsConn`, `TcpStream`) is the
+// value its registration describes. One registered without `clone` has no
+// `jet_rt_handle_clone_<runtime>` routine: its owner is the only one, so it
+// and every value holding it move instead of copying (#6581). A handle whose
+// copies soundly share one runtime object registers `clone` (a channel
+// `Receiver` retains its queue).
 sema_copy_handle_without_clone: fn(name: String) -> Bool Never! {
     row: ir_runtime_handle_row(name) ?? return false
     !IR_RUNTIME_HANDLES[row].clone
@@ -859,11 +859,6 @@ sema_copy_nominal_facts: fn(
     if !resource_impl.known -> complete = false
     if module_is_core(nominal.symbol.module_identity) && sema_copy_named_is_builtin_resource(nominal.symbol.name) {
         resource = true
-    }
-    // A Core declaration carried as a runtime handle registered without
-    // `clone` (`core.net.TCPStream`) has one owner, as a resource does.
-    if module_is_core(nominal.symbol.module_identity) && graph == .Val(registered) {
-        if sema_copy_handle_without_clone(sema_checked_nominal_key(registered, registered.modules[row.module_index], nominal)) -> resource = true
     }
     single_use: sema_copy_nominal_single_use(nominal)
     distinct: nominal.kind == SemaRegistrationNominalKind.Distinct
