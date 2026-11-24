@@ -279,6 +279,21 @@ priv __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
     Ok(result.bytes)
 }
 
+// Up to `n` stdin bytes once stdin has one, waiting at most `wait` for it:
+// the buffered bytes without a wait, else one read. None when no byte came
+// in time, [] at the end of input. A wait of zero or less looks without
+// waiting. Every answer, None included, is journaled as a stdin read is.
+take_within: fn(n: Int, wait: Duration) -[IO, Time.Wait]> [U8]? IOError! {
+    if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
+    terminal_read_preflight()
+    result: rt.terminal8_take_within(n, wait.ns)
+    if result.read_error != None {
+        return Err(terminal_other(.Read, Val("stdin"), result.read_error ?? ""))
+    }
+    if result.waited_out -> return Ok(None)
+    Ok(Val(result.bytes))
+}
+
 // Up to `limit` of the bytes the cursor has not read; a cursor at its end
 // gives none.
 priv cursor_read: fn(cursor: &Reader, limit: Int) -> [U8] IOError! {

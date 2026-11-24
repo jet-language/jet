@@ -2004,9 +2004,15 @@ under the compiler-speed method below.
 end, not a second checker. `Compiler/JetQueries` is a demand cache
 for file inputs and derived query values. The bounded loader prepares open or
 discovered sources with at most eight workers and consumes them in stable
-order. The server answers requests one at a time in arrival order, so a
-`$/cancelRequest` always names a request that has already been answered and
-is ignored. D-LSP2 requires every advertised LSP feature to have named coverage
+order. The server is single-threaded and answers requests one at a time in
+arrival order. Before answering a request, it reads, without waiting, all
+input that has already arrived (`core.term.take_within` with a zero wait,
+journaled like every stdin read) and frames each complete message into its
+queue. A request whose `$/cancelRequest` is already queued is answered with
+RequestCancelled (-32800) without running. A request that has started runs
+to its end, and a later cancel of it is ignored. A document whose newer edit
+is queued is not published until that edit is applied. D-LSP2 requires
+every advertised LSP feature to have named coverage
 in `Compiler/JetLSP/Tests/LSP/` or `Tests/Cases/LSP/`; the server must
 not advertise speculative features.
 

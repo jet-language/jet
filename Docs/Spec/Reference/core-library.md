@@ -2655,6 +2655,7 @@ run: fn() {
 | `read_all_input()` | `String IOError!` | Read stdin to EOF. |
 | `input_secret(prompt)` | `String IOError!` | Read without echo; redirected/non-terminal input is an error rather than an echoed fallback. |
 | `take(n)` | `[U8] IOError!` | Read up to `n` raw bytes from stdin. |
+| `take_within(n, wait)` | `[U8]? IOError!` | Read up to `n` raw bytes once stdin has one, waiting at most `wait` (a `Duration`; zero looks without waiting): `None` when none came in time, `[]` at end of input. Prove capture and replay record each answer, `None` included. |
 | `confirm(prompt)` / `choose(prompt, options)` | `Bool` / `String IOError!` | Ask a bounded yes/no or choice question. |
 | `stdin()` / `buffered()` | `StdinHandle` | Return the buffered stdin handle; `buffered` is its alias. |
 | `stdout()` / `stderr()` | `Stdout` / `Stderr` | Return output stream handles. |
