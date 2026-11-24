@@ -246,7 +246,8 @@ sema_data_check_encode: fn(receiver: Expr, receiver_value: TExpr, method: String
     }
     admitted: if stored -> sema_serde_stored_is_admissible(environment, program, receiver_value.ty, SemaSerdeDirection.Encode) else -> sema_serde_type_is_admissible(environment, program, receiver_value.ty, SemaSerdeDirection.Encode)
     if !admitted {
-        diagnostics.push(sema_error("E0905", span, "`{type_name(receiver_value.ty)}` does not implement `Encode`", "`.{method}()` can only call the value's Encode contract", "derive `Encode` on this type, or write its Encode implementation"))
+        fix: sema_serde_shape_fix(receiver_value.ty, "Encode") ?? "derive `Encode` on this type, or write its Encode implementation"
+        diagnostics.push(sema_error("E0905", span, "`{type_name(receiver_value.ty)}` does not implement `Encode`", "`.{method}()` can only call the value's Encode contract", fix))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
@@ -883,7 +884,8 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                     }
                     admitted: if stored -> sema_serde_stored_is_admissible(environment, program, target, SemaSerdeDirection.Decode) else -> sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode)
                     if !admitted {
-                        diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`Dyn.{method}<{type_name(target)}>()` can only call the type's Decode contract", "derive `Decode` on `{type_name(target)}`, or write `impl {type_name(target)}.Decode`"))
+                        fix: sema_serde_shape_fix(target, "Decode") ?? "derive `Decode` on `{type_name(target)}`, or write `impl {type_name(target)}.Decode`"
+                        diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`Dyn.{method}<{type_name(target)}>()` can only call the type's Decode contract", fix))
                     }
                     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
                         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -1157,7 +1159,8 @@ sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span:
         value: sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         // `Dyn.from`: the unencodable value is the error, at that value.
         if !sema_serde_type_is_admissible(environment, program, value.ty, SemaSerdeDirection.Encode) {
-            diagnostics.push(sema_error("E0905", args[0].span, "`{type_name(value.ty)}` does not implement `Encode`", "`Dyn.from` calls the value's Encode contract", "derive or implement `Encode` on this type"))
+            fix: sema_serde_shape_fix(value.ty, "Encode") ?? "derive or implement `Encode` on this type"
+            diagnostics.push(sema_error("E0905", args[0].span, "`{type_name(value.ty)}` does not implement `Encode`", "`Dyn.from` calls the value's Encode contract", fix))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         return sema_data_check_encode(args[0].expr, value, "encode", [CallArg]{}, [Type]{}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1631,7 +1634,8 @@ sema_data_core_try_decode: fn(module_name: String, member: String, args: [CallAr
     }
     target: sema_data_core_target_type(type_args, member, span, environment, program, diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
     if !sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode) {
-        diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`{module_name}.{member}<T>` can only decode into a type with the registered Decode contract", "derive `Decode` on this type, or write its Decode implementation"))
+        fix: sema_serde_shape_fix(target, "Decode") ?? "derive `Decode` on this type, or write its Decode implementation"
+        diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`{module_name}.{member}<T>` can only decode into a type with the registered Decode contract", fix))
         sema_data_check_discarded_arguments(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
         return Val(SemaDirectSpecialCheck{handled: true, value: None})
     }

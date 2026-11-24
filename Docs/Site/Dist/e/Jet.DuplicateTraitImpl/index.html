@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the duplicate trait implementation.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.DuplicateTraitImpl</code>: <code>Tests/UI/conditional_impl_overlap.stderr</code>.</p>
-<pre class="diag">Error: Jet.DuplicateDefinition: Method `describe` is defined twice on `Pair`
-  --&gt; Tests/UI/conditional_impl_overlap.jet:21:5
+<p>First UI snapshot mentioning <code>Jet.DuplicateTraitImpl</code>: <code>Tests/UI/codec_impl_concrete_argument_refused.stderr</code>.</p>
+<pre class="diag">Error: Jet.DuplicateTraitImpl: `impl Many&lt;Small&gt;.Name` singles out one instance of `Many`
+  --&gt; Tests/UI/codec_impl_concrete_argument_refused.jet:15:11
     |
- 21 |     describe: fn(self) -&gt; String { &quot;pair costs {self.left.price() + self.right.price()}&quot; }
-    |     ^^^^^^^^
- Why: Each method name may appear only once on a type
- Fix: Rename or remove one of the definitions
-More: jet-lang.dev/e/Jet.DuplicateDefinition
-
-Error: Jet.DuplicateTraitImpl: `Pair` already implements `Describe`
-  --&gt; Tests/UI/conditional_impl_overlap.jet:15:10
-    |
- 15 |     impl Describe {
-    |          ^^^^^^^^
- Why: Each type may implement a trait only once
- Fix: Remove the duplicate `impl` block
+ 15 | impl Many&lt;Small&gt;.Name {
+    |           ^^^^^
+ Why: Impls may not overlap, so an impl of `Name` covers every `Many` whose parameters meet its bounds and never names a type argument such as `&lt;Small&gt;`
+ Fix: Implement `Name` once for every `Many`, with bounds on its parameters, and move what differs for `Small` into impls on those types
 More: jet-lang.dev/e/Jet.DuplicateTraitImpl
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

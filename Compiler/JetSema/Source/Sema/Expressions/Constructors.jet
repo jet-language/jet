@@ -2641,14 +2641,9 @@ sema_expression_typed_literal_distinct_mismatch: fn(head: Type, value: TExpr, en
         if own.key == facts.key -> return false
     }
     offered: type_name(value.ty)
-    method: if value.ty == {
-        .Int -> "from_int"
-        .Float -> "from_float"
-        .String -> "from_string"
-        .Bool -> "from_bool"
-        .Char -> "from_char"
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> "from_{offered}"
-    }
+    // The conversion is named by its source in snake case, as every distinct
+    // conversion is (`from_int`, `from_u8`).
+    method: sema_call_distinct_base_method(value.ty)
     // The source spelling of the destination, never its resolved symbol identity.
     shown: sema_type_nominal_leaf(Type.Named{name: facts.name})
     diagnostics.push(sema_error("E0753", value.span, "a `{offered}` can't be used where a `{shown}` is expected", "`{shown}` and `{offered}` are different types — even though `{shown}` is built on `{type_name(facts.base)}`, one is never accepted in place of the other", "convert explicitly: `{shown}.{method}(expr)`"))

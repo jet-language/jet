@@ -5,8 +5,10 @@ use jet_foundation.[
     ModuleID,
     core_identity_in_module,
     module_is_none,
+    sema_reserved_type_name,
     symbol_key_leaf,
     symbol_key_names,
+    type_name,
 ]
 
 SemaSerdeDirection: enum {
@@ -297,9 +299,7 @@ sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program:
         }
         .Tagged(_, _) | .Case(_, _) -> false
         .Named(name) -> {
-            if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" {
-                return true
-            }
+            if sema_serde_builtin_codec_name(name) -> return true
             // Rust `is_encodable`/`is_decodable`: Core's ZonedDateTime is the
             // `Dyn.DateTime` payload, a built-in codec with no source impl.
             if sema_serde_named_leaf(name) == "ZonedDateTime" && (name == "ZonedDateTime" || core_identity_in_module(name, "core.time")) {
@@ -316,4 +316,33 @@ sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program:
         .Apply(name, args) -> sema_serde_apply_head(environment, program, module_identity, name, args, direction)
         .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Quantity(_, _) | .Measure(_) -> false
     }
+}
+
+// The compiler-owned types with a built-in codec and no source impl.
+sema_serde_builtin_codec_name: fn(name: String) -> Bool Never! {
+    name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration"
+}
+
+// The repair for a type without the `codec` trait (`Encode`, `Decode`) when
+// the part that lacks it is one no impl can give it: a map keyed by anything
+// but `String`, or a compiler-owned type without a built-in codec, reached
+// through lists, optionals, fixed lists and map values. None otherwise: a
+// declared type's repair is to derive or implement the codec on it.
+sema_serde_shape_fix: fn(ty: Type, codec: String) -> String? Never! {
+    if ty == {
+        .Map(key, _, value) -> {
+            if key != Type.String {
+                return Val("a map's keys are text on the wire, so only a map keyed by `String` has `{codec}`: use `[String: {type_name(value)}]` and convert each key to and from its text")
+            }
+            return sema_serde_shape_fix(value, codec)
+        }
+        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> return sema_serde_shape_fix(inner, codec)
+        .Named(name) -> {
+            if sema_reserved_type_name(name) && !sema_serde_builtin_codec_name(name) {
+                return Val("`{name}` is built into the compiler without `{codec}`, and no impl can add it; convert the value to a type that has `{codec}` first")
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    None
 }

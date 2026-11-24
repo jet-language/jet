@@ -2887,6 +2887,11 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
     if owned_trait_structural(bound_name) -> sema_derive_demand_type(graph, actual_resolved)
     structural: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller, generic_params)
     if structural != None -> return structural
+    // A compiler-owned type (`Bytes`) has no row to carry an impl, so one
+    // without a built-in codec has none at all.
+    if owned_trait_codec(bound_name) && actual_resolved == .Named(name) && sema_reserved_type_name(name) && !sema_serde_builtin_codec_name(name) && sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) == None {
+        return Val(false)
+    }
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)
     if generic_satisfied != None -> return generic_satisfied
     if bound_name.starts_with("Quantity<") {
@@ -2938,6 +2943,9 @@ sema_type_codec_structural_bound: fn(graph: SemaRegistrationGraph, actual_resolv
     if actual_resolved == {
         .List(inner) | .Option(inner) | .FixedList(inner, _) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
         .Map(key, _, value) -> {
+            // A map's keys are text on the wire, so only a map keyed by
+            // `String` has a codec, as the codec calls check it.
+            if owned_trait_codec(bound_name) && key != Type.String -> return Val(false)
             key_satisfied: sema_type_bound_satisfied_at(graph, key, bound_name, caller, generic_params) ?? return None
             if !key_satisfied -> return Val(false)
             return sema_type_bound_satisfied_at(graph, value, bound_name, caller, generic_params)

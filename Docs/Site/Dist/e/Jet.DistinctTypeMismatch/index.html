@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Convert explicitly with the distinct type&#39;s constructor, or compare the underlying values with `.raw()`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.DistinctTypeMismatch</code>: <code>Tests/UI/distinct_constructor_alias.stderr</code>.</p>
-<pre class="diag">Error: Jet.DistinctTypeMismatch: `UserID(value)` is not a distinct conversion
-  --&gt; Tests/UI/distinct_constructor_alias.jet:4:17
+<p>First UI snapshot mentioning <code>Jet.DistinctTypeMismatch</code>: <code>Tests/UI/codec_impl_distinct_u8_fix.stderr</code>.</p>
+<pre class="diag">Error: Jet.DistinctTypeMismatch: A `U8` can&#39;t be used where a `Level` is expected
+  --&gt; Tests/UI/codec_impl_distinct_u8_fix.jet:6:21
     |
-  4 | run: fn() { id: UserID(1) }
-    |                 ^^^^^^
- Why: Explicit conversions are owned by the destination type and name their source
- Fix: Write `UserID.from_int(value)`
+  6 |     level: Level{U8{1}}
+    |                     ^
+ Why: `Level` and `U8` are different types — even though `Level` is built on `U8`, one is never accepted in place of the other
+ Fix: Convert explicitly: `Level.from_u8(expr)`
 More: jet-lang.dev/e/Jet.DistinctTypeMismatch
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
