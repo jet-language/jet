@@ -65,6 +65,7 @@ use jet_foundation.[
     module_is_core,
     module_none,
     module_text,
+    sema_casing_pascal_words,
     foundation_byte_text,
 ]
 
@@ -938,7 +939,7 @@ sema_call_try_core_math_float_class: fn(module_name: String, member: String, typ
 // one; its whole-number exponent stays an Int. A member whose answer is the
 // binary32 bits themselves (to_bits, is_signaling, the payloads), and
 // rem_quo, whose (rem: F32, quo: Int) record rounds only the remainder, runs
-// its `__<member>_f32` source on the F32 arguments as they are. Any other
+// its F32 source on the F32 arguments as they are. Any other
 // argument list keeps the ordinary source call.
 sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
@@ -961,19 +962,28 @@ sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: 
     }
     if kept == {
         .Val(result) -> {
-            answer: sema_call_core_source("core.math", sema_call_core_f32_source(module_name, member) ?? return failed, values, result, true, span, environment, program, diagnostics) ?? return failed
+            answer: sema_call_core_role_source(sema_call_core_f32_role(module_name, member) ?? return failed, values, result, span, environment, program, diagnostics) ?? return failed
             return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(answer, expected, environment, program, diagnostics)}
         }
         .None -> {}
     }
-    own: sema_call_core_math_f32_own(member)
-    source: if own -> sema_call_core_f32_source(module_name, member) ?? member else -> member
-    wide: sema_call_core_source("core.math", source, values, Type.Float, own, span, environment, program, diagnostics) ?? return failed
+    wide: sema_call_core_math_f32_wide(module_name, member, values, span, environment, program, diagnostics) ?? return failed
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_call_core_math_round_f32(wide, span), expected, environment, program, diagnostics)}
 }
 
-// The result type of an F32-width member whose `__<member>_f32` source takes
-// the F32 arguments themselves: widening one would quiet a signaling NaN,
+// The Float-typed call an F32-width `member` rounds to F32: the F32 source of
+// a member with its own (sema_call_core_math_f32_own), else the Float
+// `member` itself, both on the widened arguments.
+sema_call_core_math_f32_wide: fn(module_name: String, member: String, values: [TExpr], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
+    if sema_call_core_math_f32_own(member) {
+        role: sema_call_core_f32_role(module_name, member) ?? return None
+        return sema_call_core_role_source(role, values, Type.Float, span, environment, program, diagnostics)
+    }
+    sema_call_core_source("core.math", member, values, Type.Float, false, span, environment, program, diagnostics)
+}
+
+// The result type of an F32-width member whose F32 source takes the F32
+// arguments themselves: widening one would quiet a signaling NaN,
 // move a payload, or make a subnormal normal, and rem_quo's source rounds
 // only the remainder of its record, whose quotient stays an Int. frexp and
 // modf split the binary32 word into F32 parts, the registry's
@@ -1013,25 +1023,39 @@ sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
     }
 }
 
-// The F32-width members with their own `__<member>_f32` source
-// (sema_call_core_f32_source). The Float fma (and muladd) of the widened
-// arguments would round twice when it lands on a binary32 midpoint, and the
-// Float next_up would step by a binary64 unit.
+// The F32-width members with their own F32 source (sema_call_core_f32_role)
+// that runs on the widened arguments. The Float fma (and muladd) of the
+// widened arguments would round twice when it lands on a binary32 midpoint,
+// and the Float next_up would step by a binary64 unit.
 sema_call_core_math_f32_own: fn(member: String) -> Bool Never! {
-    if member == {
-        "pow_n" | "pow_r" | "root_n" | "compound_n" | "atan2_pi" | "atan_pi" | "exp10_m1" | "log2_1p" | "log10_1p" | "exp2" | "ln" | "log10" | "ln_1p" | "log1p" | "sin" | "cos" | "acos" | "atan" | "atan2" | "sinh" | "asinh" | "acosh" | "hypot" | "erf" | "erfc" | "gamma" | "lgamma" | "fma" | "muladd" -> true
-        "next_up" | "next_down" | "next_after" | "nextafter" -> true
-        else -> false
-    }
+    member != "cmp" && member != "is_finite" && SEMA_CORE_MATH_F32_SOURCES.contains(member) && sema_call_core_math_f32_kept(member) == None
 }
 
-// The F32-width source `__<member>_f32` of core.math `member` (the F32 `cmp`
-// and `is_finite`, and each member with its own or kept F32 source), or None.
-// No program spells one, so CoreReach keeps each loaded with core.math.
-sema_call_core_f32_source: fn(module_name: String, member: String) -> String? Never! {
-    if module_name != "core.math" -> return None
-    if member == "cmp" || member == "is_finite" || sema_call_core_math_f32_own(member) || sema_call_core_math_f32_kept(member) != None {
-        return Val("__{member}_f32")
+// The core.math members with an F32-width source of their own: the F32 `cmp`
+// and `is_finite`, each member that source runs on the widened arguments
+// (sema_call_core_math_f32_own), and each one that keeps its F32 arguments
+// (sema_call_core_math_f32_kept).
+SEMA_CORE_MATH_F32_SOURCES: [String]{
+    "cmp", "is_finite",
+    "pow_n", "pow_r", "root_n", "compound_n", "atan2_pi", "atan_pi", "exp10_m1", "log2_1p", "log10_1p", "exp2", "ln", "log10", "ln_1p", "log1p", "sin", "cos", "acos", "atan", "atan2", "sinh", "asinh", "acosh", "hypot", "erf", "erfc", "gamma", "lgamma", "fma", "muladd",
+    "next_up", "next_down", "next_after", "nextafter",
+    "to_bits", "is_signaling", "is_normal", "is_subnormal", "total_order", "total_order_mag", "canonicalize", "fabs", "abs_float", "copysign", "get_payload", "set_payload", "set_payload_signaling", "rem_quo", "frexp", "modf",
+}
+
+// The role of the F32-width source of core.math `member`: the member's words,
+// then F32 (`sin` is SinF32, `log2_1p` is Log21pF32), or None when it has none
+// (SEMA_CORE_MATH_F32_SOURCES). No program spells the source, so CoreReach
+// loads it with the member it computes (sema_call_core_f32_role_member).
+sema_call_core_f32_role: fn(module_name: String, member: String) -> String? Never! {
+    if module_name != "core.math" || !SEMA_CORE_MATH_F32_SOURCES.contains(member) -> return None
+    Val("{sema_casing_pascal_words(member)}F32")
+}
+
+// The core.math member whose F32-width source fills `role`, or None.
+sema_call_core_f32_role_member: fn(role: String) -> String? Never! {
+    if !role.ends_with("F32") -> return None
+    loop member in SEMA_CORE_MATH_F32_SOURCES {
+        if sema_call_core_f32_role("core.math", member) == Val((role)) -> return Val(member.copy())
     }
     None
 }
@@ -1097,7 +1121,7 @@ sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr
     }
     if record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
         normalized.symbol = CoreCallSymbol.SourceOwned
-        normalized.source_target = sema_call_core_f32_source(record.module_name, record.member)
+        normalized.source_role = sema_call_core_f32_role(record.module_name, record.member)
     }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
         normalized.source_role = Val(if args.len() == 1 -> "UnixConnect" else -> "UnixConnectDeadline")
@@ -1244,11 +1268,27 @@ sema_call_core_run_source: fn(record: CoreCallRecord, identity: ModuleID, name: 
 }
 
 // A call of the `module_name` source function `member` on checked arguments,
-// typed `result` (sqrt's Float root, the exact types' crossing to Float, the
-// F32-width math calls, and the Tensor bracket windows). `registered`
-// resolves a module-private member such as `__decimal_to_float`.
+// typed `result` (sqrt's Float root, the F32-width math calls a Float member
+// computes, and the Tensor bracket windows). `registered` resolves a
+// module-private member such as `__task_timeout`.
 sema_call_core_source: fn(module_name: String, member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
+    sema_call_core_source_in(identity, member, values, result, registered, span, environment, program, diagnostics)
+}
+
+// A call of the Core function that fills `role` on checked arguments, typed
+// `result` (the F32-width math sources); E1015 when no Core function fills it.
+sema_call_core_role_source: fn(role: String, values: [TExpr], result: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    filler: sema_core_role_function(graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return None
+    }
+    sema_call_core_source_in(filler.module_identity, filler.name, values, result, true, span, environment, program, diagnostics)
+}
+
+// The call sema_call_core_source makes, of `member` of the Core module `identity`.
+sema_call_core_source_in: fn(identity: ModuleID, member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     target: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, registered, diagnostics) ?? return None
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
     arguments := [TCallArg]{}

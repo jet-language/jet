@@ -220,14 +220,15 @@ reach_test_load_module: fn(source: String, module_name: String, owned: [String],
 }
 
 #Test("a routed Core module's `__` helpers and F32 forms load by use, and its compiler routes always load") {
-    text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\n__tabled: fn() -> Int Never! {{ __TABLE }}\n\n__WIDTH: 2.0\n\n__sin_f32: fn(x: Float) -> Float Never! {{ x * __WIDTH }}\n\n__RATIO: 3.0\n\n__to_bits_i64: fn(x: Float) -> Float Never! {{ x * __RATIO }}\n"
-    routed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{"__sin_f32", "__to_bits_i64"}, text)
+    // An F32 form is the function that fills its member's F32 role.
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\n__tabled: fn() -> Int Never! {{ __TABLE }}\n\n__WIDTH: 2.0\n\n#Builtin.Role(.SinF32) narrow_sin: fn(x: Float) -> Float Never! {{ x * __WIDTH }}\n\n__RATIO: 3.0\n\n__to_bits_i64: fn(x: Float) -> Float Never! {{ x * __RATIO }}\n"
+    routed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{"narrow_sin", "__to_bits_i64"}, text)
     assert_eq(reach_test_constants(routed, "core.math"), [String]{"__RATIO"})
     assert_eq(reach_test_functions(routed, "core.math"), [String]{"plain", "__to_bits_i64"})
     // A call of `sin` (on an F32) runs its F32 form.
-    narrow: reach_test_load_module("use m: core.math\nrun: fn(x: F32) {{ print(m.sin(x)) }}\n", "core.math", [String]{"__sin_f32", "__to_bits_i64"}, text)
+    narrow: reach_test_load_module("use m: core.math\nrun: fn(x: F32) {{ print(m.sin(x)) }}\n", "core.math", [String]{"narrow_sin", "__to_bits_i64"}, text)
     assert_eq(reach_test_constants(narrow, "core.math"), [String]{"__WIDTH", "__RATIO"})
-    assert_eq(reach_test_functions(narrow, "core.math"), [String]{"__sin_f32", "__to_bits_i64"})
+    assert_eq(reach_test_functions(narrow, "core.math"), [String]{"narrow_sin", "__to_bits_i64"})
     // Any other module's `__` names stay routes as a group.
     grouped: reach_test_load_module("use m: core.devtools\nrun: fn() {{ print(m.plain()) }}\n", "core.devtools", [String]{}, text)
     assert_eq(reach_test_constants(grouped, "core.devtools"), [String]{"__TABLE", "__WIDTH", "__RATIO"})
@@ -255,9 +256,9 @@ reach_test_read: fn(path: String) -> String {
 // A route the compiler spells as a `"__…"` literal right after a routed
 // module's name (`sema_call_core_source("core.math", "__x", …)`,
 // `module_name: "core.math", member: "__x"`) must be one of that module's
-// routes, or its helper would leave the module unreached. A template
-// (`"__{member}_f32"`) can't be read as a route, so a routed module's
-// computed routes are spelled through functions jet_driver_core_route calls.
+// routes, or its helper would leave the module unreached. A function that
+// fills a role (an F32-width source, a precise family member) is reached by
+// its role marker, so the compiler spells no name for it.
 #Test("each `__` literal the compiler spells after a routed module's name is one of its routes") {
     files := [String]{}
     reach_test_sources("Compiler", files)
