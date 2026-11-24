@@ -28,7 +28,6 @@ use jet_foundation.[
     TextEdit,
     Type,
     core_call,
-    diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
     AST_EMPTY_CALL_ARG_FLAGS,
@@ -2273,7 +2272,7 @@ sema_call_check_freeze: fn(call: Call, expected: Type?, environment: SemaScopeEn
         reason = Val("the value contains a resource, function, trait value, or mutable view that Jet cannot duplicate")
     }
     if reason == .Val(explanation) {
-        row: diagnostic_registry_row("E1114") ?? panic("E1114 has no registry row")
+        row: sema_diagnostic_row("E1114")
         what := row.what.replace("{{ty}}", type_name(checked.ty)).replace("{{reason}}", explanation)
         diagnostics.push(sema_error("E1114", expr_span(source), what, row.why, row.fix))
         return SemaDirectSpecialCheck{handled: true, value: None}

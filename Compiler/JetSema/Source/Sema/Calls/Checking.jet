@@ -35,7 +35,6 @@ use {
         ast_stmt,
         ast_visit_expr,
         ast_visit_statement,
-        diagnostic_registry_row,
         expr_source_span,
         expr_span,
         checked_symbol_local,
@@ -870,7 +869,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // labeled call is checked against the parameter it actually reaches.
         if abi == .Val(callable_abi) {
             if callable_abi.is_c_abi && required == Type.String && sema_call_literal_has_nul(args[index].expr) {
-                row: diagnostic_registry_row("E3211") ?? panic("E3211 must have a registry row")
+                row: sema_diagnostic_row("E3211")
                 diagnostics.push(sema_error("E3211", expr_span(args[index].expr), row.what, row.why, row.fix))
             }
         }

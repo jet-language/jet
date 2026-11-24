@@ -15,7 +15,6 @@ use {
         TFuncKind,
         Type,
         TypeTupleField,
-        diagnostic_registry_row,
         ir_runtime_handle_row,
         module_is_core,
         runtime_c_export,
@@ -143,7 +142,7 @@ sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int
         }
         if {
             pointer_return -> {
-                row: diagnostic_registry_row("E3202") ?? panic("E3202 has no registry row")
+                row: sema_diagnostic_row("E3202")
                 diagnostics.push(sema_error("E3202", return_span, row.what.replace("{{ty}}", type_name(return_type)), row.why, row.fix))
                 valid = false
             }
@@ -501,7 +500,7 @@ sema_guest_check_surfaces: fn(graph: ^SemaRegistrationGraph) {
 
 // E1806: `function`, outside Core, imports a `provider` service.
 sema_service_import_outside_core: fn(function: Func, provider: String) -> Diagnostic {
-    row: diagnostic_registry_row("E1806") ?? panic("E1806 has no registry row")
+    row: sema_diagnostic_row("E1806")
     sema_error("E1806", function.name_span, row.what.replace("{{name}}", function.name).replace("{{provider}}", provider), row.why.replace("{{provider}}", provider), row.fix)
 }
 

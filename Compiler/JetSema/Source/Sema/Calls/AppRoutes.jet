@@ -51,7 +51,6 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
-    diagnostic_registry_row,
     expr_span,
     module_is_core,
     name_count,
@@ -152,12 +151,12 @@ sema_app_state: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: Modu
 }
 
 sema_app_screen_error: fn(path: String, found: String, span: Span) -> Diagnostic {
-    entry: diagnostic_registry_row("E2820") ?? panic("E2820 must have a registry row")
+    entry: sema_diagnostic_row("E2820")
     sema_error("E2820", span, entry.what.replace("{{path}}", path).replace("{{found}}", found), entry.why, entry.fix)
 }
 
 sema_app_no_screen: fn(state: String, span: Span) -> Diagnostic {
-    entry: diagnostic_registry_row("E2821") ?? panic("E2821 must have a registry row")
+    entry: sema_diagnostic_row("E2821")
     sema_error("E2821", span, entry.what.replace("{{state}}", state), entry.why.replace("{{state}}", state), entry.fix.replace("{{state}}", state))
 }
 

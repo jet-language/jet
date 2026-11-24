@@ -22,7 +22,6 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
-    diagnostic_registry_row,
     module_is_core,
     symbol_find,
     symbol_is_local,
@@ -425,7 +424,7 @@ sema_app_caller_spawn: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModul
 }
 
 sema_app_caller_report: fn(root: String, path: [String], span: Span) -> Diagnostic {
-    entry: diagnostic_registry_row("E2815") ?? panic("E2815 must have a registry row")
+    entry: sema_diagnostic_row("E2815")
     steps: "{path.join(" → ")} → app.caller()"
     sema_error("E2815", span, entry.what.replace("{{root}}", root), entry.why.replace("{{path}}", steps), entry.fix)
 }

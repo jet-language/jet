@@ -37,7 +37,6 @@ use jet_foundation.[
     core_call,
     core_module_has_member,
     core_module_has_type,
-    diagnostic_registry_row,
     expr_span,
     foundation_named_type,
     jet_target_layout_atomic_scalar_type,
@@ -1992,6 +1991,6 @@ sema_call_ui_shortcut_cmd_key: fn(argument: CallArg, diagnostics: ^[Diagnostic])
     if literal == None -> reason = "the key must be one plain string literal"
     if labeled -> reason = "the key must be positional"
     shortcut: literal ?? "<expression>"
-    row: diagnostic_registry_row("E2938") ?? panic("E2938 must have a registry row")
+    row: sema_diagnostic_row("E2938")
     diagnostics.push(sema_error("E2938", argument.span, "Invalid UI shortcut literal `{shortcut}`: {reason}", row.why, row.fix))
 }

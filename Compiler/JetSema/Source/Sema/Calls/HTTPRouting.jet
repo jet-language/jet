@@ -27,7 +27,6 @@ use jet_foundation.[
     ast_empty_lambda_meta,
     core_enum_cases,
     core_source_receiver_method,
-    diagnostic_registry_row,
     diagnostic_with_label,
     expr_span,
     type_identity_equal,
@@ -1071,7 +1070,7 @@ sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environm
         span: span,
         code: "E2808",
         what: "HTTP route method `{token}` is refused",
-        fix: (diagnostic_registry_row("E2808") ?? panic("E2808 has no registry row")).fix,
+        fix: sema_diagnostic_row("E2808").fix,
     }
     context.comptime_requests.push(SemaComptimeRequest{callee_key: key, module_identity: identity, args: [TComptimeValue]{}, span: span, checked_text: Val(evaluation)})
 }

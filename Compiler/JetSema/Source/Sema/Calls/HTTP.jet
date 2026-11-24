@@ -183,19 +183,19 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
     owner: sema_call_http_nominal_leaf(receiver_value.ty)
     if program.registration_graph == .Val(graph) {
         candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, method, [Type]{}, [Type]{}, span, environment, program, diagnostics)
-        candidate := candidates.pop() ?? panic("{owner}.{method} is not registered")
-        params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("{owner}.{method} has no parameter list")
+        candidate := candidates.pop() ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` is not registered")
+        params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` has no parameter list")
         filled := args.move()
         if filled.len() > params.len() {
-            panic("{owner}.{method} takes {params.len()} arguments, and its registration passed {filled.len()}")
+            return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` takes {params.len()} arguments, and its registration passed {filled.len()}")
         }
         loop index in filled.len()..<params.len() {
-            reference: params[index].default_ref ?? panic("{owner}.{method} parameter `{params[index].name}` has no default")
-            declared: sema_registration_resolve_default(graph, reference) ?? panic("{owner}.{method} parameter `{params[index].name}` lost its default")
+            reference: params[index].default_ref ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` has no default")
+            declared: sema_registration_resolve_default(graph, reference) ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` lost its default")
             if !sema_site_is_caller(declared) {
-                panic("{owner}.{method} parameter `{params[index].name}` has a default other than `#caller`")
+                return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` has a default other than `#caller`")
             }
-            declared_ty: params[index].ty ?? panic("{owner}.{method} parameter `{params[index].name}` has no type")
+            declared_ty: params[index].ty ?? return sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` parameter `{params[index].name}` has no type")
             location: sema_check_expression(sema_site_location_expr("", environment, program, scopes, span), Val(sema_call_resolved_type(declared_ty, environment, program)), environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             filled.push(sema_call_http_static_tree_arg(location, sema_call_http_core_synthetic_arg(declared, span)))
         }
@@ -206,7 +206,17 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
             sema_call_http_record_effect("Net", "{owner}.{method}", built.ty, span, environment, program, scopes, check.context, diagnostics)
         }
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
-    } else { panic("{owner}.{method} needs a registration graph") }
+    }
+    sema_call_http_mux_unavailable(check.context, "`{owner}.{method}` has no registration graph to resolve it in")
+}
+
+// A route registration whose Core source method this checker can't resolve
+// (an App, server or router missing the `__` method or its `#caller`
+// default) leaves the calling function incomplete, a totality row, rather
+// than stopping the check of every other function.
+sema_call_http_mux_unavailable: fn(context: ^SemaCheckContext, reason: String) -> SemaMethodSpecialCheck {
+    context.incomplete_reasons.push("route registration: {reason}")
+    SemaMethodSpecialCheck{handled: true, value: None}
 }
 
 sema_call_http_core_synthetic_arg: fn(expression: Expr, span: Span) -> CallArg Never! {

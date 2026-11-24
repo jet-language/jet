@@ -17,7 +17,6 @@ use jet_foundation.[
     SymbolKind,
     Type,
     derivation_record_reference,
-    diagnostic_registry_row,
     expr_span,
     type_name,
 ]
@@ -208,7 +207,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         // A refusal is reported only for a callback that otherwise checks: an
         // unresolved or ill-typed call has its own error already.
         if frame_refusal == .Val(detail) && !sema_has_error_since(diagnostics, diagnostics_before) {
-            row: diagnostic_registry_row("E2967") ?? panic("E2967 has no registry row")
+            row: sema_diagnostic_row("E2967")
             diagnostics.push(sema_error("E2967", frame_span, row.what.replace("{{detail}}", detail), row.why, row.fix))
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }

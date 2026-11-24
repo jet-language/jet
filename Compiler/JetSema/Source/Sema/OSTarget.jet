@@ -7,7 +7,7 @@
 //   takes or returns a value of a type whose impl is OS-gated. The check reads
 //   signatures only, as the web partition's ABI check does; a `#build.target.os`
 //   dispatch arm that constructs the type is folded before this runs.
-use jet_foundation.[Diagnostic, Func, Span, WebBucket, diagnostic_registry_row, target_os_name, target_os_parse]
+use jet_foundation.[Diagnostic, Func, Span, WebBucket, target_os_name, target_os_parse]
 
 sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) {
     gate_of_type := [String:String]{}
@@ -82,7 +82,7 @@ sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic
 
 sema_os_target_mixed_axis: fn(ceiling: WebBucket?, os: String, item: String, span: Span, found: ^[Diagnostic]) {
     bucket: ceiling ?? return
-    row: diagnostic_registry_row("E-OSTARGET-MIXED-AXIS") ?? panic("E-OSTARGET-MIXED-AXIS has no registry row")
+    row: sema_diagnostic_row("E-OSTARGET-MIXED-AXIS")
     os_name: sema_os_target_name(os)
     web: sema_web_bucket_name(bucket)
     found.push(
@@ -123,7 +123,7 @@ sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, ga
     if own_gate == .Val(gate) && gate == os {
         return
     }
-    row: diagnostic_registry_row("E-OSTARGET-UNMATCHED-CALL") ?? panic("E-OSTARGET-UNMATCHED-CALL has no registry row")
+    row: sema_diagnostic_row("E-OSTARGET-UNMATCHED-CALL")
     os_name: sema_os_target_name(os)
     found.push(
         sema_error(

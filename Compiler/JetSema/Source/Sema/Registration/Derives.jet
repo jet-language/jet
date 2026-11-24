@@ -3313,7 +3313,7 @@ sema_derive_unordered_comparable: fn(item: Item, diagnostics: ^[Diagnostic]) -> 
     }
     held: sema_derive_item_unordered_type(item) ?? return false
     held_name: type_name(held)
-    row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+    row: sema_diagnostic_row("E0905")
     diagnostics.push(sema_error("E0905", marker, row.what.replace("{{type}}", held_name).replace("{{bound}}", "Comparable"), row.why.replace("{{why_text}}", "`{held_name}` has no order, so a type that holds it can't be `Comparable`"), row.fix.replace("{{fix_text}}", "remove `#Comparable`, or write the `Comparable` impl by hand over the fields that have an order")))
     true
 }
@@ -3364,7 +3364,7 @@ sema_derive_numeric_base: fn(ty: Type) -> Bool Never! {
 }
 
 sema_derive_distinct_forward_error: fn(name: String, base: String, trait_name: String, span: Span) -> Diagnostic Never! {
-    row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+    row: sema_diagnostic_row("E0905")
     why := "`{name}` forwards `{trait_name}` from its base type `{base}`, and `{base}` has no `{trait_name}` to forward"
     fix := "drop the `{trait_name}` request from `{name}`, or base `{name}` on a type that has `{trait_name}`"
     sema_error("E0905", span, row.what.replace("{{type}}", base).replace("{{bound}}", trait_name), row.why.replace("{{why_text}}", why), row.fix.replace("{{fix_text}}", fix))

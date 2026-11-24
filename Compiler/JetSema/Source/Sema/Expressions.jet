@@ -32,7 +32,6 @@ use {
         CallContractRow,
         CtValue,
         Diagnostic,
-        diagnostic_registry_row,
         Dimension,
         DimensionAxis,
         EffectRowEntry,
@@ -3521,7 +3520,7 @@ sema_expr_impl_conditions_check: fn(graph: SemaRegistrationGraph, function: Sema
             met: sema_type_bound_satisfied_with_generics(graph, substitutions[found].ty, bound, function.symbol.module_identity, generic_params) ?? next
             if met -> next
             shown: type_name(substitutions[found].ty)
-            row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+            row: sema_diagnostic_row("E0905")
             fix := "implement `{bound}` for `{shown}`, or call `{function.symbol.name}` on a value whose `{condition.name}` is `{bound}`"
             loop param in generic_params {
                 if param.name == shown {
@@ -5180,7 +5179,7 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
 // `if #phase == ...`.
 sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
     if name == "#caller" {
-        row: diagnostic_registry_row("E2427") ?? panic("E2427 must have a registry row")
+        row: sema_diagnostic_row("E2427")
         diagnostics.push(sema_error("E2427", span, row.what, row.why, row.fix))
         return None
     }
@@ -5216,7 +5215,7 @@ sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environ
 // the place of each call is `#caller`.
 sema_site_here_default_check: fn(expr: Expr, diagnostics: ^[Diagnostic]) {
     if expr == .Ident(name, span, _) && name == "#here" {
-        row: diagnostic_registry_row("E2428") ?? panic("E2428 must have a registry row")
+        row: sema_diagnostic_row("E2428")
         diagnostics.push(sema_error("E2428", span, row.what, row.why, row.fix))
     }
 }

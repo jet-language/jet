@@ -43,7 +43,6 @@ use jet_foundation.[
     core_source_receiver_method_routes,
     app_route_file_address,
     AppRouteRoot,
-    diagnostic_registry_row,
     diagnostic_with_edit,
     DURATION_SOURCE_METHODS,
     duration_source_method_takes,
@@ -1639,7 +1638,7 @@ sema_app_expand_route_root: fn(roots: [AppRouteRoot], name: String, span: Span, 
     loop file in root.files {
         provenance: "{name}/{file.path}"
         if !file.has_page {
-            row: diagnostic_registry_row("E2806") ?? panic("E2806 must have a registry row")
+            row: sema_diagnostic_row("E2806")
             diagnostics.push(sema_error("E2806", span, "Convention file `{provenance}` has no `page: fn`", row.why, row.fix))
             next
         }
@@ -1775,7 +1774,7 @@ sema_call_app_browser_feature: fn(receiver_value: TExpr, method: String, span: S
         if target == "" || target == "JS" || target == "Web" {
             return
         }
-        entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
+        entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
         what: entry.what.replace("{{feature}}", method).replace("{{required}}", "JS").replace("{{target}}", target)
         diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, entry.why, entry.fix.replace("{{feature}}", method)))
     }
@@ -1795,7 +1794,7 @@ sema_call_app_native_feature: fn(receiver_value: TExpr, method: String, span: Sp
         if target == "" {
             return
         }
-        entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
+        entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
         what: entry.what.replace("{{feature}}", method).replace("{{required}}", "native").replace("{{target}}", target)
         why: "A browser runs nothing for a page that is closed, so the web output has no `.{method}` work to keep; dropping it silently would lose the work."
         fix: "Run the work on the server: a service method marked `#App.Every(cron: …)` is a server job that runs on its schedule whether or not a page is open, and `#App.Job` is one a call queues; keep `.{method}` for a native build."
@@ -1889,7 +1888,7 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
         if target == "" {
             return
         }
-        entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
+        entry: sema_diagnostic_row("E-APP-TARGET-FEATURE")
         what: entry.what.replace("{{feature}}", member).replace("{{required}}", "native").replace("{{target}}", target)
         why: "A browser shows a page's notification only while the page is open, so the web output has no `{alias}.notify` for this device; one for a closed page would be lost."
         fix: "Send it from the server: `{alias}.notify(to:, title:, body:, open:)` reaches each browser the account registered, through Web Push. Keep `{alias}.notify(title:, body:, open:)` for a native build."
@@ -1923,7 +1922,7 @@ sema_call_app_permission_purpose: fn(member: String, alias: String, named: Strin
         }
         noun: if missing.len() == 1 -> "permission" else -> "permissions"
         lines: loop key in missing -> "{key}: \"…\""
-        entry: diagnostic_registry_row("E-APP-PERMISSION-PURPOSE") ?? panic("E-APP-PERMISSION-PURPOSE must have a registry row")
+        entry: sema_diagnostic_row("E-APP-PERMISSION-PURPOSE")
         what: entry.what.replace("{{call}}", "{alias}.{member}").replace("{{permissions}}", "the {listed} {noun}")
         diagnostics.push(sema_error("E-APP-PERMISSION-PURPOSE", span, what, entry.why, entry.fix.replace("{{lines}}", lines.join(", "))))
     }
@@ -1955,7 +1954,7 @@ sema_call_app_image_settings: fn(receiver_value: TExpr, args: [CallArg], environ
     loop argument in args {
         setting: if argument.label == .Val(given) -> "{given.name}" else -> ""
         if setting == "" || sema_checked_module_literal(argument.expr) -> next
-        entry: diagnostic_registry_row("E2811") ?? panic("E2811 must have a registry row")
+        entry: sema_diagnostic_row("E2811")
         diagnostics.push(sema_error("E2811", expr_span(argument.expr), entry.what.replace("{{setting}}", setting), entry.why, entry.fix.replace("{{setting}}", setting)))
     }
 }
@@ -2029,7 +2028,7 @@ sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     boundary: method == "pending" || method == "not_found" || method == "error"
     handler_index: if boundary -> 0 else -> 1
     if (method == "route" || method == "page" || method == "layout") && sema_http_mux_callee(args[handler_index].expr) == None {
-        row: diagnostic_registry_row("E2810") ?? panic("E2810 must have a registry row")
+        row: sema_diagnostic_row("E2810")
         path: sema_app_literal_text(args[0].expr) ?? "/"
         diagnostics.push(sema_error("E2810", span, "`{method}` `{path}` is not a statically known handler", row.why, row.fix))
         return SemaMethodSpecialCheck{handled: true, value: None}

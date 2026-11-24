@@ -40,7 +40,6 @@ use jet_foundation.[
     TypeTupleField,
     ast_expr,
     ast_visit_expr,
-    diagnostic_registry_row,
     expr_span,
     integer_bounds_exact,
     measure_literal_value,
@@ -793,7 +792,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
         // An ordinary fallible call already propagates its failure in statement
         // position, so its Unit success has nothing to bind.
         if !binding.is_comptime && sema_expr_unwrap_tag(init.ty) == (Type.Named{name: "Unit"}) && sema_stmt_is_propagated_call(init) {
-            row: diagnostic_registry_row("L0531") ?? panic("L0531 has no registry row")
+            row: sema_diagnostic_row("L0531")
             diagnostics.push(sema_lint("L0531", binding.name_span, row.what, row.why, row.fix))
         }
     }

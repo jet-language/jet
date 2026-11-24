@@ -25,7 +25,6 @@ use jet_foundation.[
     TTryConvert,
     Type,
     TypeTupleField,
-    diagnostic_registry_row,
     expr_span,
     module_is_core,
     symbol_key_text,
@@ -1327,7 +1326,7 @@ sema_stmt_for_in_index_names_member: fn(collection_type: Type, item_type: Type, 
 
 // E0182 at the index name of `loop (first, item) in rows`.
 sema_stmt_for_in_index_named_like_member: fn(first: String, first_span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E0182") ?? panic("E0182 must have a registry row")
+    row: sema_diagnostic_row("E0182")
     sema_error("E0182", first_span, row.what.replace("{{name}}", first), row.why.replace("{{name}}", first), row.fix.replace("{{name}}", first))
 }
 

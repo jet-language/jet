@@ -15,7 +15,6 @@ use jet_foundation.[
     SymbolKind,
     Type,
     core_identity_is,
-    diagnostic_registry_row,
     expr_span,
     foundation_byte_text,
     type_name,
@@ -358,7 +357,7 @@ sema_ui_asset_refused: fn(args: [CallArg], environment: SemaScopeEnvironment, pr
     file: graph.modules[row].source_file
     cut: file.rfind("/")
     resolved: if cut < 0 -> named else -> "{foundation_byte_text(file.bytes(), 0, cut)}/{named}"
-    entry: diagnostic_registry_row("E2822") ?? panic("E2822 must have a registry row")
+    entry: sema_diagnostic_row("E2822")
     diagnostics.push(sema_error("E2822", expr_span(args[0].expr), sema_ui_asset_text(entry.what, path, resolved), sema_ui_asset_text(entry.why, path, resolved), sema_ui_asset_text(entry.fix, path, resolved)))
     true
 }
