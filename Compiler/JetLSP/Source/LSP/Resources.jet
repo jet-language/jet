@@ -1,0 +1,54 @@
+// The read-only resource bridge: the selected environment plan of the
+// workspace, as `jet://environment`. Its text is the report
+// `jet env info --json` prints, run by this same `jet` in the nearest folder
+// at or above the first workspace folder that holds `env.jet`, so the server
+// keeps no second reading of the plan and nothing is realized or started. A
+// plan that is missing or does not check, like any other resource, answers
+// ResourceNotFound.
+use {
+    core.encoding.[Dyn]
+    lsp_resource_files: core.files
+    lsp_resource_process: core.process
+    lsp_resource_sys: core.sys
+    jet_foundation.[foundation_json_quote]
+    jetpack_foundation.[ENV_FILE]
+}
+
+LSP_ENVIRONMENT_URI: "jet://environment"
+
+// MCP's ResourceNotFound error code.
+LSP_RESOURCE_NOT_FOUND: -32002
+
+// `resources/list`: the environment resource, when a plan is in reach.
+lsp_resources_list_response: fn(server: LSPServer, id: Dyn) -> String {
+    rows := [String]{}
+    if lsp_environment_root(server) != None {
+        rows.push("{{\"uri\":{foundation_json_quote(LSP_ENVIRONMENT_URI)},\"name\":\"Jet environment\",\"description\":\"Read-only typed environment facts\",\"mimeType\":\"application/json\"}}")
+    }
+    lsp_response(id, "{{\"resources\":[{rows.join(",")}]}}")
+}
+
+// `resources/read`: the plan's report as the one content of the resource.
+lsp_resources_read_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    uri: lsp_text_member(params ?? Dyn.Null, "uri") ?? return lsp_error_response(id, -32602, "resources/read requires a URI")
+    if uri != LSP_ENVIRONMENT_URI -> return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "resource not found: {uri}")
+    root: lsp_environment_root(server) ?? return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "environment resource not found")
+    argv: [String]{lsp_resource_sys.executable(), "env", "info", "--json", "--no-color"}
+    receipt: lsp_resource_process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "environment resource unavailable")
+    text: receipt.output.trim()
+    if !receipt.success || text == "" -> return lsp_error_response(id, LSP_RESOURCE_NOT_FOUND, "environment resource unavailable")
+    lsp_response(id, "{{\"contents\":[{{\"uri\":{foundation_json_quote(uri)},\"mimeType\":\"application/json\",\"text\":{foundation_json_quote(text)}}}]}}")
+}
+
+// The nearest folder at or above the first workspace folder (the server's
+// working folder when the client named none) that holds `env.jet`.
+lsp_environment_root: fn(server: LSPServer) -[FS, Env]> String? Never! {
+    // copy: the server keeps its workspace folders.
+    current := if server.workspace_roots.len() > 0 -> server.workspace_roots[0].copy() else -> lsp_resource_sys.current_dir() ?? return None
+    loop {
+        if lsp_resource_files.is_file(lsp_resource_files.join(current, ENV_FILE)) -> return Val(current)
+        parent: lsp_resource_files.dirname(current)
+        if parent == "" || parent == current -> return None
+        current = parent
+    }
+}

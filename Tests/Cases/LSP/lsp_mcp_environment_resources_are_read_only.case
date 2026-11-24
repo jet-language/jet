@@ -6,10 +6,8 @@ env: HOME=/test/home
 session lsp content-length: jet self lsp
 send lsp: Messages/LSPMCPEnvironmentResourcesAreReadOnly/0.json
 recv lsp
-stdout: ~ "\"protocolVersion\": \"2025-11-25\"" # original predicate; unrelated metadata varies
-stdout: ~ "\"resources\": {" # original predicate; unrelated metadata varies
-stdout: ~ "\"subscribe\": false" # original predicate; unrelated metadata varies
-stdout: ~ "\"listChanged\": false" # original predicate; unrelated metadata varies
+stdout: ~ "\"capabilities\":{" # initialize answers as a language server
+stdout: !~ "protocolVersion" # the bridge answers the resource requests below, but initialize advertises only LSP
 send lsp: Messages/LSPMCPEnvironmentResourcesAreReadOnly/1.json
 send lsp: Messages/LSPMCPEnvironmentResourcesAreReadOnly/2.json
 recv lsp

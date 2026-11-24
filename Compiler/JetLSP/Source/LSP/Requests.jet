@@ -49,6 +49,8 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/prepareCallHierarchy" -> lsp_prepare_hierarchy_response(server, params, id, calls: true)
         "callHierarchy/incomingCalls" -> lsp_incoming_calls_response(server, params, id)
         "callHierarchy/outgoingCalls" -> lsp_outgoing_calls_response(server, params, id)
+        "resources/list" -> lsp_resources_list_response(server, id)
+        "resources/read" -> lsp_resources_read_response(server, params, id)
         else -> lsp_error_response(id, -32601, "method not found: {method}")
     }
 }
