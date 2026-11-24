@@ -255,12 +255,6 @@ NixBridgeNeed: struct {
     package: String,
 }
 
-PlanState: enum {
-    New,
-    Cached,
-    Repaired,
-}
-
 PlanItem: struct {
     package: String,
     state: PlanState,
@@ -302,12 +296,7 @@ DownloadPlan: struct {
     add_nix: fn(^self, nix: NixDownloadPlan) Never! {
         self.estimated_seconds = nix.estimated_seconds
         loop item in nix.items {
-            state: if item.state == {
-                .New -> PlanState.New
-                .Cached -> PlanState.Cached
-                .Repaired -> PlanState.Repaired
-            }
-            self.add_item(PlanItem{package: item.package, state: state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
+            self.add_item(PlanItem{package: item.package, state: item.state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
         }
     }
 }
