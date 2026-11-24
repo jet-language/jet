@@ -19,7 +19,7 @@ build: fn(b: Build) {
     meta: b.compiler(app)
     loop field in Carrier.reflect().fields {
         found: meta.find_type(field.type.name) ?? panic("`{field.type.name}` names no type")
-        if found.identity != field.type.identity || found.name != field.type.name {
+        if found.identity != field.type.identity || found.name != field.type.name || found.kind != field.type.kind || found.generic_bindings.len() != field.type.generic_bindings.len() {
             panic("`{field.type.name}` found {found.identity}")
         }
     }

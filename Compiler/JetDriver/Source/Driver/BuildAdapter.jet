@@ -8,7 +8,7 @@ use {
     build_input_url: core.net.url
     jet_parser.[jfmt_escape_str_lit, parse_type_text]
     jet_lexer.[TOKEN_HASH, TOKEN_IDENT, lex]
-    jet_sema.[sema_comptime_reflection_kind, sema_comptime_reflection_type_id_of, sema_comptime_reflection_type_id_record]
+    jet_sema.[SemaTypeIDHead, sema_comptime_reflection_type_head_read, sema_comptime_reflection_type_id_headed]
 }
 
 JetDriverBuildAdapter: struct {
@@ -432,9 +432,11 @@ jet_driver_build_part: fn(session: ^BuildSession, _host: JetDriverBuildAdapter, 
 // declared type by the bare name it has there (ProgramInfo's
 // `scope_types`, and the structs the value's target already made); one the
 // module can't see is refused (E3502). `meta.find_type(text)` reads `text`
-// as one type and names each type it names as the root module names it
-// (ProgramInfo's `root_types`) or as a struct the value's target already
-// made; one it can't name, or text that is not one type, gives None.
+// as one type and makes its TypeId as the checker makes one
+// (sema_comptime_reflection_type_id_headed), each type it names read as the
+// root module reads it (ProgramInfo's `root_types`) or as a struct the
+// value's target already made; one it can't name, or text that is not one
+// type, gives None.
 // A `Compiler` value passed to a function sends the pass sema wrote
 // (build_session_compiler_handoff); the callee's new value carries the
 // same checked program.
@@ -521,16 +523,16 @@ jet_driver_compiler_find_type: fn(session: ^BuildSession, host: JetDriverBuildAd
         return jet_driver_build_host_failure(session, span, "`{member}` lost its text")
     }
     spelled: parse_type_text(text) ?? return jet_driver_meta_type_absent()
-    identities := jet_driver_meta_type_rows(program, "root_types", "spelling", "identity") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
-    loop made in build_session_made_structs(session, held) {
-        identities[made.name.copy()] = made.identity.copy()
+    rows: jet_driver_build_field(program, "root_types") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
+    made: build_session_made_structs(session, held)
+    names := [String]{}
+    jet_driver_meta_type_heads(spelled, names)
+    heads := [SemaTypeIDHead]{}
+    loop name in names {
+        head: jet_driver_meta_type_head(rows, made, name) ?? return jet_driver_meta_type_absent()
+        heads.push(head)
     }
-    heads := [String]{}
-    jet_driver_meta_type_heads(spelled, heads)
-    loop head in heads {
-        if identities.get(head) == None -> return jet_driver_meta_type_absent()
-    }
-    JetEvalBuildReply.Value{value: TComptimeValue.Present{value: sema_comptime_reflection_type_id_of(jet_driver_meta_type_renamed(spelled, identities), spelled)}}
+    JetEvalBuildReply.Value{value: TComptimeValue.Present{value: sema_comptime_reflection_type_id_headed(heads, spelled)}}
 }
 
 jet_driver_compiler_add_struct: fn(session: ^BuildSession, host: JetDriverBuildAdapter, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -> JetEvalBuildReply Never! {
@@ -589,9 +591,10 @@ jet_driver_compiler_add_struct: fn(session: ^BuildSession, host: JetDriverBuildA
     authority: jet_driver_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
     reply: build_session_call(session, build_session_compiler_add, [BuildSessionValue]{held, scope, producer, authority, BuildSessionValue.Text{value: name.copy()}}, Val(source), false, span.start, span.end)
     if reply == .Value(_) {
-        // The new struct's `TypeId`: declared as `name` in the generated
-        // module `module`, which shares the package's namespace.
-        return JetEvalBuildReply.Value{value: sema_comptime_reflection_type_id_record("{home_module}.{name}", name, sema_comptime_reflection_kind("Struct"))}
+        // The new struct's `TypeId`, made as every TypeId is: declared as
+        // `name` in the generated module `module`, which shares the
+        // package's namespace.
+        return JetEvalBuildReply.Value{value: sema_comptime_reflection_type_id_headed([SemaTypeIDHead]{jet_driver_meta_made_head(name, "{home_module}.{name}")}, Type.Named{name: name})}
     }
     jet_driver_session_reply(session, reply, span)
 }
@@ -832,9 +835,34 @@ jet_driver_meta_type_absent: fn() -> JetEvalBuildReply Never! {
     JetEvalBuildReply.Value{value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "TypeId"}}}}
 }
 
+// The head `name` names in a type `meta.find_type` reads: a struct the
+// value's target made (`made`), else the head the root module reads it as
+// (`rows`, ProgramInfo's `root_types`); None when neither knows it.
+jet_driver_meta_type_head: fn(rows: TComptimeValue, made: [BuildSessionMadeStruct], name: String) -> SemaTypeIDHead? Never! {
+    loop struct_made in made {
+        if struct_made.name == name {
+            return Val(jet_driver_meta_made_head(struct_made.name, struct_made.identity))
+        }
+    }
+    if rows == .List(values) {
+        loop row in values {
+            if jet_driver_build_field(row, "spelling") == .Val(.String(spelling)) && spelling == name {
+                return sema_comptime_reflection_type_head_read(row)
+            }
+        }
+    }
+    None
+}
+
+// The head of the struct `name` that `meta.add_struct` declared as
+// `identity`.
+jet_driver_meta_made_head: fn(name: String, identity: String) -> SemaTypeIDHead Never! {
+    SemaTypeIDHead{written: name, identity: identity, name: name, params: [String]{}, kind: "Struct", bindings: [TComptimeValue]{}}
+}
+
 // The rows of a spelling list ProgramInfo keeps for the build host
-// (`root_types`, `scope_types`: a spelling and the TypeId of the type it
-// names), as a map from each row's `key` text to its `value` text
+// (`scope_types`: a spelling and the TypeId of the type it names), as a map
+// from each row's `key` text to its `value` text
 // (jet_driver_meta_type_row_text); None when the program lacks the list.
 jet_driver_meta_type_rows: fn(program: TComptimeValue, list: String, key: String, value: String) -> [String:String]? {
     rows: jet_driver_build_field(program, list) ?? return None
