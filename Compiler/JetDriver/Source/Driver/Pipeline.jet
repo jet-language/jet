@@ -214,6 +214,7 @@ use {
         CompilerEventRecord,
         compiler_threads_admit,
         compiler_threads_joined,
+        compiler_threads_taken,
         CompilerTraceSink,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -6897,8 +6898,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
             repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
             out.push(compiler_threads_joined(reg_task))
         }
-        // Unreachable: the group above pushed the one joined row.
-        out.pop() ?? panic("lost registered function keys")
+        compiler_threads_taken(out)
     } else -> {
         repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
         jet_driver_registered_function_keys(registration_graph)

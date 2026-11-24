@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_table_sized, sha256_hex, symbol_table]
+    jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_taken, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_table_sized, sha256_hex, symbol_table]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -998,7 +998,7 @@ ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, 
     if trace_sink == .Val(sink) -> sink.begin("ir.x64.scatter", "", -1, -1)
     shells := ir_x64_take_inputs(inputs)
     program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
-    tables := tables_box.pop() ?? panic("the x64 tables task lost its tables")
+    tables := compiler_threads_taken(tables_box)
     if shells.fast.use_indexed_rt -> tables.runtime_symbols = shells.fast.runtime_symbols.move()
     has_stops: stops.len() == count
     functions.try_reserve(count) ?? ()
@@ -1733,7 +1733,7 @@ ir_x64_write_with_release: fn(owned_in: ^^IRX64Result, program: ^^X64ObjectModul
         _: compiler_threads_joined(rest)
         _: compiler_threads_joined(dropped)
     }
-    objects.pop() ?? panic("the object writer lost its object")
+    compiler_threads_taken(objects)
 }
 
 ir_x64_object: fn(compiled: ^^IRX64Result, debug_info: Bool, split: Bool{false}) -> X64ExecutableResult Never! {
@@ -1768,7 +1768,7 @@ ir_x64_object: fn(compiled: ^^IRX64Result, debug_info: Bool, split: Bool{false})
         ir_x64_reached_only(functions, debug, kept_roots, has_main)
         programs.push(ir_x64_object_module(owned))
     }
-    program: programs.pop() ?? panic("the object prep lost its module")
+    program: compiler_threads_taken(programs)
     ir_x64_write_with_release(owned, program, functions, debug, exports, cells, threads, debug_info, false, split, ways)
 }
 

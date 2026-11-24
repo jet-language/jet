@@ -5,7 +5,7 @@
 // Present, None as a clean failure and Err as a told one, a fixed-width
 // integer as an Int, and a [U8] as its bytes.
 use {
-    jet_foundation.[BUILD_DEBUG, CompilerThreads, DeclTable, IR_MARKER_ARG_VALUE, Interner, NameTable, SymbolTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, build_debug_on, compiler_threads_single, checked_comptime_integer_key, symbol_table_count, type_name, FnBody]
+    jet_foundation.[BUILD_DEBUG, CompilerThreads, DeclTable, IR_MARKER_ARG_VALUE, Interner, NameTable, SymbolTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, build_debug_on, compiler_threads_single, compiler_threads_taken, checked_comptime_integer_key, symbol_table_count, type_name, FnBody]
     jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IRSourceTexts, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_default_err, ir_default_err_drift, ir_enum_def, ir_fixed_shape, ir_foreign_index, ir_handle_row_is, ir_host_value_row, ir_keyed_function, ir_list_stride, ir_map_row_hashed, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_program_take_sources, ir_row_args, ir_row_ty, ir_source_index, ir_source_texts, ir_static_map_order, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_type_handle_row, ir_untag, ir_value_type, ir_variant_members]
     jet_sema.[SemaCheckedForeignFunction]
     jet_backend.[ERR_BYTES, ERR_CAUSE, ERR_CODE, ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_MESSAGE]
@@ -131,7 +131,7 @@ jet_eval_ir_comptime_roots: fn(cell: Shared<[IRProgram]>, program: ^^IRProgram, 
 // The program `cell` holds (its one row), moved out.
 jet_eval_ir_program_take: fn(cell: Shared<[IRProgram]>) -> IRProgram Never! {
     held := cell.guard_edit()
-    program := held.value.pop() ?? panic("the comptime program cell is empty")
+    program := compiler_threads_taken(held.value)
     program.move()
 }
 

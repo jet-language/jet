@@ -49,7 +49,7 @@
 // Selection reads every operand of an instruction before it writes the
 // instruction's result (the builder already emits `add s <- s, one`), so a
 // pass may make a result slot equal to an operand slot.
-use jet_foundation.[CompilerThreads, Interner, NameTable, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set, name_column_value]
+use jet_foundation.[CompilerThreads, Interner, NameTable, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_taken, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set, name_column_value]
 
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
@@ -1617,7 +1617,7 @@ ir_opt_cells: fn(functions: ^[IRFunction]) -> [Shared<IROptCell>] {
 
 ir_opt_cell_take: fn(cell: Shared<IROptCell>) -> IRFunction {
     held := cell.guard_edit()
-    body := held.value.body.pop() ?? panic("the IR optimizer claimed a function twice")
+    body := compiler_threads_taken(held.value.body)
     body.move()
 }
 

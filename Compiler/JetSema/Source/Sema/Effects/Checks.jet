@@ -91,6 +91,7 @@ use jet_foundation.[
     Type,
     compiler_threads_admit,
     compiler_threads_joined,
+    compiler_threads_taken,
     compiler_threads_partition,
     compiler_transfer_rows,
     CoreCallRecord,
@@ -7217,7 +7218,7 @@ sema_effect_solve_reaches: fn(nodes: [SemaEffectNode], callers: [[Int]], threads
         secret = compiler_threads_joined(secret_task)
         dispatch = compiler_threads_joined(dispatch_task)
     }
-    library: library_box.pop() ?? panic("library reachability disappeared")
+    library: compiler_threads_taken(library_box)
     SemaEffectReaches{secret: secret, library: library, dispatch: dispatch}
 }
 

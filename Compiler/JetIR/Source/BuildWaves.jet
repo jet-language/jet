@@ -8,7 +8,7 @@
 // content and numbers every row by first use in a walk from the jobs taken in
 // key order, so the module is the same whichever thread built a job and in
 // whatever order the jobs were built.
-use jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, compiler_threads_joined, name_column, name_column_set, name_column_table, name_column_value, symbol_table]
+use jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_taken, name_column, name_column_set, name_column_table, name_column_value, symbol_table]
 
 // Building one checked function's body costs about this on one thread, so the
 // build admits threads by x64 selection admission (ir_x64_admit) with each
@@ -233,7 +233,7 @@ ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Boo
             _: compiler_threads_joined(d3)
             _: compiler_threads_joined(d4)
         }
-        finished := result_box.pop() ?? panic("the IR build lost its merged result")
+        finished := compiler_threads_taken(result_box)
         return IRBuildKept{result: finished.move(), program: kept_program.move()}
     }
     program_out := ir_waves_take_program(inputs)
@@ -288,7 +288,7 @@ ir_build_waves_finish: fn(owned_jobs: ^^[IRWaveJob], owned_built: ^^[[IRWaveBuil
 
 ir_waves_take_program: fn(inputs: Shared<IRWaveInputs>) -> IRProgram Never! {
     held := inputs.guard_edit()
-    program := held.value.programs.pop() ?? panic("the IR build lost its checked program")
+    program := compiler_threads_taken(held.value.programs)
     program.move()
 }
 

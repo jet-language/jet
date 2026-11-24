@@ -636,7 +636,7 @@ sema_check_body_stream_finish_module: fn(base_environment: SemaScopeEnvironment,
 sema_check_body_stream_take_environment: fn(cells: SemaStreamCells, stream_module: Int, scopes: ^[SemaScopeTable]) -> SemaScopeEnvironment {
     held: cells.environments[stream_module].guard_edit()
     held.value.light_scopes = [SemaScopeTable]{}
-    entered := held.value.environments.pop() ?? panic("a body-stream module lost its environment")
+    entered := compiler_threads_taken(held.value.environments)
     taken := entered.module_scope.move()
     entered.module_scope = None
     scopes.push(taken.move() ?? panic("a body-stream module scope left its environment"))
@@ -1259,7 +1259,7 @@ sema_check_body_stream_place: fn(out: Shared<SemaStreamOut>, placed: ^[SemaParal
     held: out.guard_edit()
     loop held.value.bodies.len() > 0 {
         body: held.value.bodies.pop() ?? break
-        position: held.value.positions.pop() ?? panic("a checked body has no job position")
+        position: compiler_threads_taken(held.value.positions)
         delta: held.value.deltas.pop() ?? None
         placed[position] = Val(body)
         placed_deltas[position] = delta
@@ -1270,7 +1270,7 @@ sema_check_body_stream_place: fn(out: Shared<SemaStreamOut>, placed: ^[SemaParal
 sema_check_body_stream_take_scope: fn(cell: Shared<SemaStreamEnvironment>) -> SemaScopeTable {
     held: cell.guard_edit()
     held.value.light_scopes = [SemaScopeTable]{}
-    entered := held.value.environments.pop() ?? panic("a body-stream module lost its environment")
+    entered := compiler_threads_taken(held.value.environments)
     taken := entered.module_scope.move()
     entered.module_scope = None
     taken.move() ?? panic("a body-stream module scope left its environment")

@@ -1026,11 +1026,11 @@ x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64Com
             }
         }
     }
-    laid: laid_rows.pop() ?? panic("the object writer lost its layout")
+    laid: compiler_threads_taken(laid_rows)
     if laid.errors.len() > 0 {
         return X64ExecutableResult{bytes: [U8]{}, errors: laid.errors.move()}
     }
-    dwarf: dwarf_rows.pop() ?? panic("the object writer lost its debug sections")
+    dwarf: compiler_threads_taken(dwarf_rows)
     // The functions, their debug rows and the module are read no more. When
     // the `.text` step admitted threads (`laid.workers`) they drop on a
     // thread of their own while the file is assembled; a smaller object
@@ -1052,7 +1052,7 @@ x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64Com
         _: compiler_threads_joined(drop_dbg)
         _: compiler_threads_joined(drop_prog)
     }
-    assembled := files.pop() ?? panic("the object writer lost its file")
+    assembled := compiler_threads_taken(files)
     assembled.imports = laid.imports.move()
     assembled
 }
