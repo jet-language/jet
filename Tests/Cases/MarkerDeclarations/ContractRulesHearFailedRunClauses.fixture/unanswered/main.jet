@@ -1,0 +1,12 @@
+// A `#Post` clause decided while building computes the call again by name; a
+// method call is not computed again, so the clause has no answer for it.
+Lanes: struct {
+    count: Int,
+
+    #Post(#run { result > 0 }, "a positive width") width: fn(self) -> Int { self.count - 1 }
+}
+
+run: fn() {
+    lanes: Lanes{count: 4}
+    print(lanes.width())
+}

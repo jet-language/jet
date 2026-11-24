@@ -227,7 +227,13 @@ is `sum(3, …)` refused while building.
 prints 12 for `padded(4, 10)` under
 `#Post(#run { result % lanes == 0 }, "a whole number of lanes")`, and
 [`contract_required_post_false.jet`](../../../Tests/UI/contract_required_post_false.jet)
-is `width(1)` refused while building.
+is `width(1)` refused while building. The refusal is a `check` rule
+(D-CORE-CHECK1=A): the `Pre` and `Post` rules of the compiler's Prelude
+rule module ([`Rules.jet`](../../../Compiler/Prelude/Rules.jet)) hear each
+call one of whose clauses of that marker failed, once per marker, and reject
+it with E0180. A compile whose program declares no `#run` clause does not
+load that module
+([`contract_rules_hear_failed_run_clauses.case`](../../../Tests/Cases/MarkerDeclarations/contract_rules_hear_failed_run_clauses.case)).
 
 Inside a template a paste `#{name}` splices a template binding
 (D-META-HASH1=A). `#{method}: fn(self)` and `impl #{type_name}` name a

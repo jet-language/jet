@@ -146,12 +146,14 @@ use {
         sema_registration_lookup_counts,
         sema_registration_module_index,
         sema_registration_original_error_module,
+        sema_registration_rule_module,
         sema_registration_prepare_graph,
         sema_graph_modules_take_checked_facts,
         sema_registration_settle_modules,
         sema_trait_laws_add,
         sema_unsafe_path_within,
         SEMA_PRELUDE_ERROR_SOURCE_PATH,
+        SEMA_PRELUDE_RULE_SOURCE_PATH,
         sema_cli_command_record,
         sema_marker_is_guest_export,
         sema_guest_runtime_binding,
@@ -223,12 +225,14 @@ use {
         module_is_core,
         module_none,
         module_text,
+        Func,
         Item,
         NamedCtValue,
         Marker,
         name_ledger_from_facts,
         SourceFile,
         TargetMachine,
+        TraitImplBlock,
         OutputKind,
         Span,
         SymbolKind,
@@ -648,9 +652,10 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
                     }
                     source_owner = false
                 }
-            } else if jet_driver_unit_is_error_prelude(unit) {
-                // The retained original Prelude error module: checked with the
-                // graph, not a Review source owner.
+            } else if jet_driver_unit_is_compiler_prelude(unit) {
+                // A retained compiler-owned Prelude module (the original
+                // errors, the contract rules): checked with the graph, not a
+                // Review source owner.
                 source_owner = false
             } else {
                 if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() {
@@ -4577,10 +4582,21 @@ jet_driver_canonical_effect_module: fn(effects: EffectModuleSource, table: &Modu
 // bundle, so registration, checking, assembly, and every loaded-identity check
 // see one module set. Like Core, foreign aggregate, and canonical effect
 // sources, its bytes also ride the generated sidecar, so a diagnostic sited in
-// it projects through the host codec. A loaded source holding its path, alias,
-// or identity is refused.
-jet_driver_retain_error_prelude_module: fn(load: &JetDriverLoadResult) -> Bool {
-    original := sema_registration_original_error_module(load.module_table)
+// it projects through the host codec. The contract rule module
+// (Prelude/Rules.jet) joins the same way, and only a load whose programs
+// declare a `#run { … }` contract clause, the one thing its rules hear, pays
+// for registering and checking it.
+jet_driver_retain_prelude_modules: fn(load: &JetDriverLoadResult) -> Bool {
+    errors := sema_registration_original_error_module(load.module_table)
+    if !jet_driver_retain_prelude_module(load, errors) -> return false
+    if !jet_driver_items_declare_run_contract_in(load.modules) -> return true
+    rules := sema_registration_rule_module(load.module_table)
+    jet_driver_retain_prelude_module(load, rules)
+}
+
+// One compiler-owned Prelude module joins the load. A loaded source holding
+// its path, alias, or identity is refused.
+jet_driver_retain_prelude_module: fn(load: &JetDriverLoadResult, original: &&SemaRegistrationModuleInput) -> Bool {
     module_identity: jet_driver_module_identity(original.package_identity, original.module_path)
     collides := false
     loop unit in load.source_units {
@@ -4606,10 +4622,57 @@ jet_driver_retain_error_prelude_module: fn(load: &JetDriverLoadResult) -> Bool {
     true
 }
 
-// The retained original Prelude error unit: compiler-generated, outside every
-// authorized root, and not a Review source owner.
-jet_driver_unit_is_error_prelude: fn(unit: JetDriverSourceUnit) -> Bool Never! {
-    unit.root_index == -1 && unit.file_index == -1 && unit.path == SEMA_PRELUDE_ERROR_SOURCE_PATH && unit.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY && unit.source_origin == SemaSourceOrigin.CompilerGenerated
+// Whether a loaded program declares a `#Pre` or `#Post` clause written
+// `#run { … }`: on a function, or on a method of a type, an impl, or a
+// trait implementation, at any module depth.
+jet_driver_items_declare_run_contract_in: fn(modules: [JetDriverLoadedModule]) -> Bool Never! {
+    loop loaded in modules {
+        if jet_driver_items_declare_run_contract(loaded.program.items) -> return true
+    }
+    false
+}
+
+jet_driver_items_declare_run_contract: fn(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == .Func(value) && jet_driver_function_declares_run_contract(value) -> return true
+        if item == .Struct(value) && (jet_driver_functions_declare_run_contract(value.methods) || jet_driver_impls_declare_run_contract(value.trait_impls)) -> return true
+        if item == .Enum(value) && (jet_driver_functions_declare_run_contract(value.methods) || jet_driver_impls_declare_run_contract(value.trait_impls)) -> return true
+        if item == .Impl(value) && jet_driver_functions_declare_run_contract(value.methods) -> return true
+        if item == .GenericModule(value) && jet_driver_items_declare_run_contract(value.body) -> return true
+        if item == .CodeModule(value) && value.body == .Val(body) && jet_driver_items_declare_run_contract(body) -> return true
+    }
+    false
+}
+
+jet_driver_impls_declare_run_contract: fn(blocks: [TraitImplBlock]) -> Bool Never! {
+    loop block in blocks {
+        if jet_driver_functions_declare_run_contract(block.methods) -> return true
+    }
+    false
+}
+
+jet_driver_functions_declare_run_contract: fn(functions: [Func]) -> Bool Never! {
+    loop function in functions {
+        if jet_driver_function_declares_run_contract(function) -> return true
+    }
+    false
+}
+
+jet_driver_function_declares_run_contract: fn(function: Func) -> Bool Never! {
+    loop clause in function.pre {
+        if clause.required -> return true
+    }
+    loop clause in function.post {
+        if clause.required -> return true
+    }
+    false
+}
+
+// A retained compiler-owned Prelude unit (the original errors, the contract
+// rules): compiler-generated, outside every authorized root, and not a
+// Review source owner.
+jet_driver_unit_is_compiler_prelude: fn(unit: JetDriverSourceUnit) -> Bool Never! {
+    unit.root_index == -1 && unit.file_index == -1 && (unit.path == SEMA_PRELUDE_ERROR_SOURCE_PATH || unit.path == SEMA_PRELUDE_RULE_SOURCE_PATH) && unit.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY && unit.source_origin == SemaSourceOrigin.CompilerGenerated
 }
 
 jet_driver_compile_internal_result: fn(load: JetDriverLoadResult, trace: JetDriverCompileTrace, message: String) -> JetDriverCompileResult Never! {
@@ -6165,7 +6228,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if !jet_driver_foreign_provider_owners_valid(load.modules, foreign_provider_inputs, load.diagnostics) {
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)
     }
-    if !jet_driver_retain_error_prelude_module(load) {
+    if !jet_driver_retain_prelude_modules(load) {
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
     }
     jet_driver_unsafe_check(request, load)

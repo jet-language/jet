@@ -1,0 +1,15 @@
+// Every `#run { … }` clause holds for its call, so no call is heard.
+#Pre(#run { lanes == 4 || lanes == 8 }, "need 4 or 8") sum: fn(lanes: Int, values: [Int]) -> Int {
+    total := 0
+    loop value in values -> total += value
+    total
+}
+
+#Post(#run { result % lanes == 0 }, "a whole number of lanes") padded: fn(lanes: Int, count: Int) -> Int {
+    (count + lanes - 1) /% lanes * lanes
+}
+
+run: fn() {
+    print(sum(4, [1, 2, 3, 4]))
+    print(padded(4, 10))
+}

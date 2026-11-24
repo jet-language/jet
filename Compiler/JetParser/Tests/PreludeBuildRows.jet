@@ -1,8 +1,9 @@
 // The compiler-owned Prelude texts (markers and value tags, derives, the
-// original errors and the unit catalog) are parsed and read ahead of time
-// into JetSema's PreludeRows.jet by Compiler/Toolchain/PreludeRows, so a
-// compile never parses or scans them. Each stored value must equal what its
-// reader gives for the same text when it runs now, byte for byte in CBOR.
+// original errors, the contract rules and the unit catalog) are parsed and
+// read ahead of time into JetSema's PreludeRows.jet by
+// Compiler/Toolchain/PreludeRows, so a compile never parses or scans them.
+// Each stored value must equal what its reader gives for the same text when
+// it runs now, byte for byte in CBOR.
 use {
     cbor: core.encoding.cbor
     jet_foundation.[MARKER_SOURCE, registration_marker_rules]
@@ -14,6 +15,9 @@ use {
         SEMA_PRELUDE_ERROR_PROGRAM,
         SEMA_PRELUDE_ERROR_SOURCE,
         SEMA_PRELUDE_MARKER_DECLS,
+        SEMA_PRELUDE_RULE_LINE_STARTS,
+        SEMA_PRELUDE_RULE_PROGRAM,
+        SEMA_PRELUDE_RULE_SOURCE,
         SEMA_PRELUDE_TAGS,
         SEMA_UNITS_CATALOG,
         sema_derive_builtin_providers,
@@ -22,6 +26,7 @@ use {
         sema_marker_rules_applied_row,
         sema_registration_derive_words,
         sema_registration_original_error_program,
+        sema_registration_rule_program,
         sema_units_catalog_read,
     ]
 }
@@ -66,6 +71,16 @@ prelude_build_rows_same: fn<T: Encode>(built: T, read: T, what: String) {
     prelude_build_rows_same(SEMA_PRELUDE_ERROR_PROGRAM, sema_registration_original_error_program(), "original error program")
     assert_eq(SEMA_PRELUDE_ERROR_PROGRAM.items.len(), 7)
     assert_eq(SEMA_PRELUDE_ERROR_LINE_STARTS, parser_line_starts(SEMA_PRELUDE_ERROR_SOURCE.bytes()))
+}
+
+#Test("the build-time contract rule module equals the rule source read now") {
+    prelude_build_rows_same(SEMA_PRELUDE_RULE_PROGRAM, sema_registration_rule_program(), "contract rule program")
+    markers := 0
+    loop item in SEMA_PRELUDE_RULE_PROGRAM.items {
+        if item == .MarkerDecl(_) -> markers += 1
+    }
+    assert_eq(markers, 2)
+    assert_eq(SEMA_PRELUDE_RULE_LINE_STARTS, parser_line_starts(SEMA_PRELUDE_RULE_SOURCE.bytes()))
 }
 
 #Test("the build-time unit catalog equals the unit source read now") {
