@@ -36,14 +36,32 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Replace `-&gt; expr` with `{ expr }`; `jet fmt` applies this fix.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.ArrowFunctionBody</code>: <code>Tests/UI/inline_module_return_type_mismatch.stderr</code>.</p>
-<pre class="diag">Error: Jet.ArrowFunctionBody: A braced callable with a non-unit success result needs `-&gt;` before its body.
-  --&gt; Tests/UI/inline_module_return_type_mismatch.jet:15:23
+<p>First UI snapshot mentioning <code>Jet.ArrowFunctionBody</code>: <code>Tests/UI/one_arrow_function_body.stderr</code>.</p>
+<pre class="diag">Error: Jet.ArrowFunctionBody: This named function body follows an arrow instead of braces.
+  --&gt; Tests/UI/one_arrow_function_body.jet:1:31
     |
- 15 | fn bad() bank.Account {
-    |                       ^
- Why: The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
- Fix: Write `fn name(...) Type -&gt; { ... }`; keep `fn name(...) { ... }` bare for a unit result.
+  1 | double: fn(value: Int) -&gt; Int -&gt; value * 2
+    |                               ^^
+ Why: A named function has one arrow, `-&gt;` or `-[Effects]&gt;`, followed by its optional return type; the body always sits in braces: `name: fn(...) -&gt; Type { … }`.
+ Fix: Replace `-&gt; expr` with `{ expr }`; `jet fmt` applies this fix.
+More: jet-lang.dev/e/Jet.ArrowFunctionBody
+
+Error: Jet.ArrowFunctionBody: This named function body follows an arrow instead of braces.
+  --&gt; Tests/UI/one_arrow_function_body.jet:3:26
+    |
+  3 | load: fn() -[IO]&gt; String -&gt; &quot;data&quot;
+    |                          ^^
+ Why: A named function has one arrow, `-&gt;` or `-[Effects]&gt;`, followed by its optional return type; the body always sits in braces: `name: fn(...) -&gt; Type { … }`.
+ Fix: Replace `-&gt; expr` with `{ expr }`; `jet fmt` applies this fix.
+More: jet-lang.dev/e/Jet.ArrowFunctionBody
+
+Error: Jet.ArrowFunctionBody: This named function body follows an arrow instead of braces.
+  --&gt; Tests/UI/one_arrow_function_body.jet:5:20
+    |
+  5 | total: fn() -&gt; Int -&gt; {
+    |                    ^^
+ Why: A named function has one arrow, `-&gt;` or `-[Effects]&gt;`, followed by its optional return type; the body always sits in braces: `name: fn(...) -&gt; Type { … }`.
+ Fix: Replace `-&gt; expr` with `{ expr }`; `jet fmt` applies this fix.
 More: jet-lang.dev/e/Jet.ArrowFunctionBody
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

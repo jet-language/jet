@@ -1,8 +1,8 @@
-Error: Jet.ArrowFunctionBody: A braced callable with a non-unit success result needs `->` before its body.
-  --> Tests/UI/inline_module_return_type_mismatch.jet:15:23
+Error: Jet.ReturnTypeMismatch: This value is `vis2.bank.Account`, but `bad` returns bank.Account
+  --> Tests/UI/inline_module_return_type_mismatch.jet:15:36
     |
- 15 | fn bad() bank.Account {
-    |                       ^
- Why: The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
- Fix: Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` bare for a unit result.
-More: jet-lang.dev/e/Jet.ArrowFunctionBody
+ 15 | bad: fn() -> bank.Account { return vis2.bank.Account{balance: 1} }
+    |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `bad` declares bank.Account as its result, so the value it hands back must be bank.Account
+ Fix: Hand back a bank.Account value: convert this value to bank.Account, or return the value you meant
+More: jet-lang.dev/e/Jet.ReturnTypeMismatch
