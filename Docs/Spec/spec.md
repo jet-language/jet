@@ -1615,7 +1615,9 @@ are `U8` through `U64`, `IEEE<8, 23>` is `F32` and `IEEE<11, 52>` is `F64`,
 which is `Float`. A size and its name are one type, and reports use the
 name: a mismatch with `Unsigned<8>` says `U8`. Any other size, such as
 `Unsigned<24>`, is E0314; a narrower set of values is a range type such as
-`Int(0..127)`.
+`Int(0..127)`. The family names resolve like any other name: a program that
+declares or imports its own `Signed` means its own type wherever it writes
+`Signed<8>`.
 
 ## Closures and function values
 

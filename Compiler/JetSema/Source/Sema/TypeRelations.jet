@@ -38,7 +38,11 @@ use jet_foundation.[
     core_module_for_alias,
     core_root_type,
     core_type_modules,
+    foundation_family_size_list,
+    foundation_family_sizes,
+    foundation_family_type,
     foundation_named_type,
+    foundation_number_family,
     owned_trait,
     owned_trait_arithmetic,
     owned_trait_codec,
@@ -918,7 +922,7 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
                         // names its record type, which has no other name; an
                         // alias of one generic application (`Ints: Pair<Int>`,
                         // `Byte: Unsigned<8>`) names that application.
-                        if definition.type_params.len() == 0 && (definition.family_size || sema_registration_record_type(definition.target) || sema_registration_generic_application(definition.target)) {
+                        if definition.type_params.len() == 0 && (sema_registration_record_type(definition.target) || sema_registration_generic_application(definition.target)) {
                             return sema_type_resolve_declared_recursive(graph, definition.target, sema_registration_module_index(graph, graph.modules[row.module_index].nominals[row.row].symbol.module_identity) ?? -1, [TGenericParam]{})
                         }
                     }
@@ -1365,6 +1369,8 @@ sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, t
         .Apply(name, args) -> {
             if sema_type_written_name_unknown(graph, caller, name, generic_names) {
                 sema_unknown_generic_type_name(name, span, diagnostics)
+            } else if sema_type_family_size_refused(graph, caller, name, args, generic_names) == .Val(written) {
+                diagnostics.push(sema_error("E0314", span, "`{written}` is no size of the `{name}` family", "a number family has only its standard sizes: {foundation_family_size_list(name)}", "use a standard size, or a range type such as `Int(0..127)` for a narrower set of values"))
             }
             loop arg in args {
                 sema_type_unknown_written_names(graph, caller, arg, span, generic_names, diagnostics)
@@ -1536,6 +1542,7 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
             // (sema_registration_module_settled), so a cycle reported in its
             // module is never followed.
             if row == .Val(alias_row) {
+                if sema_type_number_family_at(graph, alias_row, rewritten) == .Val(sized) -> return sized
                 if graph.modules[alias_row.module_index].nominals[alias_row.row].kind == SemaRegistrationNominalKind.TypeAlias && rewritten.len() == graph.modules[alias_row.module_index].nominals[alias_row.row].generic_params.len() && sema_registration_module_settled(graph, alias_row.module_index) {
                     nominal: graph.modules[alias_row.module_index].nominals[alias_row.row]
                     item: sema_registration_nominal_source_item(nominal.source) ?? return Type.Apply{name: head, args: rewritten}
@@ -1576,6 +1583,38 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         .Map(key, key_span, value) -> if sema_type_is_scalar_resolved(key) && sema_type_is_scalar_resolved(value) -> ty else -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller, generic_params), key_span: key_span.copy(), value: sema_type_resolve_declared_recursive(graph, value, caller, generic_params)}
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
+}
+
+// D-CORE-NUMFAMILY1: a Core number family (`Signed`, `Unsigned`, `IEEE`,
+// declared once in core.prelude) applied to a standard size is that size's
+// type: `Unsigned<8>` is U8 and `IEEE<11, 52>` is F64. `row` is the nominal
+// the written head resolved to by ordinary lookup, so a type the caller
+// declares or imports under a family's name is its own and never a number.
+// None for any other head, and for a size the family does not have (E0314,
+// sema_type_family_size_refused).
+sema_type_number_family_at: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, args: [Type]) -> Type? Never! {
+    if !sema_type_number_family_row(graph, row) -> return None
+    sizes: foundation_family_sizes(args) ?? return None
+    foundation_family_type(graph.modules[row.module_index].nominals[row.row].symbol.name, sizes)
+}
+
+// Whether `row` is one of Core's number family declarations.
+sema_type_number_family_row: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> Bool Never! {
+    graph.modules[row.module_index].module_name == "core.prelude" && module_is_core(graph.modules[row.module_index].module_identity) && foundation_number_family(graph.modules[row.module_index].nominals[row.row].symbol.name)
+}
+
+// The written spelling of a number family application at a size the family
+// does not have (`Unsigned<24>`), for E0314. None when `name` is not Core's
+// family under the caller's lookup, or a size is not a number literal (the
+// family's own `Unsigned<bits>`).
+sema_type_family_size_refused: fn(graph: SemaRegistrationGraph, caller: Int, name: String, args: [Type], generic_names: [String]) -> String? {
+    if !foundation_number_family(name) || generic_names.contains(name) -> return None
+    sizes: foundation_family_sizes(args) ?? return None
+    resolved: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return None
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
+    if !sema_type_number_family_row(graph, row) || foundation_family_type(name, sizes) != None -> return None
+    written: loop size in sizes -> "{size}"
+    Val("{name}<{written.join(", ")}>")
 }
 
 // How a diagnostic names `written`, a type as its source spells it, when that
