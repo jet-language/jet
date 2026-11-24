@@ -19,6 +19,7 @@ use {
     files: core.files
     rt: jet.runtime.time
     db_rt: jet.runtime.db
+    files_rt: jet.runtime.files
 }
 
 // One durable queue. Source owns the storage/lease/receipt transactions;
@@ -141,9 +142,7 @@ queue: fn() -[DB, Env, FS, Rand, Time]> JobQueue ServiceError! {
             }
         }
     }
-    #Unsafe("create the lexical parent with the existing raw recursive mkdir kernel before SQLite open") {
-        core.files.__create_dir_all_raw(files.dirname(path)) ?? return Err(queue_mkdir_error(err))
-    }
+    files_rt.create_dir_all_raw(files.dirname(path)) ?? return Err(queue_mkdir_error(err))
     endpoint: core.service.__active_endpoint("{path}.authority") ?? return Err(err)
     service.__authority_validate(endpoint) ?? return Err(err)
     authority: core.service.__endpoint_authority(endpoint)

@@ -36,17 +36,17 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
     wire: Type.List{element: Type.List{element: Type.IntN{signed: false, bits: 8}}}
     result: Type.Result{ok: wire, err: Type.String}
     raw_host_key_fixture("core.http.client", "jet_http_build_resolve", "__build_resolve", [Type]{Type.String, Type.Int}, result, [Bool]{true, false}, [String]{"Net", "Time.Wait"})
-    read_members: [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__reader_line_bytes"}
+    read_members: [String]{"__reader_line_bytes"}
     loop member in read_members {
         row: core_call("core.files", member) ?? panic("file read leaf is registered")
         assert(row.effects == [String]{"FS.Read"})
     }
-    write_members: [String]{"__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal", "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close"}
+    write_members: [String]{"__writer_refusal", "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close"}
     loop member in write_members {
         row: core_call("core.files", member) ?? panic("file write leaf is registered")
         assert(row.effects == [String]{"FS.Write"})
     }
-    inspect_members: [String]{"__path_windows", "__atomic_pid", "__reader_path"}
+    inspect_members: [String]{"__path_windows", "__atomic_pid"}
     loop member in inspect_members {
         row: core_call("core.files", member) ?? panic("file inspection leaf is registered")
         assert(row.effects.len() == 0)

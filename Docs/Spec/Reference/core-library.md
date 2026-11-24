@@ -136,13 +136,16 @@ never escapes a raw operation. Ordinary Close first unloads any opened native
 library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
-The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
+The `jet.runtime.files.create_dir_all_raw` leaf calls the shared recursive
 directory-creation host operation without a second fault probe; source callers
 retain their own FS.Write preflight and the host's Write/path error context.
-Filesystem internal host calls use their canonical `core.files.__*` names
-directly. There is no second `__files7_*` alias layer: the Prelude's existing
-registry entries provide the raw host boundary until Jet runtime L7 replaces
-them at Rust cutover.
+Whole-file and positioned reads and writes, link reads, removal, copy, links,
+mode and owner changes, canonicalization, access checks, and the reader,
+writer, and map handle operations call their `jet.runtime.files` leaves
+directly. The remaining filesystem host calls use their canonical
+`core.files.__*` names. There is no second `__files7_*` alias layer: the
+Prelude's existing registry entries provide that raw host boundary until Jet
+runtime L7 replaces them at Rust cutover.
 The Rust verification tier single-homes filesystem syscall tails in
 `jet_std_fs_*_raw` functions. Native seed entry points retain their original
 fault probes and call those tails; Jet entry points can perform the same

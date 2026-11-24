@@ -55,7 +55,7 @@ JetcTemp: struct {
         close: fn(&&self) {
             // Best-effort cleanup: Close cannot fail, so a removal error is dropped.
             if self.path == .Val(path) {
-                core.files.__remove_raw(path).drop("temp removal at close is best-effort")
+                rt.remove_raw(path).drop("temp removal at close is best-effort")
             }
         }
     }
@@ -273,7 +273,7 @@ jetc_temp: fn(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
 jetc_stage: fn(parent: JetcParent) -> JetcTemp FileCryptoError! {
     stage := jetc_temp(parent, "jetc-stage")
     if stage.path == .Val(path) {
-        core.files.__remove_raw(path) ?? return Err(.DestinationIO)
+        rt.remove_raw(path) ?? return Err(.DestinationIO)
         stage.path = None
     }
     Ok(stage)
@@ -387,14 +387,14 @@ jetc_publish: fn(output: &JetcTemp, parent: JetcParent, operation: String) FileC
         output.file.fd = -1
         jetc_revalidate(parent)
         path: output.path ?? return Err(.DestinationIO)
-        if core.files.__hard_link_raw(path, parent.destination) == {
+        if rt.hard_link_raw(path, parent.destination) == {
             .Err(error) -> {
                 if error == .AlreadyExists(_) -> return Err(.DestinationExists)
                 return Err(.DestinationIO)
             }
             .Ok(_) -> {}
         }
-        core.files.__remove_raw(path) ?? return Err(.DestinationIO)
+        rt.remove_raw(path) ?? return Err(.DestinationIO)
         directory: jetc_fd(builtin.jetc_open_directory(parent.path), .DestinationIO)
         if builtin.jetc_fsync(directory.fd).value < 0 -> return Err(.DestinationIO)
         output.path = None
