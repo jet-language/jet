@@ -206,8 +206,11 @@ run: at a bare terminal the picker names it on stderr, and with
 Alt-?) it prints the line on stdout for the shell to put in its edit buffer.
 `--json` always gets the palette. Only `jet repl` starts the REPL: a line session that checks each
 input against the session so far, then builds and runs it after the earlier
-statements; `:help` lists its meta-commands. Raw-terminal keys, `--console`,
-`:rerun`, `:history` and `?name` docs for names the session did not define
+statements; `:help` lists its meta-commands. `?name` prints a name's docs: a
+session name's type, else the language catalog's page for a built-in name
+(`?List.filter`), else the declaration and `///` docs of a Core module member,
+named in full (`?core.math.sqrt`) or through a session import's alias
+(`?math.sqrt`). Raw-terminal keys, `--console`, `:rerun` and `:history`
 report E2104 until they are built (#6195). `jet eval CODE` runs CODE as the
 body of `run: fn`, as `jet -e CODE` does (below), and `jet eval --json <expression>`
 runs one REPL turn and prints its value in the status envelope. `?` is not a command: `jet ?` gets the
