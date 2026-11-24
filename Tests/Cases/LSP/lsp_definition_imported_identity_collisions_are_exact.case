@@ -1,34 +1,45 @@
-# Port of tests/lsp.rs:4280-4412; source bytes/order/assertions unchanged.
-# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+# Port of tests/lsp.rs:4280-4412 on current syntax. The loose files import
+# `scoring` under the alias `grades` and `util` by path. Both declare a
+# `letter`, and `run.jet` has a parameter of that name too. Definition,
+# references and prepareRename each pick the declaration the name resolves
+# to, never a same-spelled one.
 fixture: LSPDefinitionImportedIdentityCollisionsAreExact.fixture
 session lsp content-length: jet self lsp
 stderr: null
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/0.json
 recv lsp until $.id = 1
-stdout: ~ "definitionProvider" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use grades: scoring\\nuse \\\"util\\\"\\nrun: fn() {\\n    print(grades.letter(91))\\n    print(util.letter(91))\\n}\\nlocal: fn(letter: Int) {\\n    print(letter)\\n}\\n\"}}}"
+json: stdout doc $.result.capabilities.definitionProvider = true
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/1.json
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/2.json
 recv lsp
-stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/scoring.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"letter: fn(score: Int) -> String { \\\"A\\\" }\\n\"}}}"
-recv lsp
-stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/util.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"letter: fn(score: Int) -> String { \\\"unrelated\\\" }\\n\"}}}"
-recv lsp
-stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19}}}"
+json: stdout doc $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics #= 0
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/3.json
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/4.json
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/5.json
 recv lsp until $.id = 2
-json: stdout doc $.result.uri = "file://{work}/scoring.jet" # original literal oracle
-json: stdout doc $.result.range = {"start":{"line":0,"character":3},"end":{"line":0,"character":9}} # original literal oracle
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":4,\"character\":17}}}"
+json: stdout doc $.result.uri = "file://{work}/scoring.jet"
+json: stdout doc $.result.range = {"start":{"line":0,"character":0},"end":{"line":0,"character":6}}
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/6.json
 recv lsp until $.id = 3
-json: stdout doc $.result.uri = "file://{work}/util.jet" # original literal oracle
-json: stdout doc $.result.range = {"start":{"line":0,"character":3},"end":{"line":0,"character":9}} # original literal oracle
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":7,\"character\":12}}}"
+json: stdout doc $.result.uri = "file://{work}/util.jet"
+json: stdout doc $.result.range = {"start":{"line":0,"character":0},"end":{"line":0,"character":6}}
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/7.json
 recv lsp until $.id = 4
-json: stdout doc $.result.uri = "file://{work}/run.jet" # original literal oracle
-json: stdout doc $.result.range = {"start":{"line":6,"character":9},"end":{"line":6,"character":15}} # original literal oracle
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+json: stdout doc $.result.uri = "file://{work}/run.jet"
+json: stdout doc $.result.range = {"start":{"line":10,"character":10},"end":{"line":10,"character":16}}
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/8.json
+recv lsp until $.id = 5
+json: stdout doc $.result #= 2
+json: stdout doc $.result[0].uri = "file://{work}/scoring.jet"
+json: stdout doc $.result[0].range = {"start":{"line":0,"character":0},"end":{"line":0,"character":6}}
+json: stdout doc $.result[1].uri = "file://{work}/run.jet"
+json: stdout doc $.result[1].range = {"start":{"line":6,"character":17},"end":{"line":6,"character":23}}
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/9.json
+recv lsp until $.id = 6
+json: stdout doc $.result.placeholder = "letter"
+json: stdout doc $.result.range = {"start":{"line":7,"character":15},"end":{"line":7,"character":21}}
+send lsp: Messages/LSPDefinitionImportedIdentityCollisionsAreExact/10.json
 recv lsp until $.id = 99
 close lsp
 exit: 0
