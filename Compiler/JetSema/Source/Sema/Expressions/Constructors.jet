@@ -2969,10 +2969,14 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             }
         }
         // A scalar head reached through a type parameter (`T{ value }` in a
-        // generic module body, `T` = Int): the parser read `{ value }` as a
-        // field shorthand before types were known; it is the one-expression body.
+        // generic module body, `T` = Int) or a size name the file also binds
+        // elsewhere (`fn<U32>` in another function, parser_bound_size_rows):
+        // the parser read `{ value }` as a field shorthand before types were
+        // known; it is the one-expression body, under the overflow word
+        // written around this literal (`checked(U32{value})` stays `U32?`).
         .Fields(fields) -> {
             if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) {
+                context.overflow_word = word
                 // copy: `fields` is a payload of read parameter `body`, which keeps the original
                 return sema_expression_typed_literal(head, TypedLitBody.Value{value: fields[0].value.copy()}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             }

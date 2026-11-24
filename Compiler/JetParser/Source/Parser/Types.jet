@@ -485,8 +485,10 @@ parser_named_type: fn(state: &JetParserState, name: String) -> Type Never! {
 // (`U8: struct {…}`, read as `struct U8` once its colon head is rotated),
 // imported (`use mod.[U8]`, `use U8: mod.Byte`) or taken as a type parameter
 // (`fn<U8>`, `Name<U8>: …`). Core's own alias line (`U8: Unsigned<8>`)
-// binds nothing new. A wider answer than the file's own bindings only leaves
-// a size name for Sema, which resolves it through the same alias.
+// binds nothing new, and neither does a map type's key (`[U8: Int]`), whose
+// colon follows the size name too. A wider answer than the file's own
+// bindings only leaves a size name for Sema, which resolves it through the
+// same alias.
 parser_bound_size_rows: fn(tokens: [Token], tables: TokenTables) -> Int Never! {
     bound := 0
     ids := [Int]{}
@@ -518,7 +520,7 @@ parser_bound_size_rows: fn(tokens: [Token], tables: TokenTables) -> Int Never! {
         before: parser_size_code_before(tokens, index)
         after_at: parser_size_code_after(tokens, index)
         after: if after_at < tokens.len() -> tokens[after_at].kind else -> TOKEN_EOF
-        declared: after == TOKEN_COLON && !parser_size_alias_line(tokens, tables, after_at, FOUNDATION_SIZE_ALIASES[rows[found]].family, FOUNDATION_SIZE_ALIASES[rows[found]].sizes)
+        declared: after == TOKEN_COLON && before != TOKEN_LBRACKET && !parser_size_alias_line(tokens, tables, after_at, FOUNDATION_SIZE_ALIASES[rows[found]].family, FOUNDATION_SIZE_ALIASES[rows[found]].sizes)
         if declared || parser_size_declaring(before) || (member_list && (before == TOKEN_LBRACKET || before == TOKEN_COMMA)) {
             bound = bound | (1 << rows[found])
         }
@@ -628,6 +630,8 @@ parser_size_test_param_type: fn(source: String, name: String) -> Type {
     parameter: "f: fn<U16>(x: U16) -> U16 {{ x }}\n\ng: fn(x: U8) -> U8 {{ x }}\n"
     assert(parser_size_test_param_type(parameter, "f") == Type.Named{name: "U16"})
     assert(parser_size_test_param_type(parameter, "g") == Type.IntN{signed: false, bits: 8})
+    keyed: "Rows: struct {{\n    at: [U32:Int],\n}}\n\nf: fn(x: U32) -> U32 {{ x }}\n"
+    assert(parser_size_test_param_type(keyed, "f") == Type.IntN{signed: false, bits: 32})
 }
 
 parser_parse_collection_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
