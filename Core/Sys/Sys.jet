@@ -15,6 +15,7 @@ use {
     files: core.files
     process_api: core.process
     rt: jet.runtime.encoding
+    sys_rt: jet.runtime.sys
     host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
     shared_bounds.[shared_range_valid, shared_word_valid, shared_word_fits]
@@ -67,7 +68,7 @@ set: fn(name: String, value: String) -[Env]> Never! {
         .Ok(_) -> {}
     }
     if has_nul(value) -> panic("core.sys.set: {EnvError.InvalidValue}")
-    if core.sys.__env_set(name, value) == {
+    if sys_rt.env_set(name, value) == {
         .Err(error) -> { panic("core.sys.set: {error}") }
         .Ok(_) -> {}
     }
@@ -75,7 +76,7 @@ set: fn(name: String, value: String) -[Env]> Never! {
 
 unset: fn(name: String) -[Env]> Bool EnvError! {
     validate_env_name(name)
-    core.sys.__env_remove(name)
+    sys_rt.env_remove(name)
 }
 
 vars: fn() -[Env]> [String] EnvError! { entry_names(__env_snapshot()) }
@@ -386,11 +387,11 @@ account_home: fn() -[Env, FS.Read]> String? Never! {
     Val((user_by_id(getuid()) ?? return None).home)
 }
 
-name: fn() -[Env]> String Never! { core.sys.__name_os() }
+name: fn() -[Env]> String Never! { sys_rt.name() }
 
-family: fn() -[Env]> String Never! { core.sys.__family_os() }
+family: fn() -[Env]> String Never! { sys_rt.family() }
 
-arch: fn() -[Env]> String Never! { core.sys.__arch_os() }
+arch: fn() -[Env]> String Never! { sys_rt.arch() }
 
 temp_dir: fn() -[Env]> String Never! {
     tmp: get("TMPDIR")
@@ -981,7 +982,7 @@ env_digit: fn(byte: U8) -> Bool { byte >= (U8{48}) && byte <= (U8{57}) }
 
 pid: fn() -[Env]> Int Never! { getpid() }
 
-getpid: fn() -[Env]> Int Never! { core.sys.__pid_os() }
+getpid: fn() -[Env]> Int Never! { sys_rt.pid() }
 
 cpu_count: fn() -[Env]> Int Never! {
     count: core.sys.__cpu_count() ?? 1
@@ -1482,7 +1483,7 @@ utime: fn(path: String, atime: Int, mtime: Int) -[FS, Env]> IOError! {
     call_unit(core.sys.__utime(path, atime, mtime), "utime", .Write, Val(path))
 }
 
-sync: fn() -[FS, Env]> Never! { core.sys.__sync_os() }
+sync: fn() -[FS, Env]> Never! { sys_rt.sync() }
 
 #Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary")
 stop: fn(code: Int) -[Env, Exec]> Never! { process_api.exit(code) }
@@ -1502,7 +1503,7 @@ pipe: fn() -[FS, Env]> [Int] IOError! {
 }
 
 #Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call")
-close_fd: fn(fd: Int) -[FS, Env]> Never! { core.sys.__close_fd_os(fd) }
+close_fd: fn(fd: Int) -[FS, Env]> Never! { sys_rt.close_fd(fd) }
 
 // An owned operating-system descriptor, closed exactly once when its owner
 // drops it. Descriptors arrive from `net.unix_receive`,
@@ -1515,33 +1516,33 @@ Fd: struct {
     priv token: Int,
 
     impl Close {
-        close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
+        close: fn(&&self) { sys_rt.fd_close(self.token) }
     }
 
     // At most `max` bytes, 1 B to 16 MiB, from byte `offset` of the file
     // (fewer at its end; none past it). Both bounds are in the types, so a
     // runtime value comes through `Int(lo..hi).from_int(n)?` first.
     read_at: fn(self, offset: Int(0..9223372036854775807), max: Int(1..16777216)) -[Env]> [U8] IOError! {
-        core.sys.__fd_read_at_raw(self.token, offset, max)
+        sys_rt.fd_read_at(self.token, offset, max)
     }
 
     // The size in bytes of the file behind the descriptor.
-    size: fn(self) -[Env]> Int IOError! { core.sys.__fd_size_raw(self.token) }
+    size: fn(self) -[Env]> Int IOError! { sys_rt.fd_size(self.token) }
 
     // A second descriptor for the same open file, owned on its own.
     duplicate: fn(self) -[Env]> Fd IOError! {
-        Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)})
+        Ok(Fd{token: sys_rt.fd_duplicate(self.token)})
     }
 
     // The foreground process group of the terminal the descriptor is open
     // on. A descriptor that is no terminal fails (ENOTTY).
-    process_group: fn(self) -[Env]> Int IOError! { core.sys.__fd_process_group_raw(self.token) }
+    process_group: fn(self) -[Env]> Int IOError! { sys_rt.fd_process_group(self.token) }
 
     // Makes `group`, a process group of this terminal's session, the
     // terminal's foreground group (job control: a shell hands it the
     // terminal, then takes it back).
     set_process_group: fn(self, group: Int(1..2147483647)) -[Env]> IOError! {
-        core.sys.__fd_set_process_group_raw(self.token, group)
+        sys_rt.fd_set_process_group(self.token, group)
     }
 
     // At most `max` bytes, 1 B to 16 MiB, read from a pipe or socket once
@@ -1549,7 +1550,7 @@ Fd: struct {
     // limit). Empty means the writer closed its end; a wait that runs out
     // fails with `.TimedOut`.
     read: fn(self, max: Int(1..16777216), timeout_ns: Int) -[Env]> [U8] IOError! {
-        core.sys.__fd_read_raw(self.token, max, timeout_ns)
+        sys_rt.fd_read(self.token, max, timeout_ns)
     }
 
     // Writes the first of `bytes`, at most 4096, once a pipe or socket has
@@ -1558,14 +1559,14 @@ Fd: struct {
     // wait that runs out fails with `.TimedOut`, a closed reader with
     // `.Closed`.
     write: fn(self, bytes: [U8], timeout_ns: Int) -[Env]> Int IOError! {
-        core.sys.__fd_write_raw(self.token, bytes, timeout_ns)
+        sys_rt.fd_write(self.token, bytes, timeout_ns)
     }
 }
 
 // A new pipe: its read end, then its write end. Both block, so either can
 // go to another process; `Fd.read` and `Fd.write` wait with a timeout.
 open_pipe: fn() -[Env]> [Fd] IOError! {
-    packed: core.sys.__fd_pipe_raw()
+    packed: sys_rt.fd_pipe()
     Ok([Fd]{Fd{token: packed_word(packed, 0)}, Fd{token: packed_word(packed, 1)}})
 }
 
@@ -1573,7 +1574,7 @@ open_pipe: fn() -[Env]> [Fd] IOError! {
 // what the other writes. Both block, so either can go to another process;
 // `Fd.read` and `Fd.write` wait with a timeout.
 open_socket_pair: fn() -[Env]> [Fd] IOError! {
-    packed: core.sys.__fd_socket_pair_raw()
+    packed: sys_rt.fd_socket_pair()
     Ok([Fd]{Fd{token: packed_word(packed, 0)}, Fd{token: packed_word(packed, 1)}})
 }
 
@@ -1593,7 +1594,7 @@ PseudoTerminal: struct {
 // can claim it first. Neither end becomes this process's controlling
 // terminal.
 open_pseudoterminal: fn() -[Env]> PseudoTerminal IOError! {
-    packed: core.sys.__fd_pseudoterminal_raw()
+    packed: sys_rt.fd_pseudoterminal()
     Ok(PseudoTerminal{primary: Fd{token: packed_word(packed, 0)}, secondary: Fd{token: packed_word(packed, 1)}, path: "/dev/pts/{packed_word(packed, 2)}"})
 }
 
@@ -1614,7 +1615,7 @@ SharedMemory: struct {
     priv size: Int,
 
     impl Close {
-        close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
+        close: fn(&&self) { sys_rt.fd_close(self.token) }
     }
 
     len: fn(self) -> Int { self.size }
@@ -1625,7 +1626,7 @@ SharedMemory: struct {
         if !shared_range_valid(self, offset, count) {
             return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         }
-        core.sys.__shared_write_raw(self.token, offset, bytes)
+        sys_rt.shared_write(self.token, offset, bytes)
     }
 
     // `count` bytes from byte `offset`.
@@ -1633,7 +1634,7 @@ SharedMemory: struct {
         if !shared_range_valid(self, offset, count) {
             return Err(syscall_input(.Read, None, "shared memory read is out of bounds"))
         }
-        core.sys.__shared_read_raw(self.token, offset, count)
+        sys_rt.shared_read(self.token, offset, count)
     }
 
     // Copies the rectangle at (`x`, `y`), `width` by `height` pixels, of an
@@ -1660,7 +1661,7 @@ SharedMemory: struct {
             return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         }
         order: if format == .XRGB8888 -> 0 else -> 1
-        core.sys.__shared_write_pixels_raw(self.token, offset, rgba, row, x, y, width, height, order)
+        sys_rt.shared_write_pixels(self.token, offset, rgba, row, x, y, width, height, order)
     }
 
     // Stores `count` little-endian copies of the 32-bit `value` from byte
@@ -1670,7 +1671,7 @@ SharedMemory: struct {
         if !shared_range_valid(self, offset, bytes) {
             return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
         }
-        core.sys.__shared_fill_raw(self.token, offset, count, value)
+        sys_rt.shared_fill(self.token, offset, count, value)
     }
 
     // The signed 64-bit word at byte `offset`, read atomically. A word
@@ -1684,7 +1685,7 @@ SharedMemory: struct {
         if !shared_word_valid(self, offset) {
             return Err(syscall_input(.Read, None, "a shared word is 8 aligned bytes inside the memory"))
         }
-        core.sys.__shared_load_raw(self.token, offset)
+        sys_rt.shared_load(self.token, offset)
     }
 
     // Stores `value` atomically into the word at byte `offset`.
@@ -1695,7 +1696,7 @@ SharedMemory: struct {
         if !shared_word_fits(value) {
             return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
         }
-        core.sys.__shared_store_raw(self.token, offset, value)
+        sys_rt.shared_store(self.token, offset, value)
     }
 
     // Atomically replaces the word at byte `offset` with `replacement` if it
@@ -1707,13 +1708,13 @@ SharedMemory: struct {
         if !shared_word_fits(expected) || !shared_word_fits(replacement) {
             return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
         }
-        swapped: core.sys.__shared_compare_exchange_raw(self.token, offset, expected, replacement)
+        swapped: sys_rt.shared_compare_exchange(self.token, offset, expected, replacement)
         Ok(swapped == 1)
     }
 
     // A new descriptor for this memory, to pass to another process.
     descriptor: fn(self) -[Env]> Fd IOError! {
-        Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)})
+        Ok(Fd{token: sys_rt.fd_duplicate(self.token)})
     }
 }
 
@@ -1723,7 +1724,7 @@ SHARED_MEMORY_MAX: 1073741824
 
 // `size` zeroed bytes of shared memory, 1 B to 1 GiB.
 shared_memory: fn(size: Int(1..1073741824)) -[Env]> SharedMemory IOError! {
-    Ok(SharedMemory{token: core.sys.__shared_create_raw(size), size: size})
+    Ok(SharedMemory{token: sys_rt.shared_create(size), size: size})
 }
 
 // How SharedMemory bounds its accesses: not part of the sys surface. Offsets
