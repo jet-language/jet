@@ -335,7 +335,7 @@ jet_driver_core_whole_parse: fn(parsed: ^^ParseResult, dropped: ^^[Item], droppe
     next_dropped := 0
     loop item in whole.program.items.move() {
         loop next_dropped < dropped_at.len() && dropped_at[next_dropped] == items.len() {
-            items.push(left_out.pop() ?? panic("a whole Core parse lost an item it left out"))
+            items.push(left_out.pop() ?? break)
             next_dropped += 1
         }
         items.push(item)

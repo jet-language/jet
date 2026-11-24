@@ -1052,9 +1052,8 @@ IRMergePart: struct {
 // moves into its task's capture instead: the thread owns it alone and drops
 // what the merge does not keep there.
 ir_merge_rewrite_parts: fn(lists: ^[[IRFunction]], sides: [IRMergeSide], ids: ^[[Int]], recursive: [Bool], stop_points: Bool) -> [[IRMergeTaken]] Never! {
-    at: lists.len() - 1
-    if at < 0 -> return [[IRMergeTaken]]{}
-    functions := lists.pop() ?? panic("a nonempty part function list failed to pop")
+    functions := lists.pop() ?? return [[IRMergeTaken]]{}
+    at: lists.len()
     part_ids := ids.pop() ?? panic("a nonempty part id list failed to pop")
     if at == 0 {
         return [[IRMergeTaken]]{ir_merge_rewrite_part(functions.move(), sides[0], part_ids.move(), recursive, stop_points)}

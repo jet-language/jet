@@ -201,18 +201,15 @@ jet_driver_comptime_diagnostics_add: fn(diagnostics: ^[Diagnostic], incoming: [D
     }
     earlier := compiler_take_rows<Diagnostic>(diagnostics)
     merged := [Diagnostic]{}
-    row := earlier.len()
     loop {
-        at := head[row]
+        // The added rows after the rows `earlier` still holds, then the last
+        // of those; once `earlier` is empty the merge is done.
+        at := head[earlier.len()]
         loop at >= 0 {
             merged.push(incoming[at].copy())
             at = link[at]
         }
-        if row == 0 -> break
-        row -= 1
-        // Unreachable: `row` counts down from `earlier.len()` and this pop runs
-        // once per step, so it pops exactly the rows `earlier` holds.
-        merged.push(earlier.pop() ?? panic("a diagnostic row failed to pop"))
+        merged.push(earlier.pop() ?? break)
     }
     merged.reverse()
     diagnostics = merged.move()

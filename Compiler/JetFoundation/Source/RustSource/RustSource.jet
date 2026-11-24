@@ -255,8 +255,7 @@ rust_source_brackets: fn(code: [U8]) -> [Int] Never! {
     loop index in 0..<code.len() {
         byte: rust_source_byte(code, index)
         if byte == 40 || byte == 91 || byte == 123 -> stack.push(index)
-        if (byte == 41 || byte == 93 || byte == 125) && stack.len() > 0 {
-            open: stack.pop() ?? panic("nonempty bracket stack")
+        if (byte == 41 || byte == 93 || byte == 125) && stack.pop() == .Val(open) {
             closes[open] = index
         }
     }

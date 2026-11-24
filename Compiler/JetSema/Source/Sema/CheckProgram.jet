@@ -5667,13 +5667,11 @@ sema_script_entry: fn(program: ^Program) {
     // `statements` and `locals` are each in source order: take the later of
     // the two tails into `order`, which then pops in source order.
     order := [Stmt]{}
-    loop statements.len() > 0 || locals.len() > 0 {
+    loop {
         local_last: locals.len() > 0 && (statements.len() == 0 || sema_compiler_index_stmt_span(locals[locals.len() - 1]).start > sema_compiler_index_stmt_span(statements[statements.len() - 1]).start)
-        if local_last {
-            order.push(locals.pop() ?? panic("a nonempty local list failed to pop"))
-            next
-        }
-        order.push(statements.pop() ?? panic("a nonempty statement list failed to pop"))
+        // With both lists empty `statements` pops nothing, which ends it.
+        taken: if local_last -> locals.pop() else -> statements.pop()
+        order.push(taken ?? break)
     }
     start: sema_compiler_index_stmt_span(order[order.len() - 1]).start
     end: sema_compiler_index_stmt_span(order[0]).end

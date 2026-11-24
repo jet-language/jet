@@ -329,8 +329,8 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
 // lex_with_terminators on the admitted compiler threads.
 lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, threads: CompilerThreads) -> LexedThreads {
     chunks := lexer_lex_source_chunks(source, config_surface, allow_reserved_identifiers, threads)
-    if chunks.len() == 1 {
-        only := chunks.pop() ?? panic("empty lexer chunks")
+    if chunks.len() == 1 && chunks.pop() == .Val(popped) {
+        only := popped
         diagnostics := only.diagnostics.move()
         compiler_transfer_rows<Diagnostic>(diagnostics, only.bidi_diagnostics)
         compiler_transfer_rows<Diagnostic>(diagnostics, only.terminator_diagnostics)

@@ -3919,9 +3919,9 @@ ir_error_spelling: fn(p: IRProgram, ty: Type) -> String Never! {
 // The declared name of the nominal type `name` (ir_error_spelling).
 ir_error_spelling_name: fn(p: IRProgram, name: String) -> String Never! {
     if ir_type_def(p, name) == .Val(row) -> return p.types[row].name
-    // The last segment, taken out of the split's own list.
-    parts := name.split(".").to_list()
-    parts.pop() ?? panic("a split name has no segment")
+    // The last dotted segment.
+    at: name.rfind(".")
+    if at < 0 -> name else -> name.slice(at + 1, name.len())
 }
 
 // The Err box the failure edge of `?` returns for the Err box `subject` under

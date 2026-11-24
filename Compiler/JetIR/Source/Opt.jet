@@ -1582,7 +1582,7 @@ ir_opt_heap_push: fn(heap: ^[Int], ranks: [Int], id: Int) Never! {
 
 ir_opt_heap_pop: fn(heap: ^[Int], ranks: [Int]) -> Int Never! {
     top: heap[0]
-    last: heap.pop() ?? panic("the IR optimizer claimed from an empty queue")
+    last: heap.pop() ?? return top
     if heap.len() == 0 -> return top
     heap[0] = last
     at := 0

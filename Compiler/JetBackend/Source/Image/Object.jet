@@ -469,8 +469,7 @@ X64ObjectTextFinalize: struct {
 // its item without copying) in parallel and returns them in original order.
 x64_object_text_finalize_items: fn(items: ^^[X64ObjectTextFinalize]) -> [X64ObjectTextRows] {
     owned := items.move()
-    if owned.len() == 0 -> return [X64ObjectTextRows]{}
-    head: owned.pop() ?? panic("lost finalize item")
+    head: owned.pop() ?? return [X64ObjectTextRows]{}
     if owned.len() == 0 -> return [X64ObjectTextRows]{x64_object_text_finalize_one(head)}
     out := [X64ObjectTextRows]{}
     task.group x64_object_text_finalize_threads {
@@ -1472,8 +1471,7 @@ x64_object_encode_relas: fn(relas: [X64ObjectRela]) -> [U8] Never! {
 x64_object_materialize_one: fn(section: ^^X64ObjectSection) -> [U8] Never! {
     s := section.move()
     if s.pieces.len() == 0 && s.relas.len() == 0 -> return s.bytes.move()
-    if s.pieces.len() == 1 && s.bytes.len() == 0 && s.relas.len() == 0 && s.pieces[0].at == 0 {
-        p: s.pieces.pop() ?? panic("lost section piece")
+    if s.pieces.len() == 1 && s.bytes.len() == 0 && s.relas.len() == 0 && s.pieces[0].at == 0 && s.pieces.pop() == .Val(p) {
         return p.bytes.move()
     }
     size: x64_object_section_size(s)
@@ -1485,8 +1483,7 @@ x64_object_materialize_one: fn(section: ^^X64ObjectSection) -> [U8] Never! {
 
 x64_object_materialize_parallel: fn(items: ^^[X64ObjectSection]) -> [[U8]] Never! {
     owned := items.move()
-    if owned.len() == 0 -> return [[U8]]{}
-    head: owned.pop() ?? panic("lost section item")
+    head: owned.pop() ?? return [[U8]]{}
     if owned.len() == 0 -> return [[U8]]{x64_object_materialize_one(head)}
     out := [[U8]]{}
     task.group x64_object_materialize_threads {
@@ -1722,8 +1719,7 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
                 split_sec_buf[sec_idx] = buf_idx
                 next
             }
-            if sec.pieces.len() == 1 && sec.bytes.len() == 0 && sec.relas.len() == 0 && sec.pieces[0].at == 0 {
-                p: sec.pieces.pop() ?? panic("lost section piece")
+            if sec.pieces.len() == 1 && sec.bytes.len() == 0 && sec.relas.len() == 0 && sec.pieces[0].at == 0 && sec.pieces.pop() == .Val(p) {
                 buf_idx: split_bufs.len()
                 split_bufs.push(p.bytes.move())
                 split_sec_buf[sec_idx] = buf_idx
