@@ -43,12 +43,14 @@ lsp_resources_read_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
 // The nearest folder at or above the first workspace folder (the server's
 // working folder when the client named none) that holds `env.jet`.
 lsp_environment_root: fn(server: LSPServer) -[FS, Env]> String? Never! {
-    // copy: the server keeps its workspace folders.
-    current := if server.workspace_roots.len() > 0 -> server.workspace_roots[0].copy() else -> lsp_resource_sys.current_dir() ?? return None
+    // The loop carries the candidate `env.jet` path, which it owns, so the
+    // server's workspace folders are only borrowed.
+    candidate := if server.workspace_roots.len() > 0 -> lsp_resource_files.join(server.workspace_roots[0], ENV_FILE) else -> lsp_resource_files.join(lsp_resource_sys.current_dir() ?? return None, ENV_FILE)
     loop {
-        if lsp_resource_files.is_file(lsp_resource_files.join(current, ENV_FILE)) -> return Val(current)
-        parent: lsp_resource_files.dirname(current)
-        if parent == "" || parent == current -> return None
-        current = parent
+        folder: lsp_resource_files.dirname(candidate)
+        if lsp_resource_files.is_file(candidate) -> return Val(folder)
+        parent: lsp_resource_files.dirname(folder)
+        if parent == "" || parent == folder -> return None
+        candidate = lsp_resource_files.join(parent, ENV_FILE)
     }
 }

@@ -1945,7 +1945,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCLI/Source/CLI/Host.jet",
-      "line": 2692,
+      "line": 2693,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -6453,7 +6453,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Data.jet",
-      "line": 275,
+      "line": 276,
       "column": 9,
       "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
@@ -6481,42 +6481,42 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/HTTP/Client.jet",
-      "line": 861,
+      "line": 862,
       "column": 5,
       "reason": "checked resolver octets and port transferred into the socket carrier"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 136,
+      "line": 137,
       "column": 5,
       "reason": "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 143,
+      "line": 144,
       "column": 5,
       "reason": "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 283,
+      "line": 284,
       "column": 13,
       "reason": "match the queue's existing raw wall-clock wait without advancing controlled scheduler time"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 604,
+      "line": 605,
       "column": 5,
       "reason": "publish already committed queue observations through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 622,
+      "line": 623,
       "column": 5,
       "reason": "publish source-projected queue status through the existing validated Devtools event/sink boundary"
     },
@@ -7132,7 +7132,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/TUI/TUI.jet",
-      "line": 108,
+      "line": 109,
       "column": 5,
       "reason": "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption"
     },
@@ -12082,7 +12082,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2779:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2789:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2891:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2692:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2693:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 205:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 213:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 245:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -12726,16 +12726,16 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/XMLEngine.jet | 279:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XMLEngine.jet | 3432:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/YAML.jet | 589:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Data.jet | 275:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| Core | Core/Files/Data.jet | 276:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Core | Core/Files/Files.jet | 666:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 759:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 161:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/HTTP/Client.jet | 861:5 | "checked resolver octets and port transferred into the socket carrier" |
-| Core | Core/Jobs/Jobs.jet | 136:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
-| Core | Core/Jobs/Jobs.jet | 143:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
-| Core | Core/Jobs/Jobs.jet | 283:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
-| Core | Core/Jobs/Jobs.jet | 604:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
-| Core | Core/Jobs/Jobs.jet | 622:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
+| Core | Core/HTTP/Client.jet | 862:5 | "checked resolver octets and port transferred into the socket carrier" |
+| Core | Core/Jobs/Jobs.jet | 137:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
+| Core | Core/Jobs/Jobs.jet | 144:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
+| Core | Core/Jobs/Jobs.jet | 284:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
+| Core | Core/Jobs/Jobs.jet | 605:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
+| Core | Core/Jobs/Jobs.jet | 623:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
 | Core | Core/Mem/Mem.jet | 41:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
 | Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
 | Core | Core/Mem/Mem.jet | 47:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
@@ -12823,7 +12823,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Sys/Sys.jet | 2078:1 | "posix kill: the caller owns or is entitled to signal the target process" |
 | Core | Core/Sys/Sys.jet | 2086:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
 | Core | Core/Sys/Sys.jet | 2091:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
-| Core | Core/TUI/TUI.jet | 108:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
+| Core | Core/TUI/TUI.jet | 109:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tasks/Tasks.jet | 115:1 | "`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once" |
 | Core | Core/Testing/Testing.jet | 1513:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
