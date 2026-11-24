@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    builtin: jet_builtins
     unicode: core.text
     parse_unicode_string: core.text.runtime.kernel_unicode_string
 }
@@ -811,13 +812,14 @@ ascii_case: fn(b: U8, upper: Bool) -> U8 {
 }
 
 // String's line and field methods (BuiltinMethods CoreSource rows): the
-// compiler checks `text.first_lines(n)` as `__string_first_lines(text, n)`.
+// compiler checks `text.first_lines(n)` as a call of the function that fills
+// the StringFirstLines role, `__string_first_lines(text, n)`.
 // Lines follow `lines()`: LF ends a line, one CR before it is dropped, and a
 // final LF adds no empty line.
 
 // `text.trim_newlines()`: `text` without its trailing LFs, as shell `$(…)`
 // drops them. Any other trailing whitespace stays.
-priv __string_trim_newlines: fn(text: String) -> String Never! {
+#Builtin.Role(.StringTrimNewlines) priv __string_trim_newlines: fn(text: String) -> String Never! {
     raw: text.bytes()
     end := raw.len()
     loop end > 0 && raw[end - 1] == (U8{10}) -> end -= 1
@@ -829,7 +831,7 @@ priv __string_trim_newlines: fn(text: String) -> String Never! {
 
 // `text.first_lines(n)`: the first `n` lines (`head -n`); every line when
 // there are fewer, none when `n` is not positive.
-priv __string_first_lines: fn(text: String, count: Int) -> [String] Never! {
+#Builtin.Role(.StringFirstLines) priv __string_first_lines: fn(text: String, count: Int) -> [String] Never! {
     lines: text.lines()
     kept := [String]{}
     loop at in 0..<lines.len() {
@@ -841,7 +843,7 @@ priv __string_first_lines: fn(text: String, count: Int) -> [String] Never! {
 
 // `text.last_lines(n)`: the last `n` lines (`tail -n`); every line when
 // there are fewer, none when `n` is not positive.
-priv __string_last_lines: fn(text: String, count: Int) -> [String] Never! {
+#Builtin.Role(.StringLastLines) priv __string_last_lines: fn(text: String, count: Int) -> [String] Never! {
     lines: text.lines()
     start := lines.len() - count
     if count <= 0 -> start = lines.len()
@@ -853,7 +855,7 @@ priv __string_last_lines: fn(text: String, count: Int) -> [String] Never! {
 
 // `text.has_line_prefix(prefix)`: whether some line starts with `prefix`
 // (`grep -q '^prefix'` with `prefix` read literally).
-priv __string_has_line_prefix: fn(text: String, prefix: String) -> Bool Never! {
+#Builtin.Role(.StringHasLinePrefix) priv __string_has_line_prefix: fn(text: String, prefix: String) -> Bool Never! {
     loop line in text.lines() {
         if line.starts_with(prefix) -> return true
     }
@@ -862,7 +864,7 @@ priv __string_has_line_prefix: fn(text: String, prefix: String) -> Bool Never! {
 
 // `text.tsv_records()`: each line split on every tab, so an empty field
 // stays empty and a line with no tab is one field.
-priv __string_tsv_records: fn(text: String) -> [[String]] Never! {
+#Builtin.Role(.StringTSVRecords) priv __string_tsv_records: fn(text: String) -> [[String]] Never! {
     records := [[String]]{}
     loop line in text.lines() -> records.push(line.split("\t").to_list())
     records
@@ -895,7 +897,7 @@ priv __string_tsv_records: fn(text: String) -> [[String]] Never! {
 // letter or `~`, then letters, digits and `~`) counts only to break a tie.
 // The empty string comes first, then `.`, `..` and the other names that start
 // with a dot. Versions that tie (`a01`, `a1`) fall back to byte order.
-priv __string_compare_version: fn(text: String, other: String) -> Ordering Never! {
+#Builtin.Role(.StringCompareVersion) priv __string_compare_version: fn(text: String, other: String) -> Ordering Never! {
     order: version_file_order(text.bytes(), other.bytes())
     if order != 0 -> return order <=> 0
     text <=> other

@@ -137,20 +137,28 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
         .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, lhs: receiver_value, rhs: typed[0]}
         .Atomic(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{operation: operation}, args: typed}
         // sema_call_try_value_method checks these rows as their source call.
-        .CoreSource(owner, member) -> panic("the CoreSource row `{owner}.{member}` is checked as its source call")
+        .CoreSource(owner, role) -> panic("the CoreSource row `{owner}` {role} is checked as its source call")
     }
 }
 
-// A CoreSource row (`text.matches(pattern)`, `text.first_lines(n)`) calls its
-// Core source helper with the receiver first, typed by the helper's declared
-// result; the loader loads the helper's module for the spelling.
-sema_value_method_core_source: fn(owner: String, member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    unavailable: sema_error("E0906", span, "the source `{owner}.{member}` declaration is unavailable", "this String method's body is the `{owner}` source helper", "restore the `{owner}` source module")
-    identity: sema_call_core_module_identity(environment, program, owner) ?? {
+// A CoreSource row (`text.matches(pattern)`, `text.first_lines(n)`) calls the
+// `owner` function that fills its role with the receiver first, typed by that
+// function's declared result; the loader loads `owner` for the spelling.
+sema_value_method_core_source: fn(owner: String, role: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+    unavailable: sema_error("E0906", span, "the `{owner}` function that fills the {role} role is unavailable", "this String method's body is that `{owner}` source helper", "restore the `{owner}` source module")
+    if sema_call_core_module_identity(environment, program, owner) == None {
         diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    target: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, true, diagnostics) ?? {
+    graph: program.registration_graph ?? {
+        diagnostics.push(unavailable)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    filler: sema_core_role_function(graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    target: sema_call_core_source_target(environment, program, filler.module_identity, filler.name, [Type]{}, span, true, diagnostics) ?? {
         diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -387,8 +395,8 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
             }
         }
     }
-    if row.lowering == .CoreSource(source_owner, member) {
-        return sema_value_method_core_source(source_owner, member, receiver_value, typed, span, expected, environment, program, context, diagnostics)
+    if row.lowering == .CoreSource(source_owner, role) {
+        return sema_value_method_core_source(source_owner, role, receiver_value, typed, span, expected, environment, program, context, diagnostics)
     }
     result := builtin_method_bind(row.result, receiver_value.ty)
     needs_line: if row.lowering == {

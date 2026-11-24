@@ -9,7 +9,10 @@ package: {
     }
 }
 
-use prefilter.[needle_absent]
+use {
+    builtin: jet_builtins
+    prefilter.[needle_absent]
+}
 
 // core.regex — one engine, compile-checked literals, fallible runtime.
 //
@@ -397,12 +400,12 @@ find: fn(pattern: Regex, text: String) -> String? Never! {
 // `text.match(pattern)` compile `pattern` with this engine and run
 // `is_match`/`find`; a pattern that does not compile fails with compile's
 // RegexError.
-priv __string_matches: fn(text: String, pattern: String) -> Bool RegexError! {
+#Builtin.Role(.StringMatches) priv __string_matches: fn(text: String, pattern: String) -> Bool RegexError! {
     compiled: compile_program(pattern, flags(false, false, false), false)
     is_match(compiled, text)
 }
 
-priv __string_match: fn(text: String, pattern: String) -> String? RegexError! {
+#Builtin.Role(.StringMatch) priv __string_match: fn(text: String, pattern: String) -> String? RegexError! {
     compiled: compile_program(pattern, flags(false, false, false), false)
     find(compiled, text)
 }
@@ -410,7 +413,7 @@ priv __string_match: fn(text: String, pattern: String) -> String? RegexError! {
 // `text.has_line(pattern)`: whether some line of `text` (the `lines()` rule)
 // matches `pattern`, so `^` and `$` anchor at each line. A quoted pattern at
 // the call is a checked `Regex` literal.
-priv __string_has_line: fn(text: String, pattern: Regex) -> Bool Never! {
+#Builtin.Role(.StringHasLine) priv __string_has_line: fn(text: String, pattern: Regex) -> Bool Never! {
     loop line in text.lines() {
         if is_match(pattern, line) -> return true
     }

@@ -729,12 +729,12 @@ JET_DRIVER_ROUTED_MODULES: [String]{"core.math"}
 // module, whose public members are called by their spelling): the compiler
 // may call a registry member by a name the program never spells
 // (`web.form(Model, …)` runs `core.web.forms.typed`). It holds too the source
-// targets a row names in place of its member, its BUILTIN_METHOD_ROWS
-// CoreSource helpers and its JET_DRIVER_SOURCE_ROUTES; jet_driver_core_route
-// adds, in a module that isn't routed, every `__` name. A routed module's
-// F32-width source is called by its member's spelling
-// (jet_driver_core_f32_member). A builder intrinsic needs no route: the role
-// marker it carries keeps it (jet_driver_reach_lazy_func).
+// targets a row names in place of its member and its
+// JET_DRIVER_SOURCE_ROUTES; jet_driver_core_route adds, in a module that isn't
+// routed, every `__` name. A routed module's F32-width source is called by
+// its member's spelling (jet_driver_core_f32_member). A builder intrinsic or
+// a BUILTIN_METHOD_ROWS CoreSource helper needs no route: the role marker it
+// carries keeps it (jet_driver_reach_lazy_func).
 JetDriverCoreRoutes: struct {
     module_name: String,
     routed: Bool,
@@ -757,11 +757,6 @@ jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
         owner: if parts.len() > 0 -> parts.join(".") else -> row.module_name
         if owner == module_name && (member != row.member || owner != row.module_name) {
             routes.names[member] = true
-        }
-    }
-    loop row in BUILTIN_METHOD_ROWS {
-        if row.lowering == .CoreSource(owner, member) {
-            if owner == module_name -> routes.names[member] = true
         }
     }
     prefix: "{module_name}."
