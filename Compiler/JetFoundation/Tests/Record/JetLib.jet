@@ -1,7 +1,7 @@
 // Moved PackageModel/Tests/JetLibStamp.jet: all 17 original tests. Identity
 // inputs are explicit native facts, not env-dependent test fallback.
 use jet_foundation.[
-    JetLibAccess,
+    AccessConvention,
     JetLibArtifact,
     JetLibExport,
     JetLibIdentity,
@@ -103,7 +103,7 @@ jetlib_test_artifact: fn(payload: [U8]) -> JetLibArtifact Never! from payload {
 }
 
 #Test("jetlib load metadata accepts generic export names and shapes") {
-    exports: [JetLibExport]{JetLibExport.with_conventions("advance", JetLibScalar.Bool, [JetLibAccess]{JetLibAccess.Write})}
+    exports: [JetLibExport]{JetLibExport.with_conventions("advance", JetLibScalar.Bool, [AccessConvention]{AccessConvention.Write})}
     stamp := JetLibStamp.for_library("loadable", exports, [String]{}, pkg_test_jetlib_identity())
     jetlib_test_seal(stamp, "native-shared-object".bytes())
     assert(pkg_jetlib_validate_load_metadata(stamp, pkg_test_jetlib_identity().target, false) == None)
@@ -198,12 +198,12 @@ jetlib_test_artifact: fn(payload: [U8]) -> JetLibArtifact Never! from payload {
     loop value in scalars {
         assert_eq(JetLibScalar.from_int(value.to_int()) ?? panic("scalar"), value)
     }
-    accesses: [JetLibAccess]{JetLibAccess.Read, JetLibAccess.Write, JetLibAccess.Move}
+    accesses: [AccessConvention]{AccessConvention.Read, AccessConvention.Write, AccessConvention.Move}
     loop value in accesses {
-        assert_eq(JetLibAccess.from_int(value.to_int()) ?? panic("access"), value)
+        assert_eq(AccessConvention.from_int(value.to_int()) ?? panic("access"), value)
     }
     assert(JetLibScalar.from_int(4) == .Err(_))
-    assert(JetLibAccess.from_int(3) == .Err(_))
+    assert(AccessConvention.from_int(3) == .Err(_))
     assert(JetLibScalar.from_int(256) == .Err(_))
     assert_eq(JetLibExport.new("9é.foo", JetLibScalar.Int, 0).symbol, "_9__foo")
     assert_eq(JetLibExport.new("", JetLibScalar.Int, 0).symbol, "_")
@@ -335,7 +335,7 @@ jetlib_test_wire_effects: fn(stamp: JetLibStamp, effects: [String]) -> [U8] Neve
     error2: pkg_jetlib_validate_load_metadata(stamp, "linux-x86_64", false) ?? panic("identity accepted")
     assert_eq(error2.reason, "Jet.InvalidLibraryOutput: .jetlib metadata has no valid compiler build")
     stamp.compiler_build = "build"
-    stamp.exports[0].conventions = [JetLibAccess]{}
+    stamp.exports[0].conventions = [AccessConvention]{}
     error3: pkg_jetlib_validate_load_metadata(stamp, "linux-x86_64", false) ?? panic("access accepted")
     assert_eq(error3.reason, "Jet.InvalidLibraryOutput: .jetlib export `advance` has invalid access-convention metadata")
 }
