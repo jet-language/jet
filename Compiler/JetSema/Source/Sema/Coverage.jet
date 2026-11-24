@@ -494,7 +494,7 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
     }
     // A union E0363 refused where it was written has no case list to cover:
     // its arms add no second report.
-    if subject_ty == .Union(members) && sema_coverage_union_refused(members, environment) -> return
+    if subject_ty == .Union(members) && sema_coverage_union_refused(members, environment, program) -> return
     // An `#Open` enum from another package may add new cases in future
     // releases, so external dispatches must include `else` (or a catch-all
     // head in a multi-head function).
@@ -1124,7 +1124,7 @@ sema_coverage_check_closed_else: fn(heads: [SemaCoverageElseHead]?, span: Span, 
     }
     subject_span: table[0].subject.span
     subject_ty: sema_pattern_unwrap_tags(table[0].subject.ty)
-    if subject_ty == .Union(members) && sema_coverage_union_refused(members, environment) -> return
+    if subject_ty == .Union(members) && sema_coverage_union_refused(members, environment, program) -> return
     if !sema_coverage_is_closed_set(subject_ty, environment, program) {
         return
     }
@@ -1174,13 +1174,13 @@ sema_coverage_check_closed_else: fn(heads: [SemaCoverageElseHead]?, span: Span, 
 // parameter, trait object or function member (sema_union_member_open), or a
 // named case another member's name takes (sema_type_union_case_conflicts).
 // A table over it then adds no E0307 or E0641 of its own.
-sema_coverage_union_refused: fn(members: [Type], environment: SemaScopeEnvironment) -> Bool {
+sema_coverage_union_refused: fn(members: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     generic_names: loop param in environment.generic_params -> param.name
     loop member in members {
         if sema_union_member_open(member, generic_names) -> return true
     }
     conflicts := [Diagnostic]{}
-    sema_type_union_case_conflicts(members, Span{start: 0, end: 0}, conflicts)
+    sema_type_union_case_conflicts_in(members, environment, program, Span{start: 0, end: 0}, conflicts)
     conflicts.len() > 0
 }
 
