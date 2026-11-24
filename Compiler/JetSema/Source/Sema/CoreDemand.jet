@@ -995,32 +995,27 @@ SemaCoreDemandPart: struct {
 // The names read bodies hold, in walk order (sema_core_demand_body_reads),
 // each declaration row and run-wide symbol at its first site in the read,
 // and each site that names one where a stand-in will not do.
-// The declared error conversions' keys wait in `conversions`, last first
-// once the read ends (sema_core_demand_reads_end), so demanding them in
-// walk order pops each.
 SemaCoreDemandReads: struct {
     names: [SemaCoreDemandRead],
-    conversions: [String],
     decls: [Int:Bool],
     symbols: [U32:Bool],
 }
 
-// One name a body holds: a declaration row, a run-wide symbol, or the next
-// key of a declared error conversion. `full`: named where a stand-in will
-// not do; `value`: named as a function value.
+// One name a body holds: a declaration row, a run-wide symbol, or the key
+// of a declared error conversion (`conversion`, empty for any other name).
+// `full`: named where a stand-in will not do; `value`: named as a function
+// value.
 SemaCoreDemandRead: struct {
     decl: DeclID?,
     symbol: SymbolID?,
-    conversion: Bool,
+    conversion: [String],
     full: Bool{false},
     value: Bool{false},
 }
 
 sema_core_demand_reads_new: fn() -> SemaCoreDemandReads Never! {
-    SemaCoreDemandReads{names: [SemaCoreDemandRead]{}, conversions: [String]{}, decls: [Int:Bool]{}, symbols: [U32:Bool]{}}
+    SemaCoreDemandReads{names: [SemaCoreDemandRead]{}, decls: [Int:Bool]{}, symbols: [U32:Bool]{}}
 }
-
-sema_core_demand_reads_end: fn(reads: ^SemaCoreDemandReads) Never! { reads.conversions.reverse() }
 
 // Reads the functions of `modules` from `read_functions` on, in consecutive
 // module parts, one per admitted thread, weighed by their body nodes. Every
@@ -1076,7 +1071,6 @@ sema_core_demand_read_part: fn(modules: [SemaGraphModuleResult], read_functions:
         read.counts.push(modules[module_index].functions.len() - from)
         read.ends.push(read.reads.names.len())
     }
-    sema_core_demand_reads_end(read.reads)
     read
 }
 
@@ -1095,9 +1089,7 @@ sema_core_demand_apply: fn(reads: ^SemaCoreDemandReads, start: Int, end: Int, de
                 sema_core_demand_symbol_key(symbols, id, names)
             }
         }
-        if reads.names[at].conversion {
-            names.full.push(reads.conversions.pop() ?? panic("a Core demand read lost a conversion key"))
-        }
+        if reads.names[at].conversion.len() > 0 -> compiler_transfer_rows<String>(names.full, reads.names[at].conversion)
     }
 }
 
@@ -1621,7 +1613,6 @@ sema_core_demand_take: fn(list: ^[String]) -> [String] Never! {
 sema_core_demand_body_names: fn(function: FnBody, decls: DeclTable, symbols: SymbolTable, names: ^SemaCoreDemandNames) Never! {
     reads := sema_core_demand_reads_new()
     sema_core_demand_body_reads(function, reads)
-    sema_core_demand_reads_end(reads)
     count: reads.names.len()
     sema_core_demand_apply(reads, 0, count, decls, symbols, names)
 }
@@ -1717,7 +1708,7 @@ sema_core_demand_read_decl: fn(id: DeclID, reads: ^SemaCoreDemandReads) Never! {
         return
     }
     reads.decls[index] = true
-    reads.names.push(SemaCoreDemandRead{decl: Val(id), symbol: None, conversion: false})
+    reads.names.push(SemaCoreDemandRead{decl: Val(id), symbol: None, conversion: [String]{}})
 }
 
 // Run-wide symbol `id`, unless read before; a body's own id names no Core
@@ -1727,7 +1718,7 @@ sema_core_demand_read_symbol: fn(id: SymbolID, reads: ^SemaCoreDemandReads) Neve
         return
     }
     reads.symbols[id.id] = true
-    reads.names.push(SemaCoreDemandRead{decl: None, symbol: Val(id), conversion: false})
+    reads.names.push(SemaCoreDemandRead{decl: None, symbol: Val(id), conversion: [String]{}})
 }
 
 // The functions a call's template items name, each where a stand-in will
@@ -1741,7 +1732,7 @@ sema_core_demand_read_items: fn(args: [BodyCallArg], reads: ^SemaCoreDemandReads
 // Declaration row `id` at a site that names it where a stand-in will not do
 // (`value`: as a function value), read at every such site.
 sema_core_demand_read_whole_decl: fn(id: DeclID, value: Bool, reads: ^SemaCoreDemandReads) Never! {
-    reads.names.push(SemaCoreDemandRead{decl: Val(id), symbol: None, conversion: false, full: !value, value: value})
+    reads.names.push(SemaCoreDemandRead{decl: Val(id), symbol: None, conversion: [String]{}, full: !value, value: value})
 }
 
 // Run-wide symbol `id` at a site that names it where a stand-in will not
@@ -1750,7 +1741,7 @@ sema_core_demand_read_whole_symbol: fn(id: SymbolID, reads: ^SemaCoreDemandReads
     if symbol_is_local(id) {
         return
     }
-    reads.names.push(SemaCoreDemandRead{decl: None, symbol: Val(id), conversion: false, full: true})
+    reads.names.push(SemaCoreDemandRead{decl: None, symbol: Val(id), conversion: [String]{}, full: true})
 }
 
 sema_core_demand_read_conversion: fn(conversion: TTryConvert, reads: ^SemaCoreDemandReads) Never! {
@@ -1760,6 +1751,5 @@ sema_core_demand_read_conversion: fn(conversion: TTryConvert, reads: ^SemaCoreDe
             return
         }
     }
-    reads.conversions.push(key.copy())
-    reads.names.push(SemaCoreDemandRead{decl: None, symbol: None, conversion: true})
+    reads.names.push(SemaCoreDemandRead{decl: None, symbol: None, conversion: [String]{key.copy()}})
 }

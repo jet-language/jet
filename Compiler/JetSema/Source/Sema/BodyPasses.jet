@@ -20,6 +20,7 @@ use jet_foundation.[
     TFuncKind,
     TGenericParam,
     Type,
+    compiler_apply_order,
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_limit,
@@ -1558,22 +1559,17 @@ sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Se
     loop s in 0..<schedule_order.len() {
         slot_of_orig[schedule_order[s]] = s
     }
-    reordered := [[SemaStreamModuleScan]]{}
-    loop _ in 0..<selected.len() -> reordered.push([SemaStreamModuleScan]{})
-    orig_pos := scanned.len()
-    loop scanned.len() > 0 {
-        orig_pos -= 1
-        row := scanned.pop() ?? break
-        reordered[slot_of_orig[orig_pos]].push(row.move())
-    }
+    // The scanned modules in stream slot order, popped first slot first.
+    compiler_apply_order<SemaStreamModuleScan>(scanned, schedule_order)
+    scanned.reverse()
     jobs := [[SemaBodyJob]]{}
     orders := [[Int]]{}
     tops := [Int]{}
     rows := [Int]{}
     module_indexes := [Int]{}
     can_finish_rows := [Bool]{}
-    loop s in 0..<reordered.len() {
-        row := reordered[s].pop() ?? panic("a reordered body-stream module was lost")
+    loop {
+        row := scanned.pop() ?? break
         jobs.push(row.jobs.move())
         orders.push(row.order.move())
         tops.push(row.tops)
