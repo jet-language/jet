@@ -1,0 +1,28 @@
+// A type named through its module reflects in a top-level `#run`: inline
+// module `geo`'s `Inner` and file module `shapes`' `Point` each give their
+// TypeInfo, named by the leaf their source writes.
+use shapes
+
+geo: module {
+    Inner: struct {
+        x: Int,
+        label: String,
+    }
+}
+
+describe: fn(info: TypeInfo) -> String {
+    fields: loop field in info.fields -> "{field.name}: {field.type.name}"
+    "{info.name}({fields.join(", ")})"
+}
+
+INNER: #run describe(geo.Inner.reflect())
+
+INNER_NAME: #run geo.Inner.reflect().name
+
+POINT: #run describe(shapes.Point.reflect())
+
+run: fn() {
+    print(INNER)
+    print(INNER_NAME)
+    print(POINT)
+}

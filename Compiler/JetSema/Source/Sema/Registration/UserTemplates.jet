@@ -146,10 +146,14 @@ sema_user_template_catalog: fn() -> TAppliedRuleCatalog Never! {
 }
 
 // The registered nominal's full reflection handle (Rust
-// `build_struct_type_info_with_path_and_vocabulary_and_engine`).
+// `build_struct_type_info_with_path_and_vocabulary_and_engine`). A template
+// pastes its `name` as the target type in items that land beside the
+// declaration, so a type lifted from an inline module keeps the name it is
+// declared under there, not the source leaf a program reflects it by.
 sema_user_template_type_info: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String) -> CtValue? {
     info: sema_comptime_reflection_type_info(graph, graph.modules[module_index].module_identity, owner, sema_user_template_catalog(), [Type]{}) ?? return None
-    sema_user_template_ct_value(info)
+    if sema_name_type_leaf(graph.modules[module_index].program.items, owner) == owner -> return sema_user_template_ct_value(info)
+    sema_user_template_ct_value(sema_comptime_reflection_with_field(info, "name", TComptimeValue.String{value: owner}))
 }
 
 // Rust `build_function_type_info`: a function rule sees the target's stable

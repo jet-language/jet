@@ -1139,9 +1139,12 @@ sema_call_static_source_owner: fn(receiver: Expr, method: String, owner_type_arg
         // A distinct type's base conversion (`pkg.ID.from_int(n)`,
         // `auth.AccountID.from_string(id)`) is no registered method;
         // sema_call_try_distinct_conversion builds it, for a distinct declared
-        // in Core as for one declared in a package.
+        // in Core as for one declared in a package. `module.Type.reflect()`
+        // is no registered method either: it reflects the type as the bare
+        // `Type.reflect()` does (sema_call_try_static_method).
         distinct: nominal.kind == SemaRegistrationNominalKind.Distinct
-        if !distinct && !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) {
+        reflected_path: method == "reflect" && receiver == .Field(_, _, _, _)
+        if !distinct && !reflected_path && !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) {
             return None
         }
         return Val(SemaStaticOwner{symbol: sema_resolved_symbol(graph, resolved), owner_type_args: args})

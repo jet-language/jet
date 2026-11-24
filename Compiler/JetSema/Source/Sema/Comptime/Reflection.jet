@@ -2888,7 +2888,7 @@ sema_comptime_reflection_struct_type_info: fn(
     }
     traits: sema_comptime_reflection_trait_contracts(registration, caller, registered_module.program, definition.name, definition.trait_impls, registered_module.module_path, identity, registry)
     sema_comptime_reflection_type_info_fields(
-        definition.name,
+        sema_name_type_leaf(registered_module.program.items, definition.name),
         sema_name_type_path(registered_module.module_path, registered_module.program.items, definition.name),
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, bindings),
@@ -2960,7 +2960,7 @@ sema_comptime_reflection_enum_type_info: fn(
     traits: sema_comptime_reflection_trait_contracts(registration, caller, registered_module.program, definition.name, definition.trait_impls, registered_module.module_path, identity, registry)
     transitions: sema_comptime_reflection_state_transitions(definition.name, definition.state, definition.methods)
     sema_comptime_reflection_type_info_fields(
-        definition.name,
+        sema_name_type_leaf(registered_module.program.items, definition.name),
         type_path,
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, bindings),
@@ -3001,7 +3001,7 @@ sema_comptime_reflection_distinct_type_info: fn(
     }
     traits: sema_comptime_reflection_trait_contracts(registration, caller, registered_module.program, definition.name, [TraitImplBlock]{}, registered_module.module_path, identity, registry)
     sema_comptime_reflection_type_info_fields(
-        definition.name,
+        sema_name_type_leaf(registered_module.program.items, definition.name),
         sema_name_type_path(registered_module.module_path, registered_module.program.items, definition.name),
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, [SemaInferenceBinding]{}),
