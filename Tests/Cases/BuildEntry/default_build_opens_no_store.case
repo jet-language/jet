@@ -1,0 +1,20 @@
+# Build reuse is off by default: a `jet build` whose package has a step opens
+# no build store and puts nothing in it, and an unchanged rebuild runs the step
+# again (Docs/Spec/Reference/cli.md). Only a build that reuses saved work opens
+# the store at `JET_STORE_DIR`.
+fixture: Fixtures/BuildTracesItsPlanAndSteps
+artifact: app
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step first: jet build --trace=first.json main.jet --allow=Exec,FS
+exit: 0
+file: mirror.txt = "one"
+file: first.json ~ "{\"name\":\"mirror\",\"cat\":\"build.step\",\"ph\":\"B\"" # the step ran
+file: store absent # the build opened no store
+step rebuild: jet build --trace=rebuild.json main.jet --allow=Exec,FS
+exit: 0
+file: mirror.txt = "one"
+file: rebuild.json ~ "{\"name\":\"mirror\",\"cat\":\"build.step\",\"ph\":\"B\"" # the unchanged step ran again
+file: store absent # and the rebuild opened none either

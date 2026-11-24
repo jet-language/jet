@@ -3240,7 +3240,8 @@ program: it runs, prints the same notice when its effect set changes, and is
 fully checked. A script is a standalone program wherever it lives, never a
 member of the package around it. `jet <file> [args...]` runs a file, and every word after the
 file is the program's, so an executable script runs as `./tool.jet args`.
-An unchanged script reruns its kept build without compiling.
+Every run compiles the script again, even when it is unchanged; no built
+program is kept between runs.
 
 ### Function and block ceilings
 

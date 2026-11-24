@@ -1,0 +1,36 @@
+# Caches are off by default: `jet run file.jet` and `jet file.jet` compile
+# every run (Docs/Spec/Reference/cli.md), and no kept program serves a rerun
+# of unchanged sources. Neither run reads or writes under the scripts
+# directory. Then the Core file the program reads is made unreadable, which
+# leaves its size, time and inode as they were: each form of the rerun
+# compiles again and stops on that file, where a kept program would have run.
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+requires: os:unix
+fixture: SecondRunCompilesAgainByDefault.fixture
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+step first: jet run greet.jet
+env: JET_TOOLCHAIN_ROOT={work}/tree
+exit: 0
+stdout: = "hello\n"
+file: cache/jet/scripts absent # the run kept nothing
+step rerun: jet greet.jet
+env: JET_TOOLCHAIN_ROOT={work}/tree
+exit: 0
+stdout: = "hello\n"
+file: cache/jet/scripts absent # the rerun kept nothing
+chmod: tree/Core/Time/Time.jet 000
+step run_compiles: jet run greet.jet
+env: JET_TOOLCHAIN_ROOT={work}/tree
+exit: nonzero
+stdout: = ""
+stderr: ~ "Time.jet" # the rerun of unchanged sources compiles and reads Core again
+step file_compiles: jet greet.jet
+env: JET_TOOLCHAIN_ROOT={work}/tree
+exit: nonzero
+stdout: = ""
+stderr: ~ "Time.jet" # so does the plain `jet file.jet` form
+file: cache/jet/scripts absent # no run kept anything
+chmod: tree/Core/Time/Time.jet 644
