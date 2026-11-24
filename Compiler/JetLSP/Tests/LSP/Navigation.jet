@@ -93,6 +93,10 @@ lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
     spaced: "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"position\":{{\"line\":5,\"character\":5}},\"newName\":\"a b\"}}"
     assert_eq(lsp_test_error_code(server, "textDocument/rename", spaced), -32602)
     assert_eq(lsp_test_error_code(server, "textDocument/prepareRename", lsp_test_at(LSP_TEST_MAIN_URI, 3, 0)), -32803)
+    // A language word says so by name.
+    word: lsp_test_field(lsp_test_response(server, "textDocument/prepareRename", lsp_test_at(LSP_TEST_MAIN_URI, 0, 5)), "error")
+    assert_eq(lsp_test_int(word, "code"), -32803)
+    assert_eq(lsp_test_text(word, "message"), "`fn` is Jet syntax, not a name you can rename")
 }
 
 #Test("signature help names the call's parameters and the active one") {

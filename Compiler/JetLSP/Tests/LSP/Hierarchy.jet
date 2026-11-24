@@ -1,5 +1,6 @@
 // The type hierarchy: a type's supertypes are the traits it implements, and a
-// trait's subtypes are the types that implement it.
+// trait's subtypes are the types that implement it. The call hierarchy: the
+// calls into a function, by caller, and the calls it makes, by callee.
 use {
     core.encoding.[Dyn]
     jet_foundation.[foundation_json_quote]
@@ -75,4 +76,57 @@ lsp_test_hierarchy_params: fn(item: Dyn, identity: Bool{true}) -> String Never! 
     assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/subtypes", lsp_test_hierarchy_params(label))), [String]{})
     // A function is no type.
     assert(lsp_test_result(server, "textDocument/prepareTypeHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, 7, 8)) == .Null, "a method has no type hierarchy")
+}
+
+LSP_TEST_CALLS_URI: "file:///w/calls.jet"
+
+// `add` on line 0 is called twice on line 5 by `twice` and once on line 9 by
+// `run`, which also calls `twice` (line 4).
+LSP_TEST_CALLS: `add: fn(left: Int, right: Int) -> Int {
+    left + right
+}
+
+twice: fn(value: Int) -> Int {
+    add(value, add(value, 0))
+}
+
+run: fn() -> Int {
+    twice(1) + add(2, 3)
+}
+`
+
+// Each group as `name=kind side ranges`, each range `line:start-end`.
+lsp_test_call_groups: fn(result: Dyn, side: String) -> [String] Never! {
+    groups := [String]{}
+    loop group in lsp_test_rows(result) {
+        item: lsp_test_field(group, side)
+        ranges := [String]{}
+        loop range in lsp_test_rows(lsp_test_field(group, "fromRanges")) {
+            start: lsp_test_field(range, "start")
+            ranges.push("{lsp_test_int(start, "line")}:{lsp_test_int(start, "character")}-{lsp_test_int(lsp_test_field(range, "end"), "character")}")
+        }
+        groups.push("{lsp_test_text(item, "name")}={lsp_test_int(item, "kind")} {ranges.join(" ")}")
+    }
+    groups
+}
+
+#Test("the call hierarchy groups a function's incoming calls by caller and its outgoing calls by callee") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_CALLS_URI, LSP_TEST_CALLS)
+    items: lsp_test_rows(lsp_test_result(server, "textDocument/prepareCallHierarchy", lsp_test_at(LSP_TEST_CALLS_URI, 0, 0)))
+    assert_eq(items.len(), 1)
+    add: items[0]
+    assert_eq(lsp_test_text(add, "name"), "add")
+    assert_eq(lsp_test_int(add, "kind"), 12)
+    incoming: lsp_test_result(server, "callHierarchy/incomingCalls", lsp_test_hierarchy_params(add))
+    assert_eq(lsp_test_call_groups(incoming, "from"), [String]{"twice=12 5:4-7 5:15-18", "run=12 9:15-18"})
+    // A reference to `twice` prepares the function it names.
+    twice: lsp_test_rows(lsp_test_result(server, "textDocument/prepareCallHierarchy", lsp_test_at(LSP_TEST_CALLS_URI, 9, 5)))[0]
+    assert_eq(lsp_test_text(twice, "name"), "twice")
+    assert_eq(lsp_test_call_groups(lsp_test_result(server, "callHierarchy/outgoingCalls", lsp_test_hierarchy_params(twice, identity: false)), "to"), [String]{"add=12 5:4-7 5:15-18"})
+    run: lsp_test_rows(lsp_test_result(server, "textDocument/prepareCallHierarchy", lsp_test_at(LSP_TEST_CALLS_URI, 8, 0)))[0]
+    assert_eq(lsp_test_call_groups(lsp_test_result(server, "callHierarchy/outgoingCalls", lsp_test_hierarchy_params(run)), "to"), [String]{"twice=12 9:4-9", "add=12 9:15-18"})
+    assert_eq(lsp_test_call_groups(lsp_test_result(server, "callHierarchy/incomingCalls", lsp_test_hierarchy_params(run)), "from"), [String]{})
+    // A parameter is no function.
+    assert(lsp_test_result(server, "textDocument/prepareCallHierarchy", lsp_test_at(LSP_TEST_CALLS_URI, 0, 13)) == .Null, "a parameter has no call hierarchy")
 }

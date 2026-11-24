@@ -145,14 +145,20 @@ lsp_producer_markdown: fn(producer: LSPProducer) -> String Never! {
 
 // A keyword under the cursor hovers with the language's own description.
 lsp_keyword_hover: fn(view: LSPView, offset: Int) -> String? Never! {
+    slot: lsp_keyword_symbol_at(view, offset) ?? return None
+    symbol: view.checked.symbols[slot]
+    Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+}
+
+// The slot in the checked symbols of the language word under the cursor.
+lsp_keyword_symbol_at: fn(view: LSPView, offset: Int) -> Int? Never! {
     loop token in view.lexed.tokens {
         if token.span.start > offset -> break
         if !lsp_span_holds(token.span, offset) || token.kind == TOKEN_IDENT -> next
         text: token_text(view.lexed.tables, token)
-        loop symbol in view.checked.symbols {
-            if symbol.kind == SemSymbolKind.Keyword && symbol.name == text {
-                return Val(lsp_hover_markdown(symbol.signature, symbol.summary))
-            }
+        loop slot in 0..<view.checked.symbols.len() {
+            symbol: view.checked.symbols[slot]
+            if symbol.kind == SemSymbolKind.Keyword && symbol.name == text -> return Val(slot)
         }
     }
     None
@@ -202,9 +208,17 @@ LSPRenameTarget: struct {
     span: Span,
 }
 
+// No declaration is under the cursor; a language word there says so by name.
+lsp_rename_nothing: fn(at: LSPAt) -> LSPRPCError Never! {
+    if lsp_keyword_symbol_at(at.view, at.offset) == .Val(slot) {
+        return LSPRPCError{code: -32803, message: "`{at.view.checked.symbols[slot].name}` is Jet syntax, not a name you can rename"}
+    }
+    LSPRPCError{code: -32803, message: "no declaration is under the cursor"}
+}
+
 lsp_rename_target: fn(server: LSPServer, at: LSPAt) -> LSPRenameTarget LSPRPCError! {
     index: at.view.checked.index ?? return Err(LSPRPCError{code: -32803, message: "the document has not been checked"})
-    target: lsp_target_at(at.view, at.offset) ?? return Err(LSPRPCError{code: -32803, message: "no declaration is under the cursor"})
+    target: lsp_target_at(at.view, at.offset) ?? return Err(lsp_rename_nothing(at))
     def: lsp_definition_at(index, target) ?? return Err(LSPRPCError{code: -32803, message: "only a declaration in Jet source can be renamed"})
     module_index: lsp_module_index(at.view.checked, def.module_path) ?? return Err(LSPRPCError{code: -32803, message: "`{def.name}` is declared outside the checked modules"})
     if !lsp_path_is_open(server, at.view.checked.modules[module_index].physical_path) {
