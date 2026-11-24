@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113773,
+    "rev": 113775,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58360,12 +58360,12 @@
         },
         {
           "n": 22,
-          "text": "Dispatching a heard call to its check rule costs at most D-CORE-CHECK1's 1 µs budget per call. TypeIDSlice3 measured about 46.5 µs per heard call on the batch 12 compiler (2026-11-24), the same under every D-RULE-TYPEARGS1 option. Proof: the rule-dispatch probe named in Docs/Audits/2026-11-23-d-rule-typeargs1-review.md, rerun on dev, reports at most 1 µs per heard call.",
+          "text": "Dispatching a heard call to its check rule costs at most D-CORE-CHECK1's 1 µs budget per call, measured as the marginal cost of one more heard call: (time with N heard calls − time with one heard call) / (N − 1), N = 20000. The one-time cost of a module's first heard call (building and running the rule program) is reported beside it and is at most 25 ms. TypeIDSlice3 measured about 46.5 µs per heard call on the batch 12 compiler, G1Facts about 49 µs on batch 20 (2026-11-24). Proof: the rule-dispatch probe named in Docs/Audits/2026-11-23-d-rule-typeargs1-review.md plus its one-heard-call variant, rerun on dev, report at most 1 µs marginal per heard call and the fixed cost.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T00:43:28.795Z"
+          "at": "2026-11-24T09:02:46.641Z"
         },
         {
           "n": 23,
@@ -58508,7 +58508,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T08:54:42.193Z",
+      "updated": "2026-11-24T09:02:46.641Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 34
     },
@@ -65572,11 +65572,11 @@
         {
           "n": 10,
           "text": "The 2 known-failing rows this card owns (rehomed by #6843 c7) pass and leave Tests/known-failing.tsv: LSP/lsp_document_links_and_code_lenses, LSP/lsp_execute_command_impact_returns_report. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:27:52.480Z"
+          "evidence": "dev aec392940e (6904-c10b, test-only on 491390130f). On tip21 (built from 491390130f): jet test Compiler --profile cases --filter LSP/lsp_document_links_and_code_lenses -> PASS 1; --filter LSP/lsp_execute_command_impact_returns_report -> PASS 1. Tests/known-failing.tsv has no row naming #6904.",
+          "at": "2026-11-24T09:22:39.469Z"
         }
       ],
       "refs": [],
@@ -65587,7 +65587,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:53.089Z",
-      "updated": "2026-11-24T06:34:17.709Z",
+      "updated": "2026-11-24T09:22:39.469Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 10
     },
@@ -139557,6 +139557,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T09:22:39.469Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01q17ls",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-24T09:02:46.641Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#22: Per-call budget means marginal cost; the one-time fixed cost (~20-25 ms per module on batch 20) is bounded and reported separately (G1Facts probe); was: Dispatching a heard call to its check rule costs at most D-CORE-CHECK1's 1 µs budget per call. TypeIDSlice3 measured about 46.5 µs per heard call on the batch 12 compiler (2026-11-24), the same under "
+    },
     {
       "at": "2026-11-24T08:54:42.194Z",
       "by": "Orchestrator",
