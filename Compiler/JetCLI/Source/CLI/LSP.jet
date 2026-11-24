@@ -115,6 +115,19 @@ JetCLILSPChecker: struct {
             }
             sites
         }
+
+        // The `.git` and `.jet` trees hold no workspace source; an
+        // unreadable file is left out.
+        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
+            saved := [LSPOverlay]{}
+            loop item in cli_files.walk_files(root, skip: [String]{".git", ".jet"}) {
+                entry: item ?? return saved
+                if !entry.path.ends_with(".jet") -> next
+                source: cli_files.read(entry.path) ?? next
+                saved.push(LSPOverlay{path: entry.path, source: source})
+            }
+            saved
+        }
     }
 }
 

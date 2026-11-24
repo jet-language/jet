@@ -4,7 +4,7 @@ use {
     core.encoding.[Dyn]
     jet_foundation.[Span, TextEdit, foundation_json_integer]
     jet_parser.[parser_marker_placement_edits]
-    jet_lsp.[LSPServer, lsp_member]
+    jet_lsp.[LSPServer, lsp_change_workspace_folders, lsp_member]
 }
 
 LSP_TEST_SHAPES_URI: "file:///w/shapes.jet"
@@ -55,6 +55,35 @@ lsp_test_symbol_rows: fn(rows: [Dyn]) -> [String] Never! {
     rows: lsp_test_rows(lsp_test_result(server, "workspace/symbol", "{{\"query\":\"ADD\"}}"))
     assert_eq(lsp_test_symbol_rows(rows), [String]{"add=12"})
     assert_eq(lsp_test_text(lsp_test_field(rows[0], "location"), "uri"), LSP_TEST_MAIN_URI)
+}
+
+lsp_test_workspace_rows: fn(server: &LSPServer) -> [Dyn] {
+    lsp_test_rows(lsp_test_result(server, "workspace/symbol", "{{\"query\":\"\"}}"))
+}
+
+lsp_test_change_folders: fn(server: &LSPServer, added: String, removed: String) Never! {
+    lsp_change_workspace_folders(server, Val(lsp_test_json("{{\"event\":{{\"added\":[{added}],\"removed\":[{removed}]}}}}")))
+}
+
+#Test("workspace symbols follow the workspace folders, open text over saved text") {
+    server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"workspaceFolders\":[{{\"uri\":\"file:///w/first\",\"name\":\"first\"}},{{\"uri\":\"file:///w/second/\",\"name\":\"second\"}}]}}")
+    lsp_test_open(server, "file:///w/second/open.jet", "OpenSecond: fn() {{}}\n")
+    rows: lsp_test_workspace_rows(server)
+    assert_eq(lsp_test_symbol_rows(rows), [String]{"ClosedFirst=12", "OpenSecond=12"})
+    assert_eq(lsp_test_text(lsp_test_field(rows[0], "location"), "uri"), "file:///w/first/closed.jet")
+    lsp_test_change_folders(server, "{{\"uri\":\"file:///w/third\",\"name\":\"third\"}}", "{{\"uri\":\"file:///w/first\",\"name\":\"first\"}}")
+    added: lsp_test_workspace_rows(server)
+    assert_eq(lsp_test_symbol_rows(added), [String]{"OpenSecond=12", "AddedThird=12"})
+    assert_eq(lsp_test_text(lsp_test_field(added[1], "location"), "uri"), "file:///w/third/added.jet")
+    lsp_test_change_folders(server, "", "{{\"uri\":\"file:///w/second\",\"name\":\"second\"}},{{\"uri\":\"file:///w/third\",\"name\":\"third\"}}")
+    assert_eq(lsp_test_workspace_rows(server).len(), 0)
+}
+
+#Test("workspace symbols read the root URI as the one workspace folder") {
+    server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"rootUri\":\"file:///w/third\"}}")
+    assert_eq(lsp_test_symbol_rows(lsp_test_workspace_rows(server)), [String]{"AddedThird=12"})
 }
 
 #Test("selection ranges grow from the name to the whole document") {

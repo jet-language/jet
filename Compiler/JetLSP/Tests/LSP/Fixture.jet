@@ -12,7 +12,7 @@ use {
     jet_parser.[parse_source]
     jet_driver.[JetDriverDocModule, JetDriverToolStageItem]
     jet_semindex.[SemEffectProjection, semindex_build, semindex_build_symbols]
-    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_handle_request, lsp_member, lsp_server, lsp_update_document]
+    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_handle_request, lsp_member, lsp_path_below, lsp_server, lsp_update_document]
 }
 
 LSPFixtureChecker: struct {
@@ -81,6 +81,16 @@ LSPFixtureChecker: struct {
                 }
             }
             sites
+        }
+
+        // The saved workspace below `/w`: `ClosedFirst` in `/w/first`,
+        // `DiskSecond` in `/w/second` and `AddedThird` in `/w/third`.
+        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
+            saved := [LSPOverlay]{}
+            if lsp_path_below("/w/first/closed.jet", root) -> saved.push(LSPOverlay{path: "/w/first/closed.jet", source: "ClosedFirst: fn() {{}}\n"})
+            if lsp_path_below("/w/second/open.jet", root) -> saved.push(LSPOverlay{path: "/w/second/open.jet", source: "DiskSecond: fn() {{}}\n"})
+            if lsp_path_below("/w/third/added.jet", root) -> saved.push(LSPOverlay{path: "/w/third/added.jet", source: "AddedThird: fn() {{}}\n"})
+            saved
         }
     }
 }

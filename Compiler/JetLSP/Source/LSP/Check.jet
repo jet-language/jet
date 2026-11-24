@@ -65,11 +65,13 @@ LSPChoice: struct {
 // open documents overlaid: the answer rows of the call on each of `bodies`,
 // in call order. `failure_marks` gives the byte offsets in `entry`'s open
 // text just past each call that passes a failure up by itself, where
-// `jet fmt --explicit-failures` writes its `?`.
+// `jet fmt --explicit-failures` writes its `?`. `sources` gives the saved
+// `.jet` files below a workspace folder, in path order.
 LSPChecker: trait {
     check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never!,
     stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never!,
     failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never!,
+    sources: fn(self, root: String) -[FS]> [LSPOverlay] Never!,
 }
 
 // A quick fix a diagnostic offers: its primary edit, then each alternative.

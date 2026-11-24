@@ -1,8 +1,10 @@
 // Document and workspace symbols, folding, selection ranges and import links.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[ImportDecl, Span, foundation_byte_text, foundation_json_quote]
-    jet_semindex.[SemDef, semindex_symbol_imported_module]
+    jet_foundation.[Diagnostic, ImportDecl, Span, foundation_byte_text, foundation_json_quote, interner_empty]
+    jet_parser.[parse_source]
+    jet_driver.[JetDriverDocModule]
+    jet_semindex.[SemDef, SemEffectProjection, SemSymbol, semindex_build, semindex_symbol_imported_module]
 }
 
 lsp_symbol_information_json: fn(def: SemDef, location: LSPLocation, kind: Int) -> String Never! {
@@ -52,33 +54,170 @@ lsp_fuzzy_match: fn(query: String, name: String) -> Bool Never! {
     at == wanted.len()
 }
 
-// Declarations across every check the open documents' publications read.
+// Declarations matching the query. With workspace folders: those of the files
+// below each folder, an open document's from the check of its open text and a
+// closed file's from its saved text. Without: those across every check the
+// open documents' publications read.
 lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     query: lsp_text_member(params ?? Dyn.Null, "query") ?? ""
     seen := [String:Bool]{}
     rows := [String]{}
-    roots := [String]{}
-    loop (uri, _) in server.published -> roots.push(uri.copy())
-    roots.sort()
-    loop uri in roots {
-        checked: server.published[uri]
-        index: checked.index ?? next
-        loop definition in index.definitions {
-            def: definition.def
-            kind: lsp_symbol_kind(def.kind) ?? next
-            if !lsp_fuzzy_match(query, def.name) -> next
-            key: "{def.module_path}:{def.def_span.start}"
-            if seen.has_key(key) -> next
-            location: lsp_location(checked, def.module_path, def.def_span) ?? next
-            if !lsp_source_spells(location.source, def.def_span, def.name) -> next
-            seen[key] = true
-            rows.push(lsp_symbol_information_json(def, location, kind))
-            if rows.len() >= LSP_WORKSPACE_SYMBOL_LIMIT {
-                return lsp_response(id, "[{rows.join(",")}]")
-            }
+    if server.workspace_named {
+        loop root in server.workspace_roots {
+            if !lsp_root_symbol_rows(server, root, query, seen, rows) -> break
         }
+        return lsp_response(id, "[{rows.join(",")}]")
+    }
+    uris := [String]{}
+    loop (uri, _) in server.published -> uris.push(uri.copy())
+    uris.sort()
+    loop uri in uris {
+        if !lsp_symbol_rows(server.published[uri], -1, query, seen, rows) -> break
     }
     lsp_response(id, "[{rows.join(",")}]")
+}
+
+// The rows of one folder: each open document below it, then each saved file
+// below it that is not open. False once the answer is full.
+lsp_root_symbol_rows: fn(server: LSPServer, root: String, query: String, seen: &[String:Bool], rows: &[String]) -> Bool {
+    loop (uri, doc) in server.diagnostic_state.docs {
+        if !lsp_path_below(doc.path, root) -> next
+        checked: server.published.get(uri) ?? server.check(doc)
+        slot: lsp_checked_module_at(checked, doc.path) ?? next
+        if !lsp_symbol_rows(checked, slot, query, seen, rows) -> return false
+    }
+    saved: server.checker.sources(root)
+    loop source in saved.move() {
+        if lsp_path_open(server, source.path) -> next
+        if !lsp_symbol_rows(lsp_saved_outline(source), -1, query, seen, rows) -> return false
+    }
+    true
+}
+
+lsp_path_open: fn(server: LSPServer, path: String) -> Bool Never! {
+    loop (_, doc) in server.diagnostic_state.docs {
+        if doc.path == path -> return true
+    }
+    false
+}
+
+// The folders `initialize` names: its `workspaceFolders`, else its
+// `rootUri`. A client that names neither leaves workspace symbols on the
+// open documents' checks.
+lsp_initial_workspace_folders: fn(server: &LSPServer, params: Dyn?) Never! {
+    if lsp_param(params, "workspaceFolders") == .Val(folders) {
+        if folders == .Array(rows) {
+            server.workspace_named = true
+            server.workspace_roots = lsp_folder_paths(rows)
+            return
+        }
+    }
+    if lsp_param(params, "rootUri") == .Val(root) {
+        if root == .Text(uri) {
+            server.workspace_named = true
+            server.workspace_roots = [String]{lsp_folder_path(uri)}
+        }
+    }
+}
+
+// `workspace/didChangeWorkspaceFolders`: the removed folders leave, then the
+// added ones join.
+lsp_change_workspace_folders: fn(server: &LSPServer, params: Dyn?) Never! {
+    event: lsp_param(params, "event") ?? return
+    removed: lsp_folder_paths(lsp_member_rows(event, "removed"))
+    // Popping the folders reverses them; popping again restores the order.
+    reversed := [String]{}
+    loop server.workspace_roots.len() > 0 {
+        root: server.workspace_roots.pop() ?? break
+        if !removed.contains(root) -> reversed.push(root)
+    }
+    loop reversed.len() > 0 -> server.workspace_roots.push(reversed.pop() ?? break)
+    loop root in lsp_folder_paths(lsp_member_rows(event, "added")) {
+        if !server.workspace_roots.contains(root) -> server.workspace_roots.push(root)
+    }
+    server.workspace_named = true
+}
+
+lsp_member_rows: fn(value: Dyn, key: String) -> [Dyn] Never! {
+    if (lsp_member(value, key) ?? return [Dyn]{}) == .Array(rows) -> return rows
+    [Dyn]{}
+}
+
+// Each folder's path once.
+lsp_folder_paths: fn(rows: [Dyn]) -> [String] Never! {
+    paths := [String]{}
+    loop row in rows {
+        path: lsp_folder_path(lsp_text_member(row, "uri") ?? next)
+        if !paths.contains(path) -> paths.push(path)
+    }
+    paths
+}
+
+// A folder URI's path, without a trailing separator.
+lsp_folder_path: fn(uri: String) -> String Never! {
+    path: lsp_uri_to_path(uri)
+    if path.count_bytes() > 1 && path.ends_with("/") -> return path.slice(0, path.count_bytes() - 1)
+    path
+}
+
+// Whether `path` is `root` or below it.
+lsp_path_below: fn(path: String, root: String) -> Bool Never! {
+    if !path.starts_with(root) -> return false
+    if path.count_bytes() == root.count_bytes() || root.ends_with("/") -> return true
+    path.bytes()[root.count_bytes()] == (U8{47})
+}
+
+// A saved file's declarations, from its text parsed and indexed alone: the
+// module is named by the file's stem.
+lsp_saved_outline: fn(source: &&LSPOverlay) -> LSPChecked Never! {
+    parsed: parse_source(source.source.bytes())
+    physical: source.path.move()
+    stem: lsp_file_stem(physical)
+    alias: lsp_file_stem(physical)
+    modules: [JetDriverDocModule]{
+        JetDriverDocModule{
+            path: stem,
+            physical_path: physical,
+            alias: alias,
+            source: source.source.move(),
+            items: parsed.program.items.move(),
+            block_spans: parsed.program.block_spans.move(),
+            imports: parsed.program.imports.move(),
+            tables: parsed.program.tables.move(),
+        },
+    }
+    index: semindex_build(modules, interner_empty(), SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
+    LSPChecked{diagnostics: [Diagnostic]{}, modules: modules, index: Val(index), symbols: [SemSymbol]{}}
+}
+
+// `/w/app/store.jet` is `store`.
+lsp_file_stem: fn(path: String) -> String Never! {
+    bytes: path.bytes()
+    start := bytes.len()
+    loop start > 0 && bytes[start - 1] != (U8{47}) -> start -= 1
+    end: if path.ends_with(".jet") && bytes.len() - 4 >= start -> bytes.len() - 4 else -> bytes.len()
+    path.slice(start, end)
+}
+
+// Adds the rows of `checked`'s declarations that match `query`, only those of
+// the module at `slot` when it is not -1. Each declaration is one row. False
+// once the answer is full.
+lsp_symbol_rows: fn(checked: LSPChecked, slot: Int, query: String, seen: &[String:Bool], rows: &[String]) -> Bool Never! {
+    index: checked.index ?? return true
+    loop definition in index.definitions {
+        def: definition.def
+        kind: lsp_symbol_kind(def.kind) ?? next
+        if !lsp_fuzzy_match(query, def.name) -> next
+        if slot >= 0 && checked.modules[slot].path != def.module_path -> next
+        location: lsp_location(checked, def.module_path, def.def_span) ?? next
+        key: "{location.uri}:{def.def_span.start}"
+        if seen.has_key(key) -> next
+        if !lsp_source_spells(location.source, def.def_span, def.name) -> next
+        seen[key] = true
+        rows.push(lsp_symbol_information_json(def, location, kind))
+        if rows.len() >= LSP_WORKSPACE_SYMBOL_LIMIT -> return false
+    }
+    true
 }
 
 lsp_folding_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String Never! {
