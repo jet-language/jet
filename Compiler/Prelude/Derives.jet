@@ -4,6 +4,10 @@
 // reflected enum case payloads. `#{name}` is the derived type; a generic type
 // keeps its parameters.
 //
+// A KeyBy type (one whose TypeInfo lists its `key` method) compares its keys
+// alone. Any other type is read by its TypeId's `kind`: an enum's variants,
+// a struct's fields, and a distinct type's base, the `base` binding.
+//
 // Enum equality/order match `self` once per variant, then dispatch `rhs`
 // inside that arm. A cartesian product of separate `if self ==` tables
 // would consume a non-copy payload and then use `self` again (E0121).
@@ -16,42 +20,42 @@ impl Equatable.Derive {
     expand: fn(target: Target) {
         impl #{name}.Equatable {
             equal: fn(self, rhs: #{name}) -> Bool {
-                #if target.kind == "enum" {
-                    #loop left in target.reflect().cases {
-                        if self == {
-                            .#{left} -> {
-                                if rhs == {
-                                    .#{left} -> {
-                                        #loop field in left.reflect().fields {
-                                            #if field.type.name == target.reflect().name {
-                                                if self.#{field}.equal(rhs.#{field}) == false {
-                                                    return false
-                                                }
-                                            } else {
-                                                if self.#{field} != rhs.#{field} -> return false
-                                            }
-                                        }
-                                        return true
-                                    }
-                                    else -> {}
-                                }
-                                return false
-                            }
-                            else -> {}
-                        }
-                    }
-                    return false
+                #if target.reflect().has_method("key") {
+                    return self.key() == rhs.key()
                 } else {
-                    #if target.kind == "struct" {
-                        #loop field in target.reflect().fields {
-                            if self.#{field} != rhs.#{field} -> return false
+                    #if target.identity.kind == .Enum {
+                        #loop left in target.reflect().cases {
+                            if self == {
+                                .#{left} -> {
+                                    if rhs == {
+                                        .#{left} -> {
+                                            #loop field in left.reflect().fields {
+                                                #if field.type.name == target.reflect().name {
+                                                    if self.#{field}.equal(rhs.#{field}) == false {
+                                                        return false
+                                                    }
+                                                } else {
+                                                    if self.#{field} != rhs.#{field} -> return false
+                                                }
+                                            }
+                                            return true
+                                        }
+                                        else -> {}
+                                    }
+                                    return false
+                                }
+                                else -> {}
+                            }
                         }
-                        return true
+                        return false
                     } else {
-                        #if target.kind == "key" {
-                            return self.key() == rhs.key()
+                        #if target.identity.kind == .Struct {
+                            #loop field in target.reflect().fields {
+                                if self.#{field} != rhs.#{field} -> return false
+                            }
+                            return true
                         } else {
-                            #if target.base == "Float" || target.base == "Float32" {
+                            #if target.identity.generic_bindings[0].type.name == "Float" || target.identity.generic_bindings[0].type.name == "Float32" {
                                 return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
                             } else {
                                 return self.raw() == rhs.raw()
@@ -68,69 +72,71 @@ impl Comparable.Derive {
     expand: fn(target: Target) {
         impl #{name}.Comparable {
             compare: fn(self, rhs: #{name}) -> Ordering {
-                #if target.kind == "enum" {
-                    rhs_variant_index := 0
-                    #loop right in target.reflect().cases {
-                        if rhs == {
-                            .#{right} -> { rhs_variant_index = right.index }
-                            else -> {}
-                        }
-                    }
-                    #loop left in target.reflect().cases {
-                        if self == {
-                            .#{left} -> {
-                                if rhs_variant_index > left.index -> return .Less
-                                if rhs_variant_index < left.index -> return .Greater
-                                if rhs == {
-                                    .#{left} -> {
-                                        #loop field in left.reflect().fields {
-                                            // A Float payload orders by IEEE totalOrder, as `.compare` does;
-                                            // its plain `<` stays the IEEE comparison.
-                                            #if field.type.name == target.reflect().name || field.type.name == "Float" || field.type.name == "F32" {
-                                                if self.#{field}.compare(rhs.#{field}) == {
-                                                    .Less -> return .Less
-                                                    .Greater -> return .Greater
-                                                    .Equal -> {}
-                                                }
-                                            } else {
-                                                if self.#{field} < rhs.#{field} -> return .Less
-                                                if self.#{field} > rhs.#{field} -> return .Greater
-                                            }
-                                        }
-                                        return .Equal
-                                    }
-                                    else -> {}
-                                }
-                                return .Equal
-                            }
-                            else -> {}
-                        }
-                    }
+                #if target.reflect().has_method("key") {
+                    left: self.key()
+                    right: rhs.key()
+                    if left < right -> return .Less
+                    if left > right -> return .Greater
                     return .Equal
                 } else {
-                    #if target.kind == "struct" {
-                        #loop field in target.reflect().fields {
-                            #if field.type.name == "Float" || field.type.name == "F32" {
-                                if self.#{field}.compare(rhs.#{field}) == {
-                                    .Less -> return .Less
-                                    .Greater -> return .Greater
-                                    .Equal -> {}
+                    #if target.identity.kind == .Enum {
+                        rhs_variant_index := 0
+                        #loop right in target.reflect().cases {
+                            if rhs == {
+                                .#{right} -> { rhs_variant_index = right.index }
+                                else -> {}
+                            }
+                        }
+                        #loop left in target.reflect().cases {
+                            if self == {
+                                .#{left} -> {
+                                    if rhs_variant_index > left.index -> return .Less
+                                    if rhs_variant_index < left.index -> return .Greater
+                                    if rhs == {
+                                        .#{left} -> {
+                                            #loop field in left.reflect().fields {
+                                                // A Float payload orders by IEEE totalOrder, as `.compare` does;
+                                                // its plain `<` stays the IEEE comparison.
+                                                #if field.type.name == target.reflect().name || field.type.name == "Float" || field.type.name == "F32" {
+                                                    if self.#{field}.compare(rhs.#{field}) == {
+                                                        .Less -> return .Less
+                                                        .Greater -> return .Greater
+                                                        .Equal -> {}
+                                                    }
+                                                } else {
+                                                    if self.#{field} < rhs.#{field} -> return .Less
+                                                    if self.#{field} > rhs.#{field} {
+                                                        return .Greater
+                                                    }
+                                                }
+                                            }
+                                            return .Equal
+                                        }
+                                        else -> {}
+                                    }
+                                    return .Equal
                                 }
-                            } else {
-                                if self.#{field} < rhs.#{field} -> return .Less
-                                if self.#{field} > rhs.#{field} -> return .Greater
+                                else -> {}
                             }
                         }
                         return .Equal
                     } else {
-                        #if target.kind == "key" {
-                            left: self.key()
-                            right: rhs.key()
-                            if left < right -> return .Less
-                            if left > right -> return .Greater
+                        #if target.identity.kind == .Struct {
+                            #loop field in target.reflect().fields {
+                                #if field.type.name == "Float" || field.type.name == "F32" {
+                                    if self.#{field}.compare(rhs.#{field}) == {
+                                        .Less -> return .Less
+                                        .Greater -> return .Greater
+                                        .Equal -> {}
+                                    }
+                                } else {
+                                    if self.#{field} < rhs.#{field} -> return .Less
+                                    if self.#{field} > rhs.#{field} -> return .Greater
+                                }
+                            }
                             return .Equal
                         } else {
-                            #if target.base == "Float" || target.base == "F32" {
+                            #if target.identity.generic_bindings[0].type.name == "Float" || target.identity.generic_bindings[0].type.name == "F32" {
                                 return self.raw().compare(rhs.raw())
                             } else {
                                 if self.raw() < rhs.raw() -> return .Less

@@ -31,6 +31,7 @@ use {
         DeriveBodyItem,
         Diagnostic,
         DiagnosticLabel,
+        DiagnosticOrigin,
         DistinctDef,
         EffectRowEntry,
         EnumDef,
@@ -107,6 +108,8 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
+        diagnostic_with_origin,
+        diagnostic_with_source_path,
         expr_source_span,
         expr_span,
         foundation_size_alias,
@@ -118,6 +121,7 @@ use {
         owned_trait_implies,
         owned_trait_requested,
         owned_trait_structural_names,
+        sha256_hex,
         type_name,
     ]
     jet_parser.[
@@ -2343,11 +2347,31 @@ sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?)
     sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(ty))}, NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})
 }
 
-sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], base: String?) -> CtValue {
-    rows := [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("path", name), NamedCtValue{name: "fields", value: CtValue.List{values: fields}}, NamedCtValue{name: "cases", value: CtValue.List{values: cases}}}
-    if base == .Val(text) -> rows.push(sema_derive_ct_str("base", text))
-    rows.push(sema_derive_ct_str("kind", kind))
-    sema_derive_ct_struct("TypeInfo", rows)
+// The partial TypeInfo a builtin derive provider reads. Its `identity` says
+// what the type is: its `kind` (a TypeKind variant), and a distinct type's
+// `base` binding (`bindings`). Its `methods` lists only those a provider
+// asks after (`has_method`).
+sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], methods: [CtValue], bindings: [CtValue]) -> CtValue {
+    identity: sema_derive_ct_struct(
+        "TypeId",
+        [NamedCtValue]{
+            sema_derive_ct_str("identity", name),
+            sema_derive_ct_str("name", name),
+            NamedCtValue{name: "generic_bindings", value: CtValue.List{values: bindings}},
+            NamedCtValue{name: "kind", value: CtValue.Enum{type_name: "TypeKind", variant: kind, args: [CtEnumArg]{}}},
+        },
+    )
+    sema_derive_ct_struct(
+        "TypeInfo",
+        [NamedCtValue]{
+            sema_derive_ct_str("name", name),
+            sema_derive_ct_str("path", name),
+            NamedCtValue{name: "identity", value: identity},
+            NamedCtValue{name: "fields", value: CtValue.List{values: fields}},
+            NamedCtValue{name: "cases", value: CtValue.List{values: cases}},
+            NamedCtValue{name: "methods", value: CtValue.List{values: methods}},
+        },
+    )
 }
 
 sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
@@ -2360,12 +2384,15 @@ sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
         }
         fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub, default))
     }
-    sema_derive_type_info(definition.name, "struct", fields, [CtValue]{}, None)
+    sema_derive_type_info(definition.name, "Struct", fields, [CtValue]{}, [CtValue]{}, [CtValue]{})
 }
 
-// A KeyBy type's derive input: its members compare its `key()` values.
-sema_derive_key_type_info: fn(name: String) -> CtValue {
-    sema_derive_type_info(name, "key", [CtValue]{}, [CtValue]{}, None)
+// A KeyBy type's derive input, `kind` its Struct or Enum: its members
+// compare its `key()` values, so it lists that one method and no fields or
+// cases.
+sema_derive_key_type_info: fn(name: String, kind: String) -> CtValue {
+    key: sema_derive_ct_struct("MethodInfo", [NamedCtValue]{sema_derive_ct_str("name", "key")})
+    sema_derive_type_info(name, kind, [CtValue]{}, [CtValue]{}, [CtValue]{key}, [CtValue]{})
 }
 
 // An enum lists its leaf cases as CaseInfo rows under `cases`, as the
@@ -2398,11 +2425,13 @@ sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
             ),
         )
     }
-    sema_derive_type_info(definition.name, "enum", [CtValue]{}, cases, None)
+    sema_derive_type_info(definition.name, "Enum", [CtValue]{}, cases, [CtValue]{}, [CtValue]{})
 }
 
+// A distinct type binds its base type as `base`, as its TypeId does.
 sema_derive_distinct_type_info: fn(definition: DistinctDef) -> CtValue {
-    sema_derive_type_info(definition.name, "distinct", [CtValue]{}, [CtValue]{}, Val(sema_derive_type_text(definition.base)))
+    base: sema_derive_ct_struct("GenericBindingInfo", [NamedCtValue]{sema_derive_ct_str("name", "base"), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(definition.base))}})
+    sema_derive_type_info(definition.name, "Distinct", [CtValue]{}, [CtValue]{}, [CtValue]{}, [CtValue]{base})
 }
 
 sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: Type) -> Type Never! {
@@ -2473,11 +2502,19 @@ sema_derive_owner_type: fn(name: String, type_params: [TypeParam]) -> Type {
 // (`impl #{name}.Equatable { … }`) and spells the target `#{name}`, which
 // becomes the owner type with its parameters; the impl's methods are the
 // derived members. A failed expansion reports its diagnostic and generates
-// nothing. The template's expansion is taken from or kept in `memo`
+// nothing; that diagnostic's spans are offsets into the template's text, so
+// it is placed in `Prelude/Derives.jet`, not in the target's file. The
+// template's expansion is taken from or kept in `memo`
 // (sema_derive_memo_expand).
 sema_derive_expand_builtin_provider: fn(providers: [MarkerDecl], trait_name: String, target_name: String, target_span: Span, owner_type: Type, type_info: CtValue, memo: ^SemaDeriveMemo, diagnostics: ^[Diagnostic]) -> TraitImplBlock? {
     provider: sema_derive_provider(providers, trait_name) ?? return None
-    expanded: sema_derive_memo_expand(memo, trait_name, provider.body ?? [DeriveBodyItem]{}, type_info, diagnostics) ?? return None
+    failed := [Diagnostic]{}
+    expansion: sema_derive_memo_expand(memo, trait_name, provider.body ?? [DeriveBodyItem]{}, type_info, failed)
+    loop index in 0..<failed.len() {
+        origin: DiagnosticOrigin{display: SEMA_PRELUDE_DERIVE_SOURCE_PATH, path: SEMA_PRELUDE_DERIVE_SOURCE_PATH, source: SEMA_PRELUDE_DERIVE_SOURCE, revision: sha256_hex(SEMA_PRELUDE_DERIVE_SOURCE)}
+        diagnostics.push(diagnostic_with_origin(diagnostic_with_source_path(failed[index], SEMA_PRELUDE_DERIVE_SOURCE_PATH, 0), origin))
+    }
+    expanded: expansion ?? return None
     methods := [Func]{}
     loop item in expanded {
         if item == .Impl(definition) && (definition.trait_name ?? "") == trait_name {
@@ -3719,7 +3756,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || name_find(auto_comparable, definition.name) != None
             if !equatable && !comparable -> return blocks.move()
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
-            type_info: if keyed -> sema_derive_key_type_info(definition.name) else -> sema_derive_struct_type_info(definition)
+            type_info: if keyed -> sema_derive_key_type_info(definition.name, "Struct") else -> sema_derive_struct_type_info(definition)
             loop trait_name in owned_trait_structural_names() {
                 wanted: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
@@ -3733,7 +3770,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || name_find(auto_comparable, definition.name) != None
             if !equatable && !comparable -> return blocks.move()
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
-            type_info: if keyed -> sema_derive_key_type_info(definition.name) else -> sema_derive_enum_type_info(definition)
+            type_info: if keyed -> sema_derive_key_type_info(definition.name, "Enum") else -> sema_derive_enum_type_info(definition)
             loop trait_name in owned_trait_structural_names() {
                 wanted: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next

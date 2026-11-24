@@ -1,8 +1,9 @@
 // Every rung reads a declaration the same way: a marker body, a marker that
 // adds a method to the type it marks, a comptime constant and fn build each
-// read the type's name, kind, identity, module, field and marker counts, and
-// the typed `marker(Label)` argument, and each prints the same line. A type
-// without `Label` reads `marker(Label)` as None at every rung. fn build also
+// read the type's name, its kind (its TypeId's `kind`), identity, module,
+// field and marker counts, and the typed `marker(Label)` argument, and each
+// prints the same line. A type without `Label` reads `marker(Label)` as
+// None at every rung. fn build also
 // reads `marker(Label)` on a function's FunctionInfo; fn build and a marker
 // on the package record (package.jet's `#FromPackage`) read the package's
 // one PackageInfo, its name, version, modules and types, and the ModuleInfo
@@ -25,7 +26,7 @@ FromMarker: struct {
 
         expand: fn(self, target: Target) {
             label: target.marker(Label)?.text ?? "none"
-            seen: "{target.name} {target.kind} {target.identity.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
+            seen: "{target.name} struct={target.identity.kind == .Struct} {target.identity.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
             impl Rungs {
                 from_marker: fn() -> String { #{seen} }
             }
@@ -60,7 +61,7 @@ Describe: struct {
         expand: fn(self, target: Target) {
             tname: target.name
             label: target.marker(Label)?.text ?? "none"
-            seen: "{target.name} {target.kind} {target.identity.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
+            seen: "{target.name} struct={target.identity.kind == .Struct} {target.identity.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
             impl #{tname} {
                 described: fn(self) -> String { "{seen}" }
             }
@@ -82,7 +83,7 @@ Plain: struct {
 // The comptime and fn build rungs share one ordinary function.
 #Label("rung") describe: fn(info: TypeInfo) -> String {
     label: info.marker(Label)?.text ?? "none"
-    "{info.name} {info.kind} {info.identity.identity} {info.module} fields={info.fields.len()} markers={info.markers.len()} label={label}"
+    "{info.name} struct={info.identity.kind == .Struct} {info.identity.identity} {info.module} fields={info.fields.len()} markers={info.markers.len()} label={label}"
 }
 
 POINT: #run describe(Point.reflect())

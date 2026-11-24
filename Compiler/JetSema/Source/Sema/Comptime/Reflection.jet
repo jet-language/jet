@@ -2692,8 +2692,8 @@ sema_comptime_reflection_builtin_layout: fn(graph: SemaRegistrationGraph, name: 
 // `Int.reflect()`, `U8.reflect()`, `F32.reflect()`: the TypeInfo of a builtin
 // number, with its target layout. None for any other name. No source
 // declares a builtin number, so it has no `location`; its `identity` is the
-// number type's TypeId, so `F64` and `Float` read one, and its `kind` is a
-// Number.
+// number type's TypeId, so `F64` and `Float` read one, and that TypeId's
+// `kind` is a Number.
 sema_comptime_reflection_builtin_type_info: fn(graph: SemaRegistrationGraph, name: String) -> TComptimeValue? {
     number: jet_target_layout_numeric_type(name) ?? return None
     layout: sema_comptime_reflection_builtin_layout(graph, name) ?? return None
@@ -2704,7 +2704,6 @@ sema_comptime_reflection_builtin_type_info: fn(graph: SemaRegistrationGraph, nam
         name,
         "",
         identity,
-        "builtin",
         layout,
         Span{start: 0, end: 0},
         none,
@@ -2718,7 +2717,6 @@ sema_comptime_reflection_builtin_type_info: fn(graph: SemaRegistrationGraph, nam
         none,
         none,
         none,
-        None,
     )
     Val(sema_comptime_reflection_located(info, [SemaSourceSegment]{}, "", sema_comptime_reflection_no_source()))
 }
@@ -2920,12 +2918,13 @@ sema_comptime_reflection_constant_value: fn(value: TComptimeValue?) -> TComptime
     sema_comptime_reflection_some(TComptimeValue.String{value: ast_comptime_value_show(shown)})
 }
 
+// A TypeInfo record. What the type is (its `identity.kind`), and a distinct
+// type's base (its `identity` binds `base`), are read from `identity`.
 sema_comptime_reflection_type_info_fields: fn(
     name: String,
     path: String,
     module_path: String,
     identity: TComptimeValue,
-    kind: String,
     layout: TComptimeValue,
     span: Span,
     fields: [TComptimeValue],
@@ -2939,16 +2938,12 @@ sema_comptime_reflection_type_info_fields: fn(
     dimensions: [TComptimeValue],
     traits: [TComptimeValue],
     constants: [TComptimeValue],
-    base: String?,
 ) -> TComptimeValue Never! {
-    values := [SemaComptimeReflectionField]{
-        {name: "name", value: TComptimeValue.String{value: name}},
-    }
-    if kind != "distinct" {
-        values.push(SemaComptimeReflectionField{name: "path", value: TComptimeValue.String{value: path}})
-    }
-    values.extend(
+    sema_comptime_reflection_struct(
+        "TypeInfo",
         [SemaComptimeReflectionField]{
+            {name: "name", value: TComptimeValue.String{value: name}},
+            {name: "path", value: TComptimeValue.String{value: path}},
             {name: "layout", value: layout},
             {name: "span", value: sema_comptime_reflection_span(span, "")},
             {name: "fields", value: TComptimeValue.List{values: fields}},
@@ -2961,28 +2956,12 @@ sema_comptime_reflection_type_info_fields: fn(
             {name: "transitions", value: transitions},
             {name: "facts", value: TComptimeValue.List{values: facts}},
             {name: "dimensions", value: TComptimeValue.List{values: dimensions}},
-        },
-    )
-    // Every TypeInfo carries `base` so its record constant has a value in
-    // each declared member; a type that is not `distinct` has the empty text.
-    values.push(SemaComptimeReflectionField{name: "base", value: TComptimeValue.String{value: base ?? ""}})
-    values.extend(
-        [SemaComptimeReflectionField]{
             {name: "traits", value: TComptimeValue.List{values: traits}},
             {name: "constants", value: TComptimeValue.List{values: constants}},
-        },
-    )
-    if kind == "distinct" {
-        values.push(SemaComptimeReflectionField{name: "path", value: TComptimeValue.String{value: path}})
-    }
-    values.extend(
-        [SemaComptimeReflectionField]{
             {name: "module", value: TComptimeValue.String{value: module_path}},
             {name: "identity", value: identity},
-            {name: "kind", value: TComptimeValue.String{value: kind}},
         },
     )
-    sema_comptime_reflection_struct("TypeInfo", values)
 }
 
 sema_comptime_reflection_struct_type_info: fn(
@@ -3035,7 +3014,6 @@ sema_comptime_reflection_struct_type_info: fn(
         sema_name_type_path(registered_module.module_path, registered_module.program.items, definition.name),
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, bindings),
-        "struct",
         sema_comptime_reflection_struct_layout(registration, caller, definition, engine, layout_facts),
         definition.name_span,
         reflection_fields,
@@ -3049,7 +3027,6 @@ sema_comptime_reflection_struct_type_info: fn(
         dimensions,
         traits,
         constants,
-        None,
     )
 }
 
@@ -3106,7 +3083,6 @@ sema_comptime_reflection_enum_type_info: fn(
         type_path,
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, bindings),
-        "enum",
         sema_comptime_reflection_enum_layout(registration, caller, definition, engine, module_text(registration.module_table, registered_module.module_identity)),
         definition.name_span,
         // An enum has no stored fields; its cases list its variants.
@@ -3121,7 +3097,6 @@ sema_comptime_reflection_enum_type_info: fn(
         dimensions,
         traits,
         constants,
-        None,
     )
 }
 
@@ -3146,7 +3121,6 @@ sema_comptime_reflection_distinct_type_info: fn(
         sema_name_type_path(registered_module.module_path, registered_module.program.items, definition.name),
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, [SemaInferenceBinding]{}),
-        "distinct",
         sema_comptime_reflection_distinct_layout(engine, definition, module_text(registration.module_table, registered_module.module_identity)),
         definition.name_span,
         [TComptimeValue]{},
@@ -3160,7 +3134,6 @@ sema_comptime_reflection_distinct_type_info: fn(
         dimensions,
         traits,
         constants,
-        Val(type_name(definition.base)),
     )
 }
 
