@@ -289,9 +289,37 @@ RouteTable: struct {
 
 // The compiler's form rule keys on this marker: `web.form(Model, action:)`
 // derives its fields only from a model struct a program marks `#Web.Form`.
+// Its rule hears that call as `form` called on the model with the action
+// alone, and rejects an action that does not take exactly the model.
 Form: struct {
     impl Marker {
         sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            if call.name.text == "form" && call.args.len() == 1 && call.receiver == .Val(model) && call.args[0].function == .Val(action) {
+                params: action.signature.params
+                if params.len() != 1 || params[0].type.identity != model.type.identity {
+                    reject(FormActionInputMismatch{action: action.name, form: model.type.name}, at: call.args[0])
+                }
+            }
+        }
+    }
+}
+
+// The finding E2474 reports for an action that does not take the form's
+// model.
+FormActionInputMismatch: struct {
+    action: String,
+    form: String,
+
+    impl Diagnostic {
+        code: "E2474",
+
+        what: fn(self) -> String { "Form action `{self.action}` does not accept `{self.form}`" }
+
+        why: fn(self) -> String { "The form derives its fields from the model and the one server-function action must receive that exact input type" }
+
+        fix: fn(self) -> String { "Change `{self.action}` to accept `{self.form}` as its only parameter" }
     }
 }
 

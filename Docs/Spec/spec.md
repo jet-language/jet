@@ -132,7 +132,11 @@ vocabulary](vocabulary.md).
   `check: fn(self, call: CompilerCall) { … }` (D-CORE-CHECK1=A). While the
   compiler checks a program it runs the rule at each call of a function or
   method that carries the marker, and at each method call on a type that
-  carries it, a call of a member the type lacks included. `call` is a
+  carries it, a call of a member the type lacks included. A
+  `web.form(Model, action: submit)` call is heard by the rules of the
+  model's markers as `form` called on the model with the action alone; Core's
+  `#Web.Form` rule rejects an action that does not take exactly the model
+  (E2474). `call` is a
   CompilerCall: its written `name` (a CompilerName), its `args` in written
   order and its `receiver`, each a CompilerArg with its `label`, `type` (a
   TypeId; `_` when the argument's own check fails), `value`, the
