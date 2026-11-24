@@ -7,17 +7,17 @@ fixture: InspectGatesCountsEachKindSecurityFirst.fixture
 env: NO_COLOR=1
 step: jet inspect gates main.jet
 exit: 0
-stdout: ~ "unsafe: 1"
-stdout: ~ "impure: 1"
-stdout: ~ "nondeterministic: 1"
-stdout: ~ "host_facts: 1"
-stdout: ~ "taint_scrub: 1"
-stdout: ~ "precision_demotion: 1"
+stdout: ~ "unsafe: 1" # the #Unsafe region
+stdout: ~ "impure: 1" # the #Impure mark
+stdout: ~ "nondeterministic: 1" # the #Nondeterministic mark
+stdout: ~ "host_facts: 1" # the #build.host.os read
+stdout: ~ "taint_scrub: 1" # the #Scrub(Input) call
+stdout: ~ "precision_demotion: 1" # the lossy Float conversion
 stdout: before "unsafe: 1" "impure: 1" # security kinds in the ledger's order
-stdout: before "impure: 1" "nondeterministic: 1"
-stdout: before "nondeterministic: 1" "host_facts: 1"
+stdout: before "impure: 1" "nondeterministic: 1" # impure follows unsafe
+stdout: before "nondeterministic: 1" "host_facts: 1" # host facts close the security kinds
 stdout: before "host_facts: 1" "taint_scrub: 1" # every security kind before the knowledge planes
-stdout: before "taint_scrub: 1" "precision_demotion: 1"
+stdout: before "taint_scrub: 1" "precision_demotion: 1" # the knowledge planes keep their order
 step: jet inspect gates --json main.jet
 exit: 0
 json: stdout doc $.gates.counts.unsafe = 1
@@ -25,11 +25,11 @@ json: stdout doc $.gates.counts.host_facts = 1
 json: stdout doc $.gates.counts.taint_scrub = 1
 json: stdout doc $.gates.counts.precision_demotion = 1
 stdout: before "\"unsafe\":1" "\"host_facts\":1" # the counts keep the kind order
-stdout: before "\"host_facts\":1" "\"taint_scrub\":1"
-stdout: before "\"taint_scrub\":1" "\"precision_demotion\":1"
+stdout: before "\"host_facts\":1" "\"taint_scrub\":1" # host facts before the scrub
+stdout: before "\"taint_scrub\":1" "\"precision_demotion\":1" # the scrub before the demotion
 step: jet inspect gates --kind taint_scrub main.jet
 exit: 0
 stdout: ~ "taint_scrub: 1" # the filter selects one kind
-stdout: ~ "#Scrub(Input)"
-stdout: !~ "unsafe:"
-stdout: !~ "precision_demotion:"
+stdout: ~ "#Scrub(Input)" # the row names its marker
+stdout: !~ "unsafe:" # other kinds are filtered out
+stdout: !~ "precision_demotion:" # the knowledge plane is filtered out too
