@@ -1,0 +1,17 @@
+# A struct holding both `[U8]` and `[U8#2]` (or `[I16]` and `[I16#2]`) derives
+# its codecs. The derived reader reads each field through a generic instance,
+# and the two fields' instances were one, so the build stopped on "a value of
+# [U8] where [U8] is expected". On every tier each field now writes and reads
+# as it does alone: bytes as base64 text, other numbers as an array.
+fixture: FixedAndGrowableListInstancesDeriveCodecs.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = fixed_and_growable_list_instances_derive_codecs.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = fixed_and_growable_list_instances_derive_codecs.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = fixed_and_growable_list_instances_derive_codecs.out

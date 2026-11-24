@@ -1,0 +1,18 @@
+# A generic function used at both `[T]` and `[T#N]` gets one instance for
+# each. `[U8]` is a list header and `[U8#2]` two inline bytes, so an instance
+# key that dropped the length made the `[U8#2]` call run the `[U8]` instance:
+# O0 read the bytes as a header and faulted, and O1 and O2 refused the call.
+# `echo` takes no bound, and `load` and `show` are bounded by `Decode` and
+# `Encode`. On every tier each call returns its own type's value.
+fixture: FixedAndGrowableListInstancesAreApart.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = fixed_and_growable_list_instances_are_apart.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = fixed_and_growable_list_instances_are_apart.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = fixed_and_growable_list_instances_are_apart.out

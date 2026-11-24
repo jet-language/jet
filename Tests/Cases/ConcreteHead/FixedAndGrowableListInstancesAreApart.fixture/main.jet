@@ -1,0 +1,21 @@
+// Generic functions used at both `[U8]` and `[U8#2]`: each type gets its own
+// instance.
+use _encoding: core.encoding
+
+echo: fn<T>(value: T) -> T { value }
+
+load: fn<T: Decode>(tree: Dyn) -> T [FieldError]! {
+    value: tree.decode<T>() ?? return Err(err)
+    Ok(value)
+}
+
+show: fn<T: Encode>(value: T) -> Dyn { value.encode() }
+
+run: fn() {
+    print(echo([U8]{1, 2, 3}))
+    print(echo([U8#2]{4, 5}))
+    print(load<[U8]>(Dyn.Text("AQI=")) ?? panic("list"))
+    print(load<[U8#2]>(Dyn.Text("AQI=")) ?? panic("fixed"))
+    print(show([U8]{1, 2}))
+    print(show([U8#2]{1, 2}))
+}

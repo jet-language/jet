@@ -1406,7 +1406,10 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
             loop field in fields -> names.push("{field.name}: {type_carrier_identity(field.ty)}")
             "({names.join(", ")})"
         }
-        .FixedList(elem, _) -> "[{type_carrier_identity(elem)}]"
+        // A fixed list's length is part of its identity: `[U8]` and
+        // `[U8#2]` lay out apart, so a generic used at both has two
+        // instances.
+        .FixedList(elem, len) -> "[{type_carrier_identity(elem)}#{type_fixed_length_identity(len)}]"
         .IntN(signed, bits) -> {
             prefix: if signed -> "I" else -> "U"
             "{prefix}{bits}"
@@ -1428,6 +1431,14 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
             "Int"
         }
     }
+}
+
+// The length a fixed list's identity spells: its number when the measure
+// folds to one, so one length has one spelling, and its written form
+// otherwise.
+type_fixed_length_identity: fn(len: Measure) -> String Never! {
+    if measure_literal_value(len) == .Val(count) -> return "{count}"
+    measure_expression(len)
 }
 
 // A member's identity inside an Option, Result or union: a function, Result

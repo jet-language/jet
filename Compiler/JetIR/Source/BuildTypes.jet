@@ -467,8 +467,7 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, tid: TypeID, laying
             if ir_value_type_in(m, p, element, laying) == .Val(element_row) {
                 if ir_fixed_plain(m, element_row) {
                     size: ir_align8(count * ir_list_stride(m, element_row))
-                    key: "[{type_carrier_identity(element)}#{count}]"
-                    fixed_row: ir_intern_type(m, key, ir_layout(IRTypeKind.Aggregate, tid, size, 8, IRClass.Pointer, false, 64, ""))
+                    fixed_row: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, tid, size, 8, IRClass.Pointer, false, 64, ""))
                     m.fixed_counts[fixed_row] = count
                     return Val(fixed_row)
                 }
