@@ -3,13 +3,16 @@
 // that step on one module program:
 //
 // 1. member types (struct, enum, trait, tag, impl) lift beside the module
-//    under `module_type_name` (`bank.Account` -> `M4BankAccount`); the bare and
-//    qualified spellings resolve inside the module, and the qualified spelling
-//    resolves in its enclosing file, including members of `priv module`s;
+//    under `sema_inline_type_name` (`bank.Account` -> `M4BankAccount`); the
+//    bare and qualified spellings resolve inside the module, and the qualified
+//    spelling resolves in its enclosing file, including members of
+//    `priv module`s;
 // 2. a module's member functions, top-level or nested, lift under
-//    `member_name` (`bank.open` -> `__jet_bank_dopen`, `bank.audit.log` ->
-//    `__jet_bank_daudit_dlog`) with their sibling calls renamed, so
-//    registration, body checking and lowering see ordinary functions;
+//    `sema_inline_member_name` (`bank.open` -> `__jet_bank_dopen`,
+//    `bank.audit.log` -> `__jet_bank_daudit_dlog`; `sema_inline_generated_path`
+//    escapes every non-alphanumeric byte, `.` as `_d` and `_` as `_u`) with
+//    their sibling calls renamed, so registration, body checking and lowering
+//    see ordinary functions;
 // 3. `bank.f(...)` and `bank.audit.f(...)` calls and `use bank.[f]` imports
 //    resolve to the member identity: an unknown member is E0608/E0611, a
 //    private one E0609; a nested `priv module` is usable only inside the

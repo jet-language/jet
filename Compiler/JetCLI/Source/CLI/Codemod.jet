@@ -18,7 +18,7 @@ use {
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USER_ERROR,
     ]
-    jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_byte_text, foundation_json_quote, interner_empty, name_mangle]
+    jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_byte_text, foundation_json_quote, interner_empty]
     jet_lexer.[lex, lex_generated, TOKEN_IDENT]
     jet_parser.[parse_generated_source]
     jet_semindex.[
@@ -759,7 +759,7 @@ jet_cli_codemod_sentinels: fn(atoms: [JetCLICodemodAtom], typed: Bool) -> [JetCL
     captures := [JetCLICodemodCaptured]{}
     loop atom in atoms {
         if atom == .Capture(name, variadic) {
-            text: if !typed -> name_mangle("codemod_capture_{name}") else if variadic -> "__codemod_a, __codemod_b" else -> "__codemod_value"
+            text: if !typed -> "__codemod_capture_{name}" else if variadic -> "__codemod_a, __codemod_b" else -> "__codemod_value"
             captures.push(JetCLICodemodCaptured{name: name.copy(), text: text, key: ""})
         }
     }

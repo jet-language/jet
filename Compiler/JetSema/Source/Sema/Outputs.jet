@@ -1,7 +1,7 @@
 // 2: checked Output links and tool selection, ported. Resolve against the
 // existing registration graph; collect owned facts before publishing so no
 // graph read survives a write.
-use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, ModuleID, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, module_text, name_mangle, symbol_find, symbol_key_text, symbol_none]
+use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, ModuleID, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, module_text, symbol_find, symbol_key_text, symbol_none]
 
 SemaOutputIntent: enum {
     Check,
@@ -421,7 +421,7 @@ sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address
     loop parameter in function.parameters {
         params.push(OutputParam{access: parameter.convention, ty: parameter.ty.copy()})
     }
-    lowered_name: if module_row.module_identity == graph.entry_module_identity -> name_mangle(function.declaration.name) else -> "{name_mangle(module_row.module_name)}.{name_mangle(function.declaration.name)}"
+    lowered_name: if module_row.module_identity == graph.entry_module_identity -> function.declaration.name.copy() else -> "{module_row.module_name}.{function.declaration.name}"
     // copy: the ResolvedOutput fact owns its texts. address/output_name are the caller's read
     // parameters, and module_path, source_name and the declaration name/return stay in the
     // read-only graph rows.
