@@ -2,7 +2,7 @@
 // the compiler builds, each role CLIEntry.jet calls is matched to the function
 // whose `#Builtin.Role(.X)` marker names it, and a role nothing fills stops
 // the build with a refusal that names the role.
-use jet_sema.[sema_cli_role_fillers, sema_cli_roles_called, sema_cli_roles_missing, sema_cli_roles_refusal]
+use jet_sema.[SEMA_CLI_ROLES, sema_cli_role_fillers, sema_cli_roles_called, sema_cli_roles_missing, sema_cli_roles_refusal]
 
 #Test("a role marker names the core.args function that fills it") {
     roles := sema_cli_roles_called("sema_cli_call(\"CLIValue\") sema_cli_call(\"CLIArgv\")")
@@ -20,11 +20,11 @@ use jet_sema.[sema_cli_role_fillers, sema_cli_roles_called, sema_cli_roles_missi
     assert_eq(called[0].filler, "")
 }
 
+// SEMA_CLI_ROLES is read while the compiler builds, from CLIEntry.jet and
+// Core/Args/Args.jet (a test reads no file of its own at run time).
 #Test("every CLI role the generated entry calls has a core.args function") {
-    roles := sema_cli_roles_called(embed_file("../Source/Sema/Registration/CLIEntry.jet"))
-    sema_cli_role_fillers(embed_file("toolchain:Core/Args/Args.jet"), roles)
-    assert_eq(roles.len(), 35)
-    assert_eq(sema_cli_roles_missing(roles), "")
+    assert_eq(SEMA_CLI_ROLES.len(), 35)
+    assert_eq(sema_cli_roles_missing(SEMA_CLI_ROLES), "")
 }
 
 #Test("a called role that no core.args function fills stops the build, naming the role") {
