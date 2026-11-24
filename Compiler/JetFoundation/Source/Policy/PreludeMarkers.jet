@@ -460,15 +460,12 @@ Redact: struct {
 
 // A string renames one field or variant (keeping the
 // projection arguments below); a NamingCase (`.Camel`) on a type sets the
-// wire casing of all its fields or variants.
+// wire casing of all its fields or variants. Beside these, each codec
+// format takes its own label, the `name` of its `Format` impl, Core's and a
+// package's alike: `#Rename(name: "id", json: "ID", msgpack: "i")` gives the
+// field its key in that format (`field.key("msgpack")`).
 Rename: struct {
     name: NamingCase | String,
-    json: String{none},
-    cbor: String{none},
-    csv: String{none},
-    toml: String{none},
-    yaml: String{none},
-    xml: String{none},
     args: String{none},
     env: String{none},
     db: String{none},

@@ -1,0 +1,144 @@
+// Each type's layout as `reflect().layout` reports it, checked against the
+// bytes the compiled program gives it: a member's offset is its address less
+// its value's, and a value's size is the distance between two list elements.
+// An enum case's payload offsets are the stores `rect` makes into its box.
+use core.mem
+
+// A struct without `#Layout`: the compiler reorders its members.
+Mixed: struct {
+    a: U8,
+    b: Int,
+    c: U8,
+    d: Int,
+    e: U8,
+}
+
+// A `#Layout(c)` struct keeps its written order.
+#Layout(c) Ordered: struct {
+    a: U8,
+    b: Int,
+    c: U16,
+}
+
+// A generic struct lays out per instance.
+Pair: struct<T> {
+    flag: Bool,
+    value: T,
+    small: U16,
+}
+
+// A record member is its members inline, in their written order.
+Holder: struct {
+    tag: U8,
+    rec: {x: U8, y: Int, z: U8},
+    last: U16,
+}
+
+// An enum case's payload sits in its box after the tag word.
+Shape: enum {
+    Dot,
+    Circle(Float),
+    Rect(w: U8, h: Int, k: U16),
+}
+
+MIXED_SIZE: #run { Mixed.reflect().layout.size ?? -1 }
+MIXED_A: #run { Mixed.reflect().layout.fields[0].offset ?? -1 }
+MIXED_B: #run { Mixed.reflect().layout.fields[1].offset ?? -1 }
+MIXED_C: #run { Mixed.reflect().layout.fields[2].offset ?? -1 }
+MIXED_D: #run { Mixed.reflect().layout.fields[3].offset ?? -1 }
+MIXED_E: #run { Mixed.reflect().layout.fields[4].offset ?? -1 }
+
+ORDERED_SIZE: #run { Ordered.reflect().layout.size ?? -1 }
+ORDERED_A: #run { Ordered.reflect().layout.fields[0].offset ?? -1 }
+ORDERED_B: #run { Ordered.reflect().layout.fields[1].offset ?? -1 }
+ORDERED_C: #run { Ordered.reflect().layout.fields[2].offset ?? -1 }
+
+PAIR_INT_SIZE: #run { Pair<Int>.reflect().layout.size ?? -1 }
+PAIR_INT_FLAG: #run { Pair<Int>.reflect().layout.fields[0].offset ?? -1 }
+PAIR_INT_VALUE: #run { Pair<Int>.reflect().layout.fields[1].offset ?? -1 }
+PAIR_INT_SMALL: #run { Pair<Int>.reflect().layout.fields[2].offset ?? -1 }
+
+PAIR_U8_SIZE: #run { Pair<U8>.reflect().layout.size ?? -1 }
+PAIR_U8_FLAG: #run { Pair<U8>.reflect().layout.fields[0].offset ?? -1 }
+PAIR_U8_VALUE: #run { Pair<U8>.reflect().layout.fields[1].offset ?? -1 }
+PAIR_U8_SMALL: #run { Pair<U8>.reflect().layout.fields[2].offset ?? -1 }
+
+HOLDER_SIZE: #run { Holder.reflect().layout.size ?? -1 }
+HOLDER_TAG: #run { Holder.reflect().layout.fields[0].offset ?? -1 }
+HOLDER_REC: #run { Holder.reflect().layout.fields[1].offset ?? -1 }
+HOLDER_REC_SIZE: #run { Holder.reflect().layout.fields[1].size ?? -1 }
+HOLDER_LAST: #run { Holder.reflect().layout.fields[2].offset ?? -1 }
+
+SHAPE_SIZE: #run { Shape.reflect().layout.size ?? -1 }
+SHAPE_CIRCLE: #run { Shape.reflect().layout.fields[1].offset ?? -1 }
+SHAPE_RECT: #run { Shape.reflect().layout.fields[2].offset ?? -1 }
+SHAPE_RECT_SIZE: #run { Shape.reflect().layout.fields[2].size ?? -1 }
+
+// One fact: what reflection reports against what the program has.
+agree: fn(what: String, reflected: Int, compiled: Int) {
+    if reflected != compiled -> panic("{what}: reflect().layout says {reflected}, the compiled program has {compiled}")
+}
+
+// Builds the Rect case; `jet emit --ir --fn rect` shows where it stores each
+// payload member in the box.
+rect: fn(w: U8, h: Int, k: U16) -> Shape {
+    Shape.Rect{w: w, h: h, k: k}
+}
+
+run: fn() {
+    mixed: [Mixed]{Mixed{a: U8{1}, b: 2, c: U8{3}, d: 4, e: U8{5}}, Mixed{a: U8{6}, b: 7, c: U8{8}, d: 9, e: U8{10}}}
+    base: mem.address_of(mixed[0])
+    agree("Mixed size", MIXED_SIZE, mem.address_of(mixed[1]) - base)
+    agree("Mixed.a", MIXED_A, mem.address_of(mixed[0].a) - base)
+    agree("Mixed.b", MIXED_B, mem.address_of(mixed[0].b) - base)
+    agree("Mixed.c", MIXED_C, mem.address_of(mixed[0].c) - base)
+    agree("Mixed.d", MIXED_D, mem.address_of(mixed[0].d) - base)
+    agree("Mixed.e", MIXED_E, mem.address_of(mixed[0].e) - base)
+    print("Mixed: {MIXED_SIZE} bytes, a at {MIXED_A}, b at {MIXED_B}, c at {MIXED_C}, d at {MIXED_D}, e at {MIXED_E}")
+
+    ordered: [Ordered]{Ordered{a: U8{1}, b: 2, c: U16{3}}, Ordered{a: U8{4}, b: 5, c: U16{6}}}
+    at: mem.address_of(ordered[0])
+    agree("Ordered size", ORDERED_SIZE, mem.address_of(ordered[1]) - at)
+    agree("Ordered.a", ORDERED_A, mem.address_of(ordered[0].a) - at)
+    agree("Ordered.b", ORDERED_B, mem.address_of(ordered[0].b) - at)
+    agree("Ordered.c", ORDERED_C, mem.address_of(ordered[0].c) - at)
+    print("Ordered: {ORDERED_SIZE} bytes, a at {ORDERED_A}, b at {ORDERED_B}, c at {ORDERED_C}")
+
+    wide: [Pair<Int>]{Pair<Int>{flag: true, value: 7, small: U16{9}}, Pair<Int>{flag: false, value: 8, small: U16{10}}}
+    from: mem.address_of(wide[0])
+    agree("Pair<Int> size", PAIR_INT_SIZE, mem.address_of(wide[1]) - from)
+    agree("Pair<Int>.flag", PAIR_INT_FLAG, mem.address_of(wide[0].flag) - from)
+    agree("Pair<Int>.value", PAIR_INT_VALUE, mem.address_of(wide[0].value) - from)
+    agree("Pair<Int>.small", PAIR_INT_SMALL, mem.address_of(wide[0].small) - from)
+    print("Pair<Int>: {PAIR_INT_SIZE} bytes, flag at {PAIR_INT_FLAG}, value at {PAIR_INT_VALUE}, small at {PAIR_INT_SMALL}")
+
+    narrow: [Pair<U8>]{Pair<U8>{flag: true, value: U8{7}, small: U16{9}}, Pair<U8>{flag: false, value: U8{8}, small: U16{10}}}
+    start: mem.address_of(narrow[0])
+    agree("Pair<U8> size", PAIR_U8_SIZE, mem.address_of(narrow[1]) - start)
+    agree("Pair<U8>.flag", PAIR_U8_FLAG, mem.address_of(narrow[0].flag) - start)
+    agree("Pair<U8>.value", PAIR_U8_VALUE, mem.address_of(narrow[0].value) - start)
+    agree("Pair<U8>.small", PAIR_U8_SMALL, mem.address_of(narrow[0].small) - start)
+    print("Pair<U8>: {PAIR_U8_SIZE} bytes, flag at {PAIR_U8_FLAG}, value at {PAIR_U8_VALUE}, small at {PAIR_U8_SMALL}")
+
+    holders: [Holder]{Holder{tag: U8{1}, rec: {x: U8{2}, y: 3, z: U8{4}}, last: U16{5}}, Holder{tag: U8{6}, rec: {x: U8{7}, y: 8, z: U8{9}}, last: U16{10}}}
+    first: mem.address_of(holders[0])
+    agree("Holder size", HOLDER_SIZE, mem.address_of(holders[1]) - first)
+    agree("Holder.tag", HOLDER_TAG, mem.address_of(holders[0].tag) - first)
+    agree("Holder.rec", HOLDER_REC, mem.address_of(holders[0].rec) - first)
+    agree("Holder.rec size", HOLDER_REC_SIZE, mem.address_of(holders[0].last) - mem.address_of(holders[0].rec))
+    agree("Holder.last", HOLDER_LAST, mem.address_of(holders[0].last) - first)
+    print("Holder: {HOLDER_SIZE} bytes, tag at {HOLDER_TAG}, rec at {HOLDER_REC} ({HOLDER_REC_SIZE} bytes), last at {HOLDER_LAST}")
+
+    // `h` is read at run time, so `rect` is built and called, not folded.
+    shape: rect(U8{11}, mixed[0].b * 11, U16{33})
+    print("Shape: {SHAPE_SIZE} bytes, Circle at {SHAPE_CIRCLE}, Rect at {SHAPE_RECT} ({SHAPE_RECT_SIZE} bytes)")
+    loop value in mixed -> print("{value.a} {value.b} {value.c} {value.d} {value.e}")
+    loop value in ordered -> print("{value.a} {value.b} {value.c}")
+    loop value in wide -> print("{value.flag} {value.value} {value.small}")
+    loop value in narrow -> print("{value.flag} {value.value} {value.small}")
+    loop value in holders -> print("{value.tag} {value.rec.x} {value.rec.y} {value.rec.z} {value.last}")
+    if shape == {
+        .Rect(w, h, k) -> print("{w} {h} {k}")
+        .Dot | .Circle(_) -> print("other")
+    }
+}

@@ -14,7 +14,7 @@ use {
     math: core.math
     encoding: core.encoding
     rt: jet.runtime.encoding
-    core.encoding.[EncodingError, EncodingLimits]
+    core.encoding.[EncodingError, EncodingLimits, Format]
     json_codec: core.encoding.json
     csv_codec: core.encoding.csv
     encoding_stream: __core_encoding_stream
@@ -282,9 +282,13 @@ DataSnapshot: struct<T> {
     content: [U8],
 }
 
+// A loader reads its payload as one of Core's data formats (`format`), or,
+// made by `file_as` or `url_as`, through a package's `Format`: then `format`
+// is None, `codec` is that `Format`'s name, and `stream_as` gives the rows.
 DataLoader: struct<T> {
     source: DataSourceIdentity,
-    format: DataFormat,
+    format: DataFormat?,
+    codec: String?,
     authority: DataAuthority,
     limits: DataLimits,
     payload: [U8]?,
@@ -1770,6 +1774,25 @@ url: fn<T>(href: String, format: String, authority: String, limits: DataLimits) 
     make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, format, authority, limits)
 }
 
+/// A file loader whose payload the `Format` `F` reads, a package's as well as
+/// Core's: `file_as<Row, msgpack.Codec>("rows.msgpack", limits)`. Once
+/// `core.files.data.read` reads the file, its rows come from
+/// `core.data.loader.stream_as<Row, F>`.
+file_as: fn<T, F: Format>(path: String, limits: DataLimits) -> DataLoader<T> DataError! {
+    loader := make_loader<T>(DataLoaderKind.File, path, "", [String]{}, "json", "local", limits) ?? return Err(err)
+    loader.format = None
+    loader.codec = Val(F.name)
+    Ok(loader)
+}
+
+/// A URL loader whose payload the `Format` `F` reads; see `file_as`.
+url_as: fn<T, F: Format>(href: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
+    loader := make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, "json", authority, limits) ?? return Err(err)
+    loader.format = None
+    loader.codec = Val(F.name)
+    Ok(loader)
+}
+
 database: fn<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.Database, query, "", parameters, "json", authority, limits)
 }
@@ -1824,10 +1847,10 @@ locator_format: fn(locator: String) -> String DataError! {
 #Test("load discovers the final path extension before query and fragment") {
     local: load_default<Int>("dir.with.dot/items.CSV?version=.json#part") ?? panic("local loader")
     assert_eq(local.source.locator, "dir.with.dot/items.CSV?version=.json#part")
-    assert(local.format == .CSV)
+    assert(local.format == Val(DataFormat.CSV))
     remote: load_default<Int>("https://example.test/items.ndjson#part.json") ?? panic("remote loader")
     assert(remote.source.kind == .URL)
-    assert(remote.format == .JSONL)
+    assert(remote.format == Val(DataFormat.JSONL))
     assert_eq(remote.authority.scope, "network")
     assert_eq(remote.limits.max_output_rows, 1000000)
 }
@@ -1893,11 +1916,13 @@ snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSn
     if loader.canceled {
         return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was canceled before snapshot")))
     }
+    // A package `Format`'s payload has no Core data format to snapshot by.
+    format: loader.format ?? return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.Bridge, "data.loader", "a loader made by `file_as` or `url_as` gives its rows to `core.data.loader.stream_as`")))
     data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
     data_limits_check(loader.limits) ?? return Err(data_loader_fail<T>(loader, err))
     payload: data_loader_payload<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
-    tree: data_loader_tree(payload.data, loader.format, loader.limits) ?? return Err(data_loader_fail<T>(loader, err))
-    value: if data_loader_decode<T>(tree, loader.format == DataFormat.CSV) == {
+    tree: data_loader_tree(payload.data, format, loader.limits) ?? return Err(data_loader_fail<T>(loader, err))
+    value: if data_loader_decode<T>(tree, format == DataFormat.CSV) == {
         .Ok(result) -> result
         .Err(failures) -> {
             reasons: loop failure in failures -> if failure.path == "" -> failure.reason else -> "{failure.path}: {failure.reason}"
@@ -1906,11 +1931,11 @@ snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSn
     }
     canonical := [U8]{}
     data_loader_render(canonical, value.encode())
-    schema := data_loader_schema(tree, loader.format)
+    schema := data_loader_schema(tree, format)
     schema.identity = data_loader_digest(schema.identity.bytes())
     provenance_source: loader.source.copy()
     provenance_authority: loader.authority.copy()
-    provenance_format: loader.format
+    provenance_format: format
     provenance: DataProvenance{source: provenance_source, format: provenance_format, authority: provenance_authority}
     // PreludeDataFlow::commit_snapshot
     data_loader_check_payload(loader.limits, canonical.len(), "data.snapshot") ?? return Err(data_loader_fail<T>(loader, err))
@@ -1929,7 +1954,7 @@ snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSn
     snapshot_material = data_loader_identity_part(snapshot_material, source_id)
     snapshot_material = data_loader_identity_part(snapshot_material, content_id)
     snapshot_material = data_loader_identity_part(snapshot_material, schema.identity)
-    snapshot_material = data_loader_identity_part(snapshot_material, data_format_text(loader.format))
+    snapshot_material = data_loader_identity_part(snapshot_material, data_format_text(format))
     snapshot_id: data_loader_digest(snapshot_material.bytes())
     loader.status = DataLoaderStatus{
         identity: "snapshot-{snapshot_id}",
@@ -1948,7 +1973,7 @@ snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSn
         source: "source-{source_id}",
         content: content_id,
         schema: schema.identity.copy(),
-        format: loader.format,
+        format: format,
     }
     Ok(DataSnapshot<T>{value: value, identity: identity, provenance: provenance, schema: schema, status: loader.status.copy(), content: canonical})
 }
@@ -2459,7 +2484,8 @@ make_loader: fn<T>(kind: DataLoaderKind, locator: String, member: String, parame
     Ok(
         DataLoader<T>{
             source: source,
-            format: format,
+            format: Val(format),
+            codec: None,
             authority: authority,
             limits: limits,
             payload: None,
@@ -3798,7 +3824,7 @@ DataLoaderPortRecord: struct {
     assert_eq(loader.source.kind, DataLoaderKind.Value)
     assert_eq(loader.source.locator, "value")
     assert_eq(loader.authority.scope, "local")
-    assert_eq(loader.format, DataFormat.JSON)
+    assert_eq(loader.format, Val(DataFormat.JSON))
     assert(loader.last_good == None)
     assert(!loader.canceled)
     assert(!loader.offline)

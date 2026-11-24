@@ -2836,6 +2836,33 @@ RequiredContractNotTrue: struct {
     }
 }
 
+ConstructorReturnsOtherType: struct {
+    type: String,
+    result: String,
+
+    impl Diagnostic {
+        code: "E0181",
+        safety_class: .Opinion,
+        safety_reason: "A `new` with another result would run, and Jet refuses it so `Type.new(…)` always gives the type it names.",
+        meaning: "A type's static `new` whose result is not that type",
+        detail: true,
+        no_fix: .Design,
+        fix_next: "Return the owner type from `new`, or give the function another name.",
+
+        what: fn(self) -> String {
+            "`{self.type}.new` returns `{self.result}`, not a `{self.type}`"
+        }
+
+        why: fn(self) -> String {
+            "A type's static `new` is its constructor, and a call `{self.type}.new(…)` reads as making a `{self.type}`, so any other result misleads every caller"
+        }
+
+        fix: fn(self) -> String {
+            "Make `new` return `{self.type}`, `{self.type}?` or `{self.type}` with a failure contract, or rename the function to say what it returns"
+        }
+    }
+}
+
 PersistNotModuleLevel: struct {
     impl Diagnostic {
         code: "E0145",
@@ -6714,6 +6741,33 @@ SqlQueryInRowLoop: struct {
 
         fix: fn(self) -> String {
             "Read what the loop needs in one query before it: `WHERE key IN (…)` over the keys the rows hold, or a JOIN with the query that produced the rows"
+        }
+    }
+}
+
+StaticOnlyStruct: struct {
+    name: String,
+
+    impl Diagnostic {
+        code: "L0309",
+        meaning: "A struct with no fields whose body declares only static functions",
+        severity: .Lint,
+        tier: .Tidy,
+        lint_name: "static_only_struct",
+        detail: true,
+        no_fix: .Design,
+        fix_next: "Move the functions into a `name: module {{ … }}` block and call them through the module.",
+
+        what: fn(self) -> String {
+            "`{self.name}` has no fields, and every function in it is static"
+        }
+
+        why: fn(self) -> String {
+            "No value of `{self.name}` carries anything and no function here takes or returns one, so the struct only groups functions under a type name, which is what a module is for"
+        }
+
+        fix: fn(self) -> String {
+            "Replace `{self.name}: struct` with a `name: module {{ … }}` block holding the same functions, and call them through the module's name"
         }
     }
 }

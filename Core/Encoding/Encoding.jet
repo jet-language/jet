@@ -200,6 +200,40 @@ EncodingLimits: struct {
     }
 }
 
+// A codec format: its name and the reading and writing between its bytes
+// and the one `Dyn` tree every format maps to. A type that implements it
+// adds the format, Core's own (`json.Codec`, `cbor.Codec`, `csv.Codec`,
+// `toml.Codec`, `yaml.Codec`, `xml.Codec`) and a package's alike. Its name
+// is a `#Rename` label, so `#Rename(name: "id", msgpack: "i")` gives a
+// field its key in that format (read back with `field.key("msgpack")`), and
+// the data loaders read a payload through it (`data.url_as<T, F>`).
+Format: trait {
+    // The format's `#Rename` label: `json`, `msgpack`.
+    name: String,
+    read: fn(bytes: [U8]) -> Dyn FormatError!,
+    write: fn(tree: Dyn) -> [U8] FormatError!,
+}
+
+/// A `Format`'s failure to read or write: the format's name and why.
+///
+/// ```jet
+/// FormatError{format: "json", reason: "the bytes are not UTF-8"}.display() == "json: the bytes are not UTF-8" // => true
+/// FormatError{format: "csv", reason: "no rows"}.debug() == "csv: no rows" // => true
+/// ```
+#Error
+FormatError: struct {
+    format: String,
+    reason: String,
+
+    impl Display {
+        display: fn(self) -> String { "{self.format}: {self.reason}" }
+    }
+
+    impl Debug {
+        debug: fn(&&self) -> String { "{self.format}: {self.reason}" }
+    }
+}
+
 /// Error returned by the root hexadecimal decoder.
 #Error
 HexError: struct {

@@ -1,0 +1,37 @@
+// A last line after the body has already left is never handed back, but it
+// still types against what the function promises: a bare `None` there fills
+// a `T?` result, or the success side of a `T? Err!` one, as it would on a
+// reachable last line.
+dead_value_tail_errors: fn(source: String) -> [String] {
+    codes := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.code.starts_with("E") -> codes.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    codes
+}
+
+#Test("a bare None after a return takes the promised optional") {
+    optional: `first: fn(values: [Int]) -> Int? {
+    return Val(values.len())
+    None
+}
+
+fallible: fn(values: [Int]) -> Int? Err! {
+    return Val(values.len())
+    None
+}
+
+run: fn() {
+    print(first([Int]{1}) ?? 0)
+}
+`
+    assert_eq(dead_value_tail_errors(optional).join("; "), "")
+    mismatched: `count: fn(values: [Int]) -> Int Err! {
+    return values.len()
+    None
+}
+
+run: fn() {}
+`
+    assert(dead_value_tail_errors(mismatched).join("; ").contains("E0308"), dead_value_tail_errors(mismatched).join("; "))
+}

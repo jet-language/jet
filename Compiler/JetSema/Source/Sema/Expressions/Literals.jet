@@ -326,11 +326,13 @@ sema_expression_list_inference_error: fn(element: Type, expected: Type, index: I
 
 // (Rust `check_list_element_assignable`): an item that does not fit the
 // list's element type is E0112 about the list item, after a checked
-// typed-text rejection.
+// typed-text rejection and the missing implementation of a trait value's
+// trait (E0905).
 sema_expression_list_item_mismatch: fn(required: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     want: sema_expr_expected_type(required, environment, program)
     got: sema_expr_expected_type(offered, environment, program)
     if sema_typed_text_mismatch(want, got, span, program) == .Val(typed_text) -> return typed_text
+    if sema_trait_value_unimplemented(want, got, span) == .Val(unimplemented) -> return unimplemented
     sema_error("E0112", span, "a list item needs {sema_type_show(want)}, but this is {sema_type_show(got)}", "every list item must match the list's element type", sema_type_fix_hint(want, got))
 }
 

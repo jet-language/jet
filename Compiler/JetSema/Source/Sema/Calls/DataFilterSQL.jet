@@ -97,7 +97,9 @@ sema_data_filter_fields: fn(row: Type, environment: SemaScopeEnvironment, progra
         if definition.kind == .Struct(fields, _) {
             loop field in fields {
                 if field.skip || field.computed -> next
-                if (field.shape_names.json ?? field.shape_names.text) != field.name -> next
+                if (field.shape_names.format_key("json") ?? field.shape_names.text) != field.name {
+                    next
+                }
                 // A bound value is text: an Int is cast, a Bool compares as
                 // the 1 or 0 its column holds.
                 if field.ty == Type.Int {

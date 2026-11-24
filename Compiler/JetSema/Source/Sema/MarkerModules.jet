@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[AppliedRuleApplication, CompilerThreads, Diagnostic, EFFECT_VOCABULARY_ROOTS, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_is_core, module_none, owned_trait, registration_marker_rule, registration_marker_rules, sema_casing_marker_qualifier]
+    jet_foundation.[AppliedRuleApplication, CORE_FORMAT_NAMES, CompilerThreads, Diagnostic, EFFECT_VOCABULARY_ROOTS, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_is_core, module_none, owned_trait, registration_marker_rule, registration_marker_rules, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -637,7 +637,7 @@ sema_marker_module_applied_catalog: fn(graph: SemaRegistrationGraph) -> TApplied
 
 // The registry of the builtin applied rules alone, without source-declared markers.
 sema_marker_module_catalog_registry: fn(applied: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
-    catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}}
+    catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, format_names: CORE_FORMAT_NAMES}
     if !sema_scope_members_registry_add_applied_catalog(catalog, applied) -> return None
     Val(catalog)
 }
@@ -1003,7 +1003,7 @@ sema_marker_module_first_argument_evaluates: fn(marker: Marker) -> Bool {
     if marker.declaration_module != None -> return true
     rule: registration_marker_rule(marker.name) ?? return true
     argument: sema_marker_rules_marker_expression(marker, 0) ?? return true
-    bindings: sema_marker_rules_marker_signature_bindings(marker, rule.signature) ?? return true
+    bindings: sema_marker_rules_marker_signature_bindings(marker, rule.signature, None) ?? return true
     loop binding in bindings {
         if binding.source_index != 0 -> next
         if binding.kind == {

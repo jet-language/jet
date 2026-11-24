@@ -32,7 +32,7 @@
 // process out of stack.
 use {
     core: core
-    core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, __DecodeSource, __Decoding]
+    core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, Format, FormatError, __DecodeSource, __Decoding]
     base64: core.encoding.base64
     math: core.math
     stream: __core_encoding_stream
@@ -131,6 +131,43 @@ dumps: fn(value: Dyn) -> String EncodingError! { render_json(value, false) }
 
 /// Python-compatible file-shaped spelling for JSON serialization.
 dump: fn(value: Dyn) -> String EncodingError! { render_json(value, false) }
+
+/// JSON as a `Format`: UTF-8 text, read as `parse` reads it and written
+/// compact.
+///
+/// ```jet
+/// bytes: Codec.write(Dyn.Array([Dyn]{Dyn.Int(1)})) ?? panic("{err}")
+/// (String.from_bytes(bytes) ?? "") == "[1]" // => true
+/// (to_string(Codec.read(bytes) ?? panic("{err}")) ?? "") == "[1]" // => true
+/// ```
+Codec: struct {
+    impl Format {
+        name: "json",
+
+        read: fn(bytes: [U8]) -> Dyn FormatError! {
+            text: String.from_bytes(bytes) ?? return Err(FormatError{format: "json", reason: "the bytes are not UTF-8"})
+            tree: parse(text) ?? return Err(FormatError{format: "json", reason: err.display_text()})
+            Ok(tree)
+        }
+
+        write: fn(tree: Dyn) -> [U8] FormatError! {
+            text: render_json(tree, false) ?? return Err(FormatError{format: "json", reason: err.display_text()})
+            Ok(text.bytes())
+        }
+    }
+}
+
+#Test("the JSON format writes compact text and reads it back") {
+    tree: parse("{{\"id\": 7, \"tags\": [\"a\"]}}") ?? panic("JSON")
+    bytes: Codec.write(tree) ?? panic("write")
+    assert_eq(String.from_bytes(bytes) ?? "", "{{\"id\":7,\"tags\":[\"a\"]}}")
+    back: Codec.read(bytes) ?? panic("read")
+    assert_eq(to_string(back) ?? "", "{{\"id\":7,\"tags\":[\"a\"]}}")
+    if Codec.read([U8]{255}) == {
+        .Ok(_) -> { panic("bytes that are not UTF-8 read as JSON") }
+        .Err(failure) -> assert_eq(failure.reason, "the bytes are not UTF-8")
+    }
+}
 
 /// Two-space indented JSON text.
 to_string_pretty: fn<T: Encode>(value: T) -> String EncodingError! {

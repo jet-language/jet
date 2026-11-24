@@ -1,0 +1,24 @@
+// L0309 stays quiet for the module its fix writes, and for a field-less
+// struct whose values a function makes or takes.
+geometry: module {
+    area: fn(width: Int, height: Int) -> Int { width * height }
+
+    perimeter: fn(width: Int, height: Int) -> Int { 2 * (width + height) }
+}
+
+Token: struct {
+    new: fn() -> Token { Token{} }
+
+    label: fn(self) -> String { "token" }
+}
+
+Signal: struct {
+    fire: fn(_signal: Signal) -> Int { 1 }
+}
+
+run: fn() {
+    print(geometry.area(3, 4))
+    print(geometry.perimeter(3, 4))
+    print(Token.new().label())
+    print(Signal.fire(Signal{}))
+}

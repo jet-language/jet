@@ -9,9 +9,8 @@ use jet_foundation.[
 
 jet_eval_reflection_metadata_supported: fn(owner: String, method: String) -> Bool Never! {
     if owner == "TypeInfo" -> return method == "has_method" || method == "marker"
-    if owner == "FieldInfo" || owner == "CaseInfo" || owner == "MethodInfo" || owner == "FunctionInfo" {
-        return method == "marker"
-    }
+    if owner == "FieldInfo" || owner == "CaseInfo" -> return method == "marker" || method == "key"
+    if owner == "MethodInfo" || owner == "FunctionInfo" -> return method == "marker"
     false
 }
 
@@ -78,6 +77,49 @@ jet_eval_reflection_marker_value: fn(owner: String, args: [TComptimeValue]) -> J
             at += 2
         }
         return JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Present{value: TComptimeValue.Struct{type_name: wanted, fields: record}}}
+    }
+    absent
+}
+
+// `field.key(format)`: the text the receiver's `#Rename` gives it under the
+// codec format `format` (`#Rename(name: "id", msgpack: "i")` keys it `i` in
+// msgpack), or None when no `#Rename` on it labels that format.
+jet_eval_reflection_format_key: fn(owner: String, args: [TComptimeValue]) -> JetEvalCompilerValueAnswer {
+    if args.len() != 2 {
+        return jet_eval_compiler_value_fault("reflection method {owner}.key takes its receiver and one format name")
+    }
+    wanted: if args[1] == .String(text) -> text else -> {
+        return jet_eval_compiler_value_fault("reflection method {owner}.key requires a String format name")
+    }
+    fields: jet_eval_compiler_value_fields(args[0], owner) ?? return jet_eval_compiler_value_fault("reflection metadata route receiver is not {owner}")
+    absent: JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Failed{report: .Clean{ty: Type.String}}}
+    markers: jet_eval_compiler_value_field(fields, "markers") ?? return absent
+    rows: if markers == .List(values) -> values else -> {
+        return absent
+    }
+    loop row in rows {
+        marker_fields: if row == .Struct(_, values) -> values else -> {
+            next
+        }
+        name: jet_eval_compiler_value_field(marker_fields, "name") ?? next
+        renames: if name == .String(text) -> jet_eval_reflection_marker_leaf(text) == "Rename" else -> false
+        if !renames -> next
+        written: jet_eval_compiler_value_field(marker_fields, "args") ?? next
+        arguments: if written == .List(values) -> values else -> {
+            next
+        }
+        loop argument in arguments {
+            argument_fields: if argument == .Struct(_, entries) -> entries else -> {
+                next
+            }
+            label: jet_eval_compiler_value_field(argument_fields, "name") ?? next
+            labeled: if label == .String(format) -> format == wanted else -> false
+            if !labeled -> next
+            value: jet_eval_compiler_value_field(argument_fields, "value") ?? next
+            if value == .String(_) {
+                return JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Present{value: value}}
+            }
+        }
     }
     absent
 }
@@ -162,6 +204,7 @@ jet_eval_reflection_metadata_method_list_contains: fn(fields: [TComptimeField], 
 // accepts) on `args`: the receiver, then the String name it asks about.
 jet_eval_reflection_answer: fn(owner: String, method: String, args: [TComptimeValue]) -> JetEvalCompilerValueAnswer {
     if method == "marker" -> return jet_eval_reflection_marker_value(owner, args)
+    if method == "key" -> return jet_eval_reflection_format_key(owner, args)
     if args.len() != 2 {
         return jet_eval_compiler_value_fault("reflection metadata method {owner}.{method} takes its receiver and one name")
     }

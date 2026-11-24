@@ -40,6 +40,7 @@ use {
         Stmt,
         StrPart,
         StructDef,
+        TAppliedRule,
         TAppliedRuleArgumentMenu,
         TAppliedRuleCatalog,
         TComptimeEnumArg,
@@ -84,6 +85,7 @@ use {
         module_is_core,
         module_text,
         overflow_mode_name,
+        registration_marker_rule,
     ]
     jet_lexer.[
         TOKEN_BLOCK_COMMENT,
@@ -520,15 +522,7 @@ SemaComptimeReflectionMarkerViews: struct {
 
 sema_comptime_reflection_marker_rule: fn(registry: SemaScopeMembersMarkerRegistry, name: String) -> SemaComptimeReflectionMarkerRule? {
     loop rule in registry.applied_rules {
-        if rule.name != name -> next
-        params: loop parameter in rule.signature.params -> SemaComptimeReflectionMarkerParam{name: parameter.name, source_type: parameter.source_type}
-        return Val(SemaComptimeReflectionMarkerRule{
-            name: rule.name,
-            params: params,
-            variadic_source_type: rule.signature.variadic_source_type,
-            sites: rule.sites,
-            repeatable: rule.repeatable,
-        })
+        if rule.name == name -> return Val(sema_comptime_reflection_applied_rule(rule))
     }
     loop rule in registry.marker_rules {
         if rule.name != name -> next
@@ -551,7 +545,22 @@ sema_comptime_reflection_marker_rule: fn(registry: SemaScopeMembersMarkerRegistr
             repeatable: rule.repeatable,
         })
     }
-    None
+    // A Prelude marker keeps its registered rule when the registry was built
+    // over an empty catalog, so its written labels name its arguments.
+    rule: registration_marker_rule(name) ?? return None
+    Val(sema_comptime_reflection_applied_rule(rule))
+}
+
+// A registered rule's reflection row.
+sema_comptime_reflection_applied_rule: fn(rule: TAppliedRule) -> SemaComptimeReflectionMarkerRule {
+    params: loop parameter in rule.signature.params -> SemaComptimeReflectionMarkerParam{name: parameter.name, source_type: parameter.source_type}
+    SemaComptimeReflectionMarkerRule{
+        name: rule.name,
+        params: params,
+        variadic_source_type: rule.signature.variadic_source_type,
+        sites: rule.sites,
+        repeatable: rule.repeatable,
+    }
 }
 
 sema_comptime_reflection_marker_parameter: fn(rule: SemaComptimeReflectionMarkerRule, marker: Marker, source_index: Int) -> SemaComptimeReflectionMarkerParam? {
@@ -562,6 +571,11 @@ sema_comptime_reflection_marker_parameter: fn(rule: SemaComptimeReflectionMarker
         }
         if rule.variadic_source_type == .Val(source_type) {
             return Val(SemaComptimeReflectionMarkerParam{name: "value", source_type: source_type})
+        }
+        // A `#Rename` label beyond its parameters names a codec format and
+        // carries that format's key.
+        if sema_marker_is_hook(marker, MarkerHook.Rename) {
+            return Val(SemaComptimeReflectionMarkerParam{name: label.name, source_type: "String"})
         }
         return None
     }

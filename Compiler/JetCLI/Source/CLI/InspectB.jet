@@ -483,7 +483,8 @@ jet_cli_inspect_slice: fn(text: String, start: Int, end: Int) -> String Never! {
 }
 
 // `digest_slices`: byte-exact topic ranges of the one digest; the Core index
-// splits into one topic per module row.
+// splits into one topic per module row. Every offset counts UTF-8 bytes, so a
+// topic past a non-ASCII row (`—`) still ends where the next one starts.
 jet_cli_digest_slices: fn(digest: String) -> [JetCLIDigestSlice] Never! {
     topics: [String]{"first-program", "core.source-rules", "idioms", "syntax.keywords", "syntax.types", "syntax.reserved", "markers", "core", "diagnostics"}
     headings: [String]{"## First program", "## Core source rules", "## Canonical idiom suites", "## Keywords", "## Built-in type names", "## Reserved first-party names", "## Markers", "## Core module index", "## Diagnostics"}
@@ -491,7 +492,7 @@ jet_cli_digest_slices: fn(digest: String) -> [JetCLIDigestSlice] Never! {
     slices := [JetCLIDigestSlice]{}
     loop (index, topic) in topics {
         start: if index == 0 -> 0 else -> starts[index]
-        end: if index + 1 < starts.len() -> starts[index + 1] else -> digest.len()
+        end: if index + 1 < starts.len() -> starts[index + 1] else -> digest.count_bytes()
         if topic != "core" {
             slices.push(JetCLIDigestSlice{topic: topic, bytes: jet_cli_inspect_slice(digest, start, end)})
             next
@@ -504,7 +505,7 @@ jet_cli_digest_slices: fn(digest: String) -> [JetCLIDigestSlice] Never! {
         loop line in jet_cli_inspect_slice(digest, header_end, end).split("\n") {
             if offset >= end -> break
             if line.starts_with("core.") -> rows.push(offset)
-            offset += line.len() + 1
+            offset += line.count_bytes() + 1
         }
         loop (row_index, row_start) in rows {
             line: jet_cli_inspect_slice(digest, row_start, end)

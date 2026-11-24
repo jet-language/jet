@@ -392,12 +392,7 @@ jet_config_export_find_ct_field: fn(ct_fields: [NamedCtValue], name: String) -> 
 
 jet_config_export_wire_name: fn(definition: StructDef, field_index: Int, format: String) -> String Never! {
     names: sema_checked_field_shape_names(definition, definition.fields[field_index])
-    if format == {
-        "json" -> names.json ?? names.text
-        "yaml" -> names.yaml ?? names.text
-        "toml" -> names.toml ?? names.text
-        else -> names.text
-    }
+    names.format_key(format) ?? names.text
 }
 
 jet_config_export_ct_struct_fields: fn(definition: StructDef, ct_fields: [NamedCtValue], items: [Item], format: String, out: &[JetCLIStatusField]) -> Bool Never! {
@@ -653,7 +648,7 @@ jet_config_export_append_struct_fields: fn(definition: StructDef, items: [Item],
             }
         }
         names: sema_checked_field_shape_names(definition, field)
-        wire_name: names.json ?? names.text
+        wire_name: names.format_key("json") ?? names.text
         field_schema: if field.ty == .Option(inner) -> jet_config_export_schema_type(inner, items, active) else -> jet_config_export_schema_type(field.ty, items, active)
         props.push(jet_cli_status_field("{wire_name}", field_schema))
         if !(field.ty == .Option(_)) && field.default == None -> required.push("{wire_name}")

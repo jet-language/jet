@@ -1,0 +1,134 @@
+// A MessagePack codec a package adds. `Codec` implements Core's `Format`, so
+// `msgpack` becomes a `#Rename` label and Core's data loaders read
+// MessagePack bytes through it; `#Msgpack.Keys` reads each field's
+// `msgpack` key back. The codec covers nil, booleans, integers, short text,
+// arrays and maps.
+use core.encoding.[Dyn, Format, FormatError]
+
+Codec: struct {
+    impl Format {
+        name: "msgpack",
+
+        read: fn(bytes: [U8]) -> Dyn FormatError! {
+            reader := Reader{bytes: bytes, at: 0}
+            tree: reader.value() ?? return Err(err)
+            if reader.at != bytes.len() -> return Err(fail("trailing bytes after the value"))
+            Ok(tree)
+        }
+
+        write: fn(tree: Dyn) -> [U8] FormatError! {
+            out := [U8]{}
+            write_value(tree, out) ?? return Err(err)
+            Ok(out)
+        }
+    }
+}
+
+// `#Msgpack.Keys` gives a struct one `msgpack_key_<field>` method per field:
+// the field's `#Rename(msgpack: …)` key, else its name.
+Keys: struct {
+    impl Marker {
+        sites: [.Type],
+
+        expand: fn(self, target: Target) {
+            #loop field in target.reflect().fields {
+                method: "msgpack_key_{field.name}"
+                #{method}: fn(self) -> String { field.key("msgpack") ?? field.name }
+            }
+        }
+    }
+}
+
+fail: fn(reason: String) -> FormatError { FormatError{format: "msgpack", reason: reason} }
+
+write_value: fn(value: Dyn, out: &[U8]) FormatError! {
+    if value == {
+        .Null -> out.push(U8{192})
+        .Bool(flag) -> out.push(if flag -> U8{195} else -> U8{194})
+        .Int(number) -> {
+            if number >= 0 && number < 128 -> out.push(U8{number}) else {
+                if number < -(1 << 63) || number >= 1 << 63 {
+                    return Err(fail("{number} is past MessagePack's int 64"))
+                }
+                out.push(U8{211})
+                loop index in 0..<8 -> out.push(U8{(number >> ((7 - index) * 8)) & 255})
+            }
+        }
+        .Text(text) -> {
+            bytes: text.bytes()
+            if bytes.len() >= 32 {
+                return Err(fail("text of {bytes.len()} bytes is past this codec's fixstr"))
+            }
+            out.push(U8{160 | bytes.len()})
+            loop byte in bytes -> out.push(byte)
+        }
+        .Array(items) -> {
+            if items.len() >= 16 {
+                return Err(fail("an array of {items.len()} items is past this codec's fixarray"))
+            }
+            out.push(U8{144 | items.len()})
+            loop item in items -> write_value(item, out) ?? return Err(err)
+        }
+        .Object(entries) -> {
+            if entries.len() >= 16 {
+                return Err(fail("a map of {entries.len()} entries is past this codec's fixmap"))
+            }
+            out.push(U8{128 | entries.len()})
+            loop entry in entries {
+                write_value(Dyn.Text(entry.key), out) ?? return Err(err)
+                write_value(entry.value, out) ?? return Err(err)
+            }
+        }
+        .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> return Err(fail("this codec writes no such value"))
+    }
+    Ok()
+}
+
+Reader: struct {
+    bytes: [U8],
+    at: Int,
+
+    byte: fn(&self) -> Int FormatError! {
+        if self.at >= self.bytes.len() -> return Err(fail("the bytes end inside a value"))
+        value: Int{self.bytes[self.at]}
+        self.at += 1
+        Ok(value)
+    }
+
+    value: fn(&self) -> Dyn FormatError! {
+        head: self.byte() ?? return Err(err)
+        if head < 128 -> return Ok(Dyn.Int(head))
+        if head == 192 -> return Ok(Dyn.Null)
+        if head == 194 || head == 195 -> return Ok(Dyn.Bool(head == 195))
+        if head == 211 {
+            number := 0
+            loop _ in 0..<8 -> number = (number << 8) | (self.byte() ?? return Err(err))
+            // int 64 is two's complement.
+            if number >= 1 << 63 -> number -= 1 << 64
+            return Ok(Dyn.Int(number))
+        }
+        if head >= 160 && head < 192 {
+            length: head - 160
+            if self.at + length > self.bytes.len() -> return Err(fail("the bytes end inside text"))
+            text: String.from_bytes(self.bytes[self.at..<(self.at + length)]) ?? return Err(fail("text that is not UTF-8"))
+            self.at += length
+            return Ok(Dyn.Text(text))
+        }
+        if head >= 144 && head < 160 {
+            items := [Dyn]{}
+            loop _ in 0..<(head - 144) -> items.push(self.value() ?? return Err(err))
+            return Ok(Dyn.Array(items))
+        }
+        if head >= 128 && head < 144 {
+            entries := [{key: String, value: Dyn}]{}
+            loop _ in 0..<(head - 128) {
+                key: self.value() ?? return Err(err)
+                if key == .Text(name) {
+                    entries.push({key: name, value: self.value() ?? return Err(err)})
+                } else { return Err(fail("a map key that is not text")) }
+            }
+            return Ok(Dyn.Object(entries))
+        }
+        Err(fail("byte {head} starts no value this codec reads"))
+    }
+}

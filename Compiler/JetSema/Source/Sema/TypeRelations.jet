@@ -1631,6 +1631,14 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
             } else if !(caller >= 0 && module_is_core(graph.modules[caller].module_identity)) {
                 row = sema_type_unscoped_nominal_row(graph, name, caller)
             }
+            // A number family nothing the caller sees binds is Core's, as a
+            // size name is (sema_type_graph_resolve_size_name): `Unsigned<8>`
+            // is U8 wherever core.prelude is not loaded.
+            if resolved == None && row == None && foundation_number_family(name) {
+                if foundation_family_sizes(rewritten) == .Val(sizes) {
+                    if foundation_family_type(name, sizes) == .Val(sized) -> return sized
+                }
+            }
             // Invalid alias graphs are rejected during registration, before
             // consumers can recurse through their transparent targets; under
             // JET_KEEP_GOING an alias expands only from a settled module row
@@ -2444,6 +2452,10 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
+    // A trait value meets only the traits it carries: the type inside it is
+    // not known where it is used, so no impl of another trait can be found
+    // for it (a `Shown` value passed where `Back` is expected is refused).
+    if actual_resolved == .TraitObject(carried) -> return Val(carried.contains(bound_name))
     nominal_row: sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) ?? return sema_type_bound_satisfied_builtin_target(graph, actual_resolved, bound_name, caller)
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
     // The nominal row is passed in place: binding it copied the declaration.
@@ -2454,13 +2466,14 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
 // outside the builtin family only through an impl written for it (`impl
 // Int.Named`), so without one the bound is unmet, not unknown. An exact
 // number literal's type (`Decimal`, `Fraction`) has no row where core.math
-// is not imported and is judged the same way. A builtin family bound keeps
-// its own rules, and any other type without a row stays unknown.
+// is not imported and is judged the same way, and so is a function type,
+// which no impl can name. A builtin family bound keeps its own rules, and
+// any other type without a row stays unknown.
 sema_type_bound_satisfied_builtin_target: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int) -> Bool? {
     builtin: if actual_resolved == {
-        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .List(_) | .Map(_, _, _) | .FixedList(_, _) | .Option(_) | .Tuple(_) -> true
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .List(_) | .Map(_, _, _) | .FixedList(_, _) | .Option(_) | .Tuple(_) | .Fn(_, _, _, _, _, _) -> true
         .Named(name) -> name == "Decimal" || name == "Fraction"
-        .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Shared(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !builtin || sema_type_builtin_trait_symbol(bound_name) != None -> return None
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None

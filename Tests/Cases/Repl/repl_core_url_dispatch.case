@@ -11,8 +11,8 @@ exit: any # original library predicates did not assert process status
 stdout: !~ "Jet.ComptimeConstructNotSupported" # original predicate
 stderr: !~ "Jet.ComptimeConstructNotSupported" # original predicate
 stdout|stderr: ~ "\"a%20b%2Fc\" : String" # original predicate
-stdout|stderr: ~ "a b : Result" # original predicate
+stdout|stderr: ~ "\"a b\" : String" # a failable call echoes its success type
 stdout|stderr: ~ "\"a=1&b=2%20c\" : String" # original predicate
 stdout|stderr: ~ "https://ex.com/b?x=1#f" # original predicate
-stdout|stderr: ~ "err : Result" # original predicate
+stderr: ~ "Error: Syntax (type: URLError)" # a failed parse reports its error and the session goes on
 stdout|stderr: ~ "file:///tmp/x.txt" # original predicate

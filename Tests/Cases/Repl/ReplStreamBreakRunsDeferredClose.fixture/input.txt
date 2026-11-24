@@ -1,17 +1,15 @@
 
 Marker: struct {
-    name: String
-}
+    name: String,
 
-impl Marker.Close {
-    close: fn(^self) {
-        print("closed: {self.name}")
+    impl Close {
+        close: fn(&&self) { print("closed: {self.name}") }
     }
 }
 
-values: fn() -[]> Stream<Int> {
+values: fn() -> Stream<Int> {
     marker := Marker{name: "stream"}
-    defer close(^marker)
+    defer close(marker)
     print("before")
     yield 1
     print("after")

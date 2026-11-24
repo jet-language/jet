@@ -329,7 +329,7 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
                 row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
                 what: row.what.replace("{{type}}", name).replace("{{bound}}", bound)
                 why := "`{name}` would need to implement `{bound}` before it can be used here"
-                fix := "write `impl {name}.{bound} {{ … }}` with every required method"
+                fix := sema_trait_impl_fix(name, bound)
                 if bound == "Comparable" {
                     fix = "write `#Comparable` before `{name}`, or use `sort_by` with a key"
                 }

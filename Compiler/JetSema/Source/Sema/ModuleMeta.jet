@@ -380,15 +380,25 @@ sema_module_meta_value_reads: fn(text: String, modules: NameTable, reads: &NameT
     }
 }
 
+// Whether the compiler owns `input`'s source: Core, or a module of the
+// canonical Prelude package. Such a source declares no record and reads
+// none. The loader decides whether core.meta loads from the other sources
+// alone (JetDriver jet_driver_module_meta_needed), so a word of compiler
+// text, such as the `a` in a Prelude error message, must not give a user
+// module a record whose core.meta the load never reached.
+sema_module_meta_compiler_source: fn(input: SemaRegistrationModuleInput) -> Bool Never! {
+    module_is_core(input.module_identity) || input.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY
+}
+
 // Give each input's meta the names of the compile's modules some source
 // reads as a value, so only those modules, and those whose bodies set a
 // field, carry a record. A record is read across files (`lib.inner` from
 // another file of the package), so every source is scanned for every
-// module. Core declares no record and reads none.
+// module.
 sema_module_meta_mark_reads: fn(inputs: &[SemaRegistrationModuleInput]) {
     names := name_table_sized(2)
     loop input in inputs {
-        if module_is_core(input.module_identity) -> next
+        if sema_module_meta_compiler_source(input) -> next
         sema_module_meta_declared_names(input.program.items, input.declared_module, names)
     }
     if name_count(names) <= 1 {
@@ -396,13 +406,13 @@ sema_module_meta_mark_reads: fn(inputs: &[SemaRegistrationModuleInput]) {
     }
     reads := name_table_sized(2)
     loop input in inputs {
-        if module_is_core(input.module_identity) -> next
+        if sema_module_meta_compiler_source(input) -> next
         sema_module_meta_value_reads(input.source, names, reads)
     }
     if name_count(reads) <= 1 {
         return
     }
     loop index in 0..<inputs.len() {
-        if !module_is_core(inputs[index].module_identity) -> inputs[index].meta.reads = reads.copy()
+        if !sema_module_meta_compiler_source(inputs[index]) -> inputs[index].meta.reads = reads.copy()
     }
 }

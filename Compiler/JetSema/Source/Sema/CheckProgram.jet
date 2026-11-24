@@ -1377,12 +1377,17 @@ sema_function_normalize_owner_type: fn(graph: SemaRegistrationGraph, owner_type:
         .Named(name) -> {
             nominal_row: sema_type_resolve_nominal_row(graph, owner_type, caller_module_identity) ?? return owner_type
             nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            // An impl of an imported type (`impl math.Decimal.Shown`) names it
+            // through the caller's import; its methods' owner is the type's
+            // own identity, the one its values carry, as the impl row's
+            // self type is (sema_checked_impl_row).
+            owner_name: if name.contains(".") && sema_type_resolve_declared(graph, owner_type, caller_module_identity) == .Named(resolved) -> resolved else -> name
             // copy: the normalized owner type is a new owned Type. For a non-generic nominal it
             // equals `owner_type`, the caller's owner type (a read parameter), which the caller
             // keeps.
-            if nominal.generic_params.len() == 0 -> return owner_type.copy()
+            if nominal.generic_params.len() == 0 -> return Type.Named{name: owner_name}
             args: loop parameter in nominal.generic_params -> Type.Named{name: parameter.name}
-            return Type.Apply{name: name, args: args}
+            return Type.Apply{name: owner_name, args: args}
         }
         // copy: the normalized owner type is a new owned Type. For other kinds it equals
         // `owner_type`, the caller's owner type (a read parameter), which the caller keeps.
@@ -1560,9 +1565,10 @@ sema_function_check_passes: fn(func: Func, owner_key: String, function_kind: TFu
         retypes: sema_expr_number_accept_retypes(number_known, number_found)
         if !shares && !retypes {
             instance: if program.registration_graph == .Val(graph) -> sema_name_instance_span(graph, environment.module_identity, func.name) else -> None
-            if instance == .Val(line) {
+            if instance == .Val(owner) {
                 loop diagnostic in pass_diagnostics {
-                    diagnostics.push(sema_name_at_instance(diagnostic, line))
+                    placed: sema_name_at_instance(diagnostic, owner) ?? next
+                    diagnostics.push(placed)
                 }
             } else { diagnostics.extend(pass_diagnostics.move()) }
             call_facts.extend(pass_call_facts.move())
@@ -3414,7 +3420,7 @@ sema_check_registered_memory_position: fn(job: SemaBodyJob, module_index: Int, m
                 panic("a selected source function lost its original item")
             }
             .NominalMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].nominals[owner].ty) ?? "", graph.modules[module_index].nominals[owner].methods[row].declaration.name, graph.modules[module_index].nominals[owner].methods[row].declaration.span)
-            .ImplMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].impls[owner].target_type) ?? "", graph.modules[module_index].impls[owner].methods[row].declaration.name, graph.modules[module_index].impls[owner].methods[row].declaration.span)
+            .ImplMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_function_memory_type_owner(graph.modules[module_index].impls[owner].target_type), graph.modules[module_index].impls[owner].methods[row].declaration.name, graph.modules[module_index].impls[owner].methods[row].declaration.span)
         }
     }
     panic("a registered Jet body check lost its owning graph")

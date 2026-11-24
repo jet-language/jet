@@ -116,18 +116,40 @@ TLayoutAlignmentFact: struct {
     fact_identity: String,
 }
 
+// One codec format's key for a field: `#Rename(msgpack: "i")` is
+// `{format: "msgpack", name: "i"}`.
+TShapeFormatName: struct {
+    format: String,
+    name: String,
+}
+
+// The parameters of the Prelude `#Rename` (Compiler/Prelude/Markers.jet), read
+// from its registered rule; each other label it takes names a codec format.
+RENAME_PARAMETERS: #run rename_parameters_read()
+
+rename_parameters_read: fn() -> [String] Never! {
+    rule: registration_marker_rule(MARKER_RENAME) ?? panic("the Prelude declares no `#Rename`")
+    loop parameter in rule.signature.params -> parameter.name
+}
+
 TShapeFieldNames: struct {
     text: String,
-    json: String?,
-    cbor: String?,
-    csv: String?,
-    toml: String?,
-    yaml: String?,
-    xml: String?,
+    // The keys `#Rename` gives per codec format, its labels beyond its
+    // parameters, in written order.
+    formats: [TShapeFormatName],
     args: String,
     env: String,
     db: String?,
     layout: String?,
+
+    // The key `#Rename` gives under the codec format `format`, if it labels
+    // that format.
+    format_key: fn(self, format: String) -> String? Never! {
+        loop entry in self.formats {
+            if entry.format == format -> return Val(entry.name)
+        }
+        None
+    }
 }
 
 TIntegerRange: struct {

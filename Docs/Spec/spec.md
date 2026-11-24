@@ -910,6 +910,16 @@ impl Circle {
 }
 ```
 
+A static `new` is the type's constructor, wherever it is declared: in the
+body, an inherent `impl`, or as `Type.new: fn`. `Type.new(…)` gives a `Type`,
+so the result of `new` is the owner type or one of its states (`Gate.Closed`),
+and may sit behind `?` or a failure contract (`Type?`, `Type E!`). Any other
+result is **E0181**. A struct with no fields whose body declares only static
+functions, none of which takes or returns the struct, is the tidy error
+**L0309** unless the struct has states, derives or an impl anywhere. No value
+of such a struct carries anything, so the fix is a `name: module { … }`
+holding the same functions.
+
 `Type{ body }` is the one typed-literal head for every type (D-DOTCTOR3): the
 body uses the type's literal notation, such as elements for `[U8]{42, 0}` and
 entries for `[String:Int]{"a": 1}`. A body of exactly one expression is decided
@@ -1461,8 +1471,12 @@ own alignment, and the struct rounds up to a multiple of 8 bytes, so
 alignment, stride and offsets the compiler chose for the target being built,
 with guarantee `none` (D-LAYOUT-SHOW1=B): the numbers are values compile-time
 code may read and branch on, but a later compiler or another target may place
-the type otherwise. An enum without `#Layout` reports its own bytes and each
-case's offset the same way, and a distinct type its base's bytes. A C
+the type otherwise. A record member (`{x: U8, y: Int}`) is its members inline
+in their written order, each at its own alignment, rounded up to a multiple of
+8 bytes. An enum without `#Layout` reports its own bytes and each case's offset
+the same way, and a distinct type its base's bytes. The compiler places the
+bytes with the same computation it reports, so a reported offset or size is
+where the compiled program keeps the field. A C
 declaration that follows them, with explicit padding fields, takes such a
 struct by reference: an `#Import` C function with a `&T` parameter receives the
 address of the value's own bytes when every field is a machine integer, float,
@@ -4114,10 +4128,14 @@ value-argument example is `Examples/Modules/FactValueArguments.jet`.
 An instance's member bodies are its template's text, checked once per
 instance. An error in one is reported at the instance line
 (`int_cache: cache<Int>(64)`), with the template text it came from as a
-label; inline-module and instance members are named by their source paths
-(`int_cache.key_of`), never by their generated identities. A type parameter
-bound to a built-in scalar names that scalar as a static-call owner, so
-`K.parse(text)` in an `Int` instance reads as `Int.parse(text)`.
+label. A report whose fix edits that text, such as **E0514** for a `:=`
+binding nothing writes, is reported at the text itself, because the edit
+changes it for every instance. If it is not an error, only the template's
+first instance in the module reports it. Inline-module and instance members
+are named by their source paths (`int_cache.key_of`), never by their
+generated identities. A type parameter bound to a built-in scalar names that
+scalar as a static-call owner, so `K.parse(text)` in an `Int` instance reads
+as `Int.parse(text)`.
 
 ## Composable configuration modules
 

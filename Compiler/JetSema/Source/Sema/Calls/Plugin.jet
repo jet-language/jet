@@ -147,7 +147,7 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
                         if field.skip || field.computed -> next
                         field_type := sema_inference_substitute_type(field.ty, generic_names, type_args)
                         descriptor: sema_plugin_component_descriptor(graph, environment, program, field_type, next_seen) ?? return None
-                        component_fields.push(ComponentTypeField{index: index, name: field.shape_names.json ?? field.name, ty: descriptor})
+                        component_fields.push(ComponentTypeField{index: index, name: field.shape_names.format_key("json") ?? field.name, ty: descriptor})
                     }
                     return Val(ComponentTypeDescriptor.Record{name: definition.name, fields: component_fields})
                 }

@@ -1,0 +1,16 @@
+# The parser classifies each input: a string literal that holds a binding
+# (`name: value`), an import (`use core.log`) or a declaration head is an
+# expression whose value echoes, a `name: value` line is a binding, and a
+# `Name: distinct Int(lo..hi)` line is a declaration.
+fixture: StringLiteralInputIsExpression.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: StringLiteralInputIsExpression.fixture/input.txt
+exit: 0
+stdout: ~ "\"name: value\" : String" # a literal holding a binding is a value
+stdout: ~ "\"use core.log\" : String" # a literal holding an import is a value
+stdout: ~ "\"Point: struct { x: Int }\" : String" # a literal holding a declaration is a value
+stdout: ~ "\"core.log: on\" : String" # the binding keeps its literal
+stdout: ~ "3 : Int" # the distinct declaration is an item the next turn uses
+stderr: !~ "Error" # the parser accepts every input

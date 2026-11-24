@@ -1,0 +1,14 @@
+# An exact number literal (a Decimal) enters a trait value that core.math's
+# Decimal implements through the program's import, in a list and as an
+# argument, and each dynamic call reaches that implementation on every tier.
+fixture: DecimalTraitValue.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = decimal_trait_value.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = decimal_trait_value.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = decimal_trait_value.out

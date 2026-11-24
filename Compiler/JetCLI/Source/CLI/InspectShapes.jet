@@ -19,11 +19,15 @@ use {
     ]
     jet_foundation.[
         ASTTables,
+        CORE_FORMAT_NAMES,
         CtValue,
         Field,
         Marker,
         MarkerCallArg,
+        RENAME_PARAMETERS,
         StructDef,
+        TShapeFieldNames,
+        TShapeFormatName,
         Type,
         ast_expr,
         diagnostic_from_registry,
@@ -32,8 +36,23 @@ use {
     jet_sema.[sema_checked_rename_case, sema_checked_wire_case, sema_registration_cli_arg_text, sema_serde_items_skips]
 }
 
-// `ShapeProjectionKind.ALL`, in order.
-JET_CLI_SHAPE_PROJECTIONS: [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"}
+// The non-codec projections: `#Rename`'s parameters beyond its shared `name`.
+jet_cli_shape_named_projections: fn() -> [String] Never! {
+    named := [String]{}
+    loop parameter in RENAME_PARAMETERS {
+        if parameter != "name" -> named.push(parameter)
+    }
+    named
+}
+
+// `ShapeProjectionKind.ALL`, in order: Core's codec formats, then the
+// non-codec projections.
+jet_cli_shape_projections: fn() -> [String] Never! {
+    projections := [String]{}
+    loop format in CORE_FORMAT_NAMES -> projections.push(format)
+    loop projection in jet_cli_shape_named_projections() -> projections.push(projection)
+    projections
+}
 
 // `Object` names the shape identity's type in the same source.
 JetCLIShapeType: enum {
@@ -49,26 +68,12 @@ JetCLIShapeType: enum {
     Unknown(name: String),
 }
 
-JetCLIShapeNames: struct {
-    text: String,
-    json: String?,
-    cbor: String?,
-    csv: String?,
-    toml: String?,
-    yaml: String?,
-    xml: String?,
-    args: String,
-    env: String,
-    db: String?,
-    layout: String?,
-}
-
 // `default` is the status value of the typed `ShapeDefault`.
 JetCLIShapeField: struct {
     name: String,
     ty: JetCLIShapeType,
     order: Int,
-    names: JetCLIShapeNames,
+    names: TShapeFieldNames,
     encoding: String,
     default: JetCLIStatusValue?,
     skip: Bool,
@@ -203,19 +208,20 @@ jet_cli_shape_marker_string: fn(tables: ASTTables, marker: Marker, label: String
 
 // `shape_field_names` over `ShapeFieldNames.from_source`; the markers'
 // arguments are nodes of `tables`.
-jet_cli_shape_field_names: fn(tables: ASTTables, structure: StructDef, field: Field) -> JetCLIShapeNames Never! {
+jet_cli_shape_field_names: fn(tables: ASTTables, structure: StructDef, field: Field) -> TShapeFieldNames Never! {
     rename: jet_cli_shape_marker(field.serde_markers, "Rename")
     shared := String?{None}
     if rename == .Val(marker) -> shared = jet_cli_shape_marker_string(tables, marker, None)
     text: shared ?? sema_checked_wire_case(sema_checked_rename_case(structure.serde_markers), field.name)
-    names := JetCLIShapeNames{text: text, json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: text.replace("_", "-"), env: jet_cli_shape_env_name(text), db: None, layout: None}
+    names := TShapeFieldNames{text: text, formats: [TShapeFormatName]{}, args: text.replace("_", "-"), env: jet_cli_shape_env_name(text), db: None, layout: None}
     if rename == .Val(marker) {
-        names.json = jet_cli_shape_marker_string(tables, marker, Val("json"))
-        names.cbor = jet_cli_shape_marker_string(tables, marker, Val("cbor"))
-        names.csv = jet_cli_shape_marker_string(tables, marker, Val("csv"))
-        names.toml = jet_cli_shape_marker_string(tables, marker, Val("toml"))
-        names.yaml = jet_cli_shape_marker_string(tables, marker, Val("yaml"))
-        names.xml = jet_cli_shape_marker_string(tables, marker, Val("xml"))
+        // Each label beyond `#Rename`'s parameters keys a codec format.
+        loop label in marker.arg_labels {
+            written: label ?? next
+            if RENAME_PARAMETERS.contains(written.name) -> next
+            key: jet_cli_shape_marker_string(tables, marker, Val(written.name)) ?? next
+            names.formats.push(TShapeFormatName{format: written.name, name: key})
+        }
         if jet_cli_shape_marker_string(tables, marker, Val("args")) == .Val(args) {
             names.args = args
         }
@@ -227,18 +233,13 @@ jet_cli_shape_field_names: fn(tables: ASTTables, structure: StructDef, field: Fi
     names
 }
 
-jet_cli_shape_name_for: fn(names: JetCLIShapeNames, projection: String) -> String Never! {
+jet_cli_shape_name_for: fn(names: TShapeFieldNames, projection: String) -> String Never! {
     if projection == {
-        "json" -> names.json ?? names.text
-        "cbor" -> names.cbor ?? names.text
-        "csv" -> names.csv ?? names.text
-        "toml" -> names.toml ?? names.text
-        "yaml" -> names.yaml ?? names.text
-        "xml" -> names.xml ?? names.text
         "args" -> names.args
         "env" -> names.env
         "db" -> names.db ?? names.text
-        else -> names.layout ?? names.text
+        "layout" -> names.layout ?? names.text
+        else -> names.format_key(projection) ?? names.text
     }
 }
 
@@ -262,9 +263,16 @@ jet_cli_shape_bad_name: fn(name: String) -> Bool Never! {
 }
 
 // `ShapeFieldNames.validate`: the first invalid slot, in order.
-jet_cli_shape_bad_slot: fn(names: JetCLIShapeNames) -> String? Never! {
-    slots: [String?]{Val(names.text), names.json, names.cbor, names.csv, names.toml, names.yaml, names.xml, Val(names.args), Val(names.env), names.db, names.layout}
-    labels: [String]{"text", "json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"}
+jet_cli_shape_bad_slot: fn(names: TShapeFieldNames) -> String? Never! {
+    slots := [String?]{Val(names.text)}
+    labels := [String]{"text"}
+    loop entry in names.formats {
+        slots.push(Val(entry.name))
+        labels.push(entry.format)
+    }
+    named: [String?]{Val(names.args), Val(names.env), names.db, names.layout}
+    loop slot in named -> slots.push(slot)
+    loop label in jet_cli_shape_named_projections() -> labels.push(label)
     loop index in 0..<slots.len() {
         if slots[index] == .Val(name) {
             if jet_cli_shape_bad_name(name) -> return Val(labels[index])
@@ -307,7 +315,7 @@ jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) 
         }
         seen.push(field.name)
     }
-    loop projection in JET_CLI_SHAPE_PROJECTIONS {
+    loop projection in jet_cli_shape_projections() {
         names := [String]{}
         loop field in fields {
             if field.skip -> next
@@ -336,29 +344,34 @@ jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) 
     JetCLIShapeBuild.Fact{fact: JetCLIShapeFact{source: source, type_name: structure.name, fields: fields, layout: layout, alignment: alignment}}
 }
 
-jet_cli_shape_names_value: fn(names: JetCLIShapeNames) -> JetCLIStatusValue Never! {
-    slots: [String?]{names.json, names.cbor, names.csv, names.toml, names.yaml, names.xml, names.db, names.layout}
-    labels: [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "db", "layout"}
-    ignored := [String]{}
-    loop index in 0..<slots.len() {
-        if slots[index] == .None -> ignored.push(labels[index])
+// The codec formats a field's names report: Core's, in order, then each other
+// format its `#Rename` labels.
+jet_cli_shape_format_labels: fn(names: TShapeFieldNames) -> [String] Never! {
+    labels := [String]{}
+    loop format in CORE_FORMAT_NAMES -> labels.push(format)
+    loop entry in names.formats {
+        if !labels.contains(entry.format) -> labels.push(entry.format)
     }
-    jet_cli_status_object(
-        [JetCLIStatusField]{
-            jet_cli_status_field("text", jet_cli_status_text(names.text)),
-            jet_cli_status_field("json", jet_cli_status_optional_text(names.json)),
-            jet_cli_status_field("cbor", jet_cli_status_optional_text(names.cbor)),
-            jet_cli_status_field("csv", jet_cli_status_optional_text(names.csv)),
-            jet_cli_status_field("toml", jet_cli_status_optional_text(names.toml)),
-            jet_cli_status_field("yaml", jet_cli_status_optional_text(names.yaml)),
-            jet_cli_status_field("xml", jet_cli_status_optional_text(names.xml)),
-            jet_cli_status_field("args", jet_cli_status_text(names.args)),
-            jet_cli_status_field("env", jet_cli_status_text(names.env)),
-            jet_cli_status_field("db", jet_cli_status_optional_text(names.db)),
-            jet_cli_status_field("layout", jet_cli_status_optional_text(names.layout)),
-            jet_cli_status_field("ignored", jet_cli_status_texts(ignored)),
-        },
-    )
+    labels
+}
+
+jet_cli_shape_names_value: fn(names: TShapeFieldNames) -> JetCLIStatusValue Never! {
+    ignored := [String]{}
+    rows := [JetCLIStatusField]{jet_cli_status_field("text", jet_cli_status_text(names.text))}
+    loop format in jet_cli_shape_format_labels(names) {
+        key: names.format_key(format)
+        absent: key == None
+        rows.push(jet_cli_status_field("{format}", jet_cli_status_optional_text(key)))
+        if absent -> ignored.push(format)
+    }
+    if names.db == None -> ignored.push("db")
+    if names.layout == None -> ignored.push("layout")
+    rows.push(jet_cli_status_field("args", jet_cli_status_text(names.args)))
+    rows.push(jet_cli_status_field("env", jet_cli_status_text(names.env)))
+    rows.push(jet_cli_status_field("db", jet_cli_status_optional_text(names.db)))
+    rows.push(jet_cli_status_field("layout", jet_cli_status_optional_text(names.layout)))
+    rows.push(jet_cli_status_field("ignored", jet_cli_status_texts(ignored)))
+    jet_cli_status_object(rows)
 }
 
 // The projected fields: unskipped, in order; only `args` carries `short`.
@@ -406,7 +419,7 @@ jet_cli_shape_fact_value: fn(fact: JetCLIShapeFact) -> JetCLIStatusValue Never! 
             jet_cli_status_field("doc", JetCLIStatusValue.Null),
         },
     )
-    projections: loop projection in JET_CLI_SHAPE_PROJECTIONS -> jet_cli_shape_projection_value(fact, projection)
+    projections: loop projection in jet_cli_shape_projections() -> jet_cli_shape_projection_value(fact, projection)
     alignment: if fact.alignment == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null
     jet_cli_status_object(
         [JetCLIStatusField]{
@@ -465,9 +478,13 @@ jet_cli_shape_fact_text: fn(fact: JetCLIShapeFact) -> String Never! {
         if !field.skip -> projected += 1
         out = "{out}  Field {field.name}: {jet_cli_shape_type_label(field.ty)} (order={field.order}, encoding={field.encoding}, skipped={field.skip})\n"
         names: field.names
-        out = "{out}    Names: text={names.text} json={jet_cli_shape_name_text(names.json)} cbor={jet_cli_shape_name_text(names.cbor)} csv={jet_cli_shape_name_text(names.csv)} toml={jet_cli_shape_name_text(names.toml)} yaml={jet_cli_shape_name_text(names.yaml)} xml={jet_cli_shape_name_text(names.xml)} args={names.args} env={names.env} db={jet_cli_shape_name_text(names.db)} layout={jet_cli_shape_name_text(names.layout)}\n"
+        formats := ""
+        loop format in jet_cli_shape_format_labels(names) {
+            formats = "{formats} {format}={jet_cli_shape_name_text(names.format_key(format))}"
+        }
+        out = "{out}    Names: text={names.text}{formats} args={names.args} env={names.env} db={jet_cli_shape_name_text(names.db)} layout={jet_cli_shape_name_text(names.layout)}\n"
     }
-    loop projection in JET_CLI_SHAPE_PROJECTIONS {
+    loop projection in jet_cli_shape_projections() {
         out = "{out}  Projection {projection}: supported ({projected} fields)\n"
     }
     out

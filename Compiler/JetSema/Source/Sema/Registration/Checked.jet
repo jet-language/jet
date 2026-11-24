@@ -30,6 +30,7 @@ use {
         NamedSpan,
         OperatorMarker,
         Param,
+        RENAME_PARAMETERS,
         ParamZone,
         Span,
         StructDef,
@@ -72,6 +73,7 @@ use {
         TSerdeAttributeKind,
         TSerdeCodec,
         TShapeFieldNames,
+        TShapeFormatName,
         TStructLayout,
         TTargetOS,
         TTraitDef,
@@ -345,17 +347,26 @@ sema_checked_ascii_upper: fn(text: String) -> String Never! {
 sema_checked_shape_names: fn(name: String) -> TShapeFieldNames Never! {
     TShapeFieldNames{
         text: name,
-        json: None,
-        cbor: None,
-        csv: None,
-        toml: None,
-        yaml: None,
-        xml: None,
+        formats: [TShapeFormatName]{},
         args: name.replace("_", "-"),
         env: sema_checked_ascii_upper(name.replace("-", "_")),
         db: None,
         layout: None,
     }
+}
+
+// The codec format keys of a `#Rename`: each label beyond its own
+// parameters names a format (sema_marker_rules_marker_signature_bindings
+// checks the name), with its written text.
+sema_checked_rename_formats: fn(marker: Marker) -> [TShapeFormatName] Never! {
+    formats := [TShapeFormatName]{}
+    loop label in marker.arg_labels {
+        written: label ?? next
+        if RENAME_PARAMETERS.contains(written.name) -> next
+        key: sema_checked_marker_text_label(marker, written.name) ?? next
+        formats.push(TShapeFormatName{format: written.name, name: key})
+    }
+    formats
 }
 
 sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShapeFieldNames Never! {
@@ -367,12 +378,7 @@ sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShap
     if rename == .Val(rename_marker) {
         names = TShapeFieldNames{
             text: names.text,
-            json: sema_checked_marker_text_label(rename_marker, "json"),
-            cbor: sema_checked_marker_text_label(rename_marker, "cbor"),
-            csv: sema_checked_marker_text_label(rename_marker, "csv"),
-            toml: sema_checked_marker_text_label(rename_marker, "toml"),
-            yaml: sema_checked_marker_text_label(rename_marker, "yaml"),
-            xml: sema_checked_marker_text_label(rename_marker, "xml"),
+            formats: sema_checked_rename_formats(rename_marker),
             args: sema_checked_marker_text_label(rename_marker, "args") ?? names.args,
             env: sema_checked_marker_text_label(rename_marker, "env") ?? names.env,
             db: sema_checked_marker_text_label(rename_marker, "db"),
@@ -380,9 +386,7 @@ sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShap
         }
     }
     // `#Arg(env:)` names the field's environment fallback.
-    if sema_registration_cli_arg_text(field.serde_markers, "env") == .Val(env) {
-        names = TShapeFieldNames{text: names.text, json: names.json, cbor: names.cbor, csv: names.csv, toml: names.toml, yaml: names.yaml, xml: names.xml, args: names.args, env: env, db: names.db, layout: names.layout}
-    }
+    if sema_registration_cli_arg_text(field.serde_markers, "env") == .Val(env) -> names.env = env
     names
 }
 
@@ -2446,6 +2450,71 @@ sema_checked_validate_layout: fn(definition: StructDef, diagnostics: &[Diagnosti
     }
 }
 
+// The tidy error L0309: a struct with no fields whose body declares only
+// static functions, none of which takes or returns the struct. No value of it
+// carries anything, so the struct only groups functions, which a module does.
+// A struct with states, derives, a written trait impl, a marker, fact or
+// effect block, or an impl anywhere (a nested or top-level one, or a
+// `Type.method: fn`) is a type its values or the compiler use, and is never
+// one. The trait impls derived for every struct (Equatable, Comparable) are
+// the compiler's and do not count.
+sema_checked_validate_static_only: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, definition: StructDef, leaf: String, diagnostics: &[Diagnostic]) {
+    if definition.fields.len() > 0 || definition.methods.len() == 0 || definition.compiler_builtin_error -> return
+    if definition.derives.len() > 0 || definition.cli_bindings.len() > 0 || definition.validate_block.len() > 0 -> return
+    if definition.state == .Val(_) || definition.marker == .Val(_) || definition.fact == .Val(_) || definition.effect_impl == .Val(_) -> return
+    loop block in definition.trait_impls {
+        if !block.compiler_generated -> return
+    }
+    owner: [String]{definition.name, leaf}
+    loop method in definition.methods {
+        if method.compiler_generated || sema_owned_has_self(method) -> return
+        if method.return_type == .Val(returned) && sema_checked_type_contains_name(returned, owner) -> return
+        loop parameter in method.params {
+            if sema_checked_type_contains_name(parameter.ty, owner) -> return
+        }
+    }
+    loop registered in graph.modules {
+        loop implementation in registered.impls {
+            if implementation.target_identity_key == nominal.identity_key && !implementation.compiler_generated -> return
+        }
+    }
+    row: diagnostic_registry_row("L0309") ?? panic("L0309 has no registry row")
+    diagnostics.push(sema_lint("L0309", definition.name_span, row.what.replace("{{name}}", leaf), row.why.replace("{{name}}", leaf), row.fix.replace("{{name}}", leaf)))
+}
+
+// E0181: a type's static `new`, in its body, an inherent impl or a
+// `Type.new: fn`, is the type's constructor, so a call `Type.new(…)` gives a
+// `Type`: its result, behind any `?` or failure contract, is the owner or one
+// of its states.
+sema_checked_validate_constructor: fn(owner: String, leaf: String, methods: [Func], diagnostics: &[Diagnostic]) {
+    loop method in methods {
+        if method.name != "new" || method.compiler_generated || sema_owned_has_self(method) -> next
+        result: method.return_type ?? Type.Named{name: "Unit"}
+        if sema_checked_constructor_result(result, owner, leaf) -> next
+        row: diagnostic_registry_row("E0181") ?? panic("E0181 has no registry row")
+        what: row.what.replace("{{type}}", leaf).replace("{{result}}", type_name(result))
+        diagnostics.push(sema_error("E0181", method.return_type_span ?? method.name_span, what, row.why.replace("{{type}}", leaf), row.fix.replace("{{type}}", leaf)))
+    }
+}
+
+// Whether `ty`, behind any `?` or failure contract, names the type `owner`
+// (written `leaf`, which an impl head may write as a module path): the type
+// itself, a module path ending in it, or one of its states (`Gate.Closed`).
+sema_checked_constructor_result: fn(ty: Type, owner: String, leaf: String) -> Bool Never! {
+    if ty == {
+        .Option(inner) -> sema_checked_constructor_result(inner, owner, leaf)
+        .Result(ok, _) -> sema_checked_constructor_result(ok, owner, leaf)
+        .Named(name) | .Apply(name, _) -> {
+            if name == owner || name == leaf || leaf.ends_with(".{name}") -> return true
+            loop part in name.split(".") {
+                if part == leaf -> return true
+            }
+            false
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
 // The largest power of two at or below `alignment`, at least 1 and, outside
 // target mode, at most the portable baseline.
 sema_checked_usable_alignment: fn(alignment: Int, target_mode: Bool) -> Int Never! {
@@ -3073,6 +3142,8 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
     single_use := false
     must_use := false
     ownership := TDeclarationOwnership.Owned
+    // A type lifted from an inline module prints by its source leaf name.
+    leaf: sema_name_type_leaf(module_row.program.items, name)
     kind := TTypeDefKind?{None}
     if definition == {
         .Struct(value) -> {
@@ -3090,6 +3161,10 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
             sema_checked_validate_patchable(value, diagnostics)
             sema_checked_validate_layout(value, diagnostics)
             sema_receipt_validate_declaration(value, diagnostics)
+            if !nominal.compiler_owned {
+                sema_checked_validate_static_only(graph, nominal, value, leaf, diagnostics)
+                sema_checked_validate_constructor(name, leaf, value.methods, diagnostics)
+            }
             fields: sema_checked_struct_fields(graph, module_row, value, generic_params, diagnostics)
             kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(graph, definition, nominal.methods)})
         }
@@ -3101,6 +3176,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
             must_use = value.is_must_use
             serde = sema_checked_serde_attributes(value.serde_markers, value.type_markers)
             ownership = sema_checked_ownership(single_use)
+            if !nominal.compiler_owned -> sema_checked_validate_constructor(name, leaf, value.methods, diagnostics)
             c_layout_tag = sema_checked_foreign_enum_c_layout_tag(value)
             if c_layout_tag != None {
                 layout = Val(TStructLayout.C)
@@ -3135,8 +3211,6 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
         .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
     }
     type_kind: kind ?? return None
-    // A type lifted from an inline module prints by its source leaf name.
-    leaf: sema_name_type_leaf(module_row.program.items, name)
     TTypeDef{
         module_identity: module_row.module_identity,
         key: sema_checked_nominal_key(graph, module_row, nominal),
@@ -4519,6 +4593,9 @@ sema_checked_declaration_facts: fn(graph: SemaRegistrationGraph, module_index: I
     sema_checked_impl_coherence(graph, module_row, diagnostics)
     loop implementation in module_row.impls {
         sema_checked_validate_impl(graph, module_row, implementation, diagnostics)
+        if implementation.trait_name == None && !implementation.declaration.is_generated_serde {
+            sema_checked_validate_constructor(implementation.target_type_name, implementation.declaration.type_name, implementation.declaration.methods, diagnostics)
+        }
         impl_constants: sema_trait_constants_check_impl(graph, module_row.module_identity, implementation.declaration.trait_name, implementation.declaration.type_name, implementation.declaration.constants, implementation.declaration.type_span, diagnostics)
         impls.push(sema_checked_impl_row(graph, module_row, implementation, impl_constants))
     }

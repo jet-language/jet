@@ -1,9 +1,10 @@
-// REPL source classification. Rust: jet-repl 1591-1634, 1709-1788, 1839-1999.
-// This adapter feeds the canonical parser and runs nothing itself. Every input
-// the parser accepts is checked by the compiler on the shared path (`jet repl`,
-// JetCLI Repl.jet); nothing here refuses a feature by name.
+// REPL source classification. This adapter feeds the canonical parser and
+// runs nothing itself: the parse decides whether an input is imports,
+// declarations or one turn's statements, and every input the parser accepts
+// is checked by the compiler on the shared path (`jet repl`, JetCLI
+// Repl.jet); nothing here refuses a feature by name.
 use {
-    jet_foundation.[ASTTables, BLOCK_COMMENT_OPEN, COMMENT_PREFIX, Diagnostic, DiagnosticLabel, Item, ParseResult, Span, StmtNode, TextEdit]
+    jet_foundation.[ASTTables, Diagnostic, DiagnosticLabel, Item, ParseResult, Span, StmtNode, TextEdit, ast_stmt]
     jet_lexer.[lex]
     jet_parser.[parse_generated_source, parse_source]
 }
@@ -59,103 +60,16 @@ repl_rejected: fn(diagnostics: [Diagnostic], offset: Int) -> ReplInputParse Neve
     ReplInputParse.Rejected{diagnostics: repl_reanchor_all(diagnostics, offset)}
 }
 
-repl_skip_leading_comments: fn(source: String) -> String Never! {
-    text := source
-    loop {
-        text = text.trim_start()
-        if !text.starts_with(COMMENT_PREFIX) && !text.starts_with(BLOCK_COMMENT_OPEN) -> return text
-        bytes: text.bytes()
-        if text.starts_with(COMMENT_PREFIX) {
-            newline := Int?{None}
-            loop index in 0..<text.len() {
-                if bytes[index] == (U8{10}) {
-                    newline = Val(index)
-                    break
-                }
-            }
-            text = if newline == .Val(index) -> text.slice(index + 1..<text.len()) else -> ""
-            next
-        }
-        index := 2
-        depth := 1
-        loop depth > 0 {
-            if index >= text.len() -> return ""
-            if index + 1 < text.len() && bytes[index] == 47 && bytes[index + 1] == 42 {
-                depth += 1
-                index += 2
-            } else if index + 1 < text.len() && bytes[index] == 42 && bytes[index + 1] == 47 {
-                depth -= 1
-                index += 2
-            } else { index += 1 }
-        }
-        text = text.slice(index..<text.len())
+// Whether `body` is one bare expression, whose value the turn shows. The
+// Prelude's `print` and `eprint` return Unit and show nothing, so their turn
+// builds once, without the echo.
+repl_shows_value: fn(tables: ASTTables, body: [StmtNode]) -> Bool Never! {
+    if body.len() != 1 -> return false
+    if ast_stmt(tables, body[0]) == .Expr(expr) {
+        if expr == .Call(call, _) -> return call.name != "print" && call.name != "eprint"
+        return true
     }
-}
-
-repl_looks_like_item: fn(source: String) -> Bool Never! {
-    text := repl_skip_leading_comments(source)
-    if text.starts_with("pure") -> text = text.slice(4..<text.len()).trim_start()
-    text.starts_with("fn ") || text.starts_with("fn(") || text.starts_with("struct ") || text.starts_with("enum ") || text.starts_with("trait ") || text.starts_with("impl ") || text.starts_with("const ") || text.starts_with("module ") || repl_colon_item_head(text)
-}
-
-// `name: fn`, `Name: struct`, `name: module` … : a colon declaration head.
-repl_colon_item_head: fn(text: String) -> Bool Never! {
-    colon: repl_top_level_colon(text) ?? return false
-    head: text.slice(0..<colon).trim()
-    if head.len() == 0 -> return false
-    loop byte in head.bytes() {
-        code: Int{byte}
-        if !((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95 || code == 46) {
-            return false
-        }
-    }
-    rest: text.slice(colon + 1..<text.len()).trim_start()
-    repl_colon_item_kind(rest, "fn") || repl_colon_item_kind(rest, "struct") || repl_colon_item_kind(rest, "enum") || repl_colon_item_kind(rest, "trait") || repl_colon_item_kind(rest, "module")
-}
-
-// Whether `rest` starts with the kind word `keyword` of a colon declaration
-// head as a whole word.
-repl_colon_item_kind: fn(rest: String, keyword: String) -> Bool Never! {
-    if !rest.starts_with(keyword) -> return false
-    after: rest.slice(keyword.len()..<rest.len())
-    if after.len() == 0 -> return true
-    code: Int{after.bytes()[0]}
-    !((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95)
-}
-
-// The byte of the first `:` outside strings and groups that is not `:=`,
-// or None.
-repl_top_level_colon: fn(text: String) -> Int? Never! {
-    bytes: text.bytes()
-    depth := 0
-    quoted := false
-    escaped := false
-    loop index in 0..<bytes.len() {
-        code: Int{bytes[index]}
-        if quoted {
-            if escaped -> escaped = false else if code == 92 -> escaped = true else if code == 34 {
-                quoted = false
-            }
-            next
-        }
-        if code == 34 -> quoted = true
-        if code == 40 || code == 91 || code == 123 -> depth += 1
-        if code == 41 || code == 93 || code == 125 -> depth -= 1
-        if code == 58 && depth == 0 {
-            if index + 1 < bytes.len() && (Int{bytes[index + 1]}) == 61 -> return None
-            return Val(index)
-        }
-    }
-    None
-}
-
-repl_looks_like_import: fn(source: String) -> Bool Never! {
-    text: source.trim_start()
-    text.starts_with("use ") || text == "use"
-}
-
-repl_starts_with_stmt_keyword: fn(text: String) -> Bool Never! {
-    repl_top_level_colon(text) != None || text.contains(":=") || text.starts_with("return ") || text.starts_with("return") || text.starts_with("if ") || text.starts_with("loop ") || text.starts_with("break") || text.starts_with("continue") || text.starts_with("print(") || text.starts_with("eprint(")
+    false
 }
 
 repl_first_function_body: fn(items: [Item]) -> [StmtNode]? Never! {
@@ -189,49 +103,50 @@ repl_classify: fn(source: String, step: Int) -> ReplInputParse {
         return ReplInputParse.Accepted{input: ReplInput.Meta{command: "?", argument: if name == "" -> None else -> Val(name)}}
     }
     header: "// repl:{step}\n"
-    if repl_looks_like_import(text) {
-        normalized: text.trim_end()
-        full: "{header}{normalized}\n"
-        parsed: parse_source(full.bytes())
-        if parsed.diagnostics.len() > 0 -> return repl_rejected(parsed.diagnostics, header.len())
-        if parsed.program.items.len() == 0 && parsed.program.imports.len() > 0 {
-            return ReplInputParse.Accepted{input: ReplInput.Import{source: "{normalized}\n"}}
-        }
-    }
-    suppress: text.ends_with(";") && !repl_looks_like_item(text) && !text.ends_with("}};")
-    if repl_looks_like_item(text) {
-        item_source: "{text}\n"
-        parsed: parse_source("{header}{item_source}".bytes())
-        if parsed.diagnostics.len() > 0 -> return repl_rejected(parsed.diagnostics, header.len())
-        return ReplInputParse.Accepted{input: ReplInput.Item{source: item_source}}
-    }
     user_lexed: lex(text.bytes())
     if user_lexed.diagnostics.len() > 0 -> return repl_rejected(user_lexed.diagnostics, 0)
     plain_input: text.trim_end()
-    wrapper: "{header}__repl__: fn() {{\n"
-    plain_source: "{wrapper}{plain_input}\n}}\n"
-    plain_attempt := ParseResult?{None}
-    if repl_starts_with_stmt_keyword(text) || suppress {
-        parsed: parse_generated_source(plain_source.bytes())
-        if parsed.diagnostics.len() == 0 && repl_first_function_body(parsed.program.items) == .Val(body) {
-            if body.len() > 0 {
-                return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: parsed.program.tables, body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
-            }
-        }
-        plain_attempt = Val(parsed)
+    // The parser says what the input is: imports, declarations, or the
+    // statements of one turn.
+    top: parse_source("{header}{plain_input}\n".bytes())
+    if repl_declarations_only(top) {
+        if top.program.items.len() == 0 -> return ReplInputParse.Accepted{input: ReplInput.Import{source: "{plain_input}\n"}}
+        if top.program.imports.len() == 0 -> return ReplInputParse.Accepted{input: ReplInput.Item{source: "{plain_input}\n"}}
     }
-    echo_stmt: "__repl_echo__: {text}"
-    echo_source: "{wrapper}{echo_stmt}\n}}\n"
-    echo: parse_generated_source(echo_source.bytes())
+    suppress: text.ends_with(";") && !text.ends_with("}};")
+    wrapper: "{header}__repl__: fn() {{\n"
+    plain: parse_generated_source("{wrapper}{plain_input}\n}}\n".bytes())
+    plain_body: if plain.diagnostics.len() == 0 -> repl_first_function_body(plain.program.items) else -> None
+    if plain_body == .Val(body) && !repl_shows_value(plain.program.tables, body) {
+        if body.len() == 0 -> return ReplInputParse.Accepted{input: ReplInput.Empty}
+        return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: plain.program.tables, body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
+    }
+    // A bare expression binds its value, which the turn shows.
+    echo: parse_generated_source("{wrapper}__repl_echo__: {plain_input}\n}}\n".bytes())
     if echo.diagnostics.len() == 0 && repl_first_function_body(echo.program.items) == .Val(body) {
         if body.len() > 0 {
             return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: echo.program.tables, body: body, suppress_echo: suppress, echo: true, check_source: plain_input}}
         }
     }
-    plain: plain_attempt ?? parse_generated_source(plain_source.bytes())
-    if plain.diagnostics.len() > 0 -> return repl_rejected(plain.diagnostics, wrapper.len())
-    if repl_first_function_body(plain.program.items) == .Val(body) {
+    if plain_body == .Val(body) {
         return ReplInputParse.Accepted{input: ReplInput.Stmts{tables: plain.program.tables, body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
     }
+    // Input that reads as top-level declarations reports the declaration
+    // parse; anything else reports the statement parse.
+    if top.diagnostics.len() > 0 && top.program.script_body.len() == 0 -> return repl_rejected(top.diagnostics, header.len())
+    if plain.diagnostics.len() > 0 -> return repl_rejected(plain.diagnostics, wrapper.len())
     ReplInputParse.Accepted{input: ReplInput.Empty}
+}
+
+// Whether the top-level parse holds only imports and declarations. A
+// top-level `name: value` parses as a module binding (`Item.Const`); the REPL
+// keeps it a statement, so a session binding echoes and replays like any
+// other line.
+repl_declarations_only: fn(parsed: ParseResult) -> Bool Never! {
+    if parsed.diagnostics.len() > 0 || parsed.program.script_body.len() > 0 -> return false
+    if parsed.program.items.len() == 0 && parsed.program.imports.len() == 0 -> return false
+    loop item in parsed.program.items {
+        if item == .Const(_) -> return false
+    }
+    true
 }

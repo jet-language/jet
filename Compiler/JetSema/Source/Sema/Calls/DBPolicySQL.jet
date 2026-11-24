@@ -224,7 +224,9 @@ sema_policy_key_struct_ok: fn(type_name: String, environment: SemaScopeEnvironme
     if definition.kind == .Struct(fields, _) {
         loop field in fields {
             if field.skip || field.computed -> next
-            if (field.shape_names.json ?? field.shape_names.text) != field.name -> return false
+            if (field.shape_names.format_key("json") ?? field.shape_names.text) != field.name {
+                return false
+            }
         }
         return true
     }
