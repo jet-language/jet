@@ -158,7 +158,7 @@ valid_provider: fn(value: String) -> Bool {
     true
 }
 
-valid_table: fn(value: String) -> Bool {
+priv valid_table: fn(value: String) -> Bool {
     trimmed: value.trim()
     if trimmed == "" || trimmed.len() > 128 || value != trimmed -> return false
     loop byte in value.bytes() {
@@ -734,7 +734,7 @@ revoke_device: fn(user_id: String, device: String) -[DB]> Bool Err! {
 }
 
 /// `records` without `user_id`'s refresh tokens for `device`.
-without_device: fn(records: [AuthRecord], user_id: String, device: String) -> [AuthRecord] Never! {
+priv without_device: fn(records: [AuthRecord], user_id: String, device: String) -> [AuthRecord] Never! {
     out := [AuthRecord]{}
     loop i in 0..<records.len() {
         if records[i].kind != 5 || records[i].b != user_id || records[i].c != device {
@@ -1472,7 +1472,7 @@ expiry_outcome: fn(now_ms: Int, ttl_ms: Int) -> String Never! {
     }
 }
 
-tokens_outcome: fn(got: Tokens Err!) -> String Never! {
+priv tokens_outcome: fn(got: Tokens Err!) -> String Never! {
     if got == {
         .Ok(tokens) -> "ok:{tokens.device}"
         .Err(error) -> "{error}"

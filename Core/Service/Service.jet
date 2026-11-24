@@ -1245,13 +1245,13 @@ priv FeedRegistry: struct {
     feeds: [EndpointFeed],
 }
 
-init_feed_registry: fn() -> Shared<FeedRegistry> Never! {
+priv init_feed_registry: fn() -> Shared<FeedRegistry> Never! {
     Shared{FeedRegistry{feeds: [EndpointFeed]{}}}
 }
 
-feed_registry: fn() -> Shared<FeedRegistry> Never! { core.mem.__process_shared(init_feed_registry) }
+priv feed_registry: fn() -> Shared<FeedRegistry> Never! { core.mem.__process_shared(init_feed_registry) }
 
-feed_register: fn(endpoint: ServiceEndpoint, wake: service_tasks.Semaphore) Never! {
+priv feed_register: fn(endpoint: ServiceEndpoint, wake: service_tasks.Semaphore) Never! {
     registry := feed_registry().guard_edit()
     registry.value.feeds.push(EndpointFeed{endpoint: endpoint, wake: wake})
 }
@@ -1259,7 +1259,7 @@ feed_register: fn(endpoint: ServiceEndpoint, wake: service_tasks.Semaphore) Neve
 // Wakes the feeder of the typed worker behind `endpoint`, when it has one.
 // A handoff or a rollback moves a worker to another generation, so the
 // feeder is found by its worker, not by the generation it was declared at.
-feed_wake: fn(endpoint: ServiceEndpoint) Never! {
+priv feed_wake: fn(endpoint: ServiceEndpoint) Never! {
     registry := feed_registry().guard_read()
     loop feed in registry.value.feeds {
         if feed.endpoint.authority == endpoint.authority && feed.endpoint.tree == endpoint.tree && feed.endpoint.worker == endpoint.worker {
@@ -1271,7 +1271,7 @@ feed_wake: fn(endpoint: ServiceEndpoint) Never! {
 // The endpoint at which the worker declared as `endpoint` takes messages
 // now: its started row that is not partitioned, at any generation. None
 // while the worker takes none.
-feed_current: fn(endpoint: ServiceEndpoint) -> ServiceEndpoint? Never! {
+priv feed_current: fn(endpoint: ServiceEndpoint) -> ServiceEndpoint? Never! {
     registry := service_registry().guard_read()
     loop state in registry.value.endpoints {
         if state.authority == endpoint.authority && state.tree == endpoint.tree && state.worker == endpoint.worker && state.started && !state.partitioned {
@@ -4570,7 +4570,7 @@ runtime_retry: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery Servi
 }
 
 // Accepts `delivery` again and queues it; answers its receipt as it was.
-retry_accept: fn(runtime: ServiceRuntime, delivery: Delivery) -> DeliveryEntry ServiceError! {
+priv retry_accept: fn(runtime: ServiceRuntime, delivery: Delivery) -> DeliveryEntry ServiceError! {
     authority_validate_runtime(runtime)
     delivery_validate_runtime(runtime, delivery)
     id: delivery.id
@@ -4605,7 +4605,7 @@ runtime_dead_letter: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery
 }
 
 // Dead-letters receipt `id`; answers the receipt as it was.
-authority_dead_letter: fn(runtime: ServiceRuntime, id: String) -> DeliveryEntry ServiceError! {
+priv authority_dead_letter: fn(runtime: ServiceRuntime, id: String) -> DeliveryEntry ServiceError! {
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
     gate := authority_gate().guard_edit()
@@ -4646,7 +4646,7 @@ runtime_commit: fn(runtime: ServiceRuntime, delivery: Delivery) ServiceError! {
     authority_commit(runtime, delivery.id)
 }
 
-authority_commit: fn(runtime: ServiceRuntime, id: String) ServiceError! {
+priv authority_commit: fn(runtime: ServiceRuntime, id: String) ServiceError! {
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
     gate := authority_gate().guard_edit()

@@ -37,6 +37,14 @@ PARTS: "Compiler/Prelude/CoreSourceParts.tsv"
 
 BARE_SPELLINGS: "Compiler/JetFoundation/Source/Registry/CoreModules.jet"
 
+// Core functions no program spells: the compiler lowers a language construct
+// to each (`tree.worker(…)` to core.service.typed_worker, the kernel's unmap
+// under the memory sentry to core.mem.unmapping), so no call site names them.
+// Each row is `id<TAB>construct<TAB>witness`: the function, the construct that
+// reaches it, and the example or test under Examples/ or Tests/ that runs that
+// construct and so the function. The witness is the function's test evidence.
+ROUTES: "Tools/Agent/core-coverage-routes.tsv"
+
 USAGE: "usage: jet Tools/Agent/CoreCoverage.jet [--check|--write] [--json]\n--check: reject an untested public function the ratchet does not list\n--write: initialize the ratchet, then only remove names\n--json: include each declaration and its source evidence"
 
 SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
@@ -741,7 +749,10 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
                 if token(tokens, i + 2) == "." && token(tokens, i + 3).starts_with("__") {
                     owner = "{owner}.{token(tokens, i + 3)}"
                 }
-                pending = Owner{name: owner.copy(), kind: if private_types.has_key(token(tokens, i + 1)) -> PRIVATE_TYPE else -> "impl"}
+                // Methods of a `priv` type, or of an impl of a `priv` trait, are
+                // no user's to call.
+                private: private_types.has_key(token(tokens, i + 1)) || (token(tokens, i + 2) == "." && private_types.has_key(token(tokens, i + 3)))
+                pending = Owner{name: owner.copy(), kind: if private -> PRIVATE_TYPE else -> "impl"}
             }
             // `priv name: module {` or `priv(scope) name: module {`; the name may be dotted.
             "module" -> {
@@ -1440,6 +1451,28 @@ record: fn(functions: &[Function], seen: &[String:Bool], table: Table, program: 
     }
 }
 
+// Credits each ROUTES row's function with its witness. A tree without the
+// table (a fixture) routes nothing.
+routed: fn(root: String, functions: &[Function], table: Table) -[FS]> CoverageError! {
+    if !files.exists("{root}/{ROUTES}") -> return Ok()
+    source: read_source(root, ROUTES) ?? return Err(err)
+    loop line in source.split("\n") {
+        if line == "" || line.starts_with("#") -> next
+        columns := [String]{}
+        loop column in line.split("\t") -> columns.push(column.copy())
+        if columns.len() != 3 || columns[1] == "" {
+            return Err(fail("`{ROUTES}`: a row is not `id<TAB>construct<TAB>witness`: {line}"))
+        }
+        index: table.by_id.get(columns[0]) ?? return Err(fail("`{ROUTES}`: `{columns[0]}` is no public Core function"))
+        witness: columns[2]
+        if !(witness.starts_with("Examples/") || witness.starts_with("Tests/")) || !files.exists("{root}/{witness}") {
+            return Err(fail("`{ROUTES}`: `{columns[0]}` names `{witness}`, which is no example or test in the tree"))
+        }
+        functions[index].tests.push(witness.copy())
+    }
+    Ok()
+}
+
 // The bare spellings the compiler resolves in every program, by
 // CORE_BARE_SOURCE_MODULES in BARE_SPELLINGS: each bare name and the Core
 // declaration it stands for (`Path` is core.files.Path, `Date` is
@@ -1533,6 +1566,7 @@ census: fn(root: String) -[FS]> Report CoverageError! {
             }
         }
     }
+    routed(root, functions, table) ?? return Err(err)
     units := [String]{}
     known := [String:Bool]{}
     loop row in functions {
@@ -1976,8 +2010,8 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
     assert_eq(found.map(fn(row) { outside_surface(row) }), [Bool]{true, false, true, false})
 }
 
-#Test("a priv type's methods, in its body and its impls, are no surface") {
-    found: public_functions("Core/Demo/Demo.jet", "priv Cursor: struct {{\n      next: fn(&self) -> Bool Never! {{ true }}\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    impl Cursor {{ reset: fn(&self) {{}} }}\n    impl Cursor.Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }}\n    priv(package) Mode: enum {{\n      On,\n      flip: fn(self) -> Mode Never! {{ self }}\n    }}\n    Reader: struct {{ open: fn(&self) -> Cursor Never! {{ Cursor{{}} }} }}\n  ")
+#Test("a priv type's methods, in its body and its impls, and a priv trait's impls are no surface") {
+    found: public_functions("Core/Demo/Demo.jet", "priv Cursor: struct {{\n      next: fn(&self) -> Bool Never! {{ true }}\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    impl Cursor {{ reset: fn(&self) {{}} }}\n    impl Cursor.Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }}\n    priv(package) Mode: enum {{\n      On,\n      flip: fn(self) -> Mode Never! {{ self }}\n    }}\n    Reader: struct {{ open: fn(&self) -> Cursor Never! {{ Cursor{{}} }} }}\n    priv Scalar: trait {{ twice: fn(self) -> Self Never! }}\n    impl Int.Scalar {{ twice: fn(self) -> Int Never! {{ self * 2 }} }}\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.Reader.open"})
 }
 
@@ -2078,6 +2112,25 @@ find_function: fn(report: Report, name: String) -> Function Never! {
         if row.name == name -> return row.copy()
     }
     panic("no function {name}")
+}
+
+#Test("a routed function is tested by the witness that runs its construct; a row naming no function or no witness is refused") {
+    root: fixture_tree()
+    put(root, ROUTES, "# id\tconstruct\twitness\ncore.demo.unused\t`demo.lowered()` lowers to it\tExamples/Basics/demo.jet\n")
+    report: census(root) ?? panic(err.message)
+    assert_eq(report.total_uncovered, 0)
+    assert_eq(find_function(report, "unused").tests, [String]{"Examples/Basics/demo.jet"})
+    assert_eq(coverage_exit([String]{}, root), 0)
+    put(root, ROUTES, "core.demo.gone\tnothing\tExamples/Basics/demo.jet\n")
+    assert_eq(coverage_exit([String]{}, root), 1)
+    put(root, ROUTES, "core.demo.unused\t`demo.lowered()` lowers to it\tExamples/Basics/missing.jet\n")
+    assert_eq(coverage_exit([String]{}, root), 1)
+    put(root, "Docs/demo.jet", "run: fn() {{}}\n")
+    put(root, ROUTES, "core.demo.unused\t`demo.lowered()` lowers to it\tDocs/demo.jet\n")
+    assert_eq(coverage_exit([String]{}, root), 1)
+    put(root, ROUTES, "core.demo.unused\tExamples/Basics/demo.jet\n")
+    assert_eq(coverage_exit([String]{}, root), 1)
+    files.remove_all(root) ?? ()
 }
 
 #Test("census joins doctests, examples and embedded tests once per declaration") {

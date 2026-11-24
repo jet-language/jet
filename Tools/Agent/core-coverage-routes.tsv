@@ -1,0 +1,14 @@
+# Core functions the compiler reaches through a language construct, which no
+# program spells (CoreCoverage.jet ROUTES): id, construct, and the example or
+# test that runs the construct.
+# id	construct	witness
+core.service.typed_worker	`tree.worker(name, handler, capacity:)` whose message isn't Decode	Examples/Concurrency/ServiceWorkersInMemory.jet
+core.service.stateful_worker	`tree.worker(name, handler, state:, capacity:)` whose message isn't Decode	Examples/Concurrency/ServiceWorkersInMemory.jet
+core.service.batched_worker	`tree.worker(name, handler, batch:, wait:, capacity:)` whose message isn't Decode	Examples/Concurrency/ServiceWorkersInMemory.jet
+core.service.durable_worker	`tree.worker(name, handler, capacity:)` whose message is Decode	Examples/Concurrency/ServiceWorkers.jet
+core.service.durable_stateful_worker	`tree.worker(name, handler, state:, capacity:)` whose message is Decode	Examples/Concurrency/ServiceWorkers.jet
+core.service.durable_batched_worker	`tree.worker(name, handler, batch:, wait:, capacity:)` whose message is Decode	Examples/Concurrency/ServiceWorkers.jet
+core.service.typed_send	`tree.send(endpoint, message)` on a typed Endpoint<Q, R>	Examples/Concurrency/ServiceWorkers.jet
+core.service.call	`tree.call(endpoint, message)` on a typed Endpoint<Q, R>	Examples/Concurrency/ServiceWorkers.jet
+core.service.typed_send_durable	`tree.send_durable(endpoint, message, key:)` on a typed Endpoint<Q, R>	Tests/Cases/Concurrency/DurableTypedReceiptsCrossAHandoff.fixture/main.jet
+core.mem.unmapping	the kernel's unmap primitive under the memory sentry, which `Region.close()` runs	Tests/Cases/MemoryKernel/AMappingIsLiveStorageUntilItIsUnmapped.fixture/after_close.jet

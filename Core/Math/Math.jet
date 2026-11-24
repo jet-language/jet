@@ -38295,11 +38295,10 @@ priv ldexp_f32: fn(value: F32, exponent: Int) -> F32 Never! {
     x * __from_bits_f32((n + 127) << 23)
 }
 
-// Not exported from Core's public type table: internal scalar abstraction
-// shared by Complex (Float) and Complex32 (F32). Each implementation runs
-// in its own IEEE 754 precision and dynamic range rather than computing in
-// Float and narrowing.
-ComplexScalar: trait {
+// Internal scalar abstraction shared by Complex (Float) and Complex32 (F32).
+// Each implementation runs in its own IEEE 754 precision and dynamic range
+// rather than computing in Float and narrowing.
+priv ComplexScalar: trait {
     cx_add: fn(self, rhs: Self) -> Self Never!,
     cx_sub: fn(self, rhs: Self) -> Self Never!,
     cx_mul: fn(self, rhs: Self) -> Self Never!,
