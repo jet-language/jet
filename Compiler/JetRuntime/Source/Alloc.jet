@@ -53,8 +53,8 @@
 // each arena's slab metadata is protected by that arena's futex lock
 // (alloc_lock: a short spin, then a kernel sleep), so threads on different
 // arenas never contend and a waiter never burns a core. Payloads belong exclusively to
-// their callers. At most ALLOC_RETAINED_EMPTY_SLABS empty slabs per class and
-// arena stay linked to avoid relinking on every temporary; additional empty
+// their callers. At most ALLOC_RETAINED_EMPTY_SLABS empty slabs per arena,
+// across its classes, stay linked to avoid relinking on every temporary; additional empty
 // slabs go on the arena's free-slab stack, still mapped, for the arena's next
 // new slab of any class, and past ALLOC_ARENA_FREE_SLAB_CAP spill to the
 // shared stack (alloc_slab_map: slabs are carved from slab regions and
@@ -986,8 +986,8 @@ priv alloc_link: fn(slab: I64, head: I64) {
 // while a small program reserves only 1 MiB of address space: a child under a
 // tight address-space limit (Process memory_limit is RLIMIT_AS) starts and
 // grows toward it. A region that cannot be mapped is retried at half the
-// size, down to one slab. A slab that is no longer needed (more empty slabs than
-// ALLOC_RETAINED_EMPTY_SLABS) goes on its arena's free-slab stack and serves
+// size, down to one slab. A slab that is no longer needed (more empty slabs in
+// its arena than ALLOC_RETAINED_EMPTY_SLABS) goes on its arena's free-slab stack and serves
 // that arena's next new slab of any class; past ALLOC_ARENA_FREE_SLAB_CAP the
 // arena moves ALLOC_ARENA_FREE_SLAB_BATCH of them to the shared stack, which
 // serves every arena. Its pages are never returned, so they never fault again.
@@ -1005,7 +1005,7 @@ ALLOC_REGION_FIRST: I64{1048576}
 
 ALLOC_REGION: I64{33554432}
 
-ALLOC_ARENA_FREE_SLAB_CAP: I64{8}
+ALLOC_ARENA_FREE_SLAB_CAP: I64{4}
 
 ALLOC_ARENA_FREE_SLAB_BATCH: I64{4}
 
@@ -1223,11 +1223,29 @@ priv alloc_new_slab: fn(root: I64, head: I64, slot: I64) -> I64 {
     slab
 }
 
-// Empty slabs a class keeps linked per arena, so a burst of temporaries
-// (a thread's cache drains 32 blocks at a time) does not give up a slab it
-// takes again moments later: at most 8 x 64 KiB per class and arena. Any
-// further empty slab goes on the arena's free-slab stack (alloc_slab_retire).
-ALLOC_RETAINED_EMPTY_SLABS: I64{8}
+// Empty slabs an arena keeps linked on their class lists, across all its
+// classes, so a burst of temporaries (a thread's cache drains 32 blocks at a
+// time) does not give up a slab it takes again moments later: at most 4 x 64
+// KiB per arena. Any further empty slab goes on the arena's free-slab stack
+// (alloc_slab_retire), where the arena's next new slab of any class takes it.
+// With ALLOC_ARENA_FREE_SLAB_CAP stacked, an arena holds at most 8 idle slabs
+// (512 KiB) that no other arena can use, 16 MiB over the 32 arenas: a
+// long-lived process whose threads' work moves between arenas (`jet repl`,
+// whose every turn compiles on the compile threads) touches fresh slabs only
+// while that many sit idle, so its resident set stops creeping up each turn.
+ALLOC_RETAINED_EMPTY_SLABS: I64{4}
+
+// The empty slabs arena `root` keeps linked, over its eight classes'
+// retained counts (alloc_head + 64). The caller holds the arena lock.
+priv alloc_arena_retained: fn(root: I64) -> I64 {
+    total := I64{0}
+    at := I64{72}
+    loop at < (I64{136}) {
+        total = wrapping(total + sync_load(wrapping(root + at)))
+        at = wrapping(at + I64{8})
+    }
+    total
+}
 
 // Take up to `limit` free blocks of the class's head slab under the held
 // arena lock and thread them, as [next][slab], onto the cache row `row`
@@ -1281,9 +1299,9 @@ priv alloc_slab_take: fn(root: I64, head: I64, slot: I64, row: I64, limit: I64) 
 
 // Return one block to its slab. Caller holds the slab's arena lock. The slab
 // is linked again when it had no block left to give (an empty free list and
-// nothing left to carve); a slab whose last block
-// returns stays linked as one of the class's retained empty slabs
-// (ALLOC_RETAINED_EMPTY_SLABS) or goes on the arena's free-slab stack.
+// nothing left to carve); a slab whose last block returns stays linked as one
+// of its arena's retained empty slabs (ALLOC_RETAINED_EMPTY_SLABS across the
+// arena's classes) or goes on the arena's free-slab stack.
 priv alloc_slab_return: fn(slab: I64, block: I64) {
     #Unsafe("the held arena lock protects the slab's free links, carve word, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
         free: os_load_i64(wrapping(slab + I64{16}))
@@ -1298,13 +1316,13 @@ priv alloc_slab_return: fn(slab: I64, block: I64) {
             alloc_link(slab, head)
         }
         if (live == I64{0}) {
-            retained: wrapping(head + I64{64})
-            count: os_load_i64(retained)
-            if (count < ALLOC_RETAINED_EMPTY_SLABS) {
-                os_store_i64(retained, wrapping(count + I64{1}))
+            arena: os_load_i64(wrapping(slab + I64{40}))
+            if (alloc_arena_retained(arena) < ALLOC_RETAINED_EMPTY_SLABS) {
+                retained: wrapping(head + I64{64})
+                os_store_i64(retained, wrapping(os_load_i64(retained) + I64{1}))
             } else {
                 alloc_unlink(slab)
-                alloc_slab_retire(os_load_i64(wrapping(slab + I64{40})), slab)
+                alloc_slab_retire(arena, slab)
             }
         }
     }
