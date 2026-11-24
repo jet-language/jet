@@ -564,8 +564,7 @@ jet_target_layout_struct_facts_inner_named: fn(engine: TargetLayoutEngine, defin
 
 // The order in which members of alignments `aligns` take their offsets: by
 // descending alignment, declaration order among equals, when `reorder`;
-// declaration order otherwise. The native code generator places struct
-// members in this order, so its layout and these facts never disagree.
+// declaration order otherwise.
 jet_target_layout_member_order: fn(aligns: [Int], reorder: Bool) -> [Int] Never! {
     order := [Int]{}
     loop index in 0..<aligns.len() {
@@ -578,11 +577,49 @@ jet_target_layout_member_order: fn(aligns: [Int], reorder: Bool) -> [Int] Never!
     order
 }
 
-// The bytes the native code generator gives struct `definition`: a struct
-// without `#Layout` places its members by jet_target_layout_member_order, a
-// `#Layout` struct in declaration order. Each member sits at its alignment, a
-// nested struct or List member at 8; the struct is a multiple of 8 bytes, at
-// least 8, aligned to 8. Unknown when any member's bytes are.
+// Where the compiler's own placement puts the members of one struct, record
+// or enum case: `offsets` by member, `end` where the placed bytes end and
+// `alignment` the widest member's (1 for none).
+JetLayoutPlacement: struct {
+    offsets: [Int],
+    end: Int,
+    alignment: Int,
+}
+
+// The one placement of the native code generator and of the layout facts
+// reflection reports: members of `sizes[i]` bytes at alignment `aligns[i]`
+// take their offsets from byte `start` in jet_target_layout_member_order
+// (`reorder`: a struct without `#Layout`), each at its alignment unless it
+// takes no bytes. JetIR lays out struct members, record members and enum case
+// payloads with it (BuildTypes.jet ir_struct_members_in, ir_tuple_members_in,
+// ir_variant_members_laid), and the facts reflection reports come from it
+// (jet_target_layout_native_struct_facts, jet_target_layout_native_enum_facts,
+// jet_target_layout_native_record), so the two never disagree.
+// None when an offset overflows.
+jet_target_layout_place: fn(sizes: [Int], aligns: [Int], start: Int, reorder: Bool) -> JetLayoutPlacement? {
+    offsets := loop _ in 0..<sizes.len() -> 0
+    cursor := start
+    alignment := 1
+    loop index in jet_target_layout_member_order(aligns, reorder) {
+        if sizes[index] > 0 -> cursor = jet_layout_align_up(cursor, aligns[index]) ?? return None
+        offsets[index] = cursor
+        cursor = jet_layout_checked_add(cursor, sizes[index]) ?? return None
+        if aligns[index] > alignment -> alignment = aligns[index]
+    }
+    Val(JetLayoutPlacement{offsets: offsets, end: cursor, alignment: alignment})
+}
+
+// The bytes of a struct or record value whose placed members end at `end`
+// (jet_target_layout_place): whole words, at least one, aligned to 8. A
+// member struct or record is aligned to 8 in its own aggregate.
+jet_target_layout_aggregate_size: fn(end: Int) -> Int? {
+    words: jet_layout_align_up(end, 8) ?? return None
+    Val(if words < 8 -> 8 else -> words)
+}
+
+// The bytes the native code generator gives struct `definition`: its members
+// placed by jet_target_layout_place, reordered unless it has a `#Layout`.
+// Unknown when any member's bytes are.
 jet_target_layout_native_struct_facts: fn(engine: TargetLayoutEngine, definition: StructDef, identity: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
     names := [String]{}
     types := [Type]{}
@@ -599,20 +636,17 @@ jet_target_layout_native_struct_facts: fn(engine: TargetLayoutEngine, definition
     }
     jet_target_layout_set_active(query, identity, false)
     if layouts.len() != names.len() -> return jet_target_layout_unknown(names)
+    jet_target_layout_native_aggregate_facts(names, layouts, definition.layout == None)
+}
+
+// The facts of a struct or record of members `names` of bytes `layouts`, as
+// the native code generator places them (jet_target_layout_place).
+jet_target_layout_native_aggregate_facts: fn(names: [String], layouts: [ByteLayout], reorder: Bool) -> LayoutFacts Never! {
+    sizes: loop layout in layouts -> layout.size
     aligns: loop layout in layouts -> layout.alignment
-    offsets := [Int]{}
-    loop _ in 0..<layouts.len() -> offsets.push(0)
-    cursor := 0
-    loop index in jet_target_layout_member_order(aligns, definition.layout == None) {
-        if layouts[index].size > 0 {
-            cursor = jet_layout_align_up(cursor, layouts[index].alignment) ?? return jet_target_layout_unknown(names)
-        }
-        offsets[index] = cursor
-        cursor = jet_layout_checked_add(cursor, layouts[index].size) ?? return jet_target_layout_unknown(names)
-    }
-    end: jet_layout_align_up(cursor, 8) ?? return jet_target_layout_unknown(names)
-    size: if end < 8 -> 8 else -> end
-    fields: loop index in 0..<names.len() -> FieldLayoutFacts{name: names[index], offset: Val(offsets[index]), size: Val(layouts[index].size), alignment: Val(layouts[index].alignment), stride: Val(layouts[index].stride)}
+    placed: jet_target_layout_place(sizes, aligns, 0, reorder) ?? return jet_target_layout_unknown(names)
+    size: jet_target_layout_aggregate_size(placed.end) ?? return jet_target_layout_unknown(names)
+    fields: loop index in 0..<names.len() -> FieldLayoutFacts{name: names[index], offset: Val(placed.offsets[index]), size: Val(layouts[index].size), alignment: Val(layouts[index].alignment), stride: Val(layouts[index].stride)}
     LayoutFacts{bytes: Val(ByteLayout{size: size, alignment: 8, stride: size}), fields: fields}
 }
 
@@ -620,8 +654,9 @@ jet_target_layout_native_struct_facts: fn(engine: TargetLayoutEngine, definition
 // generator lays out, None when unknown. Int, Float, Char, String, Option,
 // Result, enums, raw pointers, closures, trait values and Shared handles are
 // one word; an IntN packs into 1, 2, 4 or 8 bytes; a List is its 24-byte
-// header. Core declarations are carried by the runtime, not by their
-// declared fields, and stay unknown.
+// header; a record is its members inline (jet_target_layout_native_record).
+// Core declarations are carried by the runtime, not by their declared fields,
+// and stay unknown.
 jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
     if ty == {
         .Int | .Float | .Char | .String | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Shared(_) -> Val(jet_target_layout_scalar(8))
@@ -635,8 +670,21 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, query)
         .Named(name) -> jet_target_layout_native_named(engine, name, owner_qualified_name, query)
         .Apply(name, args) -> if (name == "Ptr" && args.len() == 1) || jet_target_layout_bit_set(engine, name, args, owner_qualified_name) -> Val(jet_target_layout_scalar(8)) else -> None
-        .Map(_, _, _) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> None
+        .Tuple(fields) -> jet_target_layout_native_record(engine, fields, owner_qualified_name, query).bytes
+        .Map(_, _, _) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> None
     }
+}
+
+// The bytes the native code generator gives a record (`{x: U8, y: Int}`): its
+// members in their written order, never reordered (JetIR BuildTypes.jet
+// ir_tuple_members_in), placed as a struct's are.
+jet_target_layout_native_record: fn(engine: TargetLayoutEngine, fields: [TypeTupleField], owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+    names: loop field in fields -> field.name
+    layouts := [ByteLayout]{}
+    loop field in fields {
+        layouts.push(jet_target_layout_native_type(engine, field.ty, owner_qualified_name, query) ?? return jet_target_layout_unknown(names))
+    }
+    jet_target_layout_native_aggregate_facts(names, layouts, false)
 }
 
 jet_target_layout_native_named: fn(engine: TargetLayoutEngine, name: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
@@ -759,11 +807,12 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
 // The bytes the native code generator gives enum `definition` without a C
 // tag. A value is one word: the tag when no case has a payload, else a
 // pointer to a heap box holding the tag word at 0 and the case's payload
-// members from byte 8, each at its alignment (a nested struct or List at 8),
-// a struct wider than JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES held by an
-// 8-byte pointer to a box of its own. A case's facts are its payload's offset
-// and bytes in the box; a case without a payload reports its tag word. A
-// generic enum lays out per instance and stays unknown.
+// members placed from byte 8 in their written order (jet_target_layout_place;
+// a nested struct, record or List at 8), a struct wider than
+// JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES held by an 8-byte pointer to a box of
+// its own. A case's facts are its payload's offset and bytes in the box; a
+// case without a payload reports its tag word. A generic enum lays out per
+// instance and stays unknown.
 jet_target_layout_native_enum_facts: fn(engine: TargetLayoutEngine, definition: EnumDef, identity: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
     variant_names: loop variant in definition.variants -> variant.name
     if definition.type_params.len() > 0 || !jet_target_layout_enter(query, identity) {
@@ -772,51 +821,48 @@ jet_target_layout_native_enum_facts: fn(engine: TargetLayoutEngine, definition: 
     word: jet_target_layout_scalar(8)
     facts := [FieldLayoutFacts]{}
     loop variant in definition.variants {
-        if variant.payload == .Unit {
-            facts.push(FieldLayoutFacts{name: variant.name, offset: Val(0), size: Val(word.size), alignment: Val(word.alignment), stride: Val(word.stride)})
-            next
-        }
-        cursor := 8
-        alignment := 1
+        sizes := [Int]{}
+        aligns := [Int]{}
         known := true
         if variant.payload == {
-            .Unit -> {}
-            .Single(ty, _) -> {
-                known = jet_target_layout_native_place(engine, ty, identity, query, cursor, alignment)
+            .Unit -> {
+                facts.push(FieldLayoutFacts{name: variant.name, offset: Val(0), size: Val(word.size), alignment: Val(word.alignment), stride: Val(word.stride)})
+                next
             }
+            .Single(ty, _) -> known = jet_target_layout_variant_member(engine, ty, identity, query, sizes, aligns)
             .Named(fields) -> {
                 loop field in fields {
-                    if !jet_target_layout_native_place(engine, field.ty, identity, query, cursor, alignment) {
+                    if !jet_target_layout_variant_member(engine, field.ty, identity, query, sizes, aligns) {
                         known = false
                         break
                     }
                 }
             }
         }
-        size: cursor - 8
-        stride: if known -> jet_layout_align_up(size, alignment) else -> None
-        if stride == .Val(bytes) {
-            facts.push(FieldLayoutFacts{name: variant.name, offset: Val(8), size: Val(size), alignment: Val(alignment), stride: Val(bytes)})
-        } else {
-            jet_target_layout_set_active(query, identity, false)
-            return jet_target_layout_unknown(variant_names)
+        if known {
+            if jet_target_layout_place(sizes, aligns, 8, false) == .Val(placed) {
+                if jet_layout_align_up(placed.end - 8, placed.alignment) == .Val(stride) {
+                    facts.push(FieldLayoutFacts{name: variant.name, offset: Val(8), size: Val(placed.end - 8), alignment: Val(placed.alignment), stride: Val(stride)})
+                    next
+                }
+            }
         }
+        jet_target_layout_set_active(query, identity, false)
+        return jet_target_layout_unknown(variant_names)
     }
     jet_target_layout_set_active(query, identity, false)
     LayoutFacts{bytes: Val(word), fields: facts}
 }
 
-// Place one payload member of type `ty` in an enum case's box at `cursor`
-// (jet_target_layout_native_enum_facts), moving `cursor` past it and raising
-// `alignment` to its own; false when its bytes are unknown.
-jet_target_layout_native_place: fn(engine: TargetLayoutEngine, ty: Type, identity: String, query: &JetTargetLayoutQuery, cursor: &Int, alignment: &Int) -> Bool Never! {
+// Appends the slot an enum case's payload member of `ty` takes in the case's
+// box to `sizes` and `aligns`: its own bytes, or one 8-byte pointer when it is
+// wider than JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES. False when its bytes are
+// unknown.
+priv jet_target_layout_variant_member: fn(engine: TargetLayoutEngine, ty: Type, identity: String, query: &JetTargetLayoutQuery, sizes: &[Int], aligns: &[Int]) -> Bool Never! {
     member: jet_target_layout_native_type(engine, ty, identity, query) ?? return false
     boxed: member.size > JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES
-    size: if boxed -> 8 else -> member.size
-    align: if boxed -> 8 else -> member.alignment
-    if size > 0 -> cursor = jet_layout_align_up(cursor, align) ?? return false
-    cursor = jet_layout_checked_add(cursor, size) ?? return false
-    if align > alignment -> alignment = align
+    sizes.push(if boxed -> 8 else -> member.size)
+    aligns.push(if boxed -> 8 else -> member.alignment)
     true
 }
 

@@ -1471,8 +1471,12 @@ own alignment, and the struct rounds up to a multiple of 8 bytes, so
 alignment, stride and offsets the compiler chose for the target being built,
 with guarantee `none` (D-LAYOUT-SHOW1=B): the numbers are values compile-time
 code may read and branch on, but a later compiler or another target may place
-the type otherwise. An enum without `#Layout` reports its own bytes and each
-case's offset the same way, and a distinct type its base's bytes. A C
+the type otherwise. A record member (`{x: U8, y: Int}`) is its members inline
+in their written order, each at its own alignment, rounded up to a multiple of
+8 bytes. An enum without `#Layout` reports its own bytes and each case's offset
+the same way, and a distinct type its base's bytes. The compiler places the
+bytes with the same computation it reports, so a reported offset or size is
+where the compiled program keeps the field. A C
 declaration that follows them, with explicit padding fields, takes such a
 struct by reference: an `#Import` C function with a `&T` parameter receives the
 address of the value's own bytes when every field is a machine integer, float,

@@ -1,0 +1,26 @@
+# `reflect().layout` and the compiled program read one placement
+# (jet_target_layout_place): for a reordered struct, a `#Layout(c)` struct,
+# two instances of a generic struct and a struct with a record member, the
+# program compares every reported offset and size with the address of the
+# member and the distance between two list elements, and stops on the first
+# difference. It does this on every tier. For an enum, reflection puts the
+# Rect case's 18 payload bytes at 8 in its box. The IR of `rect` stores the
+# case's first member at 8 and its last (2 bytes) at 24 = 8 + 18 - 2, in a
+# 32-byte box.
+fixture: ReflectionLayoutMatchesIR.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = reflection_layout_matches_ir.out
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = reflection_layout_matches_ir.out
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = reflection_layout_matches_ir.out
+step enum: jet emit --ir main.jet --fn rect
+exit: 0
+stdout: ~ "const s3 <- 32 " # the box: the tag word and the widest case
+stdout: ~ "store 5 8 0\n" # w, the case's first member, at the case's offset
+stdout: ~ "store 5 16 7\n" # h at its alignment
+stdout: ~ "store 5 24 2\n" # k, the last member, ends where the case's 18 bytes end
