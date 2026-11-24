@@ -4,5 +4,5 @@ fixture: OverlappingEditConflictsWithoutWritingSuccessOutput.fixture
 step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs.jet --out {work}/must-not-exist.jet --json
 exit: 1
 file: must-not-exist.jet absent
-stderr: ~ "\"status\":\"conflict\"" # Original contains predicate.
+stderr: ~ "\"action\":\"merge.structural\",\"ok\":false" # The jet.status/v1 envelope marks the conflict with `ok: false`.
 stderr: ~ "\"kind\":\"overlapping_edit\"" # Original contains predicate.
