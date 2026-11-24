@@ -379,6 +379,49 @@ Event: enum {
     AfterWrite(artifact: Artifact),
 }
 
+/// The compiler's tokens for `source`, by its own lexer.
+#Import(jet.compiler, symbol: "compiler.lex")
+lex: fn(source: String) -> CompilerLexed CompilerError!
+
+/// The compiler's syntax tree for `source`, by its own parser.
+#Import(jet.compiler, symbol: "compiler.parse")
+parse: fn(source: String) -> CompilerSyntaxTree CompilerError!
+
+/// The checked program of `tree`: the check `jet inspect compiler check` runs.
+#Import(jet.compiler, symbol: "compiler.check")
+check: fn(tree: CompilerSyntaxTree) -> CompilerChecked CompilerError!
+
+/// The generated-to-source line map of `source`, as `jet inspect compiler
+/// source-map` prints it.
+#Import(jet.compiler, symbol: "compiler.source_map")
+source_map: fn(source: String) -> CompilerSourceMap CompilerError!
+
+/// The package's uncomposed `package.jet` or inline package carrier.
+#Import(jet.compiler, symbol: "compiler.manifest")
+manifest: fn() -> CompilerManifest CompilerPackageError!
+
+/// The package after its declared Config files compose.
+#Import(jet.compiler, symbol: "compiler.package")
+package: fn() -> CompilerPackage CompilerPackageError!
+
+/// The package's lock model.
+#Import(jet.compiler, symbol: "compiler.lock")
+lock: fn() -> CompilerLock CompilerPackageError!
+
+/// The package's named build profiles.
+#Import(jet.compiler, symbol: "compiler.profiles")
+profiles: fn() -> CompilerProfileSet CompilerPackageError!
+
+/// The running toolchain's executable schema, the store
+/// `FactSource.Schema(snapshot)` names.
+#Import(jet.compiler, symbol: "compiler.schema")
+schema: fn() -> SchemaSnapshot Never!
+
+/// The recorded run in the receipt file at `path` under the package root, read
+/// by the compiler's one receipt reader.
+#Import(jet.compiler, symbol: "compiler.receipt")
+receipt: fn(path: String) -> RunReceipt MetadataError!
+
 /// The facts of `kind` in `source`, in the source's canonical order: a
 /// program's types, then its functions, each in declaration order; a run's
 /// claim, then its sections in name order, then its record links in the

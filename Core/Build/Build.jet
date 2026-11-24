@@ -150,13 +150,10 @@ BuildTimes: struct {
     rows: [BuildTime],
 }
 
-/// `graph` is a compiler-owned query.  Runtime code cannot manufacture a
-/// BuildPlan, so failing closed here is preferable to returning an empty
-/// graph that looks like a successful build.  The comptime dispatcher replaces
-/// this body with the checked projection.
-graph: fn(_plan: BuildPlan) -> BuildGraph Never! {
-    panic("core.build.graph requires a checked BuildPlan in build/comptime code")
-}
+/// The checked graph of `plan`, as the build host projects it. Only build and
+/// compile-time code hold a BuildPlan, and only there does the host answer.
+#Import(jet.build, symbol: "BuildPlan.graph")
+graph: fn(plan: BuildPlan) -> BuildGraph Never!
 
 /// Compare two checked graph projections without reading source files or
 /// making cache policy decisions.  All deltas are ordered lexicographically;
