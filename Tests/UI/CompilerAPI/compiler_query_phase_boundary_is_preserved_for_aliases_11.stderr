@@ -7,14 +7,14 @@ Error: Jet.ComptimeConstructNotSupported: `core.compiler.check` is compile-time 
  Fix: Move this call into `build: fn` or a `#run` binding
 More: jet-lang.dev/e/Jet.ComptimeConstructNotSupported
 
-Error: Jet.BindingTypeMismatch: This needs CompilerSyntaxTree, but the value is String
+Error: Jet.ValueTypeMismatch: `check` wants `CompilerSyntaxTree` for argument 1, but this is String (text)
   --> Tests/UI/CompilerAPI/compiler_query_phase_boundary_is_preserved_for_aliases_11.jet:3:25
     |
   3 | run: fn() { facts.check("not a syntax tree") }
     |                         ^^^^^^^^^^^^^^^^^^^
- Why: The value here does not have the type required by this declaration
- Fix: Use a value of the required type or convert it explicitly
-More: jet-lang.dev/e/Jet.BindingTypeMismatch
+ Why: Every argument must match its parameter's type
+ Fix: Use `CompilerSyntaxTree` here
+More: jet-lang.dev/e/Jet.ValueTypeMismatch
 
 Error: Jet.MissingErrorConversion: This implicit fallible call can't convert `CompilerError` into `Err` — no declared conversion exists
   --> Tests/UI/CompilerAPI/compiler_query_phase_boundary_is_preserved_for_aliases_11.jet:3:19

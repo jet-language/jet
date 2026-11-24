@@ -410,14 +410,16 @@ and `source_map` expose compiler-owned front-end results; `manifest`, `package`,
 not read arbitrary paths, dependencies, or sibling packages, and they do not
 provide a runtime path-loading fallback. A runtime call is E0956.
 
-The source declarations supply the public typed vocabulary; calls retain the
-compiler-owned compile-time provider route even when that source package is loaded.
-In a `#run` binding or `build: fn`, the evaluator hands each `lex`, `parse`,
-or `check` call to the compiler, which answers with its own lexer, parser, and
-check query over the call's argument (the same check `jet inspect compiler
-check` runs). A comptime constant that holds one of these values is read back
-as the compiler's value for that constant, so `PARSED: #run { … }` can
-feed `compiler.check(PARSED)`.
+Each of these is a Core declaration bound to the compiler's own query
+(`#Import(jet.compiler, symbol: "compiler.lex")`, see the service imports
+above), so it is checked as an ordinary function of `core.compiler`: its
+arguments, its arity and its result follow its signature. Outside Core, a call
+in a body that runs with the program is E0956; in a `#run` binding or
+`build: fn`, the evaluator hands each call to the compiler, which answers
+`lex`, `parse` or `check` with its own lexer, parser, and check query over the
+call's argument (the same check `jet inspect compiler check` runs). A comptime
+constant that holds one of these values is read back as the compiler's value
+for that constant, so `PARSED: #run { … }` can feed `compiler.check(PARSED)`.
 
 The package-view field matrix is versioned by
 `PACKAGE_MODEL_SCHEMA_VERSION = 1` (D-PACKAGE-MODEL1). The four views have

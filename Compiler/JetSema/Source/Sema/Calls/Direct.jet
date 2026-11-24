@@ -1211,20 +1211,6 @@ sema_call_try_scope_guard: fn(module_name: String, member: String, alias: String
 // source-owned projections run before the generic fixed-row producer; an
 // unhandled projection deliberately leaves the row for that producer.
 sema_call_try_core_direct_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
-    // Both compiler facts and active build-plan graphs use the checked
-    // compile-time service path. Receipt diff remains ordinary Core source.
-    if (record.module_name == "core.compiler" || (record.module_name == "core.build" && record.member == "graph")) && sema_compiler_services_call_contract(record.module_name, record.member) != None {
-        compiler_allowed := sema_scope_build_time(scopes, environment.function_name)
-        check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, program, scopes, state, tail_store, context, diagnostics)
-        if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
-        if !check.arguments_complete {
-            sema_expression_rejected_call_propagation(check.result_type, None, diagnostics.len(), span, expected, environment, program, scopes, context, diagnostics)
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-        value := sema_compiler_services_lower_core_call(check, span, expected, environment, program, scopes, context, diagnostics)
-        return SemaDirectSpecialCheck{handled: true, value: value}
-    }
-
     term := sema_call_try_term_core_call(record, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if term.handled -> return term
 
@@ -1904,12 +1890,12 @@ sema_call_point_in_body: fn(target: SemaCallDirectTarget, environment: SemaScope
     false
 }
 
-// The provider of `target` when it is a compiler or build service import
-// (`#Import(jet.build, symbol: …)`, Guest.jet) called where no host answers
-// it: outside Core, in a body that runs when the program does. Only Core
-// declares one (E1806); Core's own calls are its wrappers, whose handles only
-// build code holds.
-sema_call_service_out_of_phase: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
+// E0956 when `target` is a compiler or build service import (`#Import(jet.
+// compiler, symbol: …)`, Guest.jet) called where no host answers it: outside
+// Core, in a body that runs when the program does. Only Core declares one
+// (E1806); Core's own calls are its wrappers, whose handles only build code
+// holds. The call is still checked past it.
+sema_call_service_out_of_phase: fn(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic? {
     if module_is_core(environment.module_identity) || !module_is_core(target.symbol.module_identity) || sema_scope_build_time(scopes, environment.function_name) {
         return None
     }
@@ -1917,7 +1903,8 @@ sema_call_service_out_of_phase: fn(target: SemaCallDirectTarget, environment: Se
     row: sema_registration_callable_row_of(graph, target.symbol.id) ?? return None
     if row == .Function(declaring, index) {
         service: parser_service_import(graph.modules[declaring].functions[index].declaration) ?? return None
-        return Val(service.provider)
+        why: if service.provider == "jet.compiler" -> "the compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service" else -> "the build API declares build steps and reads checked build facts for build and comptime code; it is not a runtime service"
+        return Val(sema_error("E0956", span, "`{graph.modules[declaring].module_name}.{target.symbol.name}` is compile-time only", why, "move this call into `build: fn` or a `#run` binding"))
     }
     None
 }
@@ -1927,10 +1914,7 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         diagnostics.push(sema_error("E0644", call.name_span, "`{target.symbol.name}` makes a point, which is declared only as a module binding's value", "a point is the module binding it initializes: the program makes its carrier at the first read and every reader shares it, and a call in a body would make a new, anonymous carrier each time it runs", "declare it at module level (`clicked: event.point<Int>()`) and use that binding; for a value that is local by design, use `event.new`, `event.hook` or `event.decision_hook`"))
         return None
     }
-    if sema_call_service_out_of_phase(target, environment, program, scopes) == .Val(provider) {
-        diagnostics.push(sema_error("E0956", call.name_span, "`{target.symbol.name}` is compile-time only", "it is a `{provider}` service, which the compiler answers while it builds; the running program has no compiler to ask", "move this call into `build: fn` or a `#run` binding"))
-        return None
-    }
+    if sema_call_service_out_of_phase(target, call.name_span, environment, program, scopes) == .Val(refused) -> diagnostics.push(refused)
     params := sema_call_params_from_type(target.signature) ?? {
         diagnostics.push(sema_call_not_callable(call.name, target.signature, call.name_span))
         return None

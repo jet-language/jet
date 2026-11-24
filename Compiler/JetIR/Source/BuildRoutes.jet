@@ -6737,11 +6737,6 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     if canonical.module_name == "core.crypto" && (canonical.member == "__wipe" || canonical.member == "__secret_keep") {
         return ir_core_crypto_header(m, p, b, args, canonical.member, span)
     }
-    // A `core.compiler` query (`compiler.lex(source)`, ...): compile-time
-    // only, the compiler answers it (ir_host_method `compiler.member`).
-    if canonical.module_name == "core.compiler" {
-        return ir_host_method(m, p, b, ty, "compiler.{canonical.member}", args, span)
-    }
     if canonical.symbol == .Prelude(name) {
         if name == "jet_std.channel" || name == "jet_std.channel_bounded" {
             return ir_channel_new(m, p, b, ty, name == "jet_std.channel_bounded", args, span)
