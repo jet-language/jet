@@ -2824,9 +2824,9 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
         return Val(sema_registration_quantity_bound_satisfied(graph, actual_resolved, bound_name))
     }
     // An exact number (a `3.5` literal is a Decimal) interpolates through its
-    // Core Display, so it is Display, Printable and Renderable even where
-    // core.math is not imported and no row resolves.
-    if (bound_name == "Renderable" || bound_name == "Printable" || bound_name == "Display") && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") && sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) == None {
+    // Core Display, so it meets Display and every trait Display requires even
+    // where core.math is not imported and no row resolves.
+    if owned_trait_implies("Display", bound_name) && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") && sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) == None {
         return Val(true)
     }
     // A pool `ID<T>` is a compiler-owned slot and generation whose built-in
