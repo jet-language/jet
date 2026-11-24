@@ -26,6 +26,7 @@ use jet_foundation.[
     TypedLitBody,
     compiler_threads_admit,
     compiler_threads_heaviest_first,
+    compiler_threads_slot_taken,
     name_text_hash,
     module_is_core,
 ]
@@ -184,7 +185,7 @@ sema_divergence_take: fn(found: ^^[SemaGraphScanFound?]) -> [SemaDivergenceWalke
     taken := [SemaDivergenceWalked]{}
     loop slots.len() > 0 {
         slot := slots.pop() ?? break
-        row := slot.move() ?? panic("a function's divergence walk left its slot")
+        row := compiler_threads_slot_taken(slot)
         taken.push(row.divergence.move() ?? panic("a divergence scan found no walk"))
     }
     taken

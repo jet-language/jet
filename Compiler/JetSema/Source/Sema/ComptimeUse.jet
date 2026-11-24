@@ -31,6 +31,7 @@ use jet_foundation.[
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_joined,
+    compiler_threads_slot_taken,
     compiler_threads_taken,
     compiler_threads_heaviest_first,
     diagnostic_with_alternative_edit,
@@ -120,7 +121,7 @@ sema_comptime_use_check: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThr
     found.reverse()
     loop found.len() > 0 {
         slot := found.pop() ?? break
-        row := slot.move() ?? panic("a module's #run use scan left its slot")
+        row := compiler_threads_slot_taken(slot)
         module_found := row.comptime.move() ?? panic("a #run use scan found no module scan")
         loop diagnostic in module_found.diagnostics {
             sema_registration_push_graph_diagnostic(owned, module_found.module_index, diagnostic)

@@ -41,6 +41,7 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_limit,
     compiler_threads_joined,
+    compiler_threads_slot_taken,
     compiler_threads_taken,
     expr_span,
     symbol_builtin,
@@ -1487,7 +1488,7 @@ sema_check_declaration_modules: fn(shared_state: Shared<SemaCheckShared>, module
     placed.reverse()
     loop placed.len() > 0 {
         slot := placed.pop() ?? break
-        check := slot.move() ?? panic("a module's declaration check left its thread")
+        check := compiler_threads_slot_taken(slot)
         checks.push(check)
     }
     checks

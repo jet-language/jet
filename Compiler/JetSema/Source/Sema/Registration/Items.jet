@@ -95,6 +95,7 @@ use {
         compiler_apply_order,
         compiler_threads_admit,
         compiler_threads_joined,
+        compiler_threads_slot_taken,
         compiler_threads_taken,
         compiler_threads_heaviest_first,
         compiler_threads_partition,
@@ -4585,7 +4586,7 @@ sema_registration_prepare_rows: fn(jobs: ^^[SemaRegistrationPrepareJob], threads
     slots.reverse()
     loop slots.len() > 0 {
         slot := slots.pop() ?? break
-        row := slot.move() ?? panic("a prepared module row left its slot")
+        row := compiler_threads_slot_taken(slot)
         rows.push(row)
     }
     rows

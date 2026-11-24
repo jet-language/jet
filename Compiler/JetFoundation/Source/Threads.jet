@@ -242,3 +242,11 @@ compiler_threads_joined: fn<T>(handle: ^^Task<T>) -> T Never! {
 compiler_threads_taken: fn<T>(rows: ^[T]) -> T Never! {
     rows.pop() ?? panic("a compiler phase took back a value its threads were never handed")
 }
+
+// Takes the result a worker left in its slot. A phase fills every slot through
+// workers it joins before it takes any, and a failed worker re-raises at that
+// join (compiler_threads_joined), so a joined phase's slot holds its value:
+// this checks nothing about the input.
+compiler_threads_slot_taken: fn<T>(slot: ^^T?) -> T Never! {
+    slot.move() ?? panic("a compiler thread's slot was taken before its worker filled it")
+}

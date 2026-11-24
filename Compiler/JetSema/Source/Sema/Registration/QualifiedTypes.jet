@@ -15,6 +15,7 @@ use jet_foundation.[
     TypeTupleField,
     compiler_threads_admit,
     compiler_threads_heaviest_first,
+    compiler_threads_slot_taken,
     type_identity_equal,
     ModuleID,
     module_is_core,
@@ -90,7 +91,7 @@ sema_registration_qualified_take: fn(found: ^^[SemaGraphScanFound?]) -> [SemaQua
     taken := [SemaQualifiedFound]{}
     loop slots.len() > 0 {
         slot := slots.pop() ?? break
-        row := slot.move() ?? panic("a module's qualified scan left its slot")
+        row := compiler_threads_slot_taken(slot)
         taken.push(row.qualified.move() ?? panic("a qualified scan found nothing"))
     }
     taken

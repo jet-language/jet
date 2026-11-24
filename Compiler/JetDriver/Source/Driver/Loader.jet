@@ -51,6 +51,7 @@ use {
         compiler_threads_beside,
         compiler_threads_failure_text,
         compiler_threads_joined,
+        compiler_threads_slot_taken,
         compiler_threads_taken,
         compiler_threads_heaviest_first,
         compiler_threads_partition,
@@ -5794,7 +5795,7 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
         jet_driver_parse_claimers(inputs, queue, 0, workers, placed, met)
         loop placed.len() > 0 {
             slot := placed.pop() ?? break
-            unit := slot.move() ?? panic("a parse job's unit left its thread")
+            unit := compiler_threads_slot_taken(slot)
             results.push(unit)
         }
         // The load's spellings, back from the shared inputs after the join.
