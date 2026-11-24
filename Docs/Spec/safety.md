@@ -7937,7 +7937,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Tests",
       "file": "Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet",
-      "line": 104,
+      "line": 107,
       "column": 5,
       "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
     },
@@ -12931,7 +12931,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 10:5 | "reads the address of the graph's storage, not its bytes" |
 | Tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 29:5 | "reads the address of the graph's storage, not its bytes" |
 | Tests | Tests/Cases/Context/ContextAllocatorMemoEntryMovesToTheHeap.fixture/memo.jet | 63:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
-| Tests | Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet | 104:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
+| Tests | Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet | 107:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
 | Tests | Tests/Cases/Context/ContextAllocatorMovesWhatLeavesTheBlock.fixture/moves.jet | 124:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
 | Tests | Tests/Cases/Context/ContextAllocatorPanicInAllocateStopsTheTask.fixture/refuse.jet | 38:5 | "the picky allocator's kept blocks were claimed from its region, which unmaps them all" |
 | Tests | Tests/Cases/Context/ContextAllocatorReadsBackTheUserAllocator.fixture/main.jet | 52:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
