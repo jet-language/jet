@@ -1,16 +1,12 @@
-# PORT tests/repl.rs:3468-3495; verbatim inputs and original predicate forms.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
-# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
-# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+# An empty typed list echoes, and a query over it, a value with no `Display`,
+# still runs and shows its type without exposing compile-time metadata.
 fixture: ReplCoreDataListQueryEchoHidesComptimeMetadata.fixture
 step: jet repl
 env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 stdin: ReplCoreDataListQueryEchoHidesComptimeMetadata.fixture/input.txt
-exit: any # original library predicates did not assert process status
-stdout: !~ "Jet.ComptimeConstructNotSupported" # original predicate
-stderr: !~ "Jet.ComptimeConstructNotSupported" # original predicate
-stdout|stderr: ~ "Query(" # original predicate
-stdout|stderr: ~ "[] : [Ticket]" # original predicate "[] : List"; Jet spells the list type `[Ticket]`
-stdout: !~ "elem_type:" # original predicate
-stderr: !~ "elem_type:" # original predicate
+exit: 0
+stderr: !~ "Error" # every turn is accepted
+stdout: ~ "[] : [Ticket]" # an empty typed list
+stdout: ~ "(a value with no Display) : Query<Ticket>" # a value with no Display shows its type
+stdout: !~ "elem_type:" # no compile-time metadata

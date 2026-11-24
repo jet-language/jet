@@ -1,14 +1,16 @@
 // Semantic tokens: the lexer classifies keywords, literals and comments; the
-// checked index classifies each name by what it names, marks the declarations
-// and marks a name a call writes through as a modification; a marked block's
-// `lsp.semantic_tokens` hooks classify its body. Types and modifiers index
-// `LSP_SEMANTIC_TOKEN_TYPES` and `LSP_SEMANTIC_TOKEN_MODIFIERS`. A full
-// answer is kept per document so a delta request answers only the change.
+// checked index classifies each name by what it names, each name a written
+// type holds as a type, marks the declarations and marks a name a call
+// writes through as a modification; a marked block's `lsp.semantic_tokens`
+// hooks classify its body. A retired word no grammar rule accepts is no
+// keyword. Types and modifiers index `LSP_SEMANTIC_TOKEN_TYPES` and
+// `LSP_SEMANTIC_TOKEN_MODIFIERS`. A full answer is kept per document so a
+// delta request answers only the change.
 use {
     core.encoding.[Dyn]
     jet_driver.[JetDriverToolStageItem]
     jet_foundation.[AccessConvention, Span, TOOL_STAGE_LSP_SEMANTIC_TOKENS, foundation_json_quote]
-    jet_lexer.[Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE]
+    jet_lexer.[Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE, TOKEN_KW_MUTATE, TOKEN_KW_MOVE, TOKEN_KW_COPY, TOKEN_KW_CONST, TOKEN_DOT, TOKEN_COLON]
     jet_semindex.[SemKind]
 }
 
@@ -91,6 +93,23 @@ lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
             classes[definition.def.def_span.end] = lsp_definition_class(definition.def.kind)
         }
     }
+    // A name a written type holds is a type, or the module that qualifies
+    // one (`geo.Point`); a name before `:` there labels a function type's
+    // parameter.
+    tokens: view.lexed.tokens
+    loop node in index.nodes {
+        if node.class != "type" || node.module_path != module_path -> next
+        at := lsp_first_token_from(tokens, node.span.start)
+        loop at < tokens.len() && tokens[at].span.start < node.span.end {
+            token: tokens[at]
+            following: if at + 1 < tokens.len() -> tokens[at + 1].kind else -> -1
+            if token.kind == TOKEN_IDENT && following != TOKEN_COLON && !classes.has_key(token.span.end) {
+                kind: if following == TOKEN_DOT -> LSP_TOKEN_NAMESPACE else -> LSP_TOKEN_TYPE
+                classes[token.span.end] = LSPNameClass{kind: kind, modifiers: 0}
+            }
+            at += 1
+        }
+    }
     // An argument or receiver a call writes, so an editor can underline it. A
     // written name is a place, so one the index left unresolved is a variable.
     loop mark in lsp_call_marks(view, index) {
@@ -102,12 +121,24 @@ lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
     classes
 }
 
+// The index of the first of `tokens` that starts at or after `offset`.
+lsp_first_token_from: fn(tokens: [Token], offset: Int) -> Int Never! {
+    low := 0
+    high := tokens.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if tokens[middle].span.start < offset -> low = middle + 1 else -> high = middle
+    }
+    low
+}
+
 lsp_token_class: fn(token: Token, classes: [Int:LSPNameClass]) -> LSPNameClass? Never! {
     kind: token.kind
     if kind == TOKEN_IDENT -> return classes.get(token.span.end)
     // `self` a call writes through is classed as that write.
     if kind == TOKEN_SELF && classes.has_key(token.span.end) -> return classes.get(token.span.end)
-    if (kind >= TOKEN_TRUE && kind <= TOKEN_RETURN) || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE) {
+    if lsp_retired_word_kind(kind) -> return None
+    if lsp_keyword_token_kind(kind) {
         return Val(LSPNameClass{kind: LSP_TOKEN_KEYWORD, modifiers: 0})
     }
     if kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_CHAR {
@@ -120,6 +151,19 @@ lsp_token_class: fn(token: Token, classes: [Int:LSPNameClass]) -> LSPNameClass? 
         return Val(LSPNameClass{kind: LSP_TOKEN_COMMENT, modifiers: 0})
     }
     None
+}
+
+// The lexer kinds of the language's keywords, `true` through `return` and
+// `fn` through `module`.
+lsp_keyword_token_kind: fn(kind: Int) -> Bool Never! {
+    (kind >= TOKEN_TRUE && kind <= TOKEN_RETURN) || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE)
+}
+
+// The retired words the lexer keeps reserved though no grammar rule accepts
+// them (`mut`, `take`, `copy`, `const`); after a dot such a word names a
+// method.
+lsp_retired_word_kind: fn(kind: Int) -> Bool Never! {
+    kind == TOKEN_KW_MUTATE || kind == TOKEN_KW_MOVE || kind == TOKEN_KW_COPY || kind == TOKEN_KW_CONST
 }
 
 // A classified stretch of the document.

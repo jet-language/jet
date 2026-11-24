@@ -3636,10 +3636,26 @@ sema_registration_impl_conditions_valid: fn(definition: ImplDef, declared: [Sema
             }
         }
     }
-    if matches -> return true
     names: loop param in declared -> param.name
     written: loop param in definition.type_params -> param.name
     span: Span{start: definition.type_params[0].name_span.start, end: definition.type_params[definition.type_params.len() - 1].name_span.end}
+    // A list with no bound on a trait impl (`impl Many<Small>.Name`) names
+    // type arguments, unless it restates the type's own parameters.
+    unbounded: loop param in definition.type_params {
+        if param.bounds.len() > 0 {
+            break false
+        }
+    } ?? true
+    if unbounded {
+        trait_name: definition.trait_name ?? ""
+        if matches {
+            diagnostics.push(sema_error("E0003", span, "`impl {definition.type_name}<{written.join(", ")}>.{trait_name}` restates the type parameters of `{definition.type_name}`", "an impl of a generic type names the type bare and its methods already see the type's parameters; a list after the type gives the bounds a conditional impl applies under", "write `impl {definition.type_name}.{trait_name} {{`"))
+            return false
+        }
+        diagnostics.push(sema_error("E0908", span, "`impl {definition.type_name}<{written.join(", ")}>.{trait_name}` singles out one instance of `{definition.type_name}`", "impls may not overlap, so an impl of `{trait_name}` covers every `{definition.type_name}` whose parameters meet its bounds and never names a type argument such as `<{written.join(", ")}>`", "implement `{trait_name}` once for every `{definition.type_name}`, with bounds on its parameters, and move what differs for `{written.join(", ")}` into impls on those types"))
+        return false
+    }
+    if matches -> return true
     have: if names.len() == 0 -> "`{definition.type_name}` has no type parameters" else -> "`{definition.type_name}` declares `<{names.join(", ")}>`"
     fix: if names.len() == 0 -> "remove `<{written.join(", ")}>` from the impl head" else -> "write `impl {definition.type_name}<{names.join(", ")}>` with each bound on its parameter"
     diagnostics.push(sema_error("E0003", span, "the conditional impl of `{definition.type_name}` names `<{written.join(", ")}>`", "{have}; a conditional impl lists them in order, each with the bounds it applies under", fix))

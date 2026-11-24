@@ -11,8 +11,8 @@ use {
 LSPServer: struct {
     diagnostic_state: LSPDiagnosticState,
     checker: LSPChecker,
-    // The check each open document's last publication read; workspace
-    // symbols search these.
+    // The check each open document's last publication read; without
+    // workspace folders, workspace symbols search these.
     published: [String:LSPChecked],
     initialized: Bool,
     shutdown: Bool,
@@ -24,6 +24,12 @@ LSPServer: struct {
     // a `full/delta` request names by result id, and the last id given.
     semantic_results: [String:LSPSemanticResult],
     semantic_serial: Int,
+    // The workspace folders' paths, once the client names any (its
+    // `workspaceFolders` or `rootUri` in `initialize`, then each
+    // `workspace/didChangeWorkspaceFolders`); workspace symbols search the
+    // files below them.
+    workspace_named: Bool{false},
+    workspace_roots: [String]{[String]{}},
 
     // Every open document is overlaid, so a check sees unsaved imports too.
     check: fn(self, doc: LSPDocument) -> LSPChecked {

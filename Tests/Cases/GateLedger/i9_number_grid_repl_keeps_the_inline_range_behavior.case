@@ -1,9 +1,10 @@
 # tests/gate_ledger.rs::i9_number_grid_repl_keeps_the_inline_range_behavior at tests/gate_ledger.rs:759; hand-port
-# The REPL keeps the inline Int(0..100) range behavior: both definitions are accepted and both prints run.
+# The REPL keeps the inline Int(0..100) range behavior: both definitions are accepted and both prints run. The original
+# compared the bare transcript, so the banner, the numbered prompts and the end-of-input prompt are removed first.
 env: XDG_STATE_HOME={work}/state
 env: NO_COLOR=1
 step: jet repl
 unset: JET_REPL_HISTORY
 stdin: i9_number_grid_repl_keeps_the_inline_range_behavior.stdin
 exit: 0
-stdout: = "ok\nok\n42\n3\n" # tests/gate_ledger.rs:769 the transcript
+stdout.after_first("\n\n").replace("1 user> ", "").replace("2 user> ", "").replace("3 user> ", "").replace("4 user> ", "").replace("5 user> \n", ""): = "ok\nok\n42\n3\n" # tests/gate_ledger.rs:769 the transcript

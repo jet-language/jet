@@ -66,6 +66,15 @@ lsp_checked_offset_bytes: fn(table: LineTable, bytes: [U8], pos: LSPPos) -> Int?
     Val(byte_offset)
 }
 
+// `lsp_checked_offset_bytes`, with a line past the document's last one held
+// at the document's end, as a character past a line's content is held at
+// the line's end: a request range that runs past the text covers the rest of
+// it. A position inside a surrogate pair is still None.
+lsp_clamped_offset_bytes: fn(table: LineTable, bytes: [U8], pos: LSPPos) -> Int? Never! {
+    if pos.line >= table.lines.len() -> return Val(bytes.len())
+    lsp_checked_offset_bytes(table, bytes, pos)
+}
+
 lsp_utf16_length: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     count := 0
     index := start

@@ -3161,6 +3161,8 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     // see the struct's type parameters. A list with a bound is a conditional
     // impl, `impl Pair<T: Priced>.Describe`, which applies only where `T`
     // meets its bounds; sema checks the list names the type's parameters.
+    // On a trait impl only sema knows whether a list without a bound restates
+    // the parameters or names type arguments (`impl Many<Small>.Name`).
     type_params := [TypeParam]{}
     if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) && head == None && !(parts.len() >= 2 && parser_impl_trait_args_ahead(state)) {
         open: parser_current(state).span
@@ -3170,7 +3172,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
                 break true
             }
         } ?? false
-        if bounded -> type_params = params else {
+        if bounded || parser_current_kind(state) == TOKEN_DOT -> type_params = params else {
             written := parser_value(state, parts[0])
             loop index in 1..<parts.len() {
                 written = "{written}.{parser_value(state, parts[index])}"

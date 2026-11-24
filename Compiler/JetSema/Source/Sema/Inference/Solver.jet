@@ -11,6 +11,7 @@ use jet_foundation.[
     Type,
     diagnostic_registry_row,
     dimension_identity,
+    owned_trait_codec,
     owned_trait_requires_listed,
     type_identity_equal,
     type_name,
@@ -330,6 +331,9 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
                 what: row.what.replace("{{type}}", name).replace("{{bound}}", bound)
                 why := "`{name}` would need to implement `{bound}` before it can be used here"
                 fix := sema_trait_impl_fix(name, bound)
+                if owned_trait_codec(bound) && sema_serde_shape_fix(concrete, bound) == .Val(shape_fix) {
+                    fix = shape_fix
+                }
                 if bound == "Comparable" {
                     fix = "write `#Comparable` before `{name}`, or use `sort_by` with a key"
                 }

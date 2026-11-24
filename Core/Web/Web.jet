@@ -3877,13 +3877,15 @@ Mount: struct {
 // It returns the opaque typed-model form boundary, not the source forms
 // module's explicit input/action-name record API.
 
-// `web.openapi(app)` checks as `__openapi_app(app)` below (sema
-// sema_call_http_web_openapi_mux); a router renders its route table the same way.
-openapi: fn(router: HTTPRouter) -> String OpenAPIError! { openapi_mux(web_http.router_mux(router)) }
-
-// An App's document: its handler rows; pages, server functions and static
-// files carry no endpoint contract and are not API operations.
-__openapi_app: fn(app: App) -> String OpenAPIError! { openapi_mux(app_table(app)) }
+// The OpenAPI document of a router's route table or an App's handler rows;
+// an App's pages, server functions and static files carry no endpoint
+// contract and are not API operations.
+openapi: fn(source: HTTPRouter | App) -> String OpenAPIError! {
+    if source == {
+        .HTTPRouter(router) -> openapi_mux(web_http.router_mux(router))
+        .App(app) -> openapi_mux(app_table(app))
+    }
+}
 
 // OpenAPI for an HTTPMux (`JetHTTPRouteSource for JetHTTPMux` and
 // `jet_web_openapi`): each route's checked contract is parsed

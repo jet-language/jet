@@ -2,16 +2,16 @@
 PatternError: enum { Bad }
 Pattern: distinct String
 impl Pattern.CheckedText {
-    Error: PatternError
+    Error: PatternError,
     check: fn(text: String) -[]> PatternError! {
-        return
+        if text == "" -> return Err(PatternError.Bad)
+        return Ok()
     }
-    encode_hole: fn<T: Printable>(value: T) -[]> String {
-        return ""
-    }
+    encode_hole: fn<T: Printable>(value: T) -[]> String { "hole" }
 }
-use_pattern: fn(value: Pattern) {
-    return
+
+use_pattern: fn(value: Pattern, other: Pattern) -> Bool {
+    value == other
 }
 run: fn() {
     

@@ -9,6 +9,7 @@ use {
     core.http.[HTTPError, HTTPRequest, HTTPResponse]
     provider: core.http.client
     http_url: core.net.url
+    core.net.url.[URL]
     build_net: core.net
     build_tls: core.net.tls
     client_gzip: core.archive.gzip
@@ -234,8 +235,12 @@ post: fn(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     http.__request("POST", url).__with_body(body).send()
 }
 
-request: fn(method: String, url: String) -[Net, Time.Wait]> HTTPRequest Never! {
-    http.__request(method, url)
+// The target is the URL's text, written or parsed.
+request: fn(method: String, url: String | URL) -[Net, Time.Wait]> HTTPRequest Never! {
+    if url == {
+        .String(text) -> http.__request(method, text)
+        .URL(parsed) -> http.__request(method, parsed.to_string())
+    }
 }
 
 send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! { req.send() }

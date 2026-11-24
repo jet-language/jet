@@ -1,49 +1,49 @@
-# Port of tests/lsp.rs:4073-4192; source bytes/order/assertions unchanged.
-# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+# A checked text type keeps its contract in hover and completion, and its
+# name, written in a parameter and a return type, reaches its declaration for
+# definition, references and rename.
 fixture: LSPCheckedTextContractSurvivesEditorNavigation.fixture
 session lsp content-length: jet self lsp
 stderr: null
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
-recv lsp
-stdout: ~ "hoverProvider" # original predicate
-stdout: ~ "completionProvider" # original predicate
-stdout: ~ "definitionProvider" # original predicate
-stdout: ~ "referencesProvider" # original predicate
-stdout: ~ "renameProvider" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
+recv lsp until $.id = 1
+json: stdout doc $.result.capabilities.hoverProvider = true
+json: stdout doc $.result.capabilities.definitionProvider = true
+json: stdout doc $.result.capabilities.referencesProvider = true
+json: stdout doc $.result.capabilities.completionProvider.resolveProvider = false
+json: stdout doc $.result.capabilities.renameProvider.prepareProvider = true
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"#Error\\nPatternError: enum { Bad }\\nPattern: distinct String\\nimpl Pattern.CheckedText {\\n    Error: PatternError\\n    check: fn(text: String) -[]> PatternError! {\\n        return\\n    }\\n    encode_hole: fn<T: Printable>(value: T) -[]> String {\\n        return \\\"\\\"\\n    }\\n}\\nuse_pattern: fn(value: Pattern) {\\n    return\\n}\\nrun: fn() {\\n    \\n}\\n\"}}}"
-recv lsp
-stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":2,\"character\":1}}}"
-recv lsp
-stdout: ~ "type Pattern: distinct String" # original predicate
-stdout: ~ "implements CheckedText" # original predicate
-stdout: ~ "type Error = PatternError" # original predicate
-stdout: ~ "encode_hole" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":15,\"character\":1}}}"
-recv lsp
-stdout: ~ "Pattern" # original predicate
-stdout: ~ "implements CheckedText" # original predicate
-stdout: ~ "encode_hole" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":12,\"character\":24}}}"
-recv lsp
-stdout: ~ "range" # original predicate
-stdout: ~ "nominal_base" # original predicate
-stdout: ~ "CheckedText" # original predicate
-stdout: ~ "encode_hole" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":2,\"character\":1},\"context\":{\"includeDeclaration\":true}}}"
-recv lsp
-stdout: ~ "nominal_base" # original predicate
-stdout: ~ "CheckedText" # original predicate
-stdout: ~ "Pattern" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":2,\"character\":1},\"newName\":\"Pattern2\"}}"
-recv lsp
-stdout: ~ "documentChanges" # original predicate
-stdout: ~ "\"newText\":\"Pattern2\"" # original predicate
-stdout: ~ "nominal_base" # original predicate
-stdout: ~ "CheckedText" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/checked_text.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"#Error\\nPatternError: enum { Bad }\\nPattern: distinct String\\nimpl Pattern.CheckedText {\\n    Error: PatternError,\\n    check: fn(text: String) -[]> PatternError! {\\n        if text == \\\"\\\" -> return Err(PatternError.Bad)\\n        return Ok()\\n    }\\n    encode_hole: fn<T: Printable>(value: T) -[]> String { \\\"hole\\\" }\\n}\\n\\nuse_pattern: fn(value: Pattern, other: Pattern) -> Bool {\\n    value == other\\n}\\nrun: fn() {\\n    \\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/checked_text.jet\"},\"position\":{\"line\":2,\"character\":1}}}"
+recv lsp until $.id = 2
+stdout: ~ "type Pattern: distinct String" # the hover names the type and its base
+stdout: ~ "implements CheckedText" # and the checked text contract it implements
+stdout: ~ "type Error = PatternError" # with the error the contract binds
+stdout: ~ "encode_hole" # and the hole encoding it supplies
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/checked_text.jet\"},\"position\":{\"line\":16,\"character\":4}}}"
+recv lsp until $.id = 3
+json: stdout doc $.result.items[?label="Pattern"] #= 1
+json: stdout doc $.result.items[?label="Pattern"][0].detail ~ "implements CheckedText" # the completion detail carries the contract
+json: stdout doc $.result.items[?label="Pattern"][0].detail ~ "encode_hole" # with its hole encoding
+# The parameter type names the declaration.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/checked_text.jet\"},\"position\":{\"line\":12,\"character\":24}}}"
+recv lsp until $.id = 4
+json: stdout doc $.result.uri = "file://{work}/checked_text.jet"
+json: stdout doc $.result.range = {"start":{"line":2,"character":0},"end":{"line":2,"character":7}}
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/checked_text.jet\"},\"position\":{\"line\":2,\"character\":1},\"context\":{\"includeDeclaration\":true}}}"
+recv lsp until $.id = 5
+json: stdout doc $.result #= 4
+json: stdout doc $.result[*].range #distinct= 4
+json: stdout doc $.result[*].range in [{"start":{"line":2,"character":0},"end":{"line":2,"character":7}}, {"start":{"line":3,"character":5},"end":{"line":3,"character":12}}, {"start":{"line":12,"character":23},"end":{"line":12,"character":30}}, {"start":{"line":12,"character":39},"end":{"line":12,"character":46}}]
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/checked_text.jet\"},\"position\":{\"line\":2,\"character\":1},\"newName\":\"Pattern2\"}}"
+recv lsp until $.id = 6
+json: stdout doc $.result.documentChanges #= 1
+json: stdout doc $.result.documentChanges[0].edits #= 4
+json: stdout doc $.result.documentChanges[0].edits[*].newText = "Pattern2"
+json: stdout doc $.result.documentChanges[0].edits[*].range in [{"start":{"line":2,"character":0},"end":{"line":2,"character":7}}, {"start":{"line":3,"character":5},"end":{"line":3,"character":12}}, {"start":{"line":12,"character":23},"end":{"line":12,"character":30}}, {"start":{"line":12,"character":39},"end":{"line":12,"character":46}}]
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
-recv lsp
-stdout: ~ "result" # original predicate
+recv lsp until $.id = 99
+json: stdout doc $.result = null
 close lsp
-exit: any # run_transcript child.wait status ignored
+exit: any # the server exit status after close is not part of this contract

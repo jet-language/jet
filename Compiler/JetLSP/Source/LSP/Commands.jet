@@ -1,0 +1,69 @@
+// Code lenses and the commands `workspace/executeCommand` runs.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[Span, foundation_json_integer, foundation_json_quote]
+    jet_impact.[ImpactReport]
+}
+
+// How far a `jet.impact` report follows calls when the request names no
+// depth, and the most it follows.
+LSP_IMPACT_DEPTH: 3
+LSP_IMPACT_MAX_DEPTH: 64
+
+LSP_IMPACT_USAGE: "jet.impact expects arguments [uri, symbol, depth?]"
+
+// A lens on the document's `run: fn` entry runs the file (`jet.runFile`),
+// and one on each `#Test` runs its tests (`jet.testFile`). Each lens spans
+// the rest of its declaration's first line and passes the document's URI.
+lsp_code_lens_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    module_path: view.module_path ?? return lsp_response(id, "[]")
+    doc_module: view.checked.modules[lsp_module_index(view.checked, module_path) ?? return lsp_response(id, "[]")]
+    rows := [String]{}
+    loop item in doc_module.items {
+        if item == .Func(func) {
+            if func.name == "run" -> rows.push(lsp_code_lens_json(view, func.name_span.start, "Run file", "jet.runFile"))
+        }
+        if item == .Test(test) -> rows.push(lsp_code_lens_json(view, test.span.start, "Run test", "jet.testFile"))
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+lsp_code_lens_json: fn(view: LSPView, start: Int, title: String, command: String) -> String Never! {
+    bytes: view.doc.text.bytes()
+    end := start
+    loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+    range: lsp_range_json(lsp_byte_span_to_range(view.doc.text, Span{start: start, end: end}))
+    "{{\"range\":{range},\"command\":{{\"title\":{foundation_json_quote(title)},\"command\":{foundation_json_quote(command)},\"arguments\":[{foundation_json_quote(view.uri)}]}}}}"
+}
+
+lsp_text_value: fn(value: Dyn) -> String? Never! {
+    if value == .Text(text) -> return Val(text)
+    None
+}
+
+// `jet.impact` with arguments [uri, symbol, depth?] answers the impact
+// report over the open document's checked index: the symbol's references,
+// call sites, and its callers and callees to that depth.
+lsp_execute_command_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    command: lsp_text_member(params ?? Dyn.Null, "command") ?? return lsp_error_response(id, -32602, "executeCommand names no command")
+    if command != "jet.impact" -> return lsp_error_response(id, -32602, "unknown command: {command}")
+    arguments: if (lsp_param(params, "arguments") ?? return lsp_error_response(id, -32602, LSP_IMPACT_USAGE)) == {
+        .Array(rows) -> rows
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+            return lsp_error_response(id, -32602, LSP_IMPACT_USAGE)
+        }
+    }
+    if arguments.len() < 2 -> return lsp_error_response(id, -32602, LSP_IMPACT_USAGE)
+    uri: lsp_text_value(arguments[0]) ?? return lsp_error_response(id, -32602, LSP_IMPACT_USAGE)
+    symbol: lsp_text_value(arguments[1]) ?? return lsp_error_response(id, -32602, LSP_IMPACT_USAGE)
+    depth := LSP_IMPACT_DEPTH
+    if arguments.len() > 2 {
+        depth = foundation_json_integer(arguments[2]) ?? return lsp_error_response(id, -32602, LSP_IMPACT_USAGE)
+    }
+    if depth < 1 -> depth = 1
+    if depth > LSP_IMPACT_MAX_DEPTH -> depth = LSP_IMPACT_MAX_DEPTH
+    view: lsp_view_of(server, uri) ?? return lsp_error_response(id, -32602, "{uri} is not open")
+    index: view.checked.index ?? return lsp_error_response(id, -32603, "{uri} has no checked index")
+    lsp_response(id, ImpactReport.analyze(index, symbol, depth).to_json())
+}

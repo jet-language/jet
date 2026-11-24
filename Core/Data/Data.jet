@@ -1646,10 +1646,11 @@ __schema: fn<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Ne
     columns
 }
 
-// A column identity: FNV-1a 64 over the length-delimited `name:type` key,
-// spelled `column-` and 16 lowercase hex digits.
+// A column identity: FNV-1a 64 over the key `<name length>:<name>:<type>`,
+// spelled `column-` and 16 lowercase hex digits; columns that differ only in
+// name differ in identity.
 priv column_identity: fn(name: String, type_name: String) -> String Never! {
-    key: "{name.bytes().len()}:{type_name}"
+    key: "{name.bytes().len()}:{name}:{type_name}"
     hash := U64{14695981039346656037}
     loop byte in key.bytes() -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
@@ -1753,11 +1754,12 @@ __query_test_sales: fn() -> [QueryTestSale] Never! {
 }
 
 #Test("schema columns keep their order, nullability and column identity") {
-    columns: __schema<Int>([Int]{}, [String]{"team", "minutes", "value"}, [String]{"String", "Float", "Int?"})
-    assert_eq(columns.len(), 3)
-    assert_eq(columns[0].id, "column-ed14b1fd5790663e")
-    assert_eq(columns[1].id, "column-52b8ce3bb4ec8b96")
-    assert_eq(columns[2].id, "column-727bb12c67abeab0")
+    columns: __schema<Int>([Int]{}, [String]{"team", "minutes", "value", "scale"}, [String]{"String", "Float", "Int?", "Int?"})
+    assert_eq(columns.len(), 4)
+    assert_eq(columns[0].id, "column-2bbfce4600e4d781")
+    assert_eq(columns[1].id, "column-52872214ed09d45d")
+    assert_eq(columns[2].id, "column-e9ac9d512336c7bd")
+    assert(columns[3].id != columns[2].id)
     assert(!columns[1].nullable)
     assert(columns[2].nullable)
 }

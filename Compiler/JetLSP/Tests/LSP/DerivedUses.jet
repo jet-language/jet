@@ -1,0 +1,57 @@
+// A derive-written body (an enum's `equal` and `compare`) is checked past the
+// end of its module's text. This checker adds such a use of `add` to the main
+// fixture's index: references and rename leave it out, since it has no place
+// in the file.
+use {
+    jet_driver.[JetDriverToolStageItem]
+    jet_foundation.[Span]
+    jet_semindex.[SemAnchor, SemRef]
+    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_server]
+}
+
+LSP_DERIVED_USES_PATH: "/w/main.jet"
+
+LSPDerivedUsesChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            plain: LSPFixtureChecker{}
+            checked := plain.check(entry, overlays)
+            past: LSP_TEST_MAIN.count_bytes() + 10
+            index := checked.index.move() ?? panic("the fixture check builds an index")
+            index.references.push(
+                SemRef{
+                    name: "add",
+                    span: Span{start: past, end: past + 3},
+                    module_path: LSP_DERIVED_USES_PATH,
+                    scope_identity: None,
+                    target: Val(SemAnchor{module_path: LSP_DERIVED_USES_PATH, kind: "function", def_span: Span{start: 0, end: 3}, semantic_identity: None}),
+                    fact: None,
+                },
+            )
+            checked.index = Val(index)
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            LSPFixtureChecker{}.failure_marks(entry, overlays)
+        }
+
+        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
+            LSPFixtureChecker{}.sources(root)
+        }
+    }
+}
+
+#Test("references and rename leave out a use checked past the end of its module's text") {
+    server := lsp_server(LSPDerivedUsesChecker{})
+    lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN)
+    with: "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"position\":{{\"line\":0,\"character\":1}},\"context\":{{\"includeDeclaration\":true}}}}"
+    assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_result(server, "textDocument/references", with))), [String]{"0:0-0:3", "5:11-5:14", "5:4-5:7"})
+    renamed: lsp_test_result(server, "textDocument/rename", "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"position\":{{\"line\":0,\"character\":1}},\"newName\":\"sum\"}}")
+    edits: lsp_test_rows(lsp_test_field(lsp_test_field(renamed, "changes"), LSP_TEST_MAIN_URI))
+    assert_eq(lsp_test_ranges(edits), [String]{"0:0-0:3", "5:11-5:14", "5:4-5:7"})
+}

@@ -13,6 +13,7 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "initialize" -> {
             workspace: lsp_member(lsp_param(params, "capabilities") ?? Dyn.Null, "workspace") ?? Dyn.Null
             server.document_changes = lsp_bool_member(lsp_member(workspace, "workspaceEdit") ?? Dyn.Null, "documentChanges")
+            lsp_initial_workspace_folders(server, params)
             lsp_initialize_response(id)
         }
         "shutdown" -> {
@@ -36,6 +37,8 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/foldingRange" -> lsp_folding_range_response(server, params, id)
         "textDocument/selectionRange" -> lsp_selection_range_response(server, params, id)
         "textDocument/documentLink" -> lsp_document_link_response(server, params, id)
+        "textDocument/codeLens" -> lsp_code_lens_response(server, params, id)
+        "workspace/executeCommand" -> lsp_execute_command_response(server, params, id)
         "textDocument/semanticTokens/full" -> lsp_semantic_tokens_response(server, params, id)
         "textDocument/semanticTokens/full/delta" -> lsp_semantic_tokens_delta_response(server, params, id)
         "textDocument/semanticTokens/range" -> lsp_semantic_tokens_range_response(server, params, id)
@@ -67,6 +70,7 @@ lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, st
             uri: lsp_params_uri(params) ?? return
             lsp_close_document(server, uri, stdout) ?? return Err(err)
         }
+        "workspace/didChangeWorkspaceFolders" -> lsp_change_workspace_folders(server, params)
         else -> {}
     }
 }
@@ -101,10 +105,13 @@ lsp_initialize_response: fn(id: Dyn) -> String Never! {
         "\"foldingRangeProvider\":true",
         "\"selectionRangeProvider\":true",
         "\"documentLinkProvider\":{{\"resolveProvider\":false}}",
+        "\"codeLensProvider\":{{\"resolveProvider\":false}}",
+        "\"executeCommandProvider\":{{\"commands\":[\"jet.impact\"]}}",
         "\"semanticTokensProvider\":{{\"legend\":{{\"tokenTypes\":{lsp_json_strings(LSP_SEMANTIC_TOKEN_TYPES)},\"tokenModifiers\":{lsp_json_strings(LSP_SEMANTIC_TOKEN_MODIFIERS)}}},\"full\":{{\"delta\":true}},\"range\":true}}",
         "\"inlayHintProvider\":true",
         "\"typeHierarchyProvider\":true",
         "\"callHierarchyProvider\":true",
+        "\"workspace\":{{\"workspaceFolders\":{{\"supported\":true,\"changeNotifications\":true}}}}",
     }
     lsp_response(id, "{{\"capabilities\":{{{capabilities.join(",")}}},\"serverInfo\":{{\"name\":\"jet\"}}}}")
 }

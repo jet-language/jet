@@ -131,11 +131,13 @@ vocabulary](vocabulary.md).
   TypeId; `_` when the argument's own check fails), `value`, the
   `function` it names (None) and its `span`. `value` is the Dyn the
   argument's `encode()` returns when the build knows the argument (a
-  literal or a constant, a struct, enum case or list literal of known
-  parts): a Bool, an Int or fixed-width integer, a Float or F32, a Char or
-  a String, a list of these, and a struct or enum whose Encode is the
-  derived one with no codec option, its fields plain values and its cases
-  without payload or with one value. Any other argument's `value` is None
+  literal, a module constant, also one that names another constant, or a
+  struct, enum case or list literal of known parts): a Bool, an Int or
+  fixed-width integer, a Float or F32, a Char or a String, a list of these,
+  and a struct or enum whose Encode is the derived one with no codec option,
+  its fields plain values and its cases without payload or with one value.
+  A `Path{…}` literal has no Encode and is heard as the Text of its path.
+  Any other argument's `value` is None
   (an optional field, a byte list, a generic type, a written codec, a
   value only the run knows). The call's `span` runs from its name to its
   last argument.
@@ -483,7 +485,10 @@ Names cannot shadow an existing name in the same scope (E0118), and definitions
 are unique (E0105). A name that would shadow a built-in is rejected with E0106,
 including a type named after a built-in type such as `Unit`, `Queue`, or `Set`;
 unknown names and types are E0102/E0107 and E0119, with suggestions where the
-checker has a useful candidate.
+checker has a useful candidate. A dotted type path is E0119 unless it names a
+declaration through a module the file has in scope: `core.World` names
+nothing, and a file names a Core type through the module it imports
+(`use core.math`, then `math.Point2`; `core.math.Point2` is E0119 with that fix).
 Text and byte pattern holes follow the same rule in every expression position:
 `symbol == "{root}jet"` is refused if `root` already names a local, parameter,
 or module constant. Use `symbol == ("{root}jet")` for interpolated equality,

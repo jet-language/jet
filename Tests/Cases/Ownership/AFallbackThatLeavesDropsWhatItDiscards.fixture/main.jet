@@ -1,0 +1,113 @@
+// Each form below discards a failure or an absent value and then leaves its
+// function or loop: `?? return`, `?? break` and `?? next`, a `return` that
+// reads the discarded error, and an `if` test that returns from the
+// payload it bound. Each runs 100000 times, and the resident set grows less
+// than 4 MiB per form. A discarded failure kept alive past the exit would
+// add its error box and text on every call, 12 to 31 MiB per form.
+package: {
+    name: "leaving_fallbacks"
+    authority: { allow: [FS, FS.Read, IO, Mem.Alloc] }
+}
+
+use files: core.files
+
+STEPS: 100000
+
+GROWTH_BOUND_KB: 4096
+
+MISSING: "/nonexistent-jet-case-dir/memory.max"
+
+// A /proc status field's number ("VmRSS:\t 123 kB").
+census: fn(prefix: String) -[FS]> Int {
+    text: files.read("/proc/self/status") ?? panic("read status")
+    loop line in text.lines() {
+        if line.starts_with(prefix) {
+            return Int.parse(line.remove_prefix(prefix).remove_suffix("kB").trim()) ?? -1
+        }
+    }
+    -1
+}
+
+// Whether the resident set grew less than the bound since `before`.
+flat: fn(before: Int) -[FS]> Bool {
+    after: census("VmRSS:")
+    before > 0 && after - before < GROWTH_BOUND_KB
+}
+
+parse_or_return: fn(text: String) -> Int? {
+    value: Int.parse(text) ?? return None
+    Val(value)
+}
+
+read_or_return: fn(path: String) -[FS]> Int? {
+    text: files.read(path) ?? return None
+    Val(text.len())
+}
+
+error_or_return: fn(text: String) -> String {
+    value: Int.parse(text) ?? return "{err}"
+    "{value}"
+}
+
+parse_or_break: fn(texts: [String]) -> Int {
+    total := 0
+    loop text in texts {
+        value: Int.parse(text) ?? break
+        total += value
+    }
+    total
+}
+
+parse_or_next: fn(texts: [String]) -> Int {
+    total := 0
+    loop text in texts {
+        value: Int.parse(text) ?? next
+        total += value
+    }
+    total
+}
+
+absent: fn(step: Int) -> String? {
+    if step < 0 -> return Val("word {step}")
+    None
+}
+
+absent_or_return: fn(step: Int) -> Int {
+    word: absent(step) ?? return 0
+    word.len()
+}
+
+present: fn(step: Int) -> String? { Val("word {step}") }
+
+found_or_return: fn(step: Int) -> Int {
+    if present(step) == .Val(word) -> return word.len()
+    0
+}
+
+run: fn() {
+    // Warm the allocator's classes before the first reading.
+    total := (parse_or_return("max") ?? 0) + (read_or_return(MISSING) ?? 0) + error_or_return("max").len()
+    total += parse_or_break([String]{"max", "1"}) + parse_or_next([String]{"max", "2"}) + absent_or_return(1) + found_or_return(1)
+    before := census("VmRSS:")
+    loop step in 0..<STEPS -> total += parse_or_return("max") ?? 0
+    print("?? return None after a parse failure: flat {flat(before)}")
+    before = census("VmRSS:")
+    loop step in 0..<STEPS -> total += read_or_return(MISSING) ?? 0
+    print("?? return None after a read failure: flat {flat(before)}")
+    before = census("VmRSS:")
+    loop step in 0..<STEPS -> total += error_or_return("max").len()
+    print("?? return that reads err: flat {flat(before)}")
+    before = census("VmRSS:")
+    loop step in 0..<STEPS -> total += parse_or_break([String]{"max", "1"})
+    print("?? break: flat {flat(before)}")
+    before = census("VmRSS:")
+    loop step in 0..<STEPS -> total += parse_or_next([String]{"max", "2"})
+    print("?? next: flat {flat(before)}")
+    before = census("VmRSS:")
+    loop step in 0..<STEPS -> total += absent_or_return(step)
+    print("?? return on an absent value: flat {flat(before)}")
+    before = census("VmRSS:")
+    loop step in 0..<STEPS -> total += found_or_return(step)
+    print("if test that returns from its payload: flat {flat(before)}")
+    print("total {total > 0}")
+}

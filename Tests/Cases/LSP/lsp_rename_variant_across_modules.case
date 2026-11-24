@@ -1,0 +1,48 @@
+# Renaming an enum case reaches every arm that names it: a leading-dot arm and
+# a qualified arm in the declaring module, a constructor, and the leading-dot
+# arm of a sibling module that imports it. Started from the declaration, the
+# rename reads the importing document's check too. A sibling enum's case of the
+# same spelling and the case's `#Rename` wire name stay as written.
+fixture: LSPRenameVariantAcrossModules.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
+recv lsp until $.id = 7
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/shapes.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"#Codable\\nShape: enum {\\n    Dot,\\n    #Rename(\\\"circle\\\") Circle(Int),\\n}\\n\\nlocal_area: fn(s: Shape) -> Int {\\n    if s == {\\n        .Dot -> 0\\n        .Circle(r) -> r * r\\n    }\\n}\\n\\nbare_area: fn(s: Shape) -> Int {\\n    if s == {\\n        .Dot -> 0\\n        Shape.Circle(r) -> r\\n    }\\n}\\n\\nmake: fn() -> Shape { Shape.Circle(2) }\\n\\ndot: fn() -> Shape { Shape.Dot }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/marks.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"Mark: enum {\\n    Circle,\\n    Dash,\\n}\\n\\nwidth: fn(m: Mark) -> Int {\\n    if m == {\\n        .Circle -> 1\\n        .Dash -> 3\\n    }\\n}\\n\\ndash: fn() -> Mark { Mark.Dash }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use \\\"shapes\\\"\\nuse \\\"marks\\\"\\n\\narea: fn(s: shapes.Shape) -> Int {\\n    if s == {\\n        .Dot -> 1\\n        .Circle(r) -> r\\n    }\\n}\\n\\nrun: fn() {\\n    print(area(shapes.make()))\\n    print(marks.width(.Circle))\\n    print(area(shapes.dot()))\\n    print(marks.width(marks.dash()))\\n}\\n\"}}}"
+# From the declaration in `shapes.jet`.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/shapes.jet\"},\"position\":{\"line\":3,\"character\":23},\"newName\":\"Ring\"}}"
+recv lsp until $.id = 7
+json: stdout doc $.result.documentChanges #= 2
+json: stdout doc $.result.documentChanges[*].textDocument.uri in ["file://{work}/main.jet", "file://{work}/shapes.jet"]
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits #= 4
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits[0].range = {"start":{"line":3,"character":22},"end":{"line":3,"character":28}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits[1].range = {"start":{"line":9,"character":9},"end":{"line":9,"character":15}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits[2].range = {"start":{"line":16,"character":14},"end":{"line":16,"character":20}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits[3].range = {"start":{"line":20,"character":28},"end":{"line":20,"character":34}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/main.jet"][0].edits #= 1
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/main.jet"][0].edits[0].range = {"start":{"line":6,"character":9},"end":{"line":6,"character":15}}
+json: stdout doc $.result.documentChanges[*].edits[*].newText in ["Ring"]
+# From the leading-dot arm in `main.jet`.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":6,\"character\":10},\"newName\":\"Ring\"}}"
+recv lsp until $.id = 7
+json: stdout doc $.result.documentChanges #= 2
+json: stdout doc $.result.documentChanges[*].textDocument.uri in ["file://{work}/main.jet", "file://{work}/shapes.jet"]
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits #= 4
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits[0].range = {"start":{"line":3,"character":22},"end":{"line":3,"character":28}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits[1].range = {"start":{"line":9,"character":9},"end":{"line":9,"character":15}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits[2].range = {"start":{"line":16,"character":14},"end":{"line":16,"character":20}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/shapes.jet"][0].edits[3].range = {"start":{"line":20,"character":28},"end":{"line":20,"character":34}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/main.jet"][0].edits #= 1
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/main.jet"][0].edits[0].range = {"start":{"line":6,"character":9},"end":{"line":6,"character":15}}
+json: stdout doc $.result.documentChanges[*].edits[*].newText in ["Ring"]
+# The sibling enum's `Circle` is its own declaration.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/marks.jet\"},\"position\":{\"line\":1,\"character\":5},\"context\":{\"includeDeclaration\":true}}}"
+recv lsp until $.id = 7
+json: stdout doc $.result #= 3
+json: stdout doc $.result[*].uri in ["file://{work}/marks.jet", "file://{work}/main.jet"]
+json: stdout doc $.result[?uri="file://{work}/main.jet"][0].range = {"start":{"line":12,"character":23},"end":{"line":12,"character":29}}
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 7
+close lsp

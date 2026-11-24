@@ -1,30 +1,21 @@
 #Test("semantic") {
+    assert_eq(clean(2), 2)
 }
-#Unsafe("audit") archive: fn(name: &&String, slot: &Int) -> String {
-    saved: copy name
-    return saved
+archive: fn(name: &&String, slot: &Int) -> String {
+    slot += 1
+    saved: name.copy()
+    saved
 }
-clean: fn(x: Int) -[]> Int { return x }
-retain: fn(window: View<Int>) -> View<Int> { return window }
+clean: fn(x: Int) -[]> Int { x }
+measure: fn(window: View<Int>, grow: ViewMut<Int>) -> Int {
+    window.view(0..1).len() + grow.len()
+}
 run: fn() {
     old: 1
     while: 2
     for: 3
-    mut borrowed
-    take borrowed
-    view borrowed
-    borrowed.view()
-    text := "view .view stays string content"
+    text: "view .view stays string content"
     // view and .view stay comment content
-    next()
-    cursor.next()
-    loop {
-        value: maybe() ?? next
-        nested: (maybe() ?? next)
-        consume(maybe() ?? next, 1)
-        escaped: maybe() ?? (next)
-        next
-    }
-    outer: loop { next(outer) }
+    print(text, clean(old + while + for + next()))
 }
-next: fn() -> Int { return 1 }
+next: fn() -> Int { 1 }

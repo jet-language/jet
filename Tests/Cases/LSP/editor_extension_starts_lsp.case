@@ -1,0 +1,15 @@
+# The VS Code extension, activated with no settings in a trusted workspace,
+# starts `jet self lsp` from PATH in the workspace folder; the smoke script
+# stands in for the editor's modules, opens a file through that server and
+# receives the file's diagnostics. Zed's extension starts the same command
+# when its binary setting is unset.
+requires: tool:node
+fixture: EditorExtensionStartsLSP.fixture
+copy: {root}/Tools/Editors/Vscode/extension.js extension.js
+copy: {root}/Tools/Editors/Zed/WasmSrc/src/lib.rs zed.rs
+step: node smoke.js
+exit: 0
+stdout: = editor_extension_starts_lsp.0.stdout
+stderr: empty
+file: zed.rs ~ "worktree.which(\"jet\")" # Zed's server binary is `jet` from PATH when unset
+file: zed.rs ~ ".unwrap_or_else(|| vec![\"self\".to_string(), \"lsp\".to_string()])" # and its arguments are `self lsp`

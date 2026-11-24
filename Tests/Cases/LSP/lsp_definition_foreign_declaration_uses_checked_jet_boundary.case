@@ -1,5 +1,5 @@
-# Port of tests/lsp.rs:4194-4278; source bytes/order/assertions unchanged.
-# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+# Port of tests/lsp.rs:4194-4278. The Jet declaration form puts the extern
+# function's name at column 4 (`rust_max: fn`).
 fixture: LSPDefinitionForeignDeclarationUsesCheckedJetBoundary.fixture
 session lsp content-length: jet self lsp
 stderr: null
@@ -7,13 +7,13 @@ send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\
 recv lsp until $.id = 1
 stdout: ~ "definitionProvider" # original predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/lsp_foreign_definition_test.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"extern rust \\\"std\\\" {\\n    rust_max: fn(a: Int, b: Int) -> Int = \\\"std::cmp::max\\\"\\n}\\nrun: fn() {\\n    rust_max(1, 2)\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/lsp_foreign_definition_test.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"extern rust \\\"std\\\" {\\n    rust_max: fn(a: Int, b: Int) -> Int = \\\"std::cmp::max\\\"\\n}\\nrun: fn() {\\n    rust_max(1, 2)\\n}\\n\"}}}"
 recv lsp
 stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/lsp_foreign_definition_test.jet\"},\"position\":{\"line\":4,\"character\":7}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/lsp_foreign_definition_test.jet\"},\"position\":{\"line\":4,\"character\":7}}}"
 recv lsp until $.id = 2
-json: stdout doc $.result.uri = "file:///tmp/lsp_foreign_definition_test.jet" # original literal oracle
-json: stdout doc $.result.range = {"start":{"line":1,"character":7},"end":{"line":1,"character":15}} # original literal oracle
+json: stdout doc $.result.uri = "file://{work}/lsp_foreign_definition_test.jet"
+json: stdout doc $.result.range = {"start":{"line":1,"character":4},"end":{"line":1,"character":12}}
 stdout: !~ "std::cmp::max" # original foreign-boundary predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
 recv lsp until $.id = 99

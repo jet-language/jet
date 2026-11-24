@@ -1,15 +1,12 @@
-# PORT tests/repl.rs:1452-1481; verbatim inputs and original predicate forms.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
-# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
-# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+# Typed list, map and optional literals, a fallible call's fallback and an
+# enum payload each bind in one turn and read back in the next.
 fixture: ReplAllComplexBindingShapesSurviveAcrossTurns.fixture
 step: jet repl
 env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 stdin: ReplAllComplexBindingShapesSurviveAcrossTurns.fixture/input.txt
 exit: any # original library predicates did not assert process status
-stdout: !~ "error [" # original predicate
-stderr: !~ "error [" # original predicate
+stderr: !~ "Error" # every turn is accepted
 stdout|stderr: ~ "\"jet\" : String" # original expected loop predicate
 stdout|stderr: ~ "2 : Int" # original expected loop predicate
 stdout|stderr: ~ "7 : Int" # original expected loop predicate

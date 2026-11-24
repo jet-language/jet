@@ -104,7 +104,6 @@ Tests/Cases/ComptimeCorePureParity/public_transcript_covers_bag_methods_exactly.
 Tests/Cases/ComptimeCorePureParity/public_transcript_covers_linalg_overflow_and_expect_exactly.case	#6955	`jet run main.jet` is E0102 at `expect_view`'s `expect("ok")`: the Rust-era bare `expect(value)` builtin is gone, and current Jet has `expect(value)` only as the test snapshot form `expect(value).snapshot()`. With those two lines removed, the linalg and overflow transcripts match the .1.out exactly, so the expect transcript needs a current form chosen by its owner
 Tests/Cases/ComptimeCorePureParity/public_transcript_evaluates_pure_add_arguments_once.case	#6955	`jet run main.jet` is E0109 at `measured + counted_measurement(hits)`: "`+` can't compare or combine `Measurement`<Float> and `units.Measurement`<Float>"; the fixture's written return type `Measurement<Float>` and the value from `measurement(..)` resolve to two different Measurement types
 Tests/Cases/CompilerStack/public_compile_accepts_depth_256_and_reports_depth_257.case	#6968	E0003 This expression is nested too deeply, already at 254 parentheses (the original limit accepts 254 and reports E1403 "257 levels deep; limit is 256" at 255)
-Tests/Cases/TaskStateTiers/repl_matches_canonical_task_output.case	#4720	`jet repl` is built and exits 0 and prints `ok` then `42`, but piped stdin still echoes the numbered prompts (`ok\n3 user> 3 user> 42`), so the canonical `ok\n42\n` predicate fails
 Tests/Cases/JetpackTasks/jet_top_job_runs_by_name_and_unknown_suggests_jobs.case	#6952	jet greet exits 2 with E2101 `greet` isn't a jet command; the Jet CLI does not dispatch #Job fns as top-level words
 Tests/Cases/AuthorityReceipts/authority_process_receipt_redacts_success_argv_and_output_on_all_hosted_tiers.case	#6930	unbuilt: the run source needs core.process.workspace, which `core.process` does not export (E1004)
 Tests/Cases/AuthorityReceipts/authority_process_receipt_redacts_failed_output_on_all_hosted_tiers.case	#6930	unbuilt: the run source needs core.process.workspace, which `core.process` does not export (E1004)
@@ -135,7 +134,6 @@ Tests/Cases/DevPartsRoutine/resident_jit_fidelity_matches_runtime_contract.case	
 Tests/Cases/DevPartsRoutine/wrapped_returned_view_fields_match_aot_and_default_dev.case	#6839	FAIL: `jet build wrapped_returned_view_fields.jet` exits 1 (expected 0): Error: Jet.FailureDomainNotErrorType: Explicit failure domain `String (text)` is not an Error type
 Tests/Cases/DevPartsTierParity/ui_and_web_match_o0_default_run_and_aot_web_web_app.case	#5931	`jet run web_app.jet` serves until stopped and hits the case's 30 s limit; Examples/Apps/Web/WebApp.case marks the example `run: none`, and the pinned Examples/Apps/Web/WebApp.out no longer exists
 Tests/Cases/BuildEntryEpoch4/workspace_build_observes_dependency_order_and_execution_chain.case	#6697	`jet build workspace.jet --allow=Exec` exits 1 with E3505 BuildProbeFailed: build actions run only in the bubblewrap sandbox, and none is available to the testkit run, so the member `fn build` entries never execute
-Tests/Cases/GateLedger/i9_number_grid_repl_keeps_the_inline_range_behavior.case	#4720	`jet repl` is built and exits 0, but piped stdin echoes the numbered `N user>` prompts and prints a "`print` is from `use core.term`" note, so the canonical `ok\nok\n42\n3\n` transcript differs
 Tests/Cases/Determinism/system_clock_is_monotonic_and_effectful.case	#3418	`jet check launder/main.jet --json` exits 0 with only an L0530 warning; neither the direct nor the return-type clock laundering reports E3403
 Tests/Cases/ModulesAndEnums/enum_group_value_and_bad_child_errors_do_not_turn_leaves_into_constructors.case	#6839	c1 passes; `jet check c2/main.jet` reports E0332 "`Branch` is a group, not a value" where the original requires exactly one E0304 for the bad child
 Tests/Cases/FailureTierParity/runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier.case	#6946	stops with E3010 `Value doesn't fit in destination type`
@@ -180,7 +178,6 @@ Tests/Cases/AgentExecutor/agent_executor_explicit_cancellation_reaps_descendants
 Tests/Cases/AgentExecutor/agent_executor_hostile_filesystem_examples_fail_closed_on_all_tiers.case	#6930	unbuilt: the run source needs core.process.workspace, which `core.process` does not export (E1004)
 Tests/Cases/AgentExecutor/agent_executor_plan_and_receipt_preserve_one_policy_across_tiers.case	#6930	unbuilt: the run source needs core.process.workspace, which `core.process` does not export (E1004)
 Tests/Cases/AgentExecutorCloseout/agent_executor_example_matches_all_hosted_tiers.case	#6930	`jet run main.jet` stops with E3001 `panic: agent receipt` (exit 70): `process.run_spec(spec.under(policy))` returns Err; the native golden also pins three lines where the fixture prints two, and the unsupported golden's `unsupported` line has no source in the fixture
-Tests/Cases/AuthorityManifest/i9_repl_keeps_the_authority_project_meaning.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/AuthorityManifest/lock_and_authority_ledger_mirror_the_manifest_block.case	#4944	`jet fetch` is not built yet (E2104)
 Tests/Cases/Bind/retired_top_level_bind_forms_teach_the_grouped_route.case	#6949	`jet inspect bind` is not built yet (E2104)
 Tests/Cases/BuildSandbox/shared_hostile_corpus_uses_agent_executor_production_path.case	#6930	bug: `jet run tool.jet` refuses to read the sources (E2105) because the hostile corpus's `link` symlink sits in the work tree
@@ -213,7 +210,6 @@ Tests/Cases/CLIPartsExpand/malformed_workspace_never_falls_back_to_an_ordinary_e
 Tests/Cases/CLIPartsExpand/stale_manifest_name_jet_toml_is_e1226.case	#4275	E2104 not built yet
 Tests/Cases/CLIPartsExpand/stale_manifest_name_pack_jet_is_e1226.case	#4944	`jet add` is not built yet (E2104)
 Tests/Cases/CLIPartsExpand/stale_workspace_lock_never_becomes_an_empty_member_index.case	#4275	E2104 not built yet
-Tests/Cases/ComptimeSequenceParity/repl_non_slice_write_place_is_not_silently_copied.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/ConcurrencyChannelsTiers/aot_runs_the_channel_readiness_example.case	#4913	`jet build --target=x86_64-unknown-linux-gnu` is not built yet (E2104)
 Tests/Cases/ConcurrencyChannelsTiers/comptime_channel_result_reaches_runtime.case	#4913	`jet build --target=x86_64-unknown-linux-gnu` is not built yet (E2104)
 Tests/Cases/ConcurrencyChannelsTiers/o0_runs_the_channel_readiness_example.case	#4913	`jet run --target` is not built yet (E2104)
@@ -228,7 +224,6 @@ Tests/Cases/LibraryOutputs/component_build_load_and_foreign_call_are_one_surface
 Tests/Cases/LibraryOutputs/guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic.case	#6906	`jet build --lib` writes only the static `libembedding.a`, no shared library, and refuses `greet`'s String parameter and result (E1341): the native header has no JetText projection or `jet_text_free`
 Tests/Cases/LibraryOutputs/locked_named_library_build_selects_the_requested_output.case	#6906	`jet build --output` is not built yet (E2104), so `--lib --locked --output core` selects no Library and writes no `.jetlib`
 Tests/Cases/LSP/lsp_bench_reports_deterministic_cache_and_memory.case	#6960	`jet self lsp` serves stdio only; its `--bench` report is not ported
-Tests/Cases/LSP/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.case	#6902	`jet self lsp` semantic tokens have no ownership or decorator modifiers yet
 Tests/Cases/LSP/lsp_budget_reports_projects_canonical_report_without_measuring.case	#6903	`jet self lsp` answers no `workspace/executeCommand` (`jet.budgetReports`)
 Tests/Cases/Notebook/headless_protocol_interrupt_stdin_debug_perf_and_clients.case	#6922	`jet notebook` is not built yet (E2104)
 Tests/Cases/Notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss.case	#6922	`jet notebook` is not built yet (E2104)
@@ -243,24 +238,10 @@ Tests/Cases/OutputCallable/service_edge_emits_one_structured_report_record.case	
 Tests/Cases/Pkg/cli_corrupt_manifest_has_one_diagnostic_across_package_commands.case	#4944	`jet fetch` is not built yet (E2104)
 Tests/Cases/Pkg/cli_run_reports_named_canonical_retired_entry_layout.case	#4913	` command overrides>` is not built yet (E2104)
 Tests/Cases/Prove/run_recorded_alias_time_receipt_replays_without_execution.case	#6012	`jet debug --replay` re-runs the recorded program, and this one starts no task, so it has no replay start (E2104); the act-snapshot `epoch = … because act` answer the port expects is not built
-Tests/Cases/Repl/docs_lookup_builtin_list_filter_matches_ratified_mock.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_all_complex_binding_shapes_survive_across_turns.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_allow_fs_rejects_symlink_components_before_open.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_allow_fs_still_rejects_paths_outside_project_root.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_complex_bindings_keep_exact_typed_ast_across_turns.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_cooked_rerun_edits_and_applies_downstream_state.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_core_data_dispatch.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_core_data_json_ingest_and_select.case	#4720	`jet repl --project` shows `DataColumn { id: …, name: team, type_name: String, nullable: false }`, not the `DataColumn(name: team, type_name: String)` the case pins, and a `py.*` DataStatus, not `core.data.json`
-Tests/Cases/Repl/repl_core_data_list_query_echo_hides_comptime_metadata.case	#4720	the cooked `jet repl` (Repl.jet) echoes `data.query(empty_rows)` through Display, and `Query<Ticket>` has none, so the turn fails with E0915 MissingDisplay instead of showing the `Query(` value
-Tests/Cases/Repl/repl_core_data_query_plans_and_typed_joins.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_core_data_schema_empty_lists_and_row_law.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_docs_resolve_imported_core_module_member.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_effect_needs_lexical_grant_even_with_allow_flag.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_history_limit_and_corrupt_tail_recover_visibly.case	#4720	the cooked `jet repl` (Repl.jet) keeps no history file: the first session leaves no `$XDG_STATE_HOME/jet/repl-history`
-Tests/Cases/Repl/repl_history_off_is_session_only_and_visible_storage_failure_falls_back.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_history_persists_only_successes_searches_clears_and_is_private.case	#4720	`jet repl` is not built yet (E2104)
-Tests/Cases/Repl/repl_history_rejects_symlinked_state_parent_without_chmod_or_escape.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_process_boundary_uses_the_passed_authority_value.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_raw_f3_search_recalls_and_submits_persistent_history.case	#4720	`jet repl` is not built yet (E2104)
 Tests/Cases/Repl/repl_raw_bindings_are_live_in_side_pane.case	#4720	unbuilt raw REPL: the self-hosted `jet repl` (Repl.jet) is the cooked line loop and always prints "interactive keys require a TTY", so key bindings, completion, F1 docs, the ^B pane, pin/fold/rerun keys, multiline redraw and Ctrl-C handling never run
@@ -354,26 +335,18 @@ Tests/Cases/JetpackTasks/jet_top_jobs_forward_flags_after_name.case	#6952	unbuil
 Tests/Cases/JetpackTool/multi_store_root_commit_crash_recovers_before_pointer_switch.case	#6941	unbuilt: after a crash between root commits, `jetpack tool list` recovery republishes the still-current generation 1 instead of rolling forward to the complete generation 2
 Tests/Cases/LSP/lsp_builtin_member_completion_uses_shared_semantic_symbol_docs.case	#6902	`jet self lsp` completion offers no Core member docs yet
 Tests/Cases/LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes.case	#6903	`jet self lsp` answers requests in order and does not honor `$/cancelRequest` (-32800)
-Tests/Cases/LSP/lsp_checked_text_contract_survives_editor_navigation.case	#6902	`jet self lsp` hover and rename carry no `nominal_base` / CheckedText facts
 Tests/Cases/LSP/lsp_completion_returns_items.case	#6902	`jet self lsp` is ported; this case's completion detail is unconfirmed against the port (rerun with the built compiler)
 Tests/Cases/LSP/lsp_completion_returns_snippets_and_auto_imports.case	#6902	`jet self lsp` completion offers no snippets or auto-imports
 Tests/Cases/LSP/lsp_completion_uses_local_discovery_index_for_packages_and_options.case	#6902	`jet self lsp` completion reads no package discovery index
-Tests/Cases/LSP/lsp_definition_foreign_declaration_uses_checked_jet_boundary.case	#6901	`jet self lsp` is ported; this case's foreign definition is unconfirmed against the port (rerun with the built compiler)
-Tests/Cases/LSP/lsp_definition_uses_build_graph_generated_source.case	#6901	`jet self lsp` definition does not reach build-graph generated sources
-Tests/Cases/LSP/lsp_document_links_and_code_lenses.case	#6904	`jet self lsp` answers no `textDocument/codeLens`
-Tests/Cases/LSP/lsp_execute_command_impact_returns_report.case	#6904	`jet self lsp` answers no `workspace/executeCommand` (impact)
-Tests/Cases/LSP/lsp_generated_definition_uses_selected_buildplan_identity.case	#6901	`jet self lsp` definition carries no generated-source identity
+Tests/Cases/LSP/lsp_document_links_and_code_lenses.case	#6904	`use app.store` in src/main.jet reports E0611 (`store` is not defined in module `app`), so the document link to app/store.jet and its `run` workspace symbol are missing; code lenses are answered
 Tests/Cases/LSP/lsp_hover_projects_typestate_graph_facts.case	#6921	`jet self lsp` hover carries no typestate graph facts
 Tests/Cases/LSP/lsp_mcp_environment_resources_are_read_only.case	#6903	`jet self lsp` serves no MCP resources
-Tests/Cases/LSP/lsp_workspace_symbols_follow_all_roots_and_folder_changes.case	#6903	`jet self lsp` does not follow workspace folder changes
 Tests/Cases/OutputCallable/invalid_output_selection_stops_in_jet_before_codegen.case	#4913	unbuilt: E2104 command form not built (E2104)
 Tests/Cases/PolyglotSystems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.case	#6948	`jet inspect bind counter.h` writes `.jet`, `.metadata` and `.hash` but no `counter.provenance` sidecar with the bridge-provenance schema, identity and linked-archive digest the case reads
 Tests/Cases/PolyglotSystems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.js.case	#6949	`jet inspect bind` is not built yet (E2104)
 Tests/Cases/PolyglotSystems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.jvm.case	#6949	`jet inspect bind` is not built yet (E2104)
 Tests/Cases/PolyglotSystems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.case	#6949	`jet inspect bind` is not built yet (E2104)
 Tests/Cases/Reflect/checked_text_contract_is_reflected_on_the_nominal_type.case	#6932	the verbatim original source draws L0530 and two L0102 (unused_parameter) against the Rust-era `$.reports #= 0` predicate; `jet run main.jet` is E0311: `Pattern.reflect()` inside the comptime-called fn `reflection_implements` has no static `reflect` (only a comptime block's own `T.reflect()` resolves)
-Tests/Cases/Repl/repl_history_parent_swap_stays_on_held_directory.case	#4720	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
-Tests/Cases/Repl/repl_history_two_processes_merge_and_clear_cannot_resurrect.case	#4720	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
 Tests/Cases/Repl/repl_native_run_uses_stdin_snapshot_not_replaced_temp_path.case	#4720	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
 Tests/Cases/ScriptToSystem/script_to_system_continuity_preserves_one_source.case	#6839	a `~` stream predicate fails once the case parses under the current grammar; the rollback run itself prints the original `60`
 Tests/Cases/SourceImport/enterprise_import_reports_ambiguity_malformed_input_and_no_cpp_importer.case	#1346	unbuilt: E2101/E2102 command or flag not built (E2102)
@@ -614,9 +587,7 @@ Tests/Cases/WebDev/embedded_devserver_rejects_unix_hardlinks_and_special_files.c
 Tests/Cases/WebApp/web_app_dev_auto_serves_with_reload_without_dev_function.case	#5931	unbuilt: `jet dev app.jet` serves the page with no live-reload client; nothing emits `EventSource("/__jet/reload")` or serves `/__jet/reload`
 Tests/Cases/WebDev/jet_dev_web_publishes_from_a_repository_subdirectory.case	#5931	`jet dev --target` is not built yet (E2104), so no "App preview:" line
 Tests/Cases/WebDev/jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix.case	#5931	`jet dev --canvas` is not built yet (E2104), so the session never serves and `jet test claims` stops at "devserver did not become ready"
-Tests/Cases/LSP/lsp_checked_imported_diagnostics_and_repairs.case	#6903	unbuilt: `jet self lsp` session ends before it answers `initialize` (stdout ended before recv was satisfied; stdout seen:)
 Jetpack/CLI: imported_locked_package_runs_builds_and_restores_without_nix	#6938	after the offline fixture import publishes greet@jetpack, a cached `use --prep greet@jetpack` without JETPACK_FIXTURES does not find the imported Hangar entry and reports E1272 (1 package lacks a supported Nix compatibility output)
-Tests/Cases/LSP/lsp_checked_imported_diagnostics_and_repairs.case	#6903	`jet self lsp` is ported; this case's imported repairs are unconfirmed against the port (rerun with the built compiler)
 Tests/Cases/TextUnicode/word-sentence-segments.case	#6885	`jet build run.jet`: `core.text` has no item `word_segments` (Jet.UnknownCoreItem at run.jet:102); word and sentence segmentation is not in Core
 Tests/Cases/TextUnicode/normalization-casing-graphemes.case	#6885	the NormalizationTest corpus stops at run.jet:112: Core text `nfd` returns `Ḋ` (U+1E0A) where the corpus's c3 column is `D\u{307}`, so NFD output is not fully decomposed
 Tests/Cases/SimdWitness/default_and_scalar_float_witnesses_print_identical_values_on_every_tier.case	#6955	the dev, aot and release runs print the expected values, but `auto`'s code in the `jet build --release` binary, as `jet debug`'s `disas auto` lists it, holds scalar mulsd/addsd and no mulpd/vmulpd/addpd/vaddpd: the native backend does not emit the packed arithmetic

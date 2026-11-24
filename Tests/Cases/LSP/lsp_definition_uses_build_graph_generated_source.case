@@ -1,21 +1,22 @@
-# Port of tests/lsp.rs:4415-4469; source bytes/order/assertions unchanged.
-# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+# A call into a module `build: fn` generates goes to that module, under the
+# package root at the path the module names, as the editor checks the package
+# with what its build generates.
 fixture: LSPDefinitionUsesBuildGraphGeneratedSource.fixture
 session lsp content-length: jet self lsp
 stderr: null
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
-recv lsp
-stdout: ~ "definitionProvider" # original predicate
+recv lsp until $.id = 1
+json: stdout doc $.result.capabilities.definitionProvider = true
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"build: fn(b: Build) {\\n    b.generate(\\\"made\\\") {\\n        generated_value: fn() -> String { \\\"hi\\\" }\\n    }\\n    app: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/made.jet\\\"], [])\\n    b.default(app)\\n}\\nrun: fn() { print(generated_value()) }\\n\"}}}"
-recv lsp
-stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":7,\"character\":21}}}"
-recv lsp
-stdout: ~ ".jet/generated/main/made.jet" # original predicate
-stdout: ~ "range" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"build: fn(b: Build) {\\n    b.generate(\\\"made\\\") {\\n        generated_value: fn() -> String { \\\"hi\\\" }\\n    }\\n    app: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/made.jet\\\"], [])\\n    b.default(app)\\n}\\n\\nrun: fn() { print(generated_value()) }\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":8,\"character\":21}}}"
+recv lsp until $.id = 2
+json: stdout doc $.result.uri = "file://{work}/.jet/generated/main/made.jet"
+json: stdout doc $.result.range = {"start":{"line":0,"character":0},"end":{"line":0,"character":15}}
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
-recv lsp
-stdout: ~ "result" # original predicate
+recv lsp until $.id = 99
+json: stdout doc $.result = null
 close lsp
-exit: any # run_transcript child.wait status ignored
+exit: any # the server exit status after close is not part of this contract

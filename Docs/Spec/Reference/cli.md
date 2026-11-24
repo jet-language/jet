@@ -206,9 +206,16 @@ run: at a bare terminal the picker names it on stderr, and with
 Alt-?) it prints the line on stdout for the shell to put in its edit buffer.
 `--json` always gets the palette. Only `jet repl` starts the REPL: a line session that checks each
 input against the session so far, then builds and runs it after the earlier
-statements; `:help` lists its meta-commands. Raw-terminal keys, `--console`,
-`:rerun`, `:history` and `?name` docs for names the session did not define
-report E2104 until they are built (#6195). `jet eval CODE` runs CODE as the
+statements; `:help` lists its meta-commands. `?name` prints a name's docs: a
+session name's type, else the language catalog's page for a built-in name
+(`?List.filter`), else the declaration and `///` docs of a Core module member,
+named in full (`?core.math.sqrt`) or through a session import's alias
+(`?math.sqrt`). `:history search <text>` lists earlier sessions' successful
+submissions and `:history clear` erases them; they are kept in
+`$XDG_STATE_HOME/jet/repl-history` (else `~/.local/state/jet/repl-history`,
+owner-only, the latest 2000 or `JET_REPL_HISTORY_LIMIT`), and
+`JET_REPL_HISTORY=off` keeps history to the session. Raw-terminal keys,
+`--console` and `:rerun` report E2104 until they are built (#6195). `jet eval CODE` runs CODE as the
 body of `run: fn`, as `jet -e CODE` does (below), and `jet eval --json <expression>`
 runs one REPL turn and prints its value in the status envelope. `?` is not a command: `jet ?` gets the
 unknown-command E2101.

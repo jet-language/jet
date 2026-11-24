@@ -1,0 +1,115 @@
+// Declarations the checked index holds no definition for, read from their
+// own source text by the same walk a checked module's functions take: the
+// functions of a Core module a document imports by name, and the ambient
+// `print`. A tool shows a call to one of them by its declared contract.
+use {
+    jet_driver.[JetDriverDocModule]
+    jet_foundation.[ASTTables, Func, ImportDecl]
+    jet_parser.[parse_source]
+}
+
+// One declaration: its definition (the callable, for parameters) and its
+// symbol (the signature and summary).
+SemDeclared: struct {
+    def: SemDef,
+    symbol: SemSymbol,
+}
+
+// The ambient `print` is a prelude operation with no source of its own: it
+// takes one or more printable values and writes one line per value. The
+// check refuses a call with none (Jet.EmptyPrint).
+SEMINDEX_AMBIENT_PRINT: `/// Writes each value on its own line. A call names at least one value.
+print: fn(values: ...Printable) -[IO]> Never! {}
+`
+
+// The public functions `source` declares at its top level. Each is named
+// `{qualifier}.{name}`, or `{name}` when `qualifier` is "".
+semindex_declared: fn(qualifier: String, source: String) -> [SemDeclared] {
+    parsed: parse_source(source.bytes())
+    declared := [SemDeclared]{}
+    loop item in parsed.program.items {
+        if item == .Func(function) {
+            if !function.name.starts_with("_") -> declared.push(semindex_declared_function(qualifier, function, parsed.program.tables, source))
+        }
+    }
+    declared
+}
+
+// One declared function: owned by the module `qualifier`, or by the prelude
+// when `qualifier` is "".
+semindex_declared_function: fn(qualifier: String, function: Func, tables: ASTTables, source: String) -> SemDeclared {
+    owner: if qualifier == "" -> "prelude" else -> qualifier
+    qualified_name: if qualifier == "" -> function.name else -> "{qualifier}.{function.name}"
+    identity: "declared:{qualified_name}"
+    kind: semindex_callable_kind(tables, function, source)
+    shape: semindex_symbol_shape(function.name, kind, None)
+    docs: semindex_symbol_source_docs(source, function.name_span.start)
+    SemDeclared{
+        def: SemDef{identity: identity, name: function.name, qualified_name: qualified_name, def_span: function.name_span, module_path: owner, kind: kind},
+        symbol: SemSymbol{
+            identity: identity,
+            name: function.name,
+            qualified_name: qualified_name,
+            owner: None,
+            module_path: owner,
+            kind: shape.kind,
+            signature: shape.signature,
+            summary: docs.summary,
+            examples: docs.examples,
+            provenance: SemSymbolProvenance.Builtin{module_name: owner},
+            span: Val(function.name_span),
+            lexical_scope: None,
+        },
+    }
+}
+
+semindex_ambient_print: fn() -> SemDeclared {
+    semindex_declared("", SEMINDEX_AMBIENT_PRINT)[0]
+}
+
+// Whether a checked module imports the module `name` by name: `use
+// core.term`, `use t: core.term` or `use core.term.[print]`. A `name` that
+// ends in `.` names every module below it, so "core." asks for any Core
+// module.
+semindex_imports: fn(modules: [JetDriverDocModule], name: String) -> Bool Never! {
+    below: name.ends_with(".")
+    loop doc_module in modules {
+        loop import in doc_module.imports {
+            if import.kind == {
+                .Module(imported, _) -> {
+                    if imported == name || (below && imported.starts_with(name)) -> return true
+                }
+                .Unqualified(module_alias, _, items, _, _) -> {
+                    if module_alias == name || (below && module_alias.starts_with(name)) -> return true
+                    loop item in items {
+                        member: "{module_alias}.{item.original}"
+                        if member == name || (below && member.starts_with(name)) -> return true
+                    }
+                }
+                .File(_, _) -> {}
+            }
+        }
+    }
+    false
+}
+
+// The qualified name the import that binds `local` names: `use core.term`
+// binds `term` to `core.term`, `use t: core.term` binds `t` to `core.term`,
+// and `use core.term.[print]` binds `print` to `core.term.print`.
+semindex_import_binding: fn(imports: [ImportDecl], local: String) -> String? Never! {
+    loop import in imports {
+        if import.kind == {
+            .Module(name, _) -> {
+                if import.alias == local -> return Val("{name}")
+            }
+            .Unqualified(module_alias, _, items, _, _) -> {
+                loop item in items {
+                    bound: if item.alias == .Val(alias) -> alias == local else -> item.original == local
+                    if bound -> return Val("{module_alias}.{item.original}")
+                }
+            }
+            .File(_, _) -> {}
+        }
+    }
+    None
+}

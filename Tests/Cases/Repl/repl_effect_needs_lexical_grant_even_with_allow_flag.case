@@ -1,13 +1,13 @@
-# PORT tests/repl.rs:2088-2110; all original predicates, verbatim input literals.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
-# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+# A written `#FX` boundary is a ceiling even when `--allow=FS` grants the
+# session the right: a write inside `#FX(authority: Time)` is refused before
+# the file exists.
 fixture: ReplEffectNeedsLexicalGrantEvenWithAllowFlag.fixture
 mkdir: project
 step: jet repl --project {work}/project --allow=FS
 env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 stdin: ReplEffectNeedsLexicalGrantEvenWithAllowFlag.fixture/input0.txt
-exit: any # original library predicates did not assert process status
-stdout|stderr: ~ "Jet.ApplicationAuthorityDenied" # original predicate
-stdout|stderr: ~ "no REPL runtime authority" # original predicate
+exit: any # a refused turn's piped session status is asserted by the deny rows
+stderr: ~ "Jet.EffectWithoutAuthority" # the boundary, not the session, refuses the write
+stderr: ~ "allows only `Time`" # the refusal names the ceiling
 file: project/no.txt absent

@@ -1,0 +1,50 @@
+// A rule hears a module constant's value, also through a constant that names
+// another, and a `Path{…}` literal as its path text. A value the run
+// computes is heard as None.
+Unheard: struct {
+    index: Int,
+
+    impl Diagnostic {
+        code: "known.Unheard",
+
+        what: fn(self) -> String { "argument {self.index} is not heard as the build knows it" }
+
+        why: fn(self) -> String { "constants and Path literals are known while building" }
+
+        fix: fn(self) -> String { "hear the value the build knows" }
+    }
+}
+
+CACHE_PATH: "/cache/:key"
+
+ITEM_PATH: CACHE_PATH
+
+LIMIT: 3
+
+Known: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            heard: [Dyn?]{
+                Val(Dyn.Text("/cache/:key")),
+                Val(Dyn.Text("/cache/:key")),
+                Val(Dyn.Int(3)),
+                Val(Dyn.Text("/files/:name")),
+                None,
+            }
+            loop (index, argument) in call.args {
+                if argument.value != heard[index] -> reject(Unheard{index: index}, at: argument)
+            }
+        }
+    }
+}
+
+#Known route: fn(path: String, item: String, limit: Int, files: Path, computed: String) -> Int {
+    path.len() + item.len() + limit + files.to_string().len() + computed.len()
+}
+
+run: fn() {
+    computed: "/x/{LIMIT}"
+    print(route(CACHE_PATH, ITEM_PATH, LIMIT, Path{"/files/:name"}, computed))
+}

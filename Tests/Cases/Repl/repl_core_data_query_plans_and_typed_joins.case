@@ -1,6 +1,6 @@
-# PORT tests/repl.rs:3392-3423; all original predicates, verbatim input literals.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
-# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+# A query held in a binding (no `Display`) plans and collects in later turns,
+# an inner join keeps every duplicate match, and a left join keeps an
+# unmatched left row with a `null` right.
 fixture: ReplCoreDataQueryPlansAndTypedJoins.fixture
 step: jet repl
 env: NO_COLOR=1
@@ -8,9 +8,10 @@ env: XDG_STATE_HOME={work}/state
 stdin: ReplCoreDataQueryPlansAndTypedJoins.fixture/input0.txt
 stdout: file transcript.out
 stderr: file transcript.err
-exit: any # original library predicates did not assert process status
-stdout|stderr: ~ "[table, filter]" # original predicate
-stdout|stderr: ~ "[2, 3]" # original predicate
-stdout|stderr: ~ "DataJoin(left: 2, right: null)" # original predicate
+exit: any # the line count step asserts the join rows
+stdout: ~ "[scan, filter] : [String]" # a held query's plan
+stdout: ~ "[2, 3] : [Int]" # a held query collects
+stdout: ~ "DataJoin { left: 2, right: null }" # an unmatched left row keeps a null right
+stderr: !~ "Error" # every turn is accepted
 step: jet run line_count.jet
 exit: 0

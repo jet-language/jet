@@ -1,0 +1,22 @@
+// Impls may not overlap, so an impl never names a type argument of the
+// type it implements a trait for.
+Name: trait {
+    name: fn(self) -> String Never!,
+}
+
+Small: struct {
+    n: Int,
+}
+
+Many: struct<T> {
+    items: [T],
+}
+
+impl Many<Small>.Name {
+    name: fn(self) -> String Never! { "small" }
+}
+
+run: fn() {
+    many: Many<Small>{items: [Small]{Small{n: 1}}}
+    print("{many.name()} {many.items.len()} {many.items[0].n}")
+}

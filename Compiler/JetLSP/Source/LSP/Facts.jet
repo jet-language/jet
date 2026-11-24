@@ -173,6 +173,69 @@ lsp_occurrences: fn(index: SemIndex, target: LSPTarget, declaration: Bool{false}
     found
 }
 
+// An occurrence placed in its file, with the text the check that found it read.
+LSPPlaced: struct {
+    path: String,
+    source: String,
+    span: Span,
+}
+
+// Every occurrence of a declaration across the open documents' checks.
+// `errors` counts the errors of the other checks that found one, since a check
+// with errors may have missed a use.
+LSPOpenOccurrences: struct {
+    placed: [LSPPlaced],
+    errors: Int,
+}
+
+// The occurrences of `target` that `view`'s check finds, then those of each
+// other open document's check that read the same text of the declaring module.
+// A module that imports the declaring one is checked from its own document,
+// so a search from the declaration reaches it only through that check.
+lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, declaration: Bool{false}) -> LSPOpenOccurrences {
+    found := LSPOpenOccurrences{placed: [LSPPlaced]{}, errors: 0}
+    seen := [String:Bool]{}
+    _: lsp_place_occurrences(view.checked, target, seen, found, declaration: declaration)
+    declaring: view.checked.modules[lsp_module_index(view.checked, target.module_path) ?? return found]
+    if declaring.physical_path == "" -> return found
+    uris := server.published.keys().to_list()
+    uris.sort()
+    loop uri in uris {
+        if uri == view.uri -> next
+        checked: server.published[uri]
+        loop module_ref in checked.modules {
+            if !lsp_source_paths_equal(module_ref.physical_path, declaring.physical_path) || module_ref.source != declaring.source -> next
+            if lsp_place_occurrences(checked, LSPTarget{module_path: module_ref.path, span: target.span}, seen, found, declaration: declaration) {
+                loop diagnostic in checked.diagnostics {
+                    if !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> found.errors += 1
+                }
+            }
+            break
+        }
+    }
+    found
+}
+
+// Places the occurrences of `target` in `checked` not yet seen; true when it
+// placed any. A derive-written body (an enum's `equal` and `compare`) is
+// checked past the end of its module's text, so its uses have no place in
+// the file and are left out.
+lsp_place_occurrences: fn(checked: LSPChecked, target: LSPTarget, seen: &[String:Bool], found: &LSPOpenOccurrences, declaration: Bool{false}) -> Bool {
+    index: checked.index ?? return false
+    placed := false
+    loop occurrence in lsp_occurrences(index, target, declaration: declaration) {
+        module_ref: checked.modules[lsp_module_index(checked, occurrence.module_path) ?? next]
+        if module_ref.physical_path == "" -> next
+        if occurrence.span.end > module_ref.source.count_bytes() -> next
+        key: "{module_ref.physical_path}:{occurrence.span.start}"
+        if seen.has_key(key) -> next
+        seen[key] = true
+        placed = true
+        found.placed.push(LSPPlaced{path: module_ref.physical_path, source: module_ref.source, span: occurrence.span})
+    }
+    placed
+}
+
 // The name an occurrence spells: a reference's span may cover a qualified
 // path (`module.name`), whose last segment is the name.
 lsp_name_span: fn(source: String, span: Span, name: String) -> Span Never! {

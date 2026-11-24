@@ -7396,13 +7396,30 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
     if is_result -> _: ir_runtime(m, b, "jet_journey_reset", [Int]{}, -1)
     // The fallback sees the failure's error under the ambient binding.
     mark: b.bindings.len()
+    // An owned carrier the fallback discards ends where the fallback starts
+    // when the fallback leaves (`?? return`, `break`, `next`, `panic`): no
+    // code after it runs to drop it. One whose error the fallback reads
+    // under the ambient binding is held instead (ir_hold), so the exit's own
+    // unwinding drops it after the error's name ends.
+    fallback_leaves: ir_fallback_leaves(m, p, b, fallback)
+    reads: ir_fallback_reads_error(p, b, fallback, ambient)
+    // An absent inline Option holds no Int to drop.
+    discards: owned_subject && !ir_option_inline(m, b.f.slot_type[subject])
+    if discards && fallback_leaves {
+        b.fresh[subject] = true
+        if reads -> ir_hold(m, b, subject) else -> ir_release(m, b, subject)
+    }
     if ambient == .Val(local) {
         if !is_result -> return ir_fail_slot(b, span, "`??` ambient error binding on an Option")
-        error_row: ir_value_type(m, p, error_ty) ?? return ir_type_fail(b, span, error_ty)
-        error: ir_load_at(m, b, subject, 8, error_row)
-        if error >= 0 {
-            _: ir_binder_holds(m, p, b, local, error, span)
-            b.bindings.push(IRBinding{name: local.name, slot: error})
+        // A fallback that never names the error binds nothing: its carrier
+        // may already have ended.
+        if reads {
+            error_row: ir_value_type(m, p, error_ty) ?? return ir_type_fail(b, span, error_ty)
+            error: ir_load_at(m, b, subject, 8, error_row)
+            if error >= 0 {
+                _: ir_binder_holds(m, p, b, local, error, span)
+                b.bindings.push(IRBinding{name: local.name, slot: error})
+            }
         }
     }
     if view && fallback_view && result >= 0 && fallback == .Value(alternative) {
@@ -7412,13 +7429,12 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
         ir_emit(b.f, IROp.Move, result, address, -1, -1, b.line)
     } else { ir_fallback_route(m, p, b, fallback, result, span) }
     ir_truncate_bindings(b, mark)
-    // An absent inline Option holds no Int to drop.
-    if owned_subject && !ir_option_inline(m, b.f.slot_type[subject]) {
+    // A fallback that stays drops the carrier after it runs.
+    if discards && !fallback_leaves {
         b.fresh[subject] = true
         ir_release(m, b, subject)
     }
     ir_end(b.f, b.line)
-    fallback_leaves: ir_fallback_leaves(m, p, b, fallback)
     ir_meet_paths(m, b, test, then_states, false, fallback_leaves)
     if view && result >= 0 {
         viewed: ir_allocator_view(m, b, result, row)
@@ -7465,6 +7481,10 @@ ir_or_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, carrier: Ty
     reads: ir_fallback_reads_error(p, b, fallback, ambient)
     if !reads -> ir_release(m, b, failure)
     mark: b.bindings.len()
+    // A fallback that leaves and reads the error holds the failure as
+    // ir_or_fallback holds its carrier: the exit's unwinding drops it.
+    fallback_leaves: ir_fallback_leaves(m, p, b, fallback)
+    if reads && fallback_leaves -> ir_hold(m, b, failure)
     if reads && ambient == .Val(local) {
         error_row: ir_value_type(m, p, error_ty) ?? return ir_type_fail(b, span, error_ty)
         error: ir_load_at(m, b, failure, 8, error_row)
@@ -7475,9 +7495,8 @@ ir_or_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, carrier: Ty
     }
     ir_fallback_route(m, p, b, fallback, result, span)
     ir_truncate_bindings(b, mark)
-    if reads -> ir_release(m, b, failure)
+    if reads && !fallback_leaves -> ir_release(m, b, failure)
     ir_end(b.f, b.line)
-    fallback_leaves: ir_fallback_leaves(m, p, b, fallback)
     ir_meet_paths(m, b, test, then_states, false, fallback_leaves)
     if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
     result

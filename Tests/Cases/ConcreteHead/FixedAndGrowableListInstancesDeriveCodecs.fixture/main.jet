@@ -1,0 +1,31 @@
+// `#Codable` structs that hold a list and a fixed list of one element type,
+// through JSON.
+use {
+    _encoding: core.encoding
+    json: core.encoding.json
+}
+
+#Codable
+Frame: struct {
+    pixels: [U8],
+    fixed: [U8#2],
+}
+
+#Codable
+Samples: struct {
+    pixels: [I16],
+    fixed: [I16#2],
+}
+
+run: fn() {
+    text := json.to_string(Frame{pixels: [U8]{1, 2}, fixed: [U8#2]{3, 4}}) ?? panic("frame")
+    print(text)
+    back := Frame{json.decode<Frame>(text) ?? panic("frame back")}
+    print(back.pixels)
+    print(back.fixed)
+    samples := json.to_string(Samples{pixels: [I16]{-1, 2}, fixed: [I16#2]{-3, 4}}) ?? panic("samples")
+    print(samples)
+    again := Samples{json.decode<Samples>(samples) ?? panic("samples back")}
+    print(again.pixels)
+    print(again.fixed)
+}

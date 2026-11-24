@@ -1,0 +1,8 @@
+Error: Jet.TraitNotImplemented: `[Int:String]` does not implement `Decode`
+  --> Tests/UI/codec_impl_map_key_decode_fix.jet:6:26
+    |
+  6 |     by_key: Dyn.object().decode<[Int:String]>() ?? [Int:String]{}
+    |                          ^^^^^^
+ Why: `Dyn.decode<[Int:String]>()` can only call the type's Decode contract
+ Fix: A map's keys are text on the wire, so only a map keyed by `String` has `Decode`: use `[String: String]` and convert each key to and from its text
+More: jet-lang.dev/e/Jet.TraitNotImplemented

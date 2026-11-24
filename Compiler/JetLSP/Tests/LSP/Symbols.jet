@@ -4,7 +4,7 @@ use {
     core.encoding.[Dyn]
     jet_foundation.[Span, TextEdit, foundation_json_integer]
     jet_parser.[parser_marker_placement_edits]
-    jet_lsp.[LSPServer, lsp_member]
+    jet_lsp.[LSPServer, lsp_change_workspace_folders, lsp_member]
 }
 
 LSP_TEST_SHAPES_URI: "file:///w/shapes.jet"
@@ -55,6 +55,35 @@ lsp_test_symbol_rows: fn(rows: [Dyn]) -> [String] Never! {
     rows: lsp_test_rows(lsp_test_result(server, "workspace/symbol", "{{\"query\":\"ADD\"}}"))
     assert_eq(lsp_test_symbol_rows(rows), [String]{"add=12"})
     assert_eq(lsp_test_text(lsp_test_field(rows[0], "location"), "uri"), LSP_TEST_MAIN_URI)
+}
+
+lsp_test_workspace_rows: fn(server: &LSPServer) -> [Dyn] {
+    lsp_test_rows(lsp_test_result(server, "workspace/symbol", "{{\"query\":\"\"}}"))
+}
+
+lsp_test_change_folders: fn(server: &LSPServer, added: String, removed: String) Never! {
+    lsp_change_workspace_folders(server, Val(lsp_test_json("{{\"event\":{{\"added\":[{added}],\"removed\":[{removed}]}}}}")))
+}
+
+#Test("workspace symbols follow the workspace folders, open text over saved text") {
+    server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"workspaceFolders\":[{{\"uri\":\"file:///w/first\",\"name\":\"first\"}},{{\"uri\":\"file:///w/second/\",\"name\":\"second\"}}]}}")
+    lsp_test_open(server, "file:///w/second/open.jet", "OpenSecond: fn() {{}}\n")
+    rows: lsp_test_workspace_rows(server)
+    assert_eq(lsp_test_symbol_rows(rows), [String]{"ClosedFirst=12", "OpenSecond=12"})
+    assert_eq(lsp_test_text(lsp_test_field(rows[0], "location"), "uri"), "file:///w/first/closed.jet")
+    lsp_test_change_folders(server, "{{\"uri\":\"file:///w/third\",\"name\":\"third\"}}", "{{\"uri\":\"file:///w/first\",\"name\":\"first\"}}")
+    added: lsp_test_workspace_rows(server)
+    assert_eq(lsp_test_symbol_rows(added), [String]{"OpenSecond=12", "AddedThird=12"})
+    assert_eq(lsp_test_text(lsp_test_field(added[1], "location"), "uri"), "file:///w/third/added.jet")
+    lsp_test_change_folders(server, "", "{{\"uri\":\"file:///w/second\",\"name\":\"second\"}},{{\"uri\":\"file:///w/third\",\"name\":\"third\"}}")
+    assert_eq(lsp_test_workspace_rows(server).len(), 0)
+}
+
+#Test("workspace symbols read the root URI as the one workspace folder") {
+    server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"rootUri\":\"file:///w/third\"}}")
+    assert_eq(lsp_test_symbol_rows(lsp_test_workspace_rows(server)), [String]{"AddedThird=12"})
 }
 
 #Test("selection ranges grow from the name to the whole document") {
@@ -115,6 +144,31 @@ lsp_test_token_data: fn(result: Dyn) -> [Int] Never! {
     assert_eq(line.slice(0, 10), [Int]{5, 4, 3, 2, 0, 0, 4, 1, 8, 0})
     malformed: "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"range\":{{\"start\":{{\"line\":5}}}}}}"
     assert_eq(lsp_test_error_code(server, "textDocument/semanticTokens/range", malformed), -32602)
+}
+
+#Test("semantic tokens class the names a written type holds, and a retired word is no keyword") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_SHAPES_URI, LSP_TEST_SHAPES)
+    uri: "file:///w/views.jet"
+    lsp_test_open(
+        server,
+        uri,
+        `use shapes
+
+measure: fn(window: View<Int>, grow: ViewMut<Int>, at: shapes.Point) -> Int {
+    window.len() + grow.len() + at.x
+}
+
+archive: fn(names: [String]) -> [String] {
+    names.take(1)
+}
+`,
+    )
+    tokens: lsp_test_stage_tokens(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(uri)}}}"))
+    expected: [String]{"2:20+4=1", "2:25+3=1", "2:37+7=1", "2:45+3=1", "2:55+6=11", "2:62+5=1", "2:72+3=1"}
+    loop token in expected -> assert(tokens.contains(token), "{token} in {tokens}")
+    // `take` is the lexer's retired word; as `.take(n)` it names a method.
+    assert(!tokens.contains("6:10+4=0"), "`take` is no keyword in {tokens}")
 }
 
 #Test("a semantic tokens delta answers the edit from its kept result, and the full tokens for any other id") {
@@ -182,6 +236,21 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
     assert_eq(lsp_test_rows(lsp_test_field(result, "items")).len(), 0)
 }
 
+#Test("completion reads the word being written from the lexer's tokens") {
+    server := lsp_test_main_server()
+    // Inside `add` on line 5, the word's start narrows the names.
+    inside: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 6)))
+    assert(inside.contains("add=3") && !inside.contains("run=3"), "the start of `add` is the prefix")
+    // A comment's text is no word, so nothing narrows there.
+    lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN.replace("add(1, add(2, 3))", "0 // ad"))
+    comment: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 11)))
+    assert(comment.contains("add=3") && comment.contains("run=3"), "a comment's text is no prefix")
+    // A `.` after a call's `)` has no receiver word.
+    lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN.replace("add(1, add(2, 3))", "add(1, 2)."))
+    after_call: lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 14))
+    assert_eq(lsp_test_rows(lsp_test_field(after_call, "items")).len(), 0)
+}
+
 LSP_TEST_MARKERS: `#Codable
 Pixel: struct {
     r: Int
@@ -227,9 +296,13 @@ Pixel: struct {
         titles.push(lsp_test_text(action, "title"))
     }
     assert_eq(titles, [String]{"Write the markers inside the declaration's body"})
-    // A line outside the document is refused.
-    outside: "{{{lsp_test_text_document(clean)},\"range\":{{\"start\":{{\"line\":40,\"character\":0}},\"end\":{{\"line\":40,\"character\":0}}}}}}"
-    assert_eq(lsp_test_error_code(server, "textDocument/codeAction", outside), -32602)
+    // A range that runs past the document's end covers the rest of it.
+    past: "{{{lsp_test_text_document(clean)},\"range\":{{\"start\":{{\"line\":1,\"character\":0}},\"end\":{{\"line\":40,\"character\":0}}}},\"context\":{{\"diagnostics\":[]}}}}"
+    clamped := [String]{}
+    loop action in lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", past)) {
+        clamped.push(lsp_test_text(action, "title"))
+    }
+    assert_eq(clamped, [String]{"Write the markers inside the declaration's body"})
 }
 
 #Test("a code action's edit is a plain changes map unless documentChanges is negotiated") {

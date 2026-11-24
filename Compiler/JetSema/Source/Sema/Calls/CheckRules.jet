@@ -241,7 +241,10 @@ sema_rule_call_value: fn(
         probe_diagnostics := [Diagnostic]{}
         probed: sema_probe_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics)
         ty: if probed == .Val(checked) -> checked.ty else -> Type.Named{name: "_"}
-        known: if probed == .Val(checked) -> sema_rule_known(checked, program, context) else -> TComptimeValue?{None}
+        known := if probed == .Val(checked) -> sema_rule_known(checked, program, context) else -> TComptimeValue?{None}
+        if known == None && probed == .Val(checked) && (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
+            known = sema_rule_known_path(argument.expr, environment, program, scopes, state, tail_store, context)
+        }
         label := String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
         values.push(sema_rule_call_arg(label, ty, known, argument.span, file, environment, program))
@@ -282,10 +285,12 @@ sema_rule_call_arg: fn(label: String?, ty: Type, known: TComptimeValue?, span: S
 
 // What the build knows of a heard call's argument or receiver `value`
 // (None when only the run knows it): a literal, or a constant's value
-// (sema_expr_comptime_value), with a struct, enum case or list literal built
+// (sema_expr_comptime_value; a module constant through
+// sema_rule_known_constant), with a struct, enum case or list literal built
 // from the known values of its parts and a negated number literal its
 // negation. A known struct or case leaves its type's name empty:
-// sema_rule_value_dyn reads its type from the argument's.
+// sema_rule_value_dyn reads its type from the argument's. A `Path{…}`
+// argument is known as its text (sema_rule_known_path).
 sema_rule_known: fn(value: TExpr, program: SemaProgramTables, context: SemaCheckContext) -> TComptimeValue? {
     if value.kind == .Flat(index) -> return sema_rule_known_row(index, program, context)
     if value.kind == .StructLit(fields) {
@@ -385,6 +390,104 @@ sema_rule_known_row: fn(index: Int, program: SemaProgramTables, context: SemaChe
     }
     if context.arena.tree.nodes[row].kind == .Clone(inner, _) -> return sema_rule_known_row(inner, program, context)
     if context.arena.tree.nodes[row].kind == .ExplicitCopy(inner) -> return sema_rule_known_row(inner, program, context)
+    if context.arena.tree.nodes[row].kind == .ConstRef(symbol) {
+        return sema_rule_known_constant(symbol, program)
+    }
+    None
+}
+
+// The value of the module constant `symbol` reads, which the build knows
+// when it is staged or written as a literal, a `Path{…}` literal or another
+// such constant of its module (sema_rule_known_written); None for a mutable
+// binding and for a function read as a value.
+sema_rule_known_constant: fn(symbol: SymbolID, program: SemaProgramTables) -> TComptimeValue? {
+    if program.registration_graph == .Val(graph) {
+        loop module_index in 0..<graph.modules.len() {
+            loop constant_index in 0..<graph.modules[module_index].constants.len() {
+                if graph.modules[module_index].constants[constant_index].symbol.id == symbol {
+                    return sema_rule_known_constant_at(graph, module_index, constant_index, 0)
+                }
+            }
+        }
+    }
+    None
+}
+
+// sema_rule_known_constant for the constant at `constant_index` of module
+// row `module_index`, reached through `depth` links.
+sema_rule_known_constant_at: fn(graph: SemaRegistrationGraph, module_index: Int, constant_index: Int, depth: Int) -> TComptimeValue? {
+    if depth > SEMA_CALL_RULE_VALUE_DEPTH || graph.modules[module_index].constants[constant_index].declaration.mutable {
+        return None
+    }
+    if graph.modules[module_index].constants[constant_index].declaration.ct == .Val(staged) {
+        return sema_checked_comptime(staged)
+    }
+    sema_rule_known_written(graph, module_index, graph.modules[module_index].constants[constant_index].declaration.value, depth + 1)
+}
+
+// A constant's written value in module row `module_index`: a scalar or
+// String literal without holes, a `Path{…}` literal as its path text, or the
+// name of another constant of the module, followed through at most
+// SEMA_CALL_RULE_VALUE_DEPTH links.
+sema_rule_known_written: fn(graph: SemaRegistrationGraph, module_index: Int, expression: Expr, depth: Int) -> TComptimeValue? {
+    if depth > SEMA_CALL_RULE_VALUE_DEPTH -> return None
+    if expression == .Paren(inner, _, _) {
+        return sema_rule_known_written(graph, module_index, inner, depth + 1)
+    }
+    if expression == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == .Lit(literal) -> text = "{text}{literal}" else -> return None
+        }
+        return Val(TComptimeValue.String{value: text})
+    }
+    if expression == .Int(number, _, _, _, _) -> return Val(TComptimeValue.Int{value: number})
+    if expression == .Float(number, _, narrow, _, _) {
+        return Val(TComptimeValue.Float{value: number, bits: if narrow -> 32 else -> 64})
+    }
+    if expression == .Bool(flag, _, _) -> return Val(TComptimeValue.Bool{value: flag})
+    if expression == .Char(text, _, _) {
+        return Val(TComptimeValue.Char{value: sema_checked_const_char(text) ?? return None})
+    }
+    if expression == .ComptimeName(_, _, staged, _) {
+        return sema_checked_comptime(staged ?? return None)
+    }
+    if expression == .TypedLit(head, body, _, _) {
+        if head != (Val(Type.Named{name: "Path"})) -> return None
+        if body == .Value(value) {
+            known: sema_rule_known_written(graph, module_index, value, depth + 1) ?? return None
+            return sema_rule_known_path_text(known)
+        }
+        return None
+    }
+    if expression == .Ident(name, _, _) {
+        loop constant_index in 0..<graph.modules[module_index].constants.len() {
+            if graph.modules[module_index].constants[constant_index].symbol.name == name {
+                return sema_rule_known_constant_at(graph, module_index, constant_index, depth)
+            }
+        }
+    }
+    None
+}
+
+// A heard `Path{…}` argument, known when its text is: the built-in Path
+// keeps that text, only turning `\` into `/` (Path.from).
+sema_rule_known_path: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> TComptimeValue? {
+    if expression == .TypedLit(_, body, _, _) {
+        if body == .Value(value) {
+            probe_diagnostics := [Diagnostic]{}
+            text: sema_probe_expression(value, Val(Type.String), environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return None
+            return sema_rule_known_path_text(sema_rule_known(text, program, context) ?? return None)
+        }
+    }
+    None
+}
+
+// The path a known String `text` names, as Path.from keeps it.
+sema_rule_known_path_text: fn(text: TComptimeValue) -> TComptimeValue? Never! {
+    if text == .String(written) {
+        return Val(TComptimeValue.String{value: written.replace("\\", "/")})
+    }
     None
 }
 
@@ -419,16 +522,17 @@ SEMA_CALL_RULE_F32_MAX: Float{340282346638528859811704183484516925440.0}
 // An argument's compile-time value `value`, of type `ty` as module row
 // `caller` names it, as the Dyn its `encode()` returns, so a rule reads what
 // the run would encode (`CompilerArg.value`). A Bool, an Int or
-// fixed-width integer, a Float or F32, a Char and a String are that case, a
-// Char as its Text; a list is the Array of its items, but a byte list is
-// None (Encode writes Bytes). A struct or enum counts only when its Encode is
-// the derived one with no codec option (sema_rule_value_derives_encode): a
-// struct is the Object of its encoded fields in declaration order under
-// sema_serde_items_field_key, leaving out the fields Encode leaves out
-// (sema_serde_items_drops); a case without a payload is the Text of
-// sema_serde_items_variant_key, and a case with one value the one-entry
-// Object under that key. Anything else is None: an optional field, a case
-// with named fields, a generic type, a written codec, a Map.
+// fixed-width integer, a Float or F32, a Char, a String and a built-in Path
+// are that case, a Char and a Path as their Text; a list is the Array of its
+// items, but a byte list is None (Encode writes Bytes). A struct or enum
+// counts only when its Encode is the derived one with no codec option
+// (sema_rule_value_derives_encode): a struct is the Object of its encoded
+// fields in declaration order under sema_serde_items_field_key, leaving out
+// the fields Encode leaves out (sema_serde_items_drops); a case without a
+// payload is the Text of sema_serde_items_variant_key, and a case with one
+// value the one-entry Object under that key. Anything else is None: an
+// optional field, a case with named fields, a generic type, a written codec,
+// a Map.
 sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, value: TComptimeValue, depth: Int) -> TComptimeValue? {
     if depth > SEMA_CALL_RULE_VALUE_DEPTH -> return None
     if ty == Type.Int || ty == .IntN(_, _) {
@@ -455,7 +559,8 @@ sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, val
         if value == .Bool(flag) -> return Val(sema_rule_dyn("Bool", TComptimeValue.Bool{value: flag}))
         return None
     }
-    if ty == Type.String {
+    // The built-in Path handle has no Encode; it is heard as its text.
+    if ty == Type.String || (sema_stream_handle_owner(ty) ?? "") == "Path" {
         if value == .String(text) -> return Val(sema_rule_dyn("Text", TComptimeValue.String{value: text}))
         return None
     }
