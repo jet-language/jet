@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write the receiver as `&amp;self` before assigning to `self.field`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.FieldWriteWithoutMarker</code>: <code>Tests/UI/Ownership/body_write_to_unmarked_param_is_error.stderr</code>.</p>
-<pre class="diag">Error: Jet.FieldWriteWithoutMarker: Cannot edit `n` — `c` has read access only
-  --&gt; Tests/UI/Ownership/body_write_to_unmarked_param_is_error.jet:5:26
+<p>First UI snapshot mentioning <code>Jet.FieldWriteWithoutMarker</code>: <code>Tests/UI/arm_binding_write_blames_the_binding.stderr</code>.</p>
+<pre class="diag">Error: Jet.FieldWriteWithoutMarker: Cannot edit through `p` — it is a read-only arm binding
+  --&gt; Tests/UI/arm_binding_write_blames_the_binding.jet:14:26
     |
-  5 | bump: fn(c: Counter) { c.n += 1 }
+ 14 |         .Point(p) -&gt; { p.x = 5 }
     |                          ^
- Why: Editing a field requires write access to the owning place
- Fix: Change the parameter to `c: &amp;Counter`
+ Why: An arm binds a read window into `item` when the subject it tests is written without `&amp;`, so `p` can&#39;t change it, whatever access `item` has
+ Fix: Write the subject with `&amp;` so the arm binds a write window: `if &amp;subject == { … }`
 More: jet-lang.dev/e/Jet.FieldWriteWithoutMarker
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
