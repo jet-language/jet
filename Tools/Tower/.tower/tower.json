@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113375,
+    "rev": 113400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52,17 +52,17 @@
     },
     "completionCursor": "2026-11-22T21:05:37.335Z",
     "dayStart": {
-      "date": "2026-11-23",
-      "openCards": 289,
-      "openCriteria": 2200,
+      "date": "2026-11-24",
+      "openCards": 290,
+      "openCriteria": 2181,
       "epochs": {
         "G1": {
           "openCards": 6,
-          "openCriteria": 43
+          "openCriteria": 32
         },
         "G2": {
           "openCards": 46,
-          "openCriteria": 405
+          "openCriteria": 401
         },
         "G3": {
           "openCards": 49,
@@ -82,11 +82,11 @@
         },
         "G7": {
           "openCards": 70,
-          "openCriteria": 411
+          "openCriteria": 404
         },
         "G8": {
-          "openCards": 11,
-          "openCriteria": 77
+          "openCards": 12,
+          "openCriteria": 80
         },
         "G9": {
           "openCards": 0,
@@ -33432,8 +33432,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:30.927Z",
-      "updated": "2026-11-23T21:28:01.672Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-24T00:20:33.885Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0gmf0y4",
@@ -52354,6 +52354,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T22:33:55.363Z"
+        },
+        {
+          "n": 15,
+          "text": "Compile-time code's step limit (E0952) counts deterministic steps, as ratified in D-PREP-FUEL1 (a step is a deterministic count, never wall time); it never measures time. Today SessionHost.jet:285-309 bounds the comptime child by the wall-clock wait on the monotonic clock (391-393), so a loaded host, or a debugger pausing the child, turns a working build into E0952, and Docs/Spec/Reference/metaprogramming.md:183 describes the time rule. Found by the D-DEBUG-PREP1 adversarial review, 2026-11-23. Proof: a case runs one compile-time loop just under its step limit and one just over: the first passes and the second stops with E0952 at the same step count under an all-cores load generator, and the spec line states the count rule.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T23:20:28.628Z"
         }
       ],
       "refs": [],
@@ -52361,9 +52370,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-22T02:10:23.719Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 14
+      "updated": "2026-11-23T23:20:28.628Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 15
     },
     {
       "id": "c08zzpo5",
@@ -55071,6 +55080,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-19T19:13:00.011Z"
+        },
+        {
+          "n": 63,
+          "text": "Every commit ratchet passes on dev: each tool `jet Tools/Agent/Land.jet ratchets` lists runs clean with --check. On dev 34026ae5ff eight fail: SyntaxDictionaryRows (SyntaxDictionaryData.jet differs), LexicalLedger, SurfaceBudget (markers 79 over the ceiling 73, keywords and lexical-forms under it), UnsafeRatchet (stale baseline: Host.jet, WsRoutes.jet, Client.jet rows), HotText (33 rows of hot-text.list name no function), CoreCoverage, TestShards (Compiler/package.jet declares no suite profiles) and CollationTable (SHA256SUMS does not pin allkeys_CLDR.txt). Proof: all 24 checks exit 0 on dev.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T22:18:39.329Z"
         }
       ],
       "refs": [],
@@ -55078,9 +55096,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-22T02:10:23.720Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 62
+      "updated": "2026-11-23T22:18:39.329Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 63
     },
     {
       "id": "c0nwrfck",
@@ -56960,6 +56978,11 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "c12 scope decision: c12 is met by S2 (the standard sizes are Prelude aliases of the three generic families, generated into the parser and number-kind tables) and S12 (an impl on a family expands to one impl per size; Core's per-size impls become one per family), once golden Basics/ passes on O0, O1 and O2 and git grep shows one family definition per kind in Core. S4-S11, which collapse the compiler's internal per-width representation, are not required by c12's text and overlap #6851's type identity work."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "c12 S2b decision: the parser keeps binding the standard size names (I8..F64) to the number types through a table generated from the Prelude alias declarations (checked against them by a generator check or guard), and leaves a Named type wherever the file declares, imports or type-parameters that name, so a shadowing type stays the user's; Sema resolves other aliases of a family through the alias. Chosen over a full Sema pre-resolution audit (about 850 JetSema and 300 JetIR sites, untestable before a build, self-host miscompile risk)."
         },
         {
@@ -56997,11 +57020,11 @@
         {
           "n": 1,
           "text": "A metaprogram action above marker expansion (adding declarations outside a marker, rewriting a body, making a type from text) needs a `Compiler` value, and each action checks its Meta cases (`Generate`, `Include`, `Rewrite`, `Types`, `Raw`) like any effect: denied by written code, otherwise allowed; without a `Compiler` value it is refused with a registered diagnostic and UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:41.959Z",
+          "evidence": "jet test Compiler --profile ui --filter meta_ladder_: 11 PASS, 0 FAIL on the batch 11 compiler (dev 431de10934 + batch-11 stack; landed on dev as ea939e9553..7578d807e7, a1267a9894). Snapshots cover the Generate, Rewrite, Raw and Types denials and E0774 for a marker without a Compiler value; Meta.Include has no action on dev, so it has nothing to check.",
+          "at": "2026-11-23T23:02:20.370Z",
           "proof": {
             "profile": "ui",
             "filter": "meta_ladder_"
@@ -57010,11 +57033,11 @@
         {
           "n": 2,
           "text": "Standard mode allows complete read-only reflection and explicit checked generation and refuses operations above level 5 unless the package opts in (D-META-OPTIN2=A); `#run` runs at every tier, fn build runs only for artifacts, and a built artifact never re-runs `#run`; a pure cache hit keeps every observable effect (print count and order).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:41.959Z",
+          "evidence": "jet test Compiler --profile cases --filter meta_ladder_levels: 2 PASS on the batch 11 compiler (dev 431de10934 + batch-11 stack; landed on dev as ea939e9553..7578d807e7, a1267a9894) (meta_ladder_levels_run_build_artifacts_and_cache_hits pins #run at check, test, run and build, fn build only for artifacts, no #run re-run in a built artifact, and #Memo cache hits keeping print count and order; compile-cache reuse is off by default).",
+          "at": "2026-11-23T23:02:21.265Z",
           "proof": {
             "profile": "cases",
             "filter": "meta_ladder_levels"
@@ -57114,11 +57137,11 @@
         {
           "n": 10,
           "text": "Cancelling generation midway, or exhausting memory or steps during it, leaves no partly published declaration and no stale checked fact; the next run starts clean.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:41.959Z",
+          "evidence": "jet test Compiler --profile cases --filter generate_cancel_: 1 PASS on the batch 11 compiler (dev 431de10934 + batch-11 stack; landed on dev as ea939e9553..7578d807e7, a1267a9894) (generate_cancel_midway_leaves_no_partial_module).",
+          "at": "2026-11-23T23:02:22.179Z",
           "proof": {
             "profile": "cases",
             "filter": "generate_cancel_"
@@ -57158,11 +57181,11 @@
         {
           "n": 14,
           "text": "meta.events handlers a package's build: fn registers (call watches, lint findings) run under jet check and jet run the same as under jet build (I9, the c13 rule for generated modules). Found 2026-11-23 on the batch-7 compiler: Examples/Modules/Packages/NoPrintInLib reports lints.NoPrintInLib in its golden, but jet check . prints OK and jet run . runs with no finding; a .Calls{to: helper} watch whose handler panics stops jet build but not jet check.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-23T20:13:57.601Z",
+          "evidence": "jet test Compiler --profile cases --filter meta_events_: 5 PASS, and golden NoPrintInLib: 3 PASS (O0, O1, O2) on the batch 11 compiler (dev 431de10934 + batch-11 stack; landed on dev as ea939e9553..7578d807e7, a1267a9894); watches and lint findings run under jet check and jet run as under jet build.",
+          "at": "2026-11-23T23:02:23.106Z",
           "proof": {
             "profile": "cases",
             "filter": "meta_events_run_under_check_and_run"
@@ -57178,7 +57201,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-23T21:28:18.436Z",
+      "updated": "2026-11-23T23:02:23.106Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 14
     },
@@ -57215,11 +57238,11 @@
         {
           "n": 1,
           "text": "`core.compiler` has one public typed query, `compiler.query(store, kind: FactKind) -> [FactRow] MetadataError!`, over the schema, package and plugin fact stores (D-META-REG2=A); `jet inspect facts --store=… --kind=… [--json]` renders the same call with the same rows, identities and errors, and no second registry reader remains; a golden counts marker rows both ways and gets equal counts on O0, O1 and O2, and a missing store reports its MetadataError with a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:43.897Z",
+          "evidence": "golden Metaprogramming/Reflection/FactQuery: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
+          "at": "2026-11-24T00:21:05.589Z",
           "proof": {
             "profile": "golden",
             "filter": "Metaprogramming/Reflection/FactQuery"
@@ -57228,11 +57251,11 @@
         {
           "n": 2,
           "text": "Marker rules, knowledge planes, rights and build facts register in one registry substrate, told apart by attachment (D-META-REG1=A); no second registration table remains in Compiler/.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:43.897Z",
+          "evidence": "jet test Compiler --profile cases --filter fact_registry_one_table: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (6848-c2, c2b).",
+          "at": "2026-11-24T00:21:06.588Z",
           "proof": {
             "profile": "cases",
             "filter": "fact_registry_one_table"
@@ -57241,11 +57264,11 @@
         {
           "n": 3,
           "text": "One flow-fact store on the checker holds every per-binding fact; each plane supplies only its join rule, and the walker applies joins the same way at every if, loop and arm table for ownership, effects, state and taint (D-FACT-FLOW1=A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:43.897Z",
+          "evidence": "jet test Compiler --profile cases --filter fact_flow_join_: 3 PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (state_break_exit, taint_break_exit, taint_return_path; one flow store in 6848-c3a/c3b).",
+          "at": "2026-11-24T00:21:07.634Z",
           "proof": {
             "profile": "cases",
             "filter": "fact_flow_join_"
@@ -57254,11 +57277,11 @@
         {
           "n": 4,
           "text": "Every gate lands in one ledger: unsafe regions, impure marks, grants, trust and .Force, taint scrubs, duty drops and precision demotions; `jet inspect gates` prints counts per kind with security kinds first and a filter selects one kind (D-FACT-GATE1=A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:43.897Z",
+          "evidence": "jet test Compiler --profile cases --filter inspect_gates: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (inspect_gates_counts_each_kind_security_first).",
+          "at": "2026-11-24T00:21:08.684Z",
           "proof": {
             "profile": "cases",
             "filter": "inspect_gates"
@@ -57267,11 +57290,11 @@
         {
           "n": 5,
           "text": "Facts with user-visible meaning are typed registry rows readable through the fact query: send-safety, failure attribution, #Track, view and unit-scale provenance, and maturity; prover internals such as uninitialized tracking and exhaustiveness stay inside the engine (D-FACT-HOME1=A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:43.897Z",
+          "evidence": "jet test Compiler --profile cases --filter fact_registry_user_rows: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
+          "at": "2026-11-24T00:21:09.843Z",
           "proof": {
             "profile": "cases",
             "filter": "fact_registry_user_rows"
@@ -57318,7 +57341,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:43.897Z",
-      "updated": "2026-11-23T21:29:05.337Z",
+      "updated": "2026-11-24T00:21:09.843Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     },
@@ -57435,6 +57458,31 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Correction to the c3-c6 ruling 1 (orchestrator, 2026-11-23): a rule body can't reflect a TypeId today. Rules run natively in the comptime child, T.reflect() is a static fact sema resolves while checking, and nothing maps a TypeId value to a TypeInfo. Every way to give rules generic arguments (a generic_bindings field on TypeId, id.reflect() backed by a per-wave TypeInfo table, or a query channel to the compiler) is public surface, so it goes to an owner ballot, D-RULE-TYPEARGS1, which TypeIDSlice3 is drafting. Only E2521's move waits on it; the other checker moves proceed."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c3-c6 rulings (orchestrator, 2026-11-23): (1) Checker rules compare generic arguments through the ratified TypeInfo.generic_bindings (GenericBindingInfo name and type); TypeId gets no args field and no rule parses type names. (2) Geometry: the Float routing (__then_float/__inverse_float) is deleted; Transform2<Float,A,B>.then returns Transform2<Float,A,C>, and the TransformSourceIdentity pin and all callers are migrated in the same cutover."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "M3 decision (orchestrator, 2026-11-23): option (a). #Pre(#run) becomes a Prelude rule in a small, really compiled Prelude rule module holding Pre (condition: Bool?, check) and an E0180 finding type. The module loads lazily, only when a heard call carries a Prelude rule. Each call's receiver is built from the existing pin and capture answer. E0180's registry why/fix text changes to the text sema emits (answer and reason holes), so the UI snapshots stay byte-identical. The old sema E0180 path is deleted; there is one mechanism. Rejected: (b) deferring until c3-c6, because it only waits; (c) keeping E0180 in sema, because it is two mechanisms. The proof includes a case showing that a program without #Pre(#run) loads no rule module."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Revised: the compiler writes each argument's Dyn straight into the wave's static-data CompilerArg (Dyn is a compiler-owned IR enum), so no Prelude function runs per call. The mapping follows Encode's derived output and uses Encode's key functions; anything Encode's derive does not fully determine is None. Guard: a parity case compares, for every qualifying kind and three None kinds, the Dyn a rule receives with the run's Encode-to-Dyn of the same value, under check, run and build."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Implementation decisions under D-CORE-CHECK1=A: CompilerArg.value stays Dyn? as ratified. The compiler sends each argument's prepared compile-time value (None when only the run knows it) in the wave's static-data record, and one Prelude function in the compile-time child builds the Dyn with the same mapping Core's Encode uses; a type with no Encode image gives None. M3: a Pre marker's check rule receives a per-call self whose fields are evaluated with the callee's parameters bound to that call's arguments (the existing contract pinning, moved onto the rule path); .Val(false) and None give E0180's two forms."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -57722,7 +57770,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-23T21:37:05.061Z",
+      "updated": "2026-11-24T00:15:09.625Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 21
     },
@@ -57744,6 +57792,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c10d ruling (orchestrator, 2026-11-23): Core Build wrapper methods take at: SourceLocation{#caller}, the ratified caller-location spelling, and pass it to the jet.build import. The build session resolves it to the call expression's exact byte span from sema's recorded call sites, so diagnostics point at the user's b.run(...) with byte-identical carets. Rejected: #Import on bodyless methods (new surface) and line/column-only spans (they move carets)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c10 slice 3 ruling (orchestrator, 2026-11-23): Build, BuildPlan, BuildTarget and BuildStepHandle become Core structs wrapping the host handle word (priv handle: Int), with methods that call the jet.build imports. This is the same representation #6853 c9b5 gives the net handles (TCPStream: struct { priv handle: Int }). The evaluator and the host make and read the struct instead of the bare word, through the same path as the net handles. ir_host_value_name's Build words are removed in the same patch. One handle representation for every host type."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c10 ruling (orchestrator, 2026-11-23): methods on compiler-made handles (b.add_executable, meta.add, and the rest) need no new surface and no ballot. They are ordinary Core methods on Core-declared Build, Compiler and BuildPlan types, and their bodies call #Import(jet.build|jet.compiler, symbol:) free functions with the handle as the first argument, the jet.runtime pattern Core.Net and Args already use. D-COMPTIME-HOST1=A covers this. The draft D-COMPTIME-HOST-METHODS1 (#Import on methods) is not posted."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c10 plan (orchestrator, 2026-11-23), under D-COMPTIME-HOST1=A, implemented by G1Facts. (1) Provider split: each Build, BuildPlan, BuildStepHandle, BuildFile, Code and Compiler host operation becomes one named handler; BuildAdapter becomes transport; binding is one symbol-to-handler row table, so both BuildAdapter closed_lists rows leave. (2) Core declares those symbols, and Sema and IR carry the declared symbol, not owner.method text (bootstrap two-step: compiler half, then Core half). (3) The table is generated from the declarations; JetBuildSession becomes the public jet.build provider and Sema's hand-written contract table (Calls/Build.jet) is deleted in the same patch. c10 is met only once all three hold. c7: G1Facts reports that the route tables are gone on batch 12; patch 6852-c7 removes the last Core name (Sender) from RouteHandle."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -57911,7 +57979,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-23T20:09:23.447Z",
+      "updated": "2026-11-23T23:56:41.729Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 11
     },
@@ -133246,8 +133314,813 @@
       "draftedBy": "Orchestrator",
       "reviewedBy": "Main",
       "draft": false,
+      "status": "ratified",
+      "created": "2026-11-23T21:28:00.578Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-24"
+    },
+    {
+      "id": "D-DERIV-READ1",
+      "cardId": "c0n7zpy3",
+      "group": "developer-experience",
+      "title": "How a developer asks how the compiler knows a fact: one explain reader over the derivation records",
+      "situation": "The compiler keeps a derivation record for many facts it concludes. A record names the fact, who produced it, how, by which rule and from which premises. Checked definitions, frame schedules, proof rows, test outcomes and source imports make records today. The semantic index keeps the definition records, and evidence reports keep the rest. The frame schedule record is made and then dropped.\n\n`jet inspect compiler check` prints the index records inside one large document. `jet explain \"#build.settings.loud\"` prints a build fact's writer chain, but that chain is not a record. No command answers 'how is this known?' for any other subject, and the editor never shows a record.\n\nCard #6848 c8 joins all records into one checked relation that the CLI and the LSP read. This ballot decides only how a developer reads it.",
+      "gist": "Which command and which editor view answer 'how does the compiler know this?' from the one derivation relation?",
+      "lesson": "A derivation record is the compiler's receipt for a fact. It says what was concluded, by whom, by which rule, and from which other facts. Following the premises backwards gives the chain that led to the fact. Today most premises are hashes, so that chain stops after one step.",
+      "explainer": "Think of a lab notebook. Each result sits next to the method that produced it and the earlier results it used. Today the pages sit in two binders, and one kind of page is thrown away after it is written. Build settings keep a separate logbook with its own front desk. The question is whether every page, and that logbook, gets one front desk.",
+      "story": "Ana sees a frame schedule that puts two writes in order and wonders why. The compiler made a record of that schedule and then dropped it, so no command shows it. Asking `jet explain main.on_frame@412` today reaches the package explainer, which finds no package by that name. For `#build.settings.loud`, by contrast, `jet explain` already shows the writer chain. Her editor shows the type of a declaration, never how the compiler knows it.",
+      "inWild": "// Lean: `#print axioms thm` lists the axioms a theorem rests on.\n// Coq: `Print Assumptions thm` lists what a term depends on.\n// Soufflé (Datalog): `-t explain` prints the proof tree of one derived tuple.\n// Bazel: `bazel aquery` prints the action, inputs and mnemonic that made one output.",
+      "detail": "Producers today: SemanticIndex.jet and SemIndex Build.jet (checked-definition), Frames.jet (checked-frame-accesses), ProveReport.jet (checked-proof-row) and ImportPlan.jet (foreign-source-import). EvidenceReport.jet's evidence-record rule covers test outcomes and comparison history. Records are defined in Compiler/JetFoundation/Source/Derivations.jet. Readers today: SemIndexJSON, EvidenceJSON, Review.jet and the Canvas reasoning view. The LSP's check already builds the index records, but no hover shows one.\n\nBuildFactExplain.jet folds the writer chain while loading and prints it as an explanation, not as a record. A definition record's subject is a hash such as `def:…`. Its claim is a path such as `method:app.Point.area`. Premises today are hashes, operation names or evidence ids, never another record's subject.\n\n`jet debug` answers a different question. Its `why <place>` command, run in a replay, finds the write that gave one runtime value its contents. A derivation record says why the compiler, or a recorded run, holds a claim. A reader uses `jet debug` for 'why does this variable hold 7' and explain for 'why does Jet believe this'.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One reader: `jet explain <subject> [file]` for record subjects, the build-fact chain included",
+          "detail": "`jet explain` keeps every subject it answers today and gains record subjects. A record subject is a declaration path such as `main.Shape.area`, a frame callback such as `main.on_frame@412`, or a build fact. It prints the record and its premises, and nests a premise that names another record.\n\nBuild-fact writer chains become records of a build-fact producer. The record keeps the ordered chain as its payload, so `jet explain \"#build.settings.loud\"` prints exactly today's text. `--json` keeps today's fields and adds one `derivation` field.\n\nIn the editor, hover adds a 'Known by' line only when a record says more than 'checked definition'. That means a frame schedule, a proof, test evidence, or a record that is no longer current.",
+          "technical": "Today's order stays and runs first (Front.jet `jet_cli_explain`). It covers flags such as `--cost`, codes and `Jet.` names, and the words `log`, `effects`, `strictness` and `marker`. Then come build facts, module values, policy keys, syntax words, registered facts, and `module.UpperCamel` Diagnostic types.\n\nOne new step comes before the package fallback. A dotted or `@` subject whose first segment names a module of the project is looked up by claim path. Anything else still reaches Jetpack's package explain, so `jet explain nixpkgs.ripgrep` and `jet explain ripgrep@14` keep working. `jetpack explain` stays the explicit package spelling.\n\nEach subject is answered by the stage that makes it. Build facts and Diagnostic types need only the loaded program, as today, so they still answer after a failed check. Declarations and frame schedules need a Doc-mode check of the entry, about what `jet check` of that entry costs. Proof, test and import records are read from stored evidence reports, never re-run, and their disposition says when they are stale.\n\nWithout a file, the current directory's project entry is used, as build-fact explain does now. A miss inside a known module is a registered error that lists that module's closest subjects. `main.on_frame` alone answers when the module has one frame callback.\n\nBuildFactExplain.jet and the Diagnostic-type explain become producers in one cutover, with no second print path. The ordered chain is a new DerivationPayload case beside FrameSchedule, because record premises are sorted and would lose the writer order.",
+          "code": "$ jet explain main.on_frame@412 app.jet\nmain.on_frame@412  checked frame resource schedule\n  producer jet-sema · rule checked-frame-accesses · static_derivation · current\n  premises\n    draw@3\n    update@1\n\n$ jet explain \"#build.settings.tls\" run.jet --profile=release --set tls=true\nBuild.Settings.tls\n\nWhat this means:\n  Build.Settings.tls = true\n  [shadowed] declaration / package true at package.jet:settings.tls (default):0..0\n  [shadowed] optimization bundle / package false at package.jet:build.release.settings.tls:0..0\n  [effective] command line / package true at command line:--set tls=true:0..0"
+        },
+        {
+          "key": "B",
+          "name": "A new word: `jet explain derivation <file> [<subject>]`, plus a hover line",
+          "detail": "`jet explain derivation app.jet` lists every record of the checked file, one line each. A line shows the subject, claim, producer, rule and disposition. Naming a subject prints its record and its premises. `--json` prints the same records.\n\nThe hover line is the same as in A. The build-fact explain keeps its own path, so 'how is this known' has two readers.",
+          "technical": "`explain` gains the leading word `derivation`, beside `effects`, `marker`, `log` and `strictness`. The CLI and the hover both use one query on the relation: by subject, then premises by id. BuildFactExplain.jet stays as it is.",
+          "code": "$ jet explain derivation app.jet main.on_frame@412\nmain.on_frame@412  checked frame resource schedule\n  producer jet-sema · rule checked-frame-accesses · static_derivation · current\n  premises\n    draw@3\n    update@1"
+        },
+        {
+          "key": "C",
+          "name": "A new subcommand: `jet inspect derivations <file> [<subject>]`, same hover",
+          "detail": "The views are the same as in B, but under `inspect`. `inspect` already holds machine views such as `inspect compiler` and `inspect facts`. `explain` is where a user asks 'why', and the build-fact chain stays under `explain`. So the two readers end up under two commands.",
+          "technical": "A new `inspect` subcommand beside `inspect facts`. The hover is the same as in A.",
+          "code": "$ jet inspect derivations app.jet main.on_frame@412"
+        },
+        {
+          "key": "D",
+          "name": "No new command; LSP hover only",
+          "detail": "The CLI keeps `jet inspect compiler check` as its reader, and a user filters the document with jq. Only the hover is new. The build-fact explain stays the only CLI chain view. Frame schedule records are not in that document until c8 keeps them.",
+          "technical": "SemIndexJSON and the compiler value print the index records, and no CLI words change.",
+          "code": "$ jet inspect compiler check app.jet | jq '.. | objects | select(.subject? == \"main.on_frame@412\")'"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Lean",
+          "note": "`#print axioms` walks one constant back to the axioms it rests on, and `trace.Meta` logs elaboration steps. One command answers for any constant, by its stable name.",
+          "code": "#print axioms my_theorem"
+        },
+        {
+          "lang": "Coq",
+          "note": "`Print Assumptions` lists the axioms and section variables one term depends on, through every lemma it uses. It is a single command for any term.",
+          "code": "Print Assumptions my_theorem."
+        },
+        {
+          "lang": "Soufflé",
+          "note": "Provenance mode rebuilds the proof tree of one derived tuple from its rule and premise tuples, to a depth the user sets. `explainnegation` explains why a tuple was not derived.",
+          "code": "souffle -t explain prog.dl\n> explain path(\"a\", \"c\")"
+        },
+        {
+          "lang": "Bazel",
+          "note": "`aquery` prints the actions, inputs and mnemonics behind outputs, filtered by a query language. `cquery --output=graph` prints the configured dependency graph. Both are commands separate from build.",
+          "code": "bazel aquery 'outputs(\".*app\", //app)'"
+        },
+        {
+          "lang": "Rust",
+          "note": "`rustc --explain E0502` explains an error code only. Nothing explains why the compiler concluded a fact about your code.",
+          "code": "rustc --explain E0502"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives one CLI reader for every derivation record, as Lean, Coq and Soufflé give one command. Build-fact chains become records that print today's text. Every subject `jet explain` answers today keeps its answer, including package refs.",
+        "gains": [
+          "One command for 'how is this known', in the terminal and, through hover, in the editor.",
+          "The build-fact chain and the new records share one store and one printer, with today's text.",
+          "No new top-level command, no new leading word and no new LSP request."
+        ],
+        "losses": [
+          {
+            "loss": "Declaration and frame subjects need a check of the whole entry, which costs what `jet check` costs.",
+            "mitigation": "Build facts and Diagnostic types stay load-only, evidence records come from stored reports, and the LSP reuses the check it already runs."
+          },
+          {
+            "loss": "A dotted subject has the same shape as a package ref such as `nixpkgs.ripgrep` or `ripgrep@14`.",
+            "mitigation": "Only a first segment that names a project module reaches the records, and `jetpack explain` stays the explicit package spelling."
+          },
+          {
+            "loss": "Premises are hashes today, so the printed chain stops after one step, unlike Lean, Coq and Soufflé.",
+            "mitigation": "c8 makes producers name premise records, and explain nests a premise as soon as one exists."
+          },
+          {
+            "loss": "An `@offset` subject is a byte offset that moves on every edit.",
+            "mitigation": "Hover shows the exact subject to copy, and `main.on_frame` alone answers when the module has one callback."
+          },
+          {
+            "loss": "Moving build-fact explain onto records is a cutover of working code.",
+            "mitigation": "Its text stays byte-identical, proven by explain_build_setting.txt and BuildContribution.explain.out, and `--json` only gains a field."
+          },
+          {
+            "loss": "No listing of a file's subjects and no query language, unlike Bazel's aquery.",
+            "mitigation": "A miss lists the module's closest subjects, and compile-time code reads the index records through the compiler value's `derivations`."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It leaves two readers of 'how is this known': the build-fact chain and `explain derivation`."
+          },
+          {
+            "key": "C",
+            "reason": "Splitting the views between `inspect` and `explain` makes the two-reader split worse."
+          },
+          {
+            "key": "D",
+            "reason": "jq over a large document is not an answer a developer can ask for, and frame records are not in it."
+          }
+        ],
+        "tradeoff": "A longer lookup order and a check for declaration subjects, in exchange for one reader of every derivation record."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: DerivReadReview. The review refuted three draft claims: unchanged build-fact output, since sorted premises lose writer order; one overlap, since package refs share the dotted and `@` shapes; and a free lookup. This draft keeps today's dispatch, adds record subjects before the package fallback, keeps build facts load-only with an ordered payload, and states the check cost and one-step chains."
+      },
+      "checkInstructions": "Check the dispatch order in Compiler/JetCLI/Source/CLI/Front.jet `jet_cli_explain`. Check the package-ref shape in SyntaxDictionary.jet `jet_cli_syntax_query` and the package fallback in Jetpack/CLI/Source/Commands/ExplainCommand.jet. Check BuildFactExplain.jet against Tests/Cases/CLIPartsSurface/explain_build_setting.txt and Examples/Metaprogramming/BuildTime/BuildContribution.explain.out.\n\nCheck the records in Compiler/JetFoundation/Source/Derivations.jet (sorted premises, the FrameSchedule payload). Check SemanticIndex.jet `sema_compiler_index_derivation_push`, Frames.jet `sema_frame_schedule_produce`, EvidenceReport.jet `evidence_record_checked_derivation`, and the LSP check in Compiler/JetCLI/Source/CLI/LSP.jet.",
+      "surface": {
+        "gist": "Which command answers 'how does the compiler know this?' from the one relation of derivation records?",
+        "lesson": "A derivation record is the compiler's receipt for a fact: what it concluded, by which rule, and from which premises. Build settings already have a similar receipt, their writer chain, which `jet explain` prints. This ballot picks the command and the editor view that print any receipt.",
+        "trio": {
+          "current": {
+            "note": "Today only build settings have an explain view. Other records sit in one large JSON document, or are dropped.",
+            "code": "$ jet explain \"#build.settings.tls\" run.jet\nBuild.Settings.tls\n\nWhat this means:\n  Build.Settings.tls = true\n  ...\n\n$ jet explain main.on_frame@412 app.jet\nno package record or build attempt for `main.on_frame@412`"
+          },
+          "wild": {
+            "lang": "Lean",
+            "note": "Lean has one command that says what any theorem rests on.",
+            "code": "#print axioms my_theorem\n-- 'my_theorem' depends on axioms: [propext, Classical.choice, Quot.sound]"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One reader: `jet explain <subject> [file]`",
+            "gist": "Explain also answers record subjects, and build-fact chains become records with today's text.",
+            "gains": [
+              "One command for any record, build facts included.",
+              "Every subject explain answers today keeps its answer.",
+              "No new command, word or editor request."
+            ],
+            "losses": [
+              "A declaration subject costs a `jet check` of the entry.",
+              "Chains stop after one step until producers link premises."
+            ],
+            "proposed": {
+              "code": "$ jet explain main.on_frame@412 app.jet\nmain.on_frame@412  checked frame resource schedule\n  producer jet-sema · rule checked-frame-accesses · current\n  premises\n    draw@3\n    update@1"
+            }
+          },
+          {
+            "key": "B",
+            "name": "New word: `jet explain derivation <file>`",
+            "gist": "A listing and a lookup under a new word, while build facts keep their own path.",
+            "gains": [
+              "Lists every subject of a file.",
+              "The word names the kind of question."
+            ],
+            "losses": [
+              "Two readers of 'how is this known'."
+            ],
+            "proposed": {
+              "code": "$ jet explain derivation app.jet main.on_frame@412"
+            }
+          },
+          {
+            "key": "C",
+            "name": "New subcommand: `jet inspect derivations <file>`",
+            "gist": "The same views as B, under `inspect` beside `inspect facts`.",
+            "gains": [
+              "Sits with the other machine views."
+            ],
+            "losses": [
+              "Build facts under `explain`, other records under `inspect`."
+            ],
+            "proposed": {
+              "code": "$ jet inspect derivations app.jet main.on_frame@412"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Editor hover only",
+            "gist": "No new command; the terminal keeps one large JSON document filtered with jq.",
+            "gains": [
+              "No change to the command line."
+            ],
+            "losses": [
+              "jq is not a question a developer can ask.",
+              "Frame records are not in the document."
+            ],
+            "proposed": {
+              "code": "$ jet inspect compiler check app.jet | jq '.. | objects | select(.subject? == \"main.on_frame@412\")'"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives one command for every record, as Lean, Coq and Soufflé do. Build-fact chains become records that print today's text, and every subject explain answers today keeps its answer.",
+          "gains": [
+            "One command for 'how is this known'.",
+            "Build-fact chains keep their exact text.",
+            "No new command, word or editor request."
+          ],
+          "losses": [
+            {
+              "loss": "A declaration subject costs a `jet check` of the entry.",
+              "mitigation": "Build facts stay load-only, and stored test and proof records are read, not re-run."
+            },
+            {
+              "loss": "A dotted subject looks like a package name.",
+              "mitigation": "Only a project module's name reaches the records; `jetpack explain` stays for packages."
+            },
+            {
+              "loss": "Chains stop after one step for now.",
+              "mitigation": "Card #6848 c8 makes producers link premises, and explain nests them once linked."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two readers of 'how is this known'."
+            },
+            {
+              "key": "C",
+              "reason": "Splits the views across two commands."
+            },
+            {
+              "key": "D",
+              "reason": "jq is not a question, and frame records are missing."
+            }
+          ],
+          "tradeoff": "A longer lookup order and a check for declarations, for one reader of every record."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "DerivReadReview",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-23T22:53:27.017Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-24"
+    },
+    {
+      "id": "D-DEBUG-PREP1",
+      "cardId": "c0rc40yf",
+      "group": "tooling",
+      "title": "How you stop at a breakpoint in code that runs while Jet builds",
+      "situation": "Some Jet code runs while the program is being built: prep blocks, the prep fn they call, marker bodies and `fn build`. None of it can be debugged today. `jet debug` runs the whole build first, in a separate process, and then debugs the finished program. A breakpoint on a prep block's line is refused as `No code on`. Prep code and `fn build` run as machine code in helper processes under a step limit. Marker bodies are expanded inside the compiler itself. The ratified D-PREP-FUEL1 counts steps, but the code times them, so a pause would spend them.",
+      "gist": "How do you ask Jet to stop at a breakpoint inside prep code, a marker body or `fn build` while it builds, and what does a stop show?",
+      "lesson": "Build-time code is Jet code the compiler runs while it builds: prep blocks, the prep fn they call, marker bodies and `fn build`. Each call runs under a step limit, 10,000,000 steps unless `#StepLimit(n)` sets another, so a runaway loop can't stall the build. A step is one evaluated expression or statement. A breakpoint pauses the code so you can read its local values and call stack.",
+      "explainer": "Think of a bakery whose ovens count the turns of each mixer instead of watching a clock. Today you can only inspect a cake after it leaves the oven. The recommendation lets you open the oven door halfway through and use the same tools you use on finished cakes. While the door is open no mixer turns, so the cake gets exactly the same number of turns.",
+      "story": "Ana's prep block fills a lookup table by calling a prep fn, and one entry comes out wrong. She runs `jet debug --break tables.jet:12`, but the build already ran before the session started, and the line never stops. She ends up printing every entry and building again.",
+      "inWild": "// Gradle: -Dorg.gradle.debug=true makes the build wait for a debugger on port 5005.\n// Rust: build.rs is built as a program, so a debugger can run it again by itself.\n// Roslyn: a source generator is debugged by driving it from a unit test.\n// Zig: comptime has @compileLog printing, and its limit counts backward branches.",
+      "detail": "Build-time code today. Each batch of compile-time items is compiled to x86-64 at O0 and loaded into a long-lived child of the compiler (Compiler/JetEval/Source/IR/Native.jet:1-21). `fn build`, `fn dev` and `jet eval` run in a second child. Marker bodies never reach either child. The compiler expands them itself, through the template engine derives use (JetSema Registration/UserTemplates.jet:702-716, Derives.jet:2100-2129).\n\nThe step limit. D-PREP-FUEL1 defines a step as one evaluated expression or statement, counted, never wall time. The native child times it instead: 2000 steps per millisecond of the compiler's wait (Native.jet:14-15, 102-104; SessionHost.jet:285-309, 391-393). That gap is a defect on its own card. This ballot only needs a pause never to spend steps.\n\nWhere a count can go. Every loop turn and every recursive entry in a batch already starts with a poll of one runtime word (JetIR Build.jet:3824-3858, X64Patch.jet:2867-2978). Jet's own plugin translator already counts fuel at each function entry and loop head (JetPlugin Translate.jet:9-10, 416-431).\n\nThe debugger today. `jet debug` runs `jet build -O0 --dead-code=keep` as a separate process, then traces the finished program (Debug.jet:333-350). Breakpoints resolve against that program's line table only, and a line with no code is left out (JetDebug Native.jet:708-746, 2671-2687). Batches carry no line table, only each function's range for `perf` (Native.jet:184-192, 585-613).",
+      "options": [
+        {
+          "key": "A",
+          "name": "`jet debug --build` with counted steps",
+          "detail": "`jet debug --build [<file.jet>]` runs the same build `jet build` runs, with the same flags, behind the usual `(Jet)` console. A breakpoint in build-time code waits for its code and stops there with locals, call stack and the steps the call has used. The pause happens during that build, started from `jet debug` rather than typed as `jet build`.\n\nSteps are counted, as D-PREP-FUEL1 says. A paused call runs no code, so it spends no steps by construction. The count at any stop is the same with or without the debugger, on every machine. `--dap` works with `--build`, so editors get the same stops.",
+          "technical": "The session runs the build in its own process. Both build-time children are its children, and marker bodies expand on its own threads, so the template engine can stop at a breakpoint directly. A marker body has no step limit, because its only loop walks a known list.\n\nEach batch gets a line table and the places of its locals, carried by the listing already sent for `perf`. A breakpoint waits by file and line and is placed when its batch loads.\n\nEach straight-line block adds its statement count to a word in the child. The limit is checked at the poll each loop turn and recursive entry already makes. Calls the debugger makes at a stop save and restore that word. Refused system calls arrive as a signal (ComptimeWire.jet:185, 268), which the session passes back unchanged.",
+          "code": "$ jet debug --build\n(Jet) break tables.jet:12\nBreakpoint 1 at tables.jet:12, placed when its code loads\n(Jet) run\nStopped at tables.jet:12 in squares (build time)\n  i = 7\n  table = [0, 1, 4, 9, 16, 25, 36]\n  #0 squares tables.jet:12\n  #1 SQUARES tables.jet:20 (prep)\n  steps: 1,204 of 10,000,000\n(Jet) continue"
+        },
+        {
+          "key": "B",
+          "name": "`jet debug --build` with steps measured as processor time",
+          "detail": "As A, but a step stays a slice of time, now the child's processor time instead of the compiler's wall-clock wait. A stopped child uses no processor time, so a pause spends nothing. The count still differs from machine to machine, so D-PREP-FUEL1 would have to be amended first. It reads \"during `jet build`\" as A does.",
+          "technical": "No counter in build-time code. The compiler reads the child's processor clock each time its wait for a reply ends, and kills the child past the limit. That the clock can be read from the compiler is unprobed.",
+          "code": "  steps: 2,400 of 10,000,000 (measured as time)"
+        },
+        {
+          "key": "C",
+          "name": "`jet build --break=<place>`: the build stops and opens the console",
+          "detail": "`jet build` takes `--break=<file:line|function>`, repeatable. The build runs as usual until build-time code reaches a breakpoint, then opens the `(Jet)` console there. This is the literal reading of \"during `jet build`\". The stop display and counted steps are as in A.",
+          "technical": "The same compiler work as A, started from `jet build`'s argument parser. `jet build` gains an interactive mode and needs `jet debug`'s other flags, such as `--do`, `--stdin` and `--dap`, forwarded.",
+          "code": "$ jet build --break=tables.jet:12\nStopped at tables.jet:12 in squares (build time)\n  i = 7\n  steps: 1,204 of 10,000,000\n(Jet) continue"
+        },
+        {
+          "key": "D",
+          "name": "Editor only: build-time stops through the debug adapter",
+          "detail": "Build-time stops are reachable only through the editor adapter. Breakpoints set in the editor stop build-time code with locals, stack and the steps used in the Variables view. The pause happens during a build the editor starts, and there is no console form.",
+          "technical": "The same compiler work as A without the console commands. Tests drive it through the adapter's case form.",
+          "code": "// .vscode/launch.json\n{ \"type\": \"jet\", \"request\": \"launch\", \"build\": true }"
+        },
+        {
+          "key": "E",
+          "name": "An interpreter for debugged builds",
+          "detail": "When debugged, build-time code runs in an interpreter instead of as machine code. Stepping moves by Jet expression, and the count is exact. The pause happens during a build, but not in the code a plain build runs.",
+          "technical": "A second engine for all build-time Jet, whose results must equal the machine code's. The comptime child design review already rejected a second engine for drift and speed (Docs/Audits/2026-11-23-comptime-child-design.md:36).",
+          "code": "$ jet debug --build\nStopped at tables.jet:12 in squares\n  steps: 1,204 of 10,000,000"
+        },
+        {
+          "key": "F",
+          "name": "Run one build-time call again outside the build: `jet debug --prep <place>`",
+          "detail": "The build records each build-time call's arguments and the compiler's answers to it. `jet debug --prep tables.jet:20` runs that one call again in a fresh child under today's debugger. This is how Rust's build scripts and Roslyn's generators are debugged. Nothing pauses during any build.",
+          "technical": "The build writes a small record per call, and the debugger runs the batch from it. Nothing traces a running build. `fn build` needs its build services answered from the record, and a marker body has no call to rerun.",
+          "code": "$ jet debug --prep tables.jet:20\nStopped at tables.jet:12 in squares (rerun of SQUARES)\n  i = 7"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Gradle",
+          "note": "Setting `org.gradle.debug` to true makes the build wait for a remote debugger on port 5005. Breakpoints in build logic then stop inside the running build.",
+          "code": "./gradlew help -Dorg.gradle.debug=true"
+        },
+        {
+          "lang": "Rust",
+          "note": "A build script is built as an ordinary program, which a debugger can run again by itself. Procedural macros run inside the compiler, and an endless loop in one hangs it.",
+          "code": "rust-gdb target/debug/build/app-*/build-script-build"
+        },
+        {
+          "lang": "C#",
+          "note": "Roslyn's cookbook debugs a source generator by driving it from a unit test with a generator driver. It runs outside the real build.",
+          "code": "CSharpGeneratorDriver.Create(generator).RunGeneratorsAndUpdateCompilation(input, out var output, out var diagnostics);"
+        },
+        {
+          "lang": "Zig",
+          "note": "`@compileLog` prints values at compile time and fails the build on purpose. `@setEvalBranchQuota` raises a limit counted in backward branches, not time.",
+          "code": "@setEvalBranchQuota(5000);\n@compileLog(table[7]);"
+        },
+        {
+          "lang": "Wasmtime",
+          "note": "`consume_fuel` instruments compiled code to count work deterministically. Its docs call that somewhat expensive and offer a cheaper time-based interrupt instead.",
+          "code": "config.consume_fuel(true);"
+        },
+        {
+          "lang": "Nim",
+          "note": "Macros are inspected with `dumpTree`, `treeRepr` and `expandMacros`. The compile-time VM's limit counts loop iterations.",
+          "code": "nim c --maxLoopIterationsVM:100000000 app.nim"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Build-time code is ordinary O0 Jet, so it should stop under the console and adapter people already use, as Gradle's build logic does. Counted steps keep D-PREP-FUEL1, and a pause spends none by construction.",
+        "gains": [
+          "A breakpoint in a prep block, a prep fn, a marker body or `fn build` stops with locals and a call stack.",
+          "A stop shows an exact step count, the same on every machine and with or without the debugger.",
+          "The same console commands and editor adapter work for build-time code, and `jet build` stays non-interactive."
+        ],
+        "losses": [
+          {
+            "loss": "Build-time loops run slower: a probe measured at most 0.6 ns more per loop turn.",
+            "mitigation": "The count rides the poll each turn already makes, and real build-time code is measured before cutover."
+          },
+          {
+            "loss": "Prep work above ten million counted steps fails until it carries `#StepLimit(n)`.",
+            "mitigation": "A count-only pass over the repository's builds lists those bindings before the limit is enforced."
+          },
+          {
+            "loss": "Breakpoints in build-time code wait for code that loads later.",
+            "mitigation": "A breakpoint is placed when its batch loads, and one never placed is named when the build ends."
+          },
+          {
+            "loss": "A stop holds the whole build until you continue.",
+            "mitigation": "Only `jet debug --build` stops, and a plain `jet build` never waits for a person."
+          },
+          {
+            "loss": "Batches need line tables and local places, and marker bodies need a stop hook.",
+            "mitigation": "The `perf` listing carries the tables, and the hook is a call, because the build runs in the session."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Processor time still differs between machines, so it breaks ratified D-PREP-FUEL1 unless the owner amends it."
+          },
+          {
+            "key": "C",
+            "reason": "It adds an interactive mode to `jet build`, which scripts and CI call, and duplicates `jet debug`'s flags."
+          },
+          {
+            "key": "D",
+            "reason": "Terminal users and case tests lose the console form every other debugger feature has."
+          },
+          {
+            "key": "E",
+            "reason": "A second engine must match the machine code forever, and a debugged build would not run the code a plain build runs."
+          },
+          {
+            "key": "F",
+            "reason": "It reruns a call after the build instead of pausing during it, and marker bodies have no call to rerun."
+          }
+        ],
+        "tradeoff": "A keeps one debugger, one engine and D-PREP-FUEL1's counted steps, at the price of a counter in every build-time loop."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: DerivReadReview. The review found that pauses would spend timed steps, that marker bodies run in the compiler rather than a child, and that breakpoints can't wait for code. This draft runs the build in the session with counted steps, keeping D-PREP-FUEL1, after probing a counter's cost."
+      },
+      "checkInstructions": "Check build-time execution in Compiler/JetEval/Source/IR/Native.jet (header, JET_EVAL_NATIVE_FUEL_PER_MS, the batch listing) and the timed limit in Compiler/JetBackend/Source/Image/SessionHost.jet. Check marker bodies in JetSema Registration/UserTemplates.jet and Derives.jet sema_derive_expand_rule_body.\n\nCheck loop polls in JetIR Build.jet ir_loop_check and X64Patch.jet patch_emit_armed_poll, and the plugin fuel counter in JetPlugin Translate.jet. Check breakpoints in Compiler/JetDebug/Source/Native.jet break_at and run_to. Check D-PREP-FUEL1 and card #5007 c10 and c11.",
+      "surface": {
+        "gist": "How do you stop at a breakpoint in prep code, a marker body or `fn build` while Jet builds?",
+        "lesson": "Build-time code is Jet code the compiler runs while it builds, such as prep blocks and `fn build`. Each call has a step limit, counted in statements, so a runaway loop can't stall the build. A breakpoint pauses code to show its locals and call stack.",
+        "trio": {
+          "current": {
+            "note": "Today `jet debug` builds first, then debugs the finished program, which holds no code for a prep line.",
+            "code": "$ jet debug tables.jet --break tables.jet:20\nNo code on tables.jet:20"
+          },
+          "wild": {
+            "lang": "Gradle",
+            "note": "Gradle makes the running build wait for a debugger.",
+            "code": "./gradlew help -Dorg.gradle.debug=true"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`jet debug --build`, counted steps",
+            "gist": "The usual console runs the build and stops in build-time code.",
+            "gains": [
+              "Same console and editor adapter as programs.",
+              "Exact step count, same with or without the debugger."
+            ],
+            "losses": [
+              "A counter in every build-time loop."
+            ],
+            "proposed": {
+              "code": "$ jet debug --build\n(Jet) break tables.jet:12\n(Jet) run\nStopped at tables.jet:12 in squares (build time)\n  i = 7\n  #1 SQUARES tables.jet:20 (prep)\n  steps: 1,204 of 10,000,000"
+            }
+          },
+          {
+            "key": "B",
+            "name": "As A, steps as processor time",
+            "gist": "No counter; a stopped child uses no processor time.",
+            "gains": [
+              "No added work in build-time code."
+            ],
+            "losses": [
+              "Needs ratified D-PREP-FUEL1 amended."
+            ],
+            "proposed": {
+              "code": "  steps: 2,400 of 10,000,000 (measured as time)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "`jet build --break=<place>`",
+            "gist": "The build itself takes breakpoints and opens the console.",
+            "gains": [
+              "Stops inside the command people already run."
+            ],
+            "losses": [
+              "`jet build` can wait for a person."
+            ],
+            "proposed": {
+              "code": "$ jet build --break=tables.jet:12"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Editor only",
+            "gist": "Build-time stops only through the editor's debug adapter.",
+            "gains": [
+              "Less console work."
+            ],
+            "losses": [
+              "No terminal form and no console tests."
+            ],
+            "proposed": {
+              "code": "{ \"type\": \"jet\", \"request\": \"launch\", \"build\": true }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Interpreter when debugging",
+            "gist": "Debugged builds run build-time code in an interpreter.",
+            "gains": [
+              "Steps by expression."
+            ],
+            "losses": [
+              "A second engine that must always match."
+            ],
+            "proposed": {
+              "code": "$ jet debug --build"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Rerun one call: `jet debug --prep`",
+            "gist": "The build records each call; the debugger reruns one alone.",
+            "gains": [
+              "No traced build."
+            ],
+            "losses": [
+              "Stops after the build, not during it."
+            ],
+            "proposed": {
+              "code": "$ jet debug --prep tables.jet:20"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Build-time code is ordinary Jet, so it should stop under the console and adapter people know. Counted steps keep D-PREP-FUEL1, and pauses spend none.",
+          "gains": [
+            "Breakpoints stop in prep code, marker bodies and `fn build`.",
+            "Exact step counts on every machine.",
+            "`jet build` stays non-interactive."
+          ],
+          "losses": [
+            {
+              "loss": "Build-time loops run up to 0.6 ns slower per turn.",
+              "mitigation": "The count rides an existing poll; real builds are measured before cutover."
+            },
+            {
+              "loss": "Some prep work may need `#StepLimit(n)`.",
+              "mitigation": "A count-only pass lists those bindings first."
+            },
+            {
+              "loss": "A stop holds the whole build.",
+              "mitigation": "Only `jet debug --build` stops; plain `jet build` never waits."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Breaks ratified D-PREP-FUEL1."
+            },
+            {
+              "key": "C",
+              "reason": "`jet build` should never wait for a person."
+            },
+            {
+              "key": "D",
+              "reason": "No console form or console tests."
+            },
+            {
+              "key": "E",
+              "reason": "A second engine to keep equal."
+            },
+            {
+              "key": "F",
+              "reason": "Reruns after the build instead of pausing during it."
+            }
+          ],
+          "tradeoff": "One debugger, one engine and counted steps, for a counter in each build-time loop."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "DerivReadReview",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-23T23:28:23.717Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-24"
+    },
+    {
+      "id": "D-RULE-TYPEARGS1",
+      "cardId": "c0e6znz4",
+      "group": "language",
+      "title": "How a call check reads the type arguments of the types a call passes",
+      "situation": "A marker's `check` rule hears each call of what it marks and sees each argument's type as a TypeId: its identity, its printed name and, for a function type, its signature. Coordinate spaces need more. `first.then(next)` is wrong when the first transform's destination space differs from the next one's source space, and a rule that reports it must compare those two type arguments. `T.reflect().generic_bindings` gives them for a type written in source, but a rule only holds TypeId values. Nothing turns a TypeId value into its arguments, so the Geometry checker can't move to Core.",
+      "gist": "How does a call check read the type arguments of the types a call passes, such as the spaces of two transforms?",
+      "lesson": "A marker can carry a `check` rule that runs at build time for each call of what it marks, and can reject the call with a registered error. The rule sees each argument's type as a TypeId, a small record that names one type. A generic type's arguments are the types written in its angle brackets: `Transform<Screen, World>` has `Screen` and `World`.",
+      "explainer": "Think of a train ticket that only prints the route name, such as \"Screen to World\". The inspector can read it, but can't check that your connecting ticket starts where this one ends without reading the printed words. The recommendation prints the start and end stations as their own fields on every ticket. The inspector compares two fields, and nobody has to phone the office.",
+      "story": "Mia writes a units library and wants `meters.add(seconds)` refused while building, with her own error. Her rule gets both argument types as TypeIds. It can print `Quantity<Meters>`, but it can't ask which unit `Quantity` was given without cutting the printed name apart, so she gives up and checks at run time.",
+      "inWild": "// C++26 (P2996): template_arguments_of(^^Transform<Screen, World>)[1] reflects World.\n// C#: a Roslyn analyzer reads INamedTypeSymbol.TypeArguments on each argument's type.\n// Scala 3: a macro reads TypeRepr.typeArgs and compares types with =:=.\n// Zig: @typeInfo lists a generic struct's fields and declarations, not its arguments.\n// Rust and Swift: macros see syntax; Rust checks type arguments with trait bounds.",
+      "detail": "What a rule holds today. CheckRules.jet builds each heard call's `CompilerCall` record in the compiler. Each argument's `type` is a TypeId made by sema_comptime_reflection_type_id_in (Reflection.jet:1519-1576, CheckRules.jet:275). A specialization's TypeId already names its arguments as text (`Pair<Int, String>`). The compiler holds the specialization as a structured type, and the parameter names come from the declaration, as TypeInfo's bindings do (Reflection.jet:2379-2389, 3066-3072).\n\nWhere rules run. A rule batch is compiled to x86-64 and run in the comptime child (JetEval IR/Native.jet). The driver runs every staged call of one rule in one batch, so the calls travel as one prepared list (CheckRules.jet:1-10). D-CORE-CHECK1=A set a budget of 1 µs per rule call, to be proved by rerunning that ballot's probe. It is not measured yet.\n\nWhat reflection can do today. `T.reflect()` is resolved by sema for a name it can see while checking, and becomes a constant. Nothing maps a TypeId value to a TypeInfo: fn build's `b.program.types()` lists declarations, not specializations.\n\nThe channel the child already has. Compile-time code reaches the compiler through host routes (JetIR BuildTypes.jet:919-960). Kind 1 answers compiler value methods and `core.compiler` queries (JetEval IR/Host.jet:204-225). This review timed kind 1 routes in a `#run` loop: 43 µs per call with a FieldInfo receiver, and 229 µs when a TypeInfo crosses. The comptime child audit's 5.49 to 10.63 µs is a synthetic two-process benchmark, so it is a floor.\n\nWhat the declaration already says. Core writes `then: fn<Next>(self, next: Transform<To, Next>)`, so a chain whose middle spaces differ already fails to type-check. The Geometry checker only words that failure as E2521 before inference runs (Expressions.jet:5001-5008).\n\nThe program each option is judged by. Core's `Transform.then` and `Transform2.then` refuse a chain whose middle spaces differ. They raise E2521 at `then`, keeping the UI snapshot `Tests/UI/coordinate_transform_mismatch.stderr` byte for byte. Options A to C differ only in the line that reads the spaces.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A TypeId carries its `generic_bindings`",
+          "detail": "TypeId gains `generic_bindings: [GenericBindingInfo]`, the record TypeInfo already lists: each type parameter's `name` and the `type` written for it, itself a TypeId. It is filled when the TypeId names a specialization of a declared generic struct or enum, and empty otherwise. A rule reads a type argument by walking the list, with no call out of the rule.\n\nThe fact moves rather than doubles. TypeInfo drops its own `generic_bindings` field, and `T.reflect().identity.generic_bindings` reads it. A function's `signature.generic_bindings` stays, since it binds the function's own parameters.\n\nOne meaning everywhere. A TypeId is the same record in rules, marker bodies, fn build, `#run` values and running code, so each reads the arguments the same way. Built-in shapes list nothing. `[T]`, `T?`, maps, tuples and results declare no parameter names, so a list's element type stays unread.\n\nBeginner path: `first.type.generic_bindings` on a receiver `first`. Expert path: the same list, nested through declared generic types.",
+          "technical": "Makers. Every place that makes a TypeId fills the list. That is sema_comptime_reflection_type_id and its siblings (Reflection.jet:1519-1576), the derive templates' partial records (Derives.jet:2198-2203), and fn build's `add_struct` and `find_type` (JetDriver BuildAdapter.jet). Names come from the declaration's type parameters, as sema_comptime_reflection_binding_infos does (Reflection.jet:2379-2389).\n\nReaders, in the same cutover. TypeInfo's row and field go (CoreRecordRows.jet:353, JetIR CompilerOwned.jet:134, Reflection.jet:2814 and 3099, FactReads.jet:275). TypeId's row, record and field table gain them (CoreRecordRows.jet:601-603, CompilerOwned.jet:186, FactReads.jet:655-660). Two examples, one fact-read case and the reference move to `identity.generic_bindings` (metaprogramming.md:686-695, 888-897).\n\nSize. A TypeId lists only its own arguments, never their fields, so its tree is the written type and is finite. Each nested record repeats its identity text, so a type nested d deep costs about d² characters.\n\nIn this review's probe, a TypeInfo shaped like Transform2 held 28 TypeIds, and A adds 21 binding records under them. Each heard `then` call ships 2 TypeIds today and about 8 records under A, as static data. No round trips.",
+          "code": "ChainsSpaces: struct {\n    impl Marker {\n        sites: [.Method],\n\n        check: fn(self, call: CompilerCall) {\n            first: call.receiver ?? return\n            if call.args.len() != 1 -> return\n            next: call.args[0]\n            to: bound(first.type.generic_bindings, \"To\") ?? return\n            from: bound(next.type.generic_bindings, \"From\") ?? return\n            if to.identity != from.identity {\n                reject(SpacesDoNotChain{first: first.type.name, next: next.type.name, to: to.name, from: from.name}, at: call.name)\n            }\n        }\n    }\n}\n\nbound: fn(bindings: [GenericBindingInfo], name: String) -> TypeId? {\n    loop binding in bindings {\n        if binding.name == name -> return Val(binding.type)\n    }\n    None\n}"
+        },
+        {
+          "key": "B",
+          "name": "`id.reflect()` on a TypeId value, from a table sent with each batch",
+          "detail": "`.reflect()` on a TypeId value gives the TypeInfo of the type it names, the record `T.reflect()` gives for a written type. In a rule body it reads a table the compiler sends with the batch. The table holds one TypeInfo per distinct type the batch's calls pass as receiver or argument. A TypeId reached by walking, such as a binding's `type` or a field's `type`, is not in the table, and reflecting it fails.\n\nOne spelling, three answers. Marker bodies are expanded inside the compiler and answer directly. fn build answers over its host route. Rules answer from the table, so only top-level argument types reflect in a rule.\n\nBeginner path: `first.type.reflect().generic_bindings`. Expert path: the whole TypeInfo of an argument's type, but nothing nested.",
+          "technical": "Sema accepts `.reflect()` on a TypeId-typed value. CheckRules adds the table to the batch's prepared list, built only when the rule body calls `.reflect()`, and JetIR lowers the call to a lookup by identity. No round trips.\n\nCost per batch: one full TypeInfo per distinct argument or receiver type. For `Transform2<Float, Screen, World>`, that is 8 fields and 8 method signatures today (Core/Math/Math.jet:44604-44695), with their effects, markers and locations. In this review's probe, such a TypeInfo held 28 TypeIds. Closing the table over nested TypeIds would grow it with every type each one mentions.",
+          "code": "            to: bound(first.type.reflect().generic_bindings, \"To\") ?? return\n            from: bound(next.type.reflect().generic_bindings, \"From\") ?? return"
+        },
+        {
+          "key": "C",
+          "name": "`id.reflect()` on a TypeId value, answered by the compiler over the host route",
+          "detail": "The same `.reflect()` as B, but every TypeId value reflects in every place, nested ones included. In a rule or `#run` code the child asks the compiler over the host route compile-time code already uses, and the compiler answers with the TypeInfo. Marker bodies answer directly and fn build over its own host route.\n\nOne meaning everywhere, with no table. A rule can read any fact of any type it reaches, such as an argument type's fields or traits.\n\nBeginner path: `first.type.reflect().generic_bindings`. Expert path: walk from any TypeId to its TypeInfo and on.",
+          "technical": "Sema accepts `.reflect()` on a TypeId-typed value. JetIR lowers it to a host method route of kind 1. JetEval IR/Host.jet answers it by building the TypeInfo sema builds for `T.reflect()` and writing it into the child as a value. No new channel is needed.\n\nCost: one round trip and one TypeInfo copied into the child per reflect. This review measured kind 1 routes at 43 µs with a FieldInfo receiver and 229 µs when a TypeInfo crosses. So the E2521 rule's two reflects cost roughly 0.1 to 0.5 ms per heard call, against D-CORE-CHECK1's budget of 1 µs.\n\nA memo by identity in the child would cut that to one round trip per distinct type per batch, at the price of a cache in compiled rule code.",
+          "code": "            to: bound(first.type.reflect().generic_bindings, \"To\") ?? return\n            from: bound(next.type.reflect().generic_bindings, \"From\") ?? return"
+        },
+        {
+          "key": "D",
+          "name": "The signature states the check, and a marker words its mismatch",
+          "detail": "The declaration already says what E2521 checks: `then` takes `next: Transform<To, Next>`, so differing middle spaces fail to type-check. D lets a parameter carry a marker naming the registered error for that failure. The compiler fills the error from the two types it compared and the pair of arguments that differ. No rule runs and no TypeId grows.\n\nIt covers only what a signature can say. A check such as \"the spaces must differ\" or \"this unit must be a length\" still needs a rule that reads type arguments. So D leaves this ballot's question open for packages.\n\nBeginner path: write the constraint in the types, as today. Expert path: name the error a mismatch raises.",
+          "technical": "Sema's argument check reaches E2521 today through the Geometry checker, before inference (Expressions.jet:5001-5008). Under D it reports a type mismatch at a marked parameter as that marker's error instead. The error's fields are filled from the compared types by a fixed convention. This is a second way to raise a registered error beside D-CORE-CHECK1's rules. It is Rust's shape: the bound checks, and `#[diagnostic::on_unimplemented]` words the error.",
+          "code": "// Core/Math/Math.jet under D: the signature checks, the marker words it.\nTransform: struct<From, To> {\n    then: fn<Next>(self, #Mismatch(TransformCompositionMismatch) next: Transform<To, Next>) -> Transform<From, Next> TransformError! { … }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++26",
+          "note": "P2996 reflection lists a specialization's arguments with `template_arguments_of`, each a reflection that can be queried in turn. The query runs inside the compiler, so it costs no process round trip.",
+          "code": "constexpr auto to = template_arguments_of(^^Transform<Screen, World>)[1];"
+        },
+        {
+          "lang": "C#",
+          "note": "A Roslyn analyzer gets each invocation's argument types as symbols. A constructed generic type's `TypeArguments` lists its arguments, each itself a symbol, with no further query.",
+          "code": "var named = (INamedTypeSymbol)model.GetTypeInfo(arg.Expression).Type;\nvar to = named.TypeArguments[1];"
+        },
+        {
+          "lang": "Scala 3",
+          "note": "A macro handed a `TypeRepr` reads its arguments directly with `typeArgs`, and compares types with `=:=`.",
+          "code": "val List(_, to) = first.tpe.widen.typeArgs\nif !(to =:= from) then report.error(\"spaces differ\")"
+        },
+        {
+          "lang": "Zig",
+          "note": "A generic type is a function that returns a struct. `@typeInfo` lists that struct's fields and declarations but not the arguments it was made from, and the type's name is text such as `List(i32)`.",
+          "code": "fn List(comptime T: type) type {\n    return struct { items: []T, len: usize };\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "A procedural macro reads types through `syn` as written tokens: `PathArguments::AngleBracketed` holds `<Screen, World>`, unresolved. Checks on resolved types are trait bounds, which `#[diagnostic::on_unimplemented]` words. That is D's shape.",
+          "code": "fn then<Next>(self, next: Transform<To, Next>) -> Transform<From, Next>"
+        },
+        {
+          "lang": "Swift",
+          "note": "A macro runs in a plugin process and receives syntax only. SE-0382 deferred type information to a later proposal, because its representation would have to stay stable.",
+          "code": "@freestanding(expression) macro stringify<T>(_: T) -> (T, String)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A specialization's arguments are part of the type a TypeId names, and the compiler finds them through the declaration it already reads for TypeInfo. Carrying them costs static data in each batch, not a round trip measured at 43 µs or more. It reads the same wherever a TypeId appears, as in C#, Scala and C++26.",
+        "gains": [
+          "A rule compares type arguments directly, so E2521 and any package's own type-argument checks move to Core and packages.",
+          "Every TypeId reads its arguments the same way in rules, marker bodies, fn build and running code, nested ones included.",
+          "No call leaves the rule, so a heard call's cost stays static data in its batch."
+        ],
+        "losses": [
+          {
+            "loss": "A rule still can't read an argument type's fields, methods or traits.",
+            "mitigation": "Today's checkers need only type arguments. A rule needing more is a later ballot, and C stays open for it."
+          },
+          {
+            "loss": "TypeInfo's own `generic_bindings` moves to `identity.generic_bindings`, so every reader changes.",
+            "mitigation": "One cutover changes them all: CoreRecordRows, CompilerOwned, Reflection, FactReads, two examples, one case and the reference."
+          },
+          {
+            "loss": "Every reflected record grows: a TypeInfo shaped like Transform2 holds 28 TypeIds, which gain 21 binding records.",
+            "mitigation": "A non-generic type's list is empty, and a TypeId never lists fields, so its tree is only the written type."
+          },
+          {
+            "loss": "List, option, map, tuple and result types list no bindings, so a rule can't read a list's element type.",
+            "mitigation": "Today's checks read declared generic types only. Element types can be a later TypeId field."
+          },
+          {
+            "loss": "Every TypeId maker must name the parameters, derive templates and fn build included, or two TypeIds of one type differ.",
+            "mitigation": "A parity case compares the TypeId each maker gives one specialization, as D-CORE-CHECK1's Dyn parity case does."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The table ships a whole TypeInfo per argument type to read one list, and a TypeId reached by walking can't reflect in a rule though it can elsewhere."
+          },
+          {
+            "key": "C",
+            "reason": "Each reflect is a host round trip measured at 43 to 229 µs. E2521's two reflects then cost about 90 to 460 times the 1 µs budget, unless rule code gains a cache."
+          },
+          {
+            "key": "D",
+            "reason": "It covers only what a signature can state, and it adds a second way to raise a registered error beside the rules D-CORE-CHECK1 made the one mechanism."
+          }
+        ],
+        "tradeoff": "A answers declared type arguments cheaply and the same everywhere. The price is larger reflected records, a cutover of every TypeId maker and reader, and no element types or general reflection inside rules."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: DerivReadReview. The review found D-CORE-CHECK1's 1 µs per call is a budget, C's real host route costs 43 to 229 µs, and A's bindings skip lists, options and maps. This revision states each, measures A's record growth, names every TypeId maker and reader the cutover touches, adds option D, and sources C++26, Zig, Rust syn and Swift."
+      },
+      "checkInstructions": "CheckRules.jet and its line cites are in batch tree e4d5e24c (not yet on dev). Every other cite matches dev too. Check the call record at CheckRules.jet:275 and the TypeId builders at Reflection.jet:1519-1576. Check TypeInfo's bindings at Reflection.jet:2379-2389 and 3066-3099, FactReads.jet:275 and 655-660, and CoreRecordRows.jet:353 and 601-603.\n\nCheck host routes in JetIR BuildTypes.jet:919-960 and JetEval IR/Host.jet:204-225, and the review's timings in its audit. Check the 1 µs budget in D-CORE-CHECK1's technical text. Check `then`'s signature at Core/Math/Math.jet:44538 and the E2521 snapshot in Tests/UI/coordinate_transform_mismatch.stderr.",
+      "surface": {
+        "gist": "How does a build-time call check read the type arguments of the types a call passes?",
+        "lesson": "A marker can carry a `check` rule that runs at build time for each call it marks. The rule can reject the call with its own error. It sees each argument's type as a TypeId, a small record naming one type. A generic type's arguments are the types in its angle brackets: `Transform<Screen, World>` has `Screen` and `World`.",
+        "trio": {
+          "current": {
+            "note": "Today a rule holds a TypeId with a printed name, and nothing gives its type arguments.",
+            "code": "first: call.receiver ?? return\n// first.type.name is \"Transform<Screen, World>\"\n// no field or query gives `World`"
+          },
+          "wild": {
+            "lang": "C#",
+            "note": "A Roslyn analyzer reads a generic type's arguments straight off the type symbol.",
+            "code": "var to = named.TypeArguments[1];"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A TypeId carries its type arguments",
+            "gist": "Every TypeId lists its `generic_bindings`, nested, wherever it appears.",
+            "gains": [
+              "No call leaves the rule.",
+              "Same read in rules, markers, fn build and running code."
+            ],
+            "losses": [
+              "No fields or traits of argument types in rules.",
+              "No element types of lists, options or maps.",
+              "Reflected records grow; every TypeId maker changes."
+            ],
+            "proposed": {
+              "code": "to: bound(first.type.generic_bindings, \"To\") ?? return\nfrom: bound(next.type.generic_bindings, \"From\") ?? return\nif to.identity != from.identity {\n    reject(SpacesDoNotChain{...}, at: call.name)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "`id.reflect()` from a per-batch table",
+            "gist": "The compiler sends each argument type's TypeInfo with the batch.",
+            "gains": [
+              "Whole TypeInfo of top-level argument types."
+            ],
+            "losses": [
+              "Nested TypeIds can't reflect in a rule.",
+              "Ships whole records to read one list."
+            ],
+            "proposed": {
+              "code": "to: bound(first.type.reflect().generic_bindings, \"To\") ?? return"
+            }
+          },
+          {
+            "key": "C",
+            "name": "`id.reflect()` asked of the compiler",
+            "gist": "Each reflect asks the compiler over the existing host route.",
+            "gains": [
+              "Any TypeId reflects, everywhere."
+            ],
+            "losses": [
+              "43 to 229 µs per reflect, measured."
+            ],
+            "proposed": {
+              "code": "to: bound(first.type.reflect().generic_bindings, \"To\") ?? return"
+            }
+          },
+          {
+            "key": "D",
+            "name": "The signature checks; a marker words it",
+            "gist": "The parameter type refuses the chain, and a marker names the error.",
+            "gains": [
+              "No rule and no new reflection."
+            ],
+            "losses": [
+              "Only checks a signature can state.",
+              "A second way to raise registered errors."
+            ],
+            "proposed": {
+              "code": "then: fn<Next>(self, #Mismatch(TransformCompositionMismatch) next: Transform<To, Next>)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The arguments are part of the type a TypeId names. Carrying them costs no round trip and reads the same everywhere, as in C# and Scala.",
+          "gains": [
+            "Type-argument checks move to Core and packages.",
+            "One read of type arguments everywhere.",
+            "No round trip per call."
+          ],
+          "losses": [
+            {
+              "loss": "Rules still can't read argument types' fields or traits.",
+              "mitigation": "Today's checks need only type arguments; a later ballot can add C."
+            },
+            {
+              "loss": "Reflected records grow, and every TypeId maker and reader changes.",
+              "mitigation": "One cutover, with a parity case across makers."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Ships whole records, and nested TypeIds can't reflect in rules."
+            },
+            {
+              "key": "C",
+              "reason": "A measured round trip per reflect costs at least 40 times a rule's budget."
+            },
+            {
+              "key": "D",
+              "reason": "Covers only what signatures state, and adds a second error mechanism."
+            }
+          ],
+          "tradeoff": "Cheap, uniform type arguments, but no element types or general reflection inside rules."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "DerivReadReview",
+      "draft": false,
       "status": "open",
-      "created": "2026-11-23T21:28:00.578Z"
+      "created": "2026-11-24T00:15:09.625Z"
     }
   ],
   "questions": [
@@ -135581,6 +136454,209 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T00:21:09.843Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-24T00:21:08.684Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-24T00:21:07.634Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-24T00:21:06.588Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-24T00:21:05.589Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-24T00:20:33.885Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DEBUG-PREP1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-24T00:20:33.885Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DERIV-READ1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-24T00:20:33.884Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BUILD-TARGETFACTS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-24T00:15:09.625Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-RULE-TYPEARGS1",
+      "note": "How a call check reads the type arguments of the types a call passes"
+    },
+    {
+      "at": "2026-11-23T23:58:09.392Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T23:56:42.621Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T23:56:41.729Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T23:50:01.473Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T23:30:11.082Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T23:28:23.717Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DEBUG-PREP1",
+      "note": "How you stop at a breakpoint in code that runs while Jet builds"
+    },
+    {
+      "at": "2026-11-23T23:20:28.628Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0gy2j07",
+      "note": "15 criteria, soft limit 6: The compile-time step limit is the same load-sensitivity defect this card owns; one card per area (owner order 2026-11-14)."
+    },
+    {
+      "at": "2026-11-23T23:20:28.628Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#15 Compile-time code's step limit (E0952) counts deterministic "
+    },
+    {
+      "at": "2026-11-23T23:17:22.326Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T23:06:10.345Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T23:02:23.106Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-23T23:02:22.179Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-23T23:02:21.266Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-23T23:02:20.370Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-23T22:53:27.017Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DERIV-READ1",
+      "note": "How a developer asks how the compiler knows a fact: one explain reader over the derivation records"
+    },
+    {
+      "at": "2026-11-23T22:47:26.405Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T22:41:48.691Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T22:18:39.329Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0oe96sn",
+      "note": "61 criteria, soft limit 6: sweep-regression card; the owner order puts each regression on the card that owns the area"
+    },
+    {
+      "at": "2026-11-23T22:18:39.329Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#63 Every commit ratchet passes on dev: each tool `jet Tools/Age"
+    },
+    {
+      "at": "2026-11-23T22:16:30.124Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-23T21:37:05.061Z",
       "by": "Orchestrator",
