@@ -12,6 +12,7 @@ use {
         module_text,
         name_column_table,
         name_find,
+        name_index,
         name_intern,
         name_table_sized,
     ]
@@ -131,20 +132,86 @@ jet_driver_comptime_diagnostic_key: fn(diagnostic: Diagnostic) -> String Never! 
 }
 
 // Adds each of `incoming` that matches no diagnostic already in `diagnostics`
-// (or added before it). The keys of the existing diagnostics are taken once
-// per call instead of recomputing every existing key for each addition.
+// (or added before it). A later pass reports the diagnostics of an earlier
+// one again, in its own order, so an added one takes its place among them:
+// just before the existing diagnostic the next repeated one matches, and
+// last when no repeated one follows it. A call whose errors waited on its
+// rules' answers is reported in its place in the source, not after the
+// rest. The keys of the existing diagnostics are taken once per call
+// instead of recomputing every existing key for each addition.
 jet_driver_comptime_diagnostics_add: fn(diagnostics: &[Diagnostic], incoming: [Diagnostic]) Never! {
     if incoming.len() == 0 {
         return
     }
     seen := name_column_table(diagnostics.len() + incoming.len())
-    loop existing in diagnostics -> _ := name_intern(seen, jet_driver_comptime_diagnostic_key(existing))
-    loop diagnostic in incoming {
-        key: jet_driver_comptime_diagnostic_key(diagnostic)
-        if name_find(seen, key) != None -> next
-        _ := name_intern(seen, key)
-        diagnostics.push(diagnostic.copy())
+    // The row of the first existing diagnostic of each key id; id 0 is the
+    // empty spelling, which no key is.
+    rows := [Int]{-1}
+    loop row in 0..<diagnostics.len() {
+        if name_index(name_intern(seen, jet_driver_comptime_diagnostic_key(diagnostics[row]))) == rows.len() {
+            rows.push(row)
+        }
     }
+    existing: rows.len()
+    // Each incoming diagnostic's existing row; -1 when it is added, -2 when
+    // it repeats one added or matched before it. Only the first repeat of an
+    // existing diagnostic marks its place.
+    places := [Int]{}
+    fresh := existing
+    loop diagnostic in incoming {
+        id: name_index(name_intern(seen, jet_driver_comptime_diagnostic_key(diagnostic)))
+        if {
+            id < existing -> {
+                places.push(rows[id])
+                rows[id] = -2
+            }
+            id == fresh -> {
+                fresh += 1
+                places.push(-1)
+            }
+            else -> places.push(-2)
+        }
+    }
+    if fresh == existing {
+        return
+    }
+    // The row each added diagnostic goes before (the length for last).
+    before := loop _ in incoming -> diagnostics.len()
+    following := diagnostics.len()
+    walk := incoming.len()
+    loop walk > 0 {
+        walk -= 1
+        if {
+            places[walk] >= 0 -> following = places[walk]
+            places[walk] == -1 -> before[walk] = following
+        }
+    }
+    // Each row's added diagnostics, chained through `link` last first, so
+    // the list built back to front and then reversed has a row's added
+    // diagnostics before it in their incoming order.
+    head := loop _ in 0..<diagnostics.len() + 1 -> -1
+    link := loop _ in incoming -> -1
+    loop index in 0..<incoming.len() {
+        if places[index] == -1 {
+            link[index] = head[before[index]]
+            head[before[index]] = index
+        }
+    }
+    earlier := compiler_take_rows<Diagnostic>(diagnostics)
+    merged := [Diagnostic]{}
+    row := earlier.len()
+    loop {
+        at := head[row]
+        loop at >= 0 {
+            merged.push(incoming[at].copy())
+            at = link[at]
+        }
+        if row == 0 -> break
+        row -= 1
+        merged.push(earlier.pop() ?? panic("a diagnostic row failed to pop"))
+    }
+    merged.reverse()
+    diagnostics = merged.move()
 }
 
 // A run returns its one graph on every exit, with later edits in its trail.

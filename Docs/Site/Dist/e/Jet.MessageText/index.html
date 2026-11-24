@@ -47,19 +47,19 @@
 More: jet-lang.dev/e/Jet.MessageText
 
 Warning: Jet.MessageText: The default HTTP body text limit is passed through a lower-level body call
-  --&gt; Tests/UILint/message_text.jet:13:55
+  --&gt; Tests/UILint/message_text.jet:5:20
     |
- 13 | read_response: fn(response: HTTPResponse) -&gt; String { response.body().text(1048576) ?? &quot;fallback&quot; }
-    |                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  5 |     from_constant: req.body().text(exact) ?? &quot;fallback&quot;
+    |                    ^^^^^^^^^^^^^^^^^^^^^^
  Why: `request.text()` and `response.text()` already read the body with the same default cap as `body().text(1048576)`
  Fix: Replace `body().text(1048576)` with `text()`
 More: jet-lang.dev/e/Jet.MessageText
 
 Warning: Jet.MessageText: The default HTTP body text limit is passed through a lower-level body call
-  --&gt; Tests/UILint/message_text.jet:5:20
+  --&gt; Tests/UILint/message_text.jet:13:55
     |
-  5 |     from_constant: req.body().text(exact) ?? &quot;fallback&quot;
-    |                    ^^^^^^^^^^^^^^^^^^^^^^
+ 13 | read_response: fn(response: HTTPResponse) -&gt; String { response.body().text(1048576) ?? &quot;fallback&quot; }
+    |                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: `request.text()` and `response.text()` already read the body with the same default cap as `body().text(1048576)`
  Fix: Replace `body().text(1048576)` with `text()`
 More: jet-lang.dev/e/Jet.MessageText
