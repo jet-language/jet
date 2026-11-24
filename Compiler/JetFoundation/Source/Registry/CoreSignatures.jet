@@ -59,12 +59,6 @@ CoreCallSignatureRequest: struct {
     type_args: [Type],
 }
 
-CoreCallParameterContract: struct {
-    label: String,
-    zone: ParamZone,
-    default: CoreCallDefault?,
-}
-
 CoreCallLabelRequirement: struct {
     argument_index: Int,
     label: String,
@@ -125,40 +119,6 @@ core_sig_generic_with_result_rule: fn(module_name: String, member: String, param
     signature := core_sig_generic(module_name, member, parameters, return_type, type_parameter)
     signature.result_rule = result_rule
     signature
-}
-
-core_param_required: fn(label: String) -> CoreCallParameterContract Never! {
-    CoreCallParameterContract{label: label, zone: ParamZone.PositionalOnly, default: None}
-}
-
-core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCallParameterContract]? {
-    if module_name == "core.rt" && member == "callback" {
-        return Val([CoreCallParameterContract]{
-            core_param_required("rate"),
-            core_param_required("frames"),
-            core_param_required("fn"),
-        })
-    }
-    None
-}
-
-core_sig_apply_parameter_contract: fn(signature: ^^CoreTypedCallSignature, contracts: [CoreCallParameterContract]) -> CoreTypedCallSignature? {
-    updated := signature
-    if updated.parameters.len() != contracts.len() -> return None
-    required_count := 0
-    index := 0
-    loop index < contracts.len() {
-        contract: contracts[index]
-        updated.parameters[index].name = contract.label
-        updated.parameters[index].label = contract.label
-        updated.parameters[index].zone = contract.zone
-        updated.parameters[index].default = contract.default
-        if contract.default == None -> required_count += 1
-        index += 1
-    }
-    updated.min_arity = required_count
-    updated.max_arity = updated.parameters.len()
-    Val(updated)
 }
 
 core_sig_math_fixed: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
@@ -330,16 +290,12 @@ core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature?
 core_call_typed_signature_for: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     row: core_call(request.module_name, request.member) ?? return None
     if !core_call_coverage_contains(row.coverage, CORE_CALL_COVERAGE_SEMA) -> return None
-    resolved_signature := core_sig_fixed(request) ?? return None
+    resolved_signature: core_sig_fixed(request) ?? return None
     if resolved_signature.module_name != request.module_name || resolved_signature.member != request.member {
         return None
     }
     if request.type_args.len() > 0 && request.type_args.len() != resolved_signature.type_parameters.len() {
         return None
-    }
-    contracts: core_call_parameter_contract(request.module_name, request.member)
-    if contracts == Val(contract_rows) {
-        resolved_signature = core_sig_apply_parameter_contract(resolved_signature, contract_rows) ?? return None
     }
     if request.actual_arity < resolved_signature.min_arity || request.actual_arity > resolved_signature.max_arity {
         return None

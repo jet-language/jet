@@ -57,13 +57,10 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins process_spec_plan ProcessSpec Result<ProcessPlan,IOError>
     jet_builtins process_spec_run|process_spec_run_checked ProcessSpec Result<ProcessReceipt,IOError>
     jet_builtins process_spec_spawn ProcessSpec Result<ProcessChild,IOError>
-    core.term readline - Result<String,IOError>
     core.term take Int Result<[u8],IOError>
     core.term stdout - Stdout
     core.term stderr - Stderr
-    core.term terminal_width|terminal_height - Int
     core.term jet_term_is_terminal_raw Int Bool
-    core.term progress String Result<Unit,IOError>
     core.sys __times - (available:Bool,user:Int,system:Int,child_user:Int,child_system:Int,elapsed:Int,ticks:Int)
     core.sys __rlimit Int (available:Bool,soft:Int,hard:Int,errno:Int)
     core.sys __set_rlimit|__sched_set Int,Int,Int (available:Bool,value:Int,errno:Int)
@@ -110,7 +107,7 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.math.random seed Int -
     core.crypto __wipe ^[u8] -
     core.crypto __secret_keep ^[u8] -
-    core.rt callback|__callback Int,Int,callback RealtimeStream
+    core.rt __callback Int,Int,callback RealtimeStream
     core.tasks after Duration,T Receiver<T> T
     core.game run ^GameScene,GameReplay?,GameBackend?,Int? String
     core.event __scope_new - EventScope
@@ -125,7 +122,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.tasks __channel_new - (sender:Sender<T>,receiver:Receiver<T>) T
     core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
     core.prelude __receipt_attach T,String,String,String Unit T
-    core.encoding.json decode String Result<Dyn,EncodingError>
     core.encoding.json canonical Dyn String
     jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
     core.net __ip_from_bytes ^^[u8] IPAddr

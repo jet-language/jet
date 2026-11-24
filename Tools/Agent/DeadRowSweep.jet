@@ -18,7 +18,12 @@
 // non-receiver dispatcher row and no CoreCallExtensions.jet row): the typed
 // signature lookup (core_call_typed_signature_for) and the native return
 // labels' route read a row only through a member's record, so the row is
-// read by nothing; only its name goes from the signature table.
+// read by nothing. It is stale too when the record is source-owned with no
+// source target or role: sema routes the call to the member's Core
+// declaration and, on the Core record route, checks the call against that
+// declaration when no row is there (sema_call_core_check_fixed_record), so
+// the row only restates it. Only the stale member's name goes from the
+// signature table.
 // Usage: jet Tools/Agent/DeadRowSweep.jet [--check|--write]
 // --check lists the dead members and the stale signature rows and fails when
 // there is one; --write deletes their rows and names each dead source-owned
@@ -219,18 +224,24 @@ inventory_members: fn(text: String) -> [TableMember] Never! {
 
 // The `module member` keys of the non-receiver Core call records: Core.rows's
 // dispatcher rows (a receiver row's module is `-`) and CoreCallExtensions.jet's
-// rows (`module_name: "core.x", member: "name"`).
+// rows (`module_name: "core.x", member: "name"`). Each maps to whether its
+// Core declaration types the call: a source-owned record with no source target
+// or role.
 record_keys: fn(rows: String, extensions: String) -> [String:Bool] Never! {
     keys := [String:Bool]{}
-    loop member in dispatcher_members(rows) {
-        if member.module_name != "-" -> keys["{member.module_name} {member.member}"] = true
+    loop line in rows.split("\n") {
+        if !line.starts_with("dispatcher_row ") -> next
+        fields: line.split(" ").to_list()
+        if fields.len() < 4 || fields[2] == "-" -> next
+        source_owned: line.contains("CoreCallRecord.source_owned(") || line.contains(".with_source_owned()")
+        keys["{fields[2]} {fields[3]}"] = source_owned && !line.contains(".with_source_target(") && !line.contains(".with_source_role(")
     }
     loop line in extensions.split("\n") {
         module_part: line.split_once("module_name: \"") ?? next
         module_name: module_part.after.split_once("\"") ?? next
         member_part: module_name.after.split_once("member: \"") ?? next
         member: member_part.after.split_once("\"") ?? next
-        keys["{module_name.before} {member.before}"] = true
+        keys["{module_name.before} {member.before}"] = line.contains("symbol: CoreCallSymbol.SourceOwned") && line.contains("source_target: None")
     }
     keys
 }
@@ -246,12 +257,13 @@ signature_table_members: fn() -[FS]> [TableMember] DeadRowSweepError! {
 }
 
 // The stale members of `signatures` as `module member` pairs: those with no
-// Core call record in `records`.
+// Core call record in `records`, or whose record's Core declaration types the
+// call.
 stale_signatures: fn(signatures: [TableMember], records: [String:Bool]) -> [String:Bool] Never! {
     stale := [String:Bool]{}
     loop member in signatures {
         key: "{member.module_name} {member.member}"
-        if records.get(key) == None -> stale[key] = true
+        if records.get(key) ?? true -> stale[key] = true
     }
     stale
 }
@@ -386,7 +398,8 @@ dead_row_sweep_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> String DeadR
     rows: files.read(CORE_ROWS) ?? return Err(sweep_fail("cannot read {CORE_ROWS}: {err}"))
     extensions: files.read(EXTENSION_ROWS) ?? return Err(sweep_fail("cannot read {EXTENSION_ROWS}: {err}"))
     signatures: signature_table_members() ?? return Err(err)
-    stale: stale_signatures(signatures, record_keys(rows, extensions))
+    records: record_keys(rows, extensions)
+    stale: stale_signatures(signatures, records)
     if dead.len() == 0 && stale.len() == 0 -> return Ok("dead row sweep: no dead rows")
     if mode == "--check" {
         count := 0
@@ -398,7 +411,9 @@ dead_row_sweep_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> String DeadR
         }
         loop member in signatures {
             key: "{member.module_name} {member.member}"
-            if dead.get(key) == None && stale.get(key) != None -> print("{member.place}: {key} (no call record)")
+            if dead.get(key) != None || stale.get(key) == None -> next
+            reason: if records.get(key) == None -> "no call record" else -> "its Core declaration types the call"
+            print("{member.place}: {key} ({reason})")
         }
         return Err(sweep_fail("{count} dead row(s) of {dead.len()} member(s) and {stale.len()} stale signature member(s); run jet Tools/Agent/DeadRowSweep.jet --write"))
     }
@@ -471,13 +486,14 @@ run: fn() {
     assert_eq(sweep_inventory(inventory, dead), "fixed_sig core.x {{ kept }}\n")
 }
 
-#Test("a signature member without a non-receiver call record is stale") {
-    rows: "dispatcher_row plain core.x kept | CoreCallRecord.new(\"core.x\", \"kept\", \"jet_kept\", true, &[false])\ndispatcher_row receiver - gone | CoreCallRecord.receiver_with_symbol(&[\"X\"], \"gone\", \"jet_gone\", true, &[])\n"
-    extensions: "    CoreCallRecord{{module_name: \"core.y\", member: \"added\", receiver_types: [String]{{}}}},\n"
+#Test("a signature member without a non-receiver call record, or whose record's Core declaration types it, is stale") {
+    rows: "dispatcher_row plain core.x kept | CoreCallRecord.new(\"core.x\", \"kept\", \"jet_kept\", true, &[false])\ndispatcher_row receiver - gone | CoreCallRecord.receiver_with_symbol(&[\"X\"], \"gone\", \"jet_gone\", true, &[])\ndispatcher_row plain core.x owned | CoreCallRecord.source_owned(\"core.x\", \"owned\", &[false])\ndispatcher_row plain core.x roled | CoreCallRecord.new(\"core.x\", \"roled\", \"jet_roled\", true, &[false]).with_source_owned().with_source_role(\"XRoled\")\n"
+    extensions: "    CoreCallRecord{{module_name: \"core.y\", member: \"added\", receiver_types: [String]{{}}, symbol: CoreCallSymbol.Prelude(\"jet_added\"), source_target: None}},\n    CoreCallRecord{{module_name: \"core.y\", member: \"sourced\", receiver_types: [String]{{}}, symbol: CoreCallSymbol.SourceOwned, source_target: None}},\n"
     records: record_keys(rows, extensions)
-    assert_eq(records.len(), 2)
-    table: "a: fn() {{\n    rows: \"\"\"\n    core.x gone|kept Int Int\n    core.y added - Unit\n    core.z lone Int Int\n    \"\"\"\n}}\n"
+    assert_eq(records.len(), 5)
+    table: "a: fn() {{\n    rows: \"\"\"\n    core.x gone|kept Int Int\n    core.x owned|roled Int Int\n    core.y added|sourced - Unit\n    core.z lone Int Int\n    \"\"\"\n}}\n"
     stale: stale_signatures(signature_members("a.jet", table), records)
-    assert_eq(stale.len(), 2)
+    assert_eq(stale.len(), 4)
     assert(stale.get("core.x gone") != None && stale.get("core.z lone") != None)
+    assert(stale.get("core.x owned") != None && stale.get("core.y sourced") != None)
 }
