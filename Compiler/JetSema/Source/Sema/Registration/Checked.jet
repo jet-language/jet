@@ -7,6 +7,7 @@
 use {
     jet_foundation.[
         AccessConvention,
+        CEnumTag,
         ConstDef,
         CtKey,
         CtValue,
@@ -42,7 +43,6 @@ use {
         symbol_table_key,
         TAssociatedTypeDecl,
         TAssociatedTypeValue,
-        TCEnumTag,
         TCLIBinding,
         TComptimeEnumArg,
         TComptimeField,
@@ -885,21 +885,6 @@ sema_checked_foreign_struct_c_layout: fn(layout: StructLayout?) -> Bool Never! {
     }
 }
 
-sema_checked_foreign_enum_c_layout_tag: fn(definition: EnumDef) -> TCEnumTag? {
-    layout_tag: jet_target_layout_enum_c_tag(definition) ?? return None
-    if layout_tag == {
-        .CInt -> Val(TCEnumTag.CInt)
-        .U8 -> Val(TCEnumTag.U8)
-        .I8 -> Val(TCEnumTag.I8)
-        .U16 -> Val(TCEnumTag.U16)
-        .I16 -> Val(TCEnumTag.I16)
-        .U32 -> Val(TCEnumTag.U32)
-        .I32 -> Val(TCEnumTag.I32)
-        .U64 -> Val(TCEnumTag.U64)
-        .I64 -> Val(TCEnumTag.I64)
-    }
-}
-
 sema_checked_foreign_handle_source_matches: fn(handles: [SemaCheckedForeignHandle], facts: SemaRegistrationForeignHandleFacts) -> Bool Never! {
     loop handle in handles {
         if handle.library == facts.library && handle.typedef_name == facts.typedef_name && handle.jet_name == facts.jet_name && handle.ownership == facts.ownership && handle.close == facts.close && handle.close_source == facts.close_source && handle.thread_safety == facts.thread_safety && handle.send == facts.send && handle.sync == facts.sync {
@@ -929,7 +914,7 @@ sema_checked_foreign_nominal_type: fn(graph: SemaRegistrationGraph, nominal: Sem
                 true
             }
             .Enum(definition) -> {
-                if c_abi && sema_checked_foreign_enum_c_layout_tag(definition) == None {
+                if c_abi && jet_target_layout_enum_c_tag(definition) == None {
                     return false
                 }
                 payload_handles: if c_abi -> [SemaCheckedForeignHandle]{} else -> handles
@@ -3119,7 +3104,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
     name: nominal.symbol.name
     generic_params: sema_checked_generic_params(graph, module_row, nominal.generic_params, diagnostics)
     layout := TStructLayout?{None}
-    c_layout_tag := TCEnumTag?{None}
+    c_layout_tag := CEnumTag?{None}
     enum_layout := LayoutFacts?{None}
     serde := [TSerdeAttribute]{}
     cli_bindings := [TCLIBinding]{}
@@ -3173,7 +3158,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
             serde = sema_checked_serde_attributes(value.serde_markers, value.type_markers)
             ownership = sema_checked_ownership(single_use)
             if !nominal.compiler_owned -> sema_checked_validate_constructor(name, leaf, value.methods, diagnostics)
-            c_layout_tag = sema_checked_foreign_enum_c_layout_tag(value)
+            c_layout_tag = jet_target_layout_enum_c_tag(value)
             if c_layout_tag != None {
                 layout = Val(TStructLayout.C)
                 engine: layout_engine ?? return None
@@ -4565,7 +4550,7 @@ sema_checked_declaration_facts: fn(graph: SemaRegistrationGraph, module_index: I
         source_item: sema_registration_nominal_source_item(nominal.source)
         if layout_engine == None && source_item == .Val(item) {
             if item == .Enum(value) {
-                if sema_checked_foreign_enum_c_layout_tag(value) != None {
+                if jet_target_layout_enum_c_tag(value) != None {
                     layout_engine = Val(sema_checked_layout_engine(graph, module_row))
                 }
             }
