@@ -274,7 +274,9 @@ use {
         source_file_id,
         symbol_key,
         symbol_key_parts,
+        symbol_is_local,
         symbol_key_text,
+        symbol_local_keys_text,
         symbol_table_key,
         body_each_expr_child,
         body_each_stmt_child,
@@ -5430,6 +5432,70 @@ jet_driver_unresolved_call_in: fn(tree: BodyTree, expression: Int, targets: [Boo
     body_each_expr_child(tree, node, fn(child: Int) { jet_driver_unresolved_call_in(tree, child, targets, missing) })
 }
 
+// A constant's row carries its value, and IR reads a constant through its
+// row (ir_constant). Under JET_KEEP_GOING a compile-time value whose
+// evaluation failed (a check, a refusal, or its step limit) never lands, so
+// its constant has no row: each function that reads it lowers as a trap
+// instead, and each is a census row.
+jet_driver_keep_going_trap_unvalued_constants: fn(kg: &JetDriverKeepGoingLog, functions: &[FnBody], modules: [SemaGraphModuleResult], symbols: SymbolTable) {
+    // The keys a constant read resolves by: each constant row's key and
+    // symbol key, and each lowered function's key (a function read as a
+    // value).
+    known := name_table_sized(256)
+    loop semantic_module in modules {
+        loop row in semantic_module.declarations.constants {
+            _ := name_intern(known, row.key)
+            if row.symbol_key != "" -> _ := name_intern(known, row.symbol_key)
+        }
+    }
+    loop function in functions -> _ := name_intern(known, function.key)
+    loop position in 0..<functions.len() {
+        missing: jet_driver_unvalued_constant(functions[position], known, symbols) ?? next
+        trap: jet_driver_keep_going_trap_body_row(kg, functions[position], "lowered as a trap: it reads `{missing}`, which has no value", "keep-going trap: this function reads `{missing}`, which has no value")
+        functions[position] = trap
+    }
+}
+
+// The key of the first constant `function` reads (its parameter defaults,
+// then its body, each expression before the ones below it) that `known` does
+// not hold.
+jet_driver_unvalued_constant: fn(function: FnBody, known: NameTable, symbols: SymbolTable) -> String? Never! {
+    missing := String?{None}
+    loop parameter in function.params {
+        if parameter.default == Val(value) {
+            jet_driver_unvalued_constant_in(function.tree, value, known, symbols, missing)
+        }
+    }
+    loop statement in function.body {
+        if missing != None -> break
+        jet_driver_unvalued_constant_statement(function.tree, statement, known, symbols, missing)
+    }
+    missing
+}
+
+// One statement's subtrees, in its own function for the reason
+// jet_driver_unresolved_call_statement gives.
+jet_driver_unvalued_constant_statement: fn(tree: BodyTree, statement: Int, known: NameTable, symbols: SymbolTable, missing: &String?) Never! {
+    body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { jet_driver_unvalued_constant_in(tree, child, known, symbols, missing) })
+}
+
+// Records in `missing` (once) the key of the first constant read in
+// `expression` or below it that `known` does not hold, read in place.
+jet_driver_unvalued_constant_in: fn(tree: BodyTree, expression: Int, known: NameTable, symbols: SymbolTable, missing: &String?) Never! {
+    if missing != None {
+        return
+    }
+    node: body_node(tree, expression)
+    if node.kind == .ConstRef(symbol) {
+        key: if symbol_is_local(symbol) -> symbol_local_keys_text(tree.symbols, symbol) else -> symbol_table_key(symbols, symbol)
+        if name_find(known, key) == None {
+            missing = Val(key)
+            return
+        }
+    }
+    body_each_expr_child(tree, node, fn(child: Int) { jet_driver_unvalued_constant_in(tree, child, known, symbols, missing) })
+}
+
 // This retained input is not a RootMemo cache-eligibility proof. All checked
 // rows remain in compile.doc_modules; source_modules selects real loaded
 // sources and excludes only Loader's explicit ABI-only Core fallback.
@@ -7142,9 +7208,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if kg.enabled {
         jet_driver_keep_going_diagnostics(kg, "sema", load.diagnostics)
         if kg.skip.len() > 0 -> jet_driver_keep_going_trap_lowering(kg, sema_functions)
-        // Only a failed check can leave a callee without a checked function.
+        // Only a failed check can leave a callee without a checked function,
+        // and only a failed evaluation a constant without a value.
         if kg.rows.len() > 0 {
             jet_driver_keep_going_trap_unresolved_calls(kg, sema_functions, runtime_semantic_modules, decls, symbols)
+            jet_driver_keep_going_trap_unvalued_constants(kg, sema_functions, runtime_semantic_modules, symbols)
         }
         jet_driver_keep_going_flush(kg, request.trace_sink)
     }
