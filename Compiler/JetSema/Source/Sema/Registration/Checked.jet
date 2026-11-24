@@ -74,7 +74,6 @@ use {
         TSerdeCodec,
         TShapeFieldNames,
         TShapeFormatName,
-        TStructLayout,
         TTargetOS,
         TTraitDef,
         TTraitMethod,
@@ -402,15 +401,6 @@ sema_checked_serde_attributes: fn(markers: [Marker], type_markers: [Marker]) -> 
         attributes.push(TSerdeAttribute{kind: TSerdeAttributeKind.Untagged, value: None, span: codable.span})
     }
     attributes
-}
-
-sema_checked_layout: fn(layout: StructLayout?) -> TStructLayout? {
-    value: layout ?? return None
-    if value == {
-        .C -> Val(TStructLayout.C)
-        .CAligned(alignment, target) -> Val(TStructLayout.CAligned{alignment: alignment, target: target})
-        .Columnar -> Val(TStructLayout.Columnar)
-    }
 }
 
 sema_checked_effects: fn(effects: [EffectRowEntry]?) -> [TEffectSpan]? {
@@ -3099,7 +3089,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
     if nominal.kind == SemaRegistrationNominalKind.Trait -> return None
     name: nominal.symbol.name
     generic_params: sema_checked_generic_params(graph, module_row, nominal.generic_params, diagnostics)
-    layout := TStructLayout?{None}
+    layout := StructLayout?{None}
     c_layout_tag := CEnumTag?{None}
     enum_layout := LayoutFacts?{None}
     serde := [TSerdeAttribute]{}
@@ -3130,7 +3120,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
             published_schema = value.is_published_schema
             single_use = value.is_single_use
             must_use = value.is_must_use
-            layout = sema_checked_layout(value.layout)
+            layout = value.layout
             serde = sema_checked_serde_attributes(value.serde_markers, value.type_markers)
             cli_bindings = sema_checked_cli_bindings(module_text(graph.module_table, module_row.module_identity), value)
             ownership = sema_checked_ownership(single_use)
@@ -3156,7 +3146,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
             if !nominal.compiler_owned -> sema_checked_validate_constructor(name, leaf, value.methods, diagnostics)
             c_layout_tag = jet_target_layout_enum_c_tag(value)
             if c_layout_tag != None {
-                layout = Val(TStructLayout.C)
+                layout = Val(StructLayout.C)
                 engine: layout_engine ?? return None
                 enum_layout = Val(jet_target_layout_enum_facts_in_module(engine, value, module_text(graph.module_table, module_row.module_identity)))
             }
