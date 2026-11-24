@@ -215,9 +215,18 @@ lsp_retain_document_diagnostics: fn(diagnostics: [Diagnostic], path: String, tex
 
 // Republish every dirty document and the open documents that read one. The
 // loop runs this before each request, so a request sees current diagnostics.
-lsp_flush_dirty: fn(server: ^LSPServer, stdout: ^lsp_diag_term.Stdout) IOError! {
-    pending: lsp_dirty_documents(server.diagnostic_state)
-    loop uri in pending -> lsp_publish_document_diagnostics(server, uri, stdout) ?? return Err(err)
+// A document whose newer edit is already queued stays dirty, unpublished,
+// until that edit is applied.
+lsp_flush_dirty: fn(server: ^LSPServer, input: LSPInput, stdout: ^lsp_diag_term.Stdout) IOError! {
+    pending := lsp_dirty_documents(server.diagnostic_state)
+    pending.reverse()
+    loop !pending.is_empty() {
+        uri: pending.pop() ?? return
+        if {
+            lsp_edit_queued(input, uri) -> server.diagnostic_state.dirty[uri] = true
+            else -> lsp_publish_document_diagnostics(server, uri, stdout) ?? return Err(err)
+        }
+    }
 }
 
 // The publication is recorded only after every write and flush succeeded, so

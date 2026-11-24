@@ -8,6 +8,7 @@ use {
         AST_NODE_GENERATED,
         AccessConvention,
         MARKER_NUMERIC,
+        MODULE_CORE_PREFIX,
         access_sigil,
         ArithmeticOperation,
         ArithmeticPolicyFact,
@@ -81,6 +82,7 @@ use {
         compute_shape_dimensions,
         compute_shape_type,
         core_module_export,
+        core_identity_module,
         core_source_owns_type,
         core_source_receiver_method,
         core_source_receiver_method_routes,
@@ -1711,6 +1713,23 @@ sema_expr_check_math_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
     right_name_value := right_name ?? ""
     function := if op == BinOp.Mul -> "mul_{right_name_value}" else -> "div_{right_name_value}"
     Val(sema_tree_node(scalar_result, TExprKind.MathBuiltin{type_name: "Float", function: function, args: [TExpr]{scalar, rhs}}, span))
+}
+
+// The leaf of a Core geometry nominal (`core.math.ScreenPoint` reads
+// `ScreenPoint`); any other name is itself.
+sema_geometry_nominal_leaf: fn(name: String) -> String Never! {
+    if !core_source_owns_type(name) -> return name.copy()
+    parts: name.split(".").to_list()
+    if parts.len() >= 2 && core_identity_module(name) == (Val("core.math")) {
+        return parts[parts.len() - 1].copy()
+    }
+    name.copy()
+}
+
+#Test("Geometry declaration identity matches only source-owned Core nominals") {
+    owner: "{MODULE_CORE_PREFIX}core.math.ScreenPoint"
+    assert_eq(sema_geometry_nominal_leaf(owner), "ScreenPoint")
+    assert_eq(sema_geometry_nominal_leaf("user.ScreenPoint"), "user.ScreenPoint")
 }
 
 sema_expr_geometry_is_point: fn(ty: Type) -> Bool Never! {
@@ -4887,7 +4906,7 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     rules := [SemaCallRule]{}
     if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
     if rules.len() == 0 -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    hearing: sema_call_rules_hear(rules, None, method, method_span, args, Val(receiver_value.ty), sema_rule_known(receiver_value, program, context), receiver_value.span, environment, program, scopes, state, tail_store, context, diagnostics)
+    hearing: sema_call_rules_hear(rules, None, method, method_span, args, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, program, context), receiver_value.span, None, "", scopes.current, environment, program, scopes, state, tail_store, context, diagnostics)
     if hearing.rejected -> return None
     if !hearing.staged -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     held := [Diagnostic]{}
@@ -5002,6 +5021,7 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
     }
     if method == "routes" {
         _ := sema_call_app_route_registrations(receiver, receiver_value, method, args, method_span, environment, program, diagnostics)
+        sema_call_app_route_root(receiver, receiver_value, args, method_span, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if method == "csr" || method == "island" || method == "hydration_dev" || method == "hydration_release" {
         sema_call_app_browser_feature(receiver_value, method, method_span, environment, program, context.function_name, diagnostics)
@@ -5081,14 +5101,6 @@ sema_expr_check_declared_method: fn(receiver: Expr, receiver_value: TExpr, metho
             }
         }
         argument_index += 1
-    }
-    // Core declares `Transform.then<Next>`, so a chain whose middle spaces
-    // differ reaches this declared call; it is E2521, not an uninferable `Next`.
-    if method == "then" && args.len() == 1 && argument_types[0] == .Val(next_type) {
-        // copy: `argument_types` stays live for the inference call below
-        if sema_call_geometry_report_transform_chain_mismatch(receiver_value.ty, method, [Type]{next_type.copy()}, method_span, environment, program, diagnostics) {
-            return None
-        }
     }
     candidates := [SemaCallMethodCandidate]{}
     if args.len() == 1 && operator_trait == .Val(trait_name) {

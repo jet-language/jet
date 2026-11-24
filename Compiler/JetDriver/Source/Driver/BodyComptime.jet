@@ -295,6 +295,20 @@ jet_driver_comptime_rules_pending: fn(pending: [SemaComptimeBodySource]) -> Bool
     false
 }
 
+// The pending sources a compile without the runtime image keeps. jet-bare
+// checks every Core body in the runtime step with no image, so it runs no
+// compile-time code: a call a check rule hears keeps its ordinary checks
+// there, and each compile that can run the rule hears it. A call whose own
+// checks failed still waits on its rule, so its held errors are reported.
+jet_driver_comptime_unheard: fn(pending: [SemaComptimeBodySource]) -> [SemaComptimeBodySource] Never! {
+    kept := [SemaComptimeBodySource]{}
+    loop source in pending {
+        if source.rule != None && !source.rule_held -> next
+        kept.push(source.copy())
+    }
+    kept
+}
+
 // Whether the body recheck or the checked-text validation evaluates over
 // `graph` and so reads its name facts (jet_driver_comptime_body_pass,
 // jet_driver_validate_checked_text).
@@ -393,6 +407,7 @@ jet_driver_comptime_body_pass: fn(
     jet_driver_comptime_diagnostics_add(diagnostics, current_graph.diagnostics)
     jet_driver_trace_step_begin(request.trace_sink, "comptime.body.pending")
     pending := jet_driver_pending_comptime_body_sources(current_graph.modules, values)
+    if request.eval_config.native == None -> pending = jet_driver_comptime_unheard(pending)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.pending", pending.len())
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.comptime.bodies_pending", pending.len(), -1)

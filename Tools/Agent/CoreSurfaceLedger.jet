@@ -58,6 +58,10 @@ BUILTIN_METHODS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet
 
 BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet"
 
+// core.time's source, whose `__duration_<method>` functions run Duration's
+// methods (the `source:Duration` receivers source).
+TIME_SOURCE_PATH: "Core/Time/Time.jet"
+
 // The Prelude's family size aliases (`U8: Unsigned<8>`), whose `from_<size>`
 // conversions BuiltinStatics generates.
 PRELUDE_PATH: "Core/Prelude/Prelude.jet"
@@ -1527,6 +1531,7 @@ ReceiverTables: struct {
     collection: [String:[String]],
     statics: [String:[String]],
     numeric: [String],
+    duration: [String],
     module_paths: [String:[String]],
     sema_names: [String:Bool],
 }
@@ -1545,13 +1550,15 @@ STATIC_ROW: Regex{"\x7Bmodule_name: \x22([^\x22]*)\x22, owner: \x22([^\x22]+)\x2
 
 CONVERSION_ROW: Regex{"\{{method: \x22([^\x22]+)\x22, source: \x22[^\x22]+\x22\}}"}
 
+DURATION_SOURCE_FN: Regex{"^(?:priv\s+)?__duration_([a-z_]+):\s*fn\b"}
+
 SIZE_ALIAS_ROW: Regex{"^([A-Z][A-Za-z0-9]*): (Signed|Unsigned|IEEE)<([0-9, ]+)>$"}
 
 SEMA_LITERAL: Regex{"\x22([A-Za-z_][A-Za-z0-9_]*)\x22"}
 
 INVENTORY_ROW: Regex{"^(fixed_sig|receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)\s*\}}$"}
 
-RECEIVER_SOURCE: Regex{"^(builtin|collection|static|numeric|type):([A-Za-z_][A-Za-z0-9_.]*)$"}
+RECEIVER_SOURCE: Regex{"^(builtin|collection|static|numeric|source|type):([A-Za-z_][A-Za-z0-9_.]*)$"}
 
 IMPL_HEADER: Regex{"^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?|([A-Za-z_][A-Za-z0-9_]*):\s*(?:struct|enum)(?:<[^>]*>)?)\s*\x7B"}
 
@@ -1579,10 +1586,14 @@ jet_receiver_tables: fn(root: String, module_paths: [String:[String]]) -[FS]> Re
     collection := [String:[String]]{}
     statics := [String:[String]]{}
     numeric := [String]{}
+    duration := [String]{}
     loop line in split_lines(read_source(root, BUILTIN_METHODS_PATH) ?? return Err(err)) {
         if BUILTIN_ROW.match(line) == .Val(row) {
             record_name(builtin, row.group(1) ?? "", row.group(2) ?? "")
         }
+    }
+    loop line in split_lines(read_source(root, TIME_SOURCE_PATH) ?? return Err(err)) {
+        if DURATION_SOURCE_FN.match(line) == .Val(row) -> duration.push(row.group(1) ?? "")
     }
     // `collection_receivers_accept`: a Sequence row serves List and Iter; a
     // Proposed row is not checked by sema.
@@ -1617,13 +1628,15 @@ jet_receiver_tables: fn(root: String, module_paths: [String:[String]]) -[FS]> Re
     }
     sema_names := [String:Bool]{}
     walk_sema(root, SEMA_SOURCE_DIR, sema_names) ?? return Err(err)
-    Ok(ReceiverTables{builtin: builtin, collection: collection, statics: statics, numeric: numeric, module_paths: module_paths.copy(), sema_names: sema_names})
+    Ok(ReceiverTables{builtin: builtin, collection: collection, statics: statics, numeric: numeric, duration: duration, module_paths: module_paths.copy(), sema_names: sema_names})
 }
 
 // One receivers source: `builtin:<BuiltinMethodReceiver>`,
 // `collection:<CollectionReceivers>`, `static:[<module>.]<owner>`,
-// `numeric:conversions` (BUILTIN_NUMERIC_SOURCES), or
-// `type:<core module>.<Type>` (the type's methods declared in its Core source).
+// `numeric:conversions` (BUILTIN_NUMERIC_SOURCES), `source:Duration`
+// (the Duration methods core.time's `__duration_<method>` functions run,
+// TIME_SOURCE_PATH), or `type:<core module>.<Type>` (the type's methods
+// declared in its Core source).
 receiver_source_methods: fn(root: String, tables: ReceiverTables, item: String, context: String) -[FS]> [String] LedgerError! {
     source: RECEIVER_SOURCE.match(item) ?? return Err(fail("{context} has an invalid receivers source: {item}"))
     kind: source.group(1) ?? ""
@@ -1633,6 +1646,7 @@ receiver_source_methods: fn(root: String, tables: ReceiverTables, item: String, 
     if kind == "collection" -> methods = tables.collection.get(key) ?? [String]{}
     if kind == "static" -> methods = tables.statics.get(key) ?? [String]{}
     if kind == "numeric" && key == "conversions" -> methods = tables.numeric.copy()
+    if kind == "source" && key == "Duration" -> methods = tables.duration.copy()
     if kind == "type" {
         dot: key.rfind(".")
         if dot < 0 {

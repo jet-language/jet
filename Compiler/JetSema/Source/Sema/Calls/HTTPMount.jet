@@ -581,6 +581,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
         prefix = sema_http_mount_prefix(text)
     }
     value_arg: args[args.len() - 1]
+    call_frame: scopes.current
     sema_scope_enter(scopes, state, "http.mount:{span.start}")
     body := [TStmt]{}
     mux_name: "__jet_http_mount_mux_{span.start}"
@@ -742,6 +743,9 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                                 meta.http_route_source = Val(symbol_table_key(graph.symbols, registered.symbol.id))
                             }
                         }
+                        // The marked method stands for the call `verb(path)`
+                        // at its marker, which the receiver's rules hear.
+                        _ := sema_call_rules_hear_stand_in(receiver, receiver_value, verb, marker.span, marked, None, "mount{span.start}", call_frame, environment, program, scopes, state, tail_store, context, diagnostics)
                         handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
                         marked.push(sema_http_mount_arg(handler, marker.span))
                         registration: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, marked, marker.span, None, environment, program, scopes, state, tail_store, context, diagnostics)

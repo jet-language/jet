@@ -8791,6 +8791,7 @@ sema_stmt_check_assignment: fn(target: LValue, op: BinOp?, op_span: Span, expr: 
     diagnostics_before: diagnostics.len()
     reasons_before: context.incomplete_reasons.len()
     checked := sema_stmt_check_assignment_target(target, op, op_span, expr, environment, program, scopes, state, tail_store, context, diagnostics)
+    if op == None && context.rule_tables.heard.len() > 0 && sema_stmt_transaction_lvalue_root(target) == .Val(root) -> sema_rule_table_assigned(root, op_span, scopes, context)
     sema_shared_cycle_check_write(target, expr, environment, program, scopes, state, diagnostics)
     // Collect-all: an assignment that checks to nothing names its step when
     // no error report or recorded reason already explains it.
@@ -9975,6 +9976,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 checked: sema_stmt_check_binding(binding, lambda_escapes, environment, program, scopes, state, tail_store, context, diagnostics)
                 if checked == {
                     .Val(value) -> {
+                        sema_rule_table_join(binding, scopes, context)
                         if value == .Let(local, _, _, _, _, _) {
                             if local.ty == Type.String && sema_stmt_ascii_case_ladder(statements, index, binding) {
                                 diagnostics.push(sema_lint("L0521", binding.name_span, "a complete ASCII case ladder repeats a direct case conversion", "all 26 constant ASCII branches inspect the same value and only change its case", "replace the complete ladder with value.to_ascii_lower() or value.to_ascii_upper()"))

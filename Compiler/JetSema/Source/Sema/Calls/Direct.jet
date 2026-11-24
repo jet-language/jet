@@ -2201,7 +2201,7 @@ sema_call_check_direct_target_owned: fn(state: ^SemaOwnershipState, target: Sema
     rules := [SemaCallRule]{}
     if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_callee(graph, target.symbol.id)
     if rules.len() == 0 -> return sema_call_direct_checked_from_target(state, target, call, defaults, expected, environment, program, scopes, tail_store, context, diagnostics)
-    hearing: sema_call_rules_hear(rules, Val(target.symbol.id), call.name, call.name_span, call.args, None, None, call.name_span, environment, program, scopes, state, tail_store, context, diagnostics)
+    hearing: sema_call_rules_hear(rules, Val(target.symbol.id), call.name, call.name_span, call.args, None, None, None, call.name_span, None, "", scopes.current, environment, program, scopes, state, tail_store, context, diagnostics)
     if hearing.rejected -> return None
     if !hearing.staged -> return sema_call_direct_checked_from_target(state, target, call, defaults, expected, environment, program, scopes, tail_store, context, diagnostics)
     held := [Diagnostic]{}

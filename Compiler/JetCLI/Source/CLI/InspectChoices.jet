@@ -39,10 +39,10 @@
 //   no effect, so the function's effect row never shows it.
 // - Live reads: each `Query.filter` in the program's own code, and whether
 //   the compiler wrote its predicate as SQL over a table's field columns
-//   (the condition JetSema DataFilterSQL.jet passes to
-//   `core.data.__query_filter`). A table reads only the rows the condition
-//   holds for, and a live query over it re-runs only for a write that
-//   changes such a row; any other predicate reads the whole table, and its
+//   (the condition JetSema DataFilterSQL.jet passes to the Core function
+//   that fills the `QueryFilter` role). A table reads only the rows the
+//   condition holds for, and a live query over it re-runs only for a write
+//   that changes such a row; any other predicate reads the whole table, and its
 //   live query re-runs for every write to it.
 use {
     jet_driver.[JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
@@ -248,12 +248,12 @@ jet_cli_context_key_name: fn(key: String) -> String Never! { "`{symbol_key_leaf(
 
 // The live read choices of the program's own `functions`, at the function's
 // line: each filter, with the SQL condition its table reads by, or why it
-// reads the whole table. A filter is a call of Core's source
-// `__query_filter`, whose declaration `decls` names by its function key.
+// reads the whole table. A filter is a call of the Core function that fills
+// the `QueryFilter` role, whose declaration `decls` names by its function key.
 jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, out: ^[JetCLIChoice]) Never! {
     filters := [String]{}
     loop function in functions {
-        if function.name == "__query_filter" && module_is_core(function.module_identity) {
+        if function.role == "QueryFilter" && module_is_core(function.module_identity) {
             filters.push("{function.key}")
         }
     }

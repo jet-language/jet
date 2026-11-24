@@ -1,0 +1,17 @@
+# A route table a package declares pairs its routes as Core's router does:
+# its marker's `row` gives each method call on a router its method and path,
+# and its `check` hears each call with the first earlier call of the same
+# router that has its row. `jokes.get("/jokes")` in the block clashes with
+# the first `jokes.get("/jokes")`, and the error points at both; a POST of
+# the same path and a GET on another router have no earlier call with their
+# row.
+fixture: PackageRouterPairsItsRoutesByRow.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build main.jet
+exit: 1
+stderr: ~ "Error: router.Clash: Two routes both answer `GET /jokes`" # the later call
+stderr: ~ "main.jet:13:15" # is reported at its name
+stderr: ~ "main.jet:8:11" # beside the earlier one
+stderr: ~ "^^^ first registered here" # with the rule's label
+stderr: count "Error: " = 1 # the POST and the other router's GET do not clash

@@ -1,7 +1,18 @@
 // The collecting loop of a rule batch is generated Jet text. It must parse
 // with no error, and a lint it might raise must never stop the compiler.
-use jet_sema.[sema_call_rule_batch_expression]
+use {
+    jet_foundation.[Span, module_none]
+    jet_sema.[SemaCallRuleBatch, SemaCallRuleBatchSite, sema_call_rule_batch_expression]
+}
+
+rule_batch_text_batch: fn(paired: Bool) -> SemaCallRuleBatch {
+    SemaCallRuleBatch{module_identity: module_none(), marker: "Rule", span: Span{start: 0, end: 0}, key: "rules", paired: paired, sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}}
+}
 
 #Test("a heard call's rule batch text parses with no error") {
-    if sema_call_rule_batch_expression() == .Unit(_, _) -> panic("the batch expression is empty")
+    if sema_call_rule_batch_expression(rule_batch_text_batch(paired: false)) == .Unit(_, _) -> panic("the batch expression is empty")
+}
+
+#Test("a paired rule's batch text parses with no error") {
+    if sema_call_rule_batch_expression(rule_batch_text_batch(paired: true)) == .Unit(_, _) -> panic("the paired batch expression is empty")
 }

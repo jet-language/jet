@@ -75,5 +75,11 @@ run: fn() {
     // A written `&` parameter and a taken `&&` one.
     // The operators `&&` and `||` stay.
     label: "the write-access marker `&`"
-    print("{source} {quoted} {hint} {html} {rust} {c} {lines} {label}")
+    plain: "ok &&done"
+    rows: """
+    core.files reader_line &FileReader [u8]
+    core.files lock_owner &&String,Int FileLock
+    """
+    foreign: "extern rust \"std\" {{\n    consume: fn(s: &&String) -> String = \"std::convert::identity\"\n}}\n"
+    print("{source} {quoted} {hint} {html} {rust} {c} {lines} {label} {plain} {rows} {foreign}")
 }

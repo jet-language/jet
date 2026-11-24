@@ -11,6 +11,7 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     math: core.math
     encoding: core.encoding
     rt: jet.runtime.encoding
@@ -941,7 +942,7 @@ query: fn<T>(rows: [T]) -> Query<T> Never! {
 
 // `data.query(stream)`: a one-shot read of the stream's remaining rows, under
 // the limits of the reader that made the stream.
-priv __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
+#Builtin.Role(.QueryStream) priv __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
     limits: if source.__source == {
         .Val(pull) -> pull.guard_read().value.limits.copy()
         .None -> DataLimits.safe()
@@ -1087,8 +1088,8 @@ priv __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
 
 // Event-time windows over a `Stream<T>`. Each step is a
 // lazy stage over the one source generator: `stream.with_event_time(f)`
-// stamps every element, `.key_by(f)` keys it, and
-// `.window(width, watermark: lateness, late: .Drop)` groups the keyed events
+// stamps every element, `StreamEventTime.key_by(f)` keys it, and
+// `KeyedStream.window(width, watermark: lateness, late: .Drop)` groups the keyed events
 // into tumbling windows. The watermark is the largest event time seen minus
 // the allowed lateness and never moves back; an event older than the
 // watermark is late and `.Drop` discards it. After each event every pending
@@ -1108,10 +1109,71 @@ StreamEvent: struct<T> {
 
 StreamEventTime: struct<T> {
     events: Stream<StreamEvent<T>>,
+
+    // Keys each stamped element; `key` runs once per element as the stream
+    // is pulled.
+    key_by: fn<K: Equatable>(^^self, key: ^^fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
+        KeyedStream<K, T>{events: stream_keyed<K, T>(self.events.move(), key)}
+    }
 }
 
-KeyedStream: struct<K, T> {
+KeyedStream: struct<K: Equatable, T> {
     events: Stream<KeyedEvent<K, T>>,
+
+    // The keyed events in tumbling windows of `width`. The lateness and the
+    // late-event policy are named, so the two durations cannot be swapped.
+    window: fn(^^self, width: time.Duration, /, *, watermark: time.Duration, late: LateEventDisposition{.Drop}) -> Stream<Window<K, T>> {
+        width_ns: width.ns
+        lateness_ns: watermark.ns
+        if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
+        if lateness_ns < 0 -> panic("stream allowed lateness must be nonnegative, got {lateness_ns}ns")
+        keys := [K]{}
+        pending := [PendingWindow<T>]{}
+        mark := 0
+        has_mark := false
+        stream := self.events.move()
+        loop keyed in stream {
+            event_ns: stream_event_ns(keyed.event.event_time)
+            // `.Drop` is the one late-event disposition: a late event joins no window.
+            was_late: has_mark && event_ns < mark && late == LateEventDisposition.Drop
+            candidate: event_ns - lateness_ns
+            if !has_mark || candidate > mark {
+                mark = candidate
+                has_mark = true
+            }
+            if !was_late {
+                key_index := keys.len()
+                loop (index, known) in keys {
+                    if known == keyed.key {
+                        key_index = index
+                        break
+                    }
+                }
+                if key_index == keys.len() -> keys.push(keyed.key)
+                start_ns: event_ns /% width_ns * width_ns
+                position := pending.len()
+                joined := false
+                loop (index, open) in pending {
+                    if open.key_index == key_index && open.start_ns == start_ns {
+                        position = index
+                        joined = true
+                        break
+                    }
+                    if open.key_index > key_index || (open.key_index == key_index && open.start_ns > start_ns) {
+                        position = index
+                        break
+                    }
+                }
+                if joined -> pending[position].events.push(keyed.event) else {
+                    pending.insert(position, PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
+                }
+            }
+            loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, false) {
+                yield ready
+            }
+        }
+        loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, true) -> yield ready
+    }
 }
 
 Window: struct<K, T> {
@@ -1133,12 +1195,12 @@ priv PendingWindow: struct<T> {
 }
 
 // `stream.with_event_time(f)` with an `Int` result: Unix seconds.
-priv __stream_with_event_time: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
+#Builtin.Role(.StreamWithEventTime) priv __stream_with_event_time: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
     StreamEventTime<T>{events: stream_stamp_seconds<T>(stream.move(), event_time)}
 }
 
 // `stream.with_event_time(f)` with a `DateTime` result.
-priv __stream_with_event_datetime: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
+#Builtin.Role(.StreamWithEventDatetime) priv __stream_with_event_datetime: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
     StreamEventTime<T>{events: stream_stamp_datetime<T>(stream.move(), event_time)}
 }
 
@@ -1156,70 +1218,10 @@ priv stream_stamp_datetime: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> Da
     }
 }
 
-priv __stream_key_by: fn<K, T>(source: ^^StreamEventTime<T>, key: ^^fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
-    KeyedStream<K, T>{events: stream_keyed<K, T>(source.events.move(), key)}
-}
-
 priv stream_keyed: fn<K, T>(stream: ^^Stream<StreamEvent<T>>, key: ^^fn(T) -> K Never!) -> Stream<KeyedEvent<K, T>> {
     loop event in stream {
         yield KeyedEvent<K, T>{key: key(event.value), event: event}
     }
-}
-
-// A `Stream<T>` function is a generator that yields only from its own body,
-// so `.window()` is this generator itself, with the generator's default
-// failure carrier.
-priv __stream_window: fn<K: Equatable, T>(source: ^^KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
-    width_ns: width.ns
-    lateness_ns: watermark.ns
-    if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
-    if lateness_ns < 0 -> panic("stream allowed lateness must be nonnegative, got {lateness_ns}ns")
-    keys := [K]{}
-    pending := [PendingWindow<T>]{}
-    mark := 0
-    has_mark := false
-    stream := source.events.move()
-    loop keyed in stream {
-        event_ns: stream_event_ns(keyed.event.event_time)
-        // `.Drop` is the one late-event disposition: a late event joins no window.
-        was_late: has_mark && event_ns < mark && late == LateEventDisposition.Drop
-        candidate: event_ns - lateness_ns
-        if !has_mark || candidate > mark {
-            mark = candidate
-            has_mark = true
-        }
-        if !was_late {
-            key_index := keys.len()
-            loop (index, known) in keys {
-                if known == keyed.key {
-                    key_index = index
-                    break
-                }
-            }
-            if key_index == keys.len() -> keys.push(keyed.key)
-            start_ns: event_ns /% width_ns * width_ns
-            position := pending.len()
-            joined := false
-            loop (index, open) in pending {
-                if open.key_index == key_index && open.start_ns == start_ns {
-                    position = index
-                    joined = true
-                    break
-                }
-                if open.key_index > key_index || (open.key_index == key_index && open.start_ns > start_ns) {
-                    position = index
-                    break
-                }
-            }
-            if joined -> pending[position].events.push(keyed.event) else {
-                pending.insert(position, PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
-            }
-        }
-        loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, false) {
-            yield ready
-        }
-    }
-    loop ready in stream_windows_ready<K, T>(keys, pending, width_ns, mark, true) -> yield ready
 }
 
 // Event time as Unix nanoseconds; the window arithmetic is exact `Int`.
@@ -1241,13 +1243,13 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
 
 // `data.query(tracked)` and `tracked.query()`: a reusable scan of the
 // tracked snapshot rows.
-priv __query_tracked: fn<T, K>(tracked: DataTracked<T, K>) -> Query<T> Never! {
+#Builtin.Role(.QueryTracked) priv __query_tracked: fn<T, K>(tracked: DataTracked<T, K>) -> Query<T> Never! {
     query_make<T>([String]{"track"}, false, DataLimits.safe(), fn() { Ok(tracked.snapshot.value.copy()) })
 }
 
-priv __query_plan: fn<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
+#Builtin.Role(.QueryPlan) priv __query_plan: fn<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
 
-priv __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
+#Builtin.Role(.QueryCollect) priv __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
     rows: query_rows<T>(query) ?? return Err(err)
     limits: query.__limits.copy()
     if rows.len() > limits.max_output_rows {
@@ -1260,7 +1262,7 @@ priv __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
 // with `values` bound to its `?`s in order, or `""` when the compiler could
 // not write it so, and then `values` is unused (QueryCell). They come before
 // the predicate, which may take the locals they read.
-priv __query_filter: fn<T>(query: Query<T>, condition: String, values: [String], predicate: ^^fn(T) -> Bool) -> Query<T> Never! {
+#Builtin.Role(.QueryFilter) priv __query_filter: fn<T>(query: Query<T>, condition: String, values: [String], predicate: ^^fn(T) -> Bool) -> Query<T> Never! {
     count_by: if condition != "" && query.__take == None -> {
         source: query.copy()
         filter_condition: condition.copy()
@@ -1293,7 +1295,7 @@ priv __query_filter: fn<T>(query: Query<T>, condition: String, values: [String],
 }
 
 // A stable sort by the String key, bounded by `max_sort_rows`.
-priv __query_sort_by: fn<T>(query: Query<T>, key: ^^fn(T) -> String) -> Query<T> Never! {
+#Builtin.Role(.QuerySortBy) priv __query_sort_by: fn<T>(query: Query<T>, key: ^^fn(T) -> String) -> Query<T> Never! {
     query_make<T>(query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
         limits: query.__limits.copy()
@@ -1376,7 +1378,7 @@ priv query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) ->
     order
 }
 
-priv __query_map: fn<T, U>(query: Query<T>, mapper: ^^fn(T) -> U) -> Query<U> Never! {
+#Builtin.Role(.QueryMap) priv __query_map: fn<T, U>(query: Query<T>, mapper: ^^fn(T) -> U) -> Query<U> Never! {
     query_make<U>(query_steps(query.__steps, "map"), true, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
         out := [U]{}
@@ -1409,15 +1411,15 @@ priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V, max
     })
 }
 
-priv __query_min: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V) -> Query<V> Never! {
+#Builtin.Role(.QueryMin) priv __query_min: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V) -> Query<V> Never! {
     query_extreme<T, V>(query, key, false)
 }
 
-priv __query_max: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V) -> Query<V> Never! {
+#Builtin.Role(.QueryMax) priv __query_max: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V) -> Query<V> Never! {
     query_extreme<T, V>(query, key, true)
 }
 
-priv __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
+#Builtin.Role(.QueryInnerJoin) priv __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
     query_make<DataJoin<T, U>>(query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), fn() {
         left_rows: query_rows<T>(left) ?? return Err(err)
         right_rows: query_rows<U>(right) ?? return Err(err)
@@ -1427,7 +1429,7 @@ priv __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^f
     })
 }
 
-priv __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
+#Builtin.Role(.QueryLeftJoin) priv __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
     query_make<DataJoin<T, U?>>(query_steps(left.__steps, "left_join"), true, left.__limits.copy(), fn() {
         left_rows: query_rows<T>(left) ?? return Err(err)
         right_rows: query_rows<U>(right) ?? return Err(err)
@@ -1448,7 +1450,7 @@ priv query_join_keys: fn<T>(rows: [T], key: fn(T) -> String, side: String, api: 
     Ok(keys)
 }
 
-priv __query_group_by: fn<T, K>(query: Query<T>, key: ^^fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
+#Builtin.Role(.QueryGroupBy) priv __query_group_by: fn<T, K>(query: Query<T>, key: ^^fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
     DataGroupedQuery<T, K>{
         __query: query,
         __key: Shared{QueryKeyCell<T, K>{
@@ -1492,7 +1494,7 @@ priv group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] 
     out
 }
 
-priv __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Group<K, Int>> Never! {
+#Builtin.Role(.GroupCount) priv __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Group<K, Int>> Never! {
     query_make<Group<K, Int>>(group_steps<T, K>(grouped, "count"), true, grouped.__query.__limits.copy(), fn() {
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
@@ -1555,51 +1557,51 @@ priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value
     })
 }
 
-priv __group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Int) -> Query<Group<K, Int>> Never! {
+#Builtin.Role(.GroupSumInt) priv __group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Int) -> Query<Group<K, Int>> Never! {
     __group_sum<T, K, Int>(grouped, value, fn(left: Int, right: Int) { left + right })
 }
 
-priv __group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
+#Builtin.Role(.GroupSumFloat) priv __group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
     __group_sum<T, K, Float>(grouped, value, fn(left: Float, right: Float) { left + right })
 }
 
-priv __group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> F32) -> Query<Group<K, F32>> Never! {
+#Builtin.Role(.GroupSumF32) priv __group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> F32) -> Query<Group<K, F32>> Never! {
     __group_sum<T, K, F32>(grouped, value, fn(left: F32, right: F32) { left + right })
 }
 
-priv __group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I8) -> Query<Group<K, I8>> Never! {
+#Builtin.Role(.GroupSumI8) priv __group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I8) -> Query<Group<K, I8>> Never! {
     __group_sum<T, K, I8>(grouped, value, fn(left: I8, right: I8) { left + right })
 }
 
-priv __group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I16) -> Query<Group<K, I16>> Never! {
+#Builtin.Role(.GroupSumI16) priv __group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I16) -> Query<Group<K, I16>> Never! {
     __group_sum<T, K, I16>(grouped, value, fn(left: I16, right: I16) { left + right })
 }
 
-priv __group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I32) -> Query<Group<K, I32>> Never! {
+#Builtin.Role(.GroupSumI32) priv __group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I32) -> Query<Group<K, I32>> Never! {
     __group_sum<T, K, I32>(grouped, value, fn(left: I32, right: I32) { left + right })
 }
 
-priv __group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I64) -> Query<Group<K, I64>> Never! {
+#Builtin.Role(.GroupSumI64) priv __group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I64) -> Query<Group<K, I64>> Never! {
     __group_sum<T, K, I64>(grouped, value, fn(left: I64, right: I64) { left + right })
 }
 
-priv __group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U8) -> Query<Group<K, U8>> Never! {
+#Builtin.Role(.GroupSumU8) priv __group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U8) -> Query<Group<K, U8>> Never! {
     __group_sum<T, K, U8>(grouped, value, fn(left: U8, right: U8) { left + right })
 }
 
-priv __group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U16) -> Query<Group<K, U16>> Never! {
+#Builtin.Role(.GroupSumU16) priv __group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U16) -> Query<Group<K, U16>> Never! {
     __group_sum<T, K, U16>(grouped, value, fn(left: U16, right: U16) { left + right })
 }
 
-priv __group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U32) -> Query<Group<K, U32>> Never! {
+#Builtin.Role(.GroupSumU32) priv __group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U32) -> Query<Group<K, U32>> Never! {
     __group_sum<T, K, U32>(grouped, value, fn(left: U32, right: U32) { left + right })
 }
 
-priv __group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U64) -> Query<Group<K, U64>> Never! {
+#Builtin.Role(.GroupSumU64) priv __group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U64) -> Query<Group<K, U64>> Never! {
     __group_sum<T, K, U64>(grouped, value, fn(left: U64, right: U64) { left + right })
 }
 
-priv __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
+#Builtin.Role(.GroupMean) priv __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
     query_make<Group<K, Float>>(group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), fn() {
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
@@ -1638,7 +1640,7 @@ priv __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: 
 // `data.schema(rows)`: sema passes the checked row type's column names and
 // type spellings (a scalar row is one `value` column), so empty rows still
 // describe their columns.
-priv __schema: fn<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Never! {
+#Builtin.Role(.DataSchema) priv __schema: fn<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Never! {
     columns := [DataColumn]{}
     loop index in 0..<names.len() {
         columns.push(DataColumn{id: column_identity(names[index], types[index]), name: names[index].copy(), type_name: types[index].copy(), nullable: types[index].ends_with("?")})

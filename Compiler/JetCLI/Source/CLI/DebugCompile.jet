@@ -1889,7 +1889,7 @@ jet_cli_debug_eval_prepare: fn(entry: String, color: Bool, path: String, source:
         if source == .Val(text) -> overlays.push(JetDriverSourceDocument{path: path, source: text})
         overlays.extend(others)
         prepared := jet_cli_prepare_overlays(entry, entry, overlays, color, None, JetDriverCompileMode.Program, appended: true)
-        if source != None && &prepared == .Prepared(request, _) {
+        if source != None && ^prepared == .Prepared(request, _) {
             request.rooted_source = jet_cli_overlay_path(path)
         }
         return prepared

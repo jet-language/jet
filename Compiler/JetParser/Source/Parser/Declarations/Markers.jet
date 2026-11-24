@@ -22,6 +22,7 @@ use {
         MarkerDeclParam,
         MarkerHook,
         NamedType,
+        Param,
         STATE_ARROW_LABEL,
         Span,
         Stmt,
@@ -122,19 +123,24 @@ parser_parse_marker_impl: fn(state: ^JetParserState, value: ^StructDef) {
             parser_parse_marker_check(state, value, declaration)
             next
         }
+        if token.kind == TOKEN_KW_FN && parser_value_at(state, 1) == "row" {
+            parser_parse_marker_row(state, value, declaration)
+            next
+        }
         if token.kind == TOKEN_KW_FN {
             span: parser_parse_marker_expand(state, declaration)
             if expand_span == None -> expand_span = Val(span)
             next
         }
         found: parser_describe_token(state, token)
-        parser_add_error(state, token.span, "expected a marker setting, `expand: fn` or `check: fn`, found {found}", "an `impl Marker` block holds `name: value` settings, a `group: #[…]`, the `expand: fn(self, target: Target)` template and the `check: fn(self, call: CompilerCall)` rule", "write a setting such as `sites: [.Function]`, or `check: fn(self, call: CompilerCall) {{ … }}`")
+        parser_add_error(state, token.span, "expected a marker setting, `expand: fn`, `check: fn` or `row: fn`, found {found}", "an `impl Marker` block holds `name: value` settings, a `group: #[…]`, the `expand: fn(self, target: Target)` template, the `check: fn(self, call: CompilerCall)` rule and the `row: fn(self, call: CompilerCall) -> String?` key that pairs its calls", "write a setting such as `sites: [.Function]`, or `check: fn(self, call: CompilerCall) {{ … }}`")
         break
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl Marker` body")
     if repeated {
         return
     }
+    parser_check_marker_pairing(state, value.methods, declaration)
     value.marker = Val(declaration)
     value.marker_span = Val(start.span)
     value.marker_expand_span = expand_span
@@ -146,8 +152,11 @@ parser_parse_marker_impl: fn(state: ^JetParserState, value: ^StructDef) {
 }
 
 // `check: fn(self, call: CompilerCall) { … }`: the marker's rule, which the
-// compiler runs on each call of a declaration the marker marks. It is the
-// marker struct's method `check`: the parser gives it the
+// compiler runs on each call of a declaration the marker marks. Beside a
+// `row` member it is `check: fn(self, call: CompilerCall, first:
+// CompilerCall?)`: `first` is the earliest earlier call whose row on the
+// same table has an equal key (parser_parse_marker_row). It is the marker
+// struct's method `check`: the parser gives it the
 // `CompilerRejection? Err!` result, so the rule may call fallible code such
 // as a finding's texts, and the closing `None` its body falls through to;
 // `reject(value, at: part)` in it ends the rule with that finding
@@ -156,18 +165,19 @@ parser_parse_marker_impl: fn(state: ^JetParserState, value: ^StructDef) {
 parser_parse_marker_check: fn(state: ^JetParserState, value: ^StructDef, declaration: ^MarkerDecl) {
     method := parser_parse_type_method(state)
     signature: Span{start: method.span.start, end: method.name_span.end}
-    shaped := method.params.len() == 2 && method.return_type == None && method.type_params.len() == 0 && method.declared_effects == None && !method.is_comptime
+    shaped := (method.params.len() == 2 || method.params.len() == 3) && method.return_type == None && method.type_params.len() == 0 && method.declared_effects == None && !method.is_comptime
     if shaped {
-        receiver: method.params[0]
-        call: method.params[1]
-        shaped = receiver.name == "self" && receiver.convention == AccessConvention.Read && call.convention == AccessConvention.Read && call.ty == Type.Named{name: "CompilerCall"} && call.default == None
+        shaped = parser_marker_rule_param(method.params[0], "self", None) && parser_marker_rule_param(method.params[1], "", Val(Type.Named{name: "CompilerCall"}))
+    }
+    if shaped && method.params.len() == 3 {
+        shaped = parser_marker_rule_param(method.params[2], "", Val(Type.Option{inner: Type.Named{name: "CompilerCall"}}))
     }
     if !shaped {
-        parser_add_error_code(state, "E0907", signature, "`check: fn` doesn't match the `Marker` contract", "a marker's rule reads its own value and the call it hears, and `reject` gives its one result", "write `check: fn(self, call: CompilerCall) {{ … }}`")
+        parser_add_error_code(state, "E0907", signature, "`check: fn` doesn't match the `Marker` contract", "a marker's rule reads its own value and the call it hears, beside a `row` member also the earliest earlier call with an equal row, and `reject` gives its one result", "write `check: fn(self, call: CompilerCall) {{ … }}`, or `check: fn(self, call: CompilerCall, first: CompilerCall?) {{ … }}` beside `row`")
         return
     }
     loop earlier in value.methods {
-        if earlier.marker_check {
+        if earlier.marker_check && earlier.name == "check" {
             parser_add_error_code(state, "E0105", method.name_span, "`check: fn` is defined twice in `impl Marker`", "`impl Marker` holds one rule", "remove one of the definitions")
             return
         }
@@ -178,6 +188,60 @@ parser_parse_marker_check: fn(state: ^JetParserState, value: ^StructDef, declara
     method.marker_check = true
     declaration.check = Val(method.name_span)
     value.methods.push(method)
+}
+
+// `row: fn(self, call: CompilerCall) -> String? { … }`: the key of the row
+// the heard call adds to its receiver's table, or None for a call that adds
+// none. The compiler pairs each call with the earliest earlier call on the
+// same table whose row has an equal key and gives that call to `check` as
+// `first` (sema_call_rule_batch_expression). It is the marker struct's
+// method `row`, kept with `check` in the `impl Marker` block
+// (Func.marker_check).
+parser_parse_marker_row: fn(state: ^JetParserState, value: ^StructDef, declaration: ^MarkerDecl) {
+    method := parser_parse_type_method(state)
+    signature: Span{start: method.span.start, end: method.name_span.end}
+    shaped := method.params.len() == 2 && method.return_type == Val(Type.Option{inner: Type.String}) && method.type_params.len() == 0 && method.declared_effects == None && !method.is_comptime
+    if shaped {
+        shaped = parser_marker_rule_param(method.params[0], "self", None) && parser_marker_rule_param(method.params[1], "", Val(Type.Named{name: "CompilerCall"}))
+    }
+    if !shaped {
+        parser_add_error_code(state, "E0907", signature, "`row: fn` doesn't match the `Marker` contract", "a rule's `row` reads its own value and the call it hears and gives the key of the row the call adds to its receiver's table, or None", "write `row: fn(self, call: CompilerCall) -> String? {{ … }}`")
+        return
+    }
+    if declaration.pairs != None {
+        parser_add_error_code(state, "E0105", method.name_span, "`row: fn` is defined twice in `impl Marker`", "`impl Marker` holds one row key", "remove one of the definitions")
+        return
+    }
+    method.marker_check = true
+    declaration.pairs = Val(method.name_span)
+    value.methods.push(method)
+}
+
+// A parameter of a rule member: read, without a default, named `name`
+// (any name when empty) and, when `ty` is given, of that type.
+parser_marker_rule_param: fn(param: Param, name: String, ty: Type?) -> Bool Never! {
+    if param.convention != AccessConvention.Read || param.default != None -> return false
+    if name != "" && param.name != name -> return false
+    if ty == .Val(expected) -> return param.ty == expected
+    true
+}
+
+// `check` takes `first` only beside `row`, and `row` is only written beside
+// such a `check` (E0907).
+parser_check_marker_pairing: fn(state: ^JetParserState, methods: [Func], declaration: MarkerDecl) {
+    loop method in methods {
+        if !method.marker_check || method.name != "check" -> next
+        if method.params.len() == 3 && declaration.pairs == None {
+            parser_add_error_code(state, "E0907", Span{start: method.span.start, end: method.name_span.end}, "`check: fn` takes `first` without a `row` member", "`first` is the earliest earlier call whose row on the same table has an equal key, so only a rule with `row: fn` pairs its calls", "add `row: fn(self, call: CompilerCall) -> String? {{ … }}`, or write `check: fn(self, call: CompilerCall) {{ … }}`")
+        }
+        if method.params.len() == 2 && declaration.pairs == .Val(span) {
+            parser_add_error_code(state, "E0907", span, "`row: fn` needs a `check` that takes `first`", "the compiler gives `check` the earliest earlier call whose row on the same table has an equal key", "write `check: fn(self, call: CompilerCall, first: CompilerCall?) {{ … }}`")
+        }
+        return
+    }
+    if declaration.pairs == .Val(span) {
+        parser_add_error_code(state, "E0907", span, "`row: fn` needs a `check` that takes `first`", "the compiler gives `check` the earliest earlier call whose row on the same table has an equal key", "write `check: fn(self, call: CompilerCall, first: CompilerCall?) {{ … }}`")
+    }
 }
 
 // `name: value` in `impl Marker`: a `Marker` constant, also kept as the

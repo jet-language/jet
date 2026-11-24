@@ -521,7 +521,7 @@ jet_driver_compiler_find_type: fn(session: ^BuildSession, host: JetDriverBuildAd
         return jet_driver_build_host_failure(session, span, "`{member}` lost its text")
     }
     spelled: parse_type_text(text) ?? return jet_driver_meta_type_absent()
-    identities := jet_driver_meta_type_rows(program, "root_types", "name", "identity") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
+    identities := jet_driver_meta_type_rows(program, "root_types", "spelling", "identity") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
     loop made in build_session_made_structs(session, held) {
         identities[made.name.copy()] = made.identity.copy()
     }
@@ -546,7 +546,7 @@ jet_driver_compiler_add_struct: fn(session: ^BuildSession, host: JetDriverBuildA
     // written. Its type is a `TypeId` the compiler made, written from
     // its identity as the new module names each type in it.
     program: jet_driver_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
-    seen := jet_driver_meta_type_rows(program, "scope_types", "identity", "name") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
+    seen := jet_driver_meta_type_rows(program, "scope_types", "identity", "spelling") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
     loop made in build_session_made_structs(session, held) {
         seen[made.identity.copy()] = made.name.copy()
     }
@@ -832,20 +832,33 @@ jet_driver_meta_type_absent: fn() -> JetEvalBuildReply Never! {
     JetEvalBuildReply.Value{value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "TypeId"}}}}
 }
 
-// The rows of a list ProgramInfo keeps for the build host, as a map from
-// each row's `key` field to its `value` field; None when the program lacks
-// the list.
+// The rows of a spelling list ProgramInfo keeps for the build host
+// (`root_types`, `scope_types`: a spelling and the TypeId of the type it
+// names), as a map from each row's `key` text to its `value` text
+// (jet_driver_meta_type_row_text); None when the program lacks the list.
 jet_driver_meta_type_rows: fn(program: TComptimeValue, list: String, key: String, value: String) -> [String:String]? {
     rows: jet_driver_build_field(program, list) ?? return None
     found := [String:String]{}
     if rows == .List(values) {
         loop row in values {
-            if jet_driver_build_field(row, key) == .Val(.String(written)) && jet_driver_build_field(row, value) == .Val(.String(answer)) {
+            if jet_driver_meta_type_row_text(row, key) == .Val(written) && jet_driver_meta_type_row_text(row, value) == .Val(answer) {
                 found[written.copy()] = answer.copy()
             }
         }
         return Val(found)
     }
+    None
+}
+
+// Field `name` of a ProgramInfo spelling row as text: its `spelling`, or for
+// `identity` the identity of its type's TypeId.
+jet_driver_meta_type_row_text: fn(row: TComptimeValue, name: String) -> String? Never! {
+    if name == "identity" {
+        ty: jet_driver_build_field(row, "type") ?? return None
+        if jet_driver_build_field(ty, "identity") == .Val(.String(text)) -> return Val(text)
+        return None
+    }
+    if jet_driver_build_field(row, name) == .Val(.String(text)) -> return Val(text)
     None
 }
 

@@ -26,6 +26,8 @@ use {
         EFFECT_VOCABULARY_ROWS,
         EffectVocabularyRow,
         core_call_key,
+        core_call_source_member,
+        core_call_source_role,
         core_declarations_module,
         core_declarations_read,
         core_declarations_source_problems,
@@ -262,7 +264,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
         {kind: "plain", module_name: "core.jobs", member: "covered", expression: "CoreCallRecord.new_with_coverage(\"core.jobs\", \"covered\", \"jet_job_queue_default\", true, ^[], CoreCallCoverage.from_bits(CoreCallCoverage.SEMA))"},
         {kind: "adapter", module_name: "core.web", member: "form", expression: "sema_web_call(\"core.web\", \"form\", \"jet_web_forms_typed\", ^[])"},
         {kind: "receiver", module_name: "-", member: "METHOD_RECEIPT_ATTACH", expression: "CoreCallRecord.receiver_with_symbol(^[INTERNAL_RECEIPT_HANDLE], METHOD_RECEIPT_ATTACH, \"jet_receipt_attach\", true, ^[])"},
-        {kind: "receiver", module_name: "-", member: "collect", expression: "CoreCallRecord.receiver_with_symbol(^[\"Query\"], \"collect\", \"\", true, ^[true]).with_source_owned().with_source_target(\"core.data.__query_collect\")"},
+        {kind: "receiver", module_name: "-", member: "collect", expression: "CoreCallRecord.receiver_with_symbol(^[\"Query\"], \"collect\", \"\", true, ^[true]).with_source_owned().with_source_role(\"QueryCollect\")"},
     }
     loop row in accepted {
         assert_eq(core_declarations_row_error(row.kind, row.module_name, row.member, row.expression, constants), "")
@@ -271,6 +273,8 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     assert(targeted.module_name == "core.fake" && targeted.member == "call" && (targeted.source_target ?? "") == "__checked_call")
     ordinary: (core_decl_call_record("CoreCallRecord.source_owned(\"core.fake\", \"call\", ^[false])", "ordinary fixture", constants) ?? panic("the ordinary row was refused: {err.message}")).record
     assert(ordinary.member == "call" && ordinary.source_target == None)
+    roled: (core_decl_call_record("CoreCallRecord.source_owned(\"core.fake\", \"call\", ^[false]).with_source_role(\"FakeCall\")", "role fixture", constants) ?? panic("the role row was refused: {err.message}")).record
+    assert((roled.source_role ?? "") == "FakeCall" && roled.source_target == None && core_call_source_member(roled) == None && core_call_source_role(roled) == Val("FakeCall"))
 }
 
 #Test("public dispatcher rows must name a ledger module once") {

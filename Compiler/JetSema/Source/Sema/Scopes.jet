@@ -913,6 +913,8 @@ SemaCheckContext: struct {
     // Each static route a body registers, `binding|method|pattern`, to the
     // span that registered it first.
     http_routes: SemaHTTPRouteIndex{SemaHTTPRouteIndex{}},
+    // The tables the body's heard calls add rows to (sema_rule_table).
+    rule_tables: SemaRuleTables{SemaRuleTables{}},
     hardware_use: TargetHardwareUse,
     call_return_views: [SemaCallReturnView],
     local_view_provenance: [SemaLocalViewProvenance],
@@ -1831,6 +1833,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         call_facts: source.call_facts.copy(),
         module_writes: source.module_writes.copy(),
         http_routes: if source.http_routes.spans.len() == 0 -> SemaHTTPRouteIndex{} else -> source.http_routes.copy(),
+        rule_tables: if source.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> source.rule_tables.copy(),
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: source.call_return_views.copy(),
         local_view_provenance: source.local_view_provenance.copy(),
@@ -1980,6 +1983,7 @@ SemaCheckContextSaved: struct {
     lending_view_parameter_keys: [String],
     lambda_statement_tails: [SemaStatementTailFrame],
     http_routes: SemaHTTPRouteIndex,
+    rule_tables: SemaRuleTables,
     hardware_use: TargetHardwareUse,
     return_view_receiver_key: String,
     return_view_parameter_keys: [String],
@@ -2075,6 +2079,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             lending_view_parameter_keys: if context.lending_view_parameter_keys.len() == 0 -> [String]{} else -> context.lending_view_parameter_keys.copy(),
             lambda_statement_tails: if context.lambda_statement_tails.len() == 0 -> [SemaStatementTailFrame]{} else -> context.lambda_statement_tails.copy(),
             http_routes: if context.http_routes.spans.len() == 0 -> SemaHTTPRouteIndex{} else -> context.http_routes.copy(),
+            rule_tables: if context.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> context.rule_tables.copy(),
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             return_view_receiver_key: context.return_view_receiver_key,
             return_view_parameter_keys: if context.return_view_parameter_keys.len() == 0 -> [String]{} else -> context.return_view_parameter_keys.copy(),
@@ -2200,6 +2205,7 @@ sema_check_context_rollback: fn(context: ^SemaCheckContext, mark: ^^SemaCheckCon
     context.lambda_statement_tails = saved.lambda_statement_tails.move()
     context.hardware_use = saved.hardware_use.move()
     context.http_routes = saved.http_routes.move()
+    context.rule_tables = saved.rule_tables.move()
     context.return_view_receiver_key = saved.return_view_receiver_key.move()
     context.return_view_parameter_keys = saved.return_view_parameter_keys.move()
     context.return_view_provenance = saved.return_view_provenance.move()

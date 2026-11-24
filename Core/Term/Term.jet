@@ -11,6 +11,7 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     rt: jet.runtime.term
     core.files.[FileReader]
 }
@@ -269,7 +270,7 @@ read_until: fn(delimiter: String) -[IO, Time.Wait]> String IOError! {
     Ok(result.input)
 }
 
-priv __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
+#Builtin.Role(.TermTake) priv __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
     if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
     terminal_read_preflight()
     result: rt.terminal8_take(n)

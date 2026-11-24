@@ -5,16 +5,18 @@
 # parameter, a call argument, a receiver mark at the start of a line, a
 # window and an element window, a written match subject, a task capture, a
 # raw and a plain string's Jet, marks after a quoted line break, a code span
-# in a string, a comment's code spans, a Jet fence, prose code spans and the
-# source lines and code spans of a diagnostic. The bit and logical operators
-# (`a & b`, `a&b`, `ok &&done`, `&=`, `&~=`), HTML entities, Rust's `&mut`, a
-# string quoting C, a run of three signs, other fences and prose outside code
-# spans stay as written.
+# in a string, a row's first parameter after its name in a triple-quoted
+# string, a Jet `extern rust` block in a string though its link names hold
+# `::`, a comment's code spans, a Jet fence, prose code spans and the source
+# lines and code spans of a diagnostic. The bit and logical operators
+# (`a & b`, `a&b`, `ok &&done` in code and in a plain string, `&=`, `&~=`),
+# HTML entities, Rust's `&mut`, a string quoting C, a run of three signs,
+# other fences and prose outside code spans stay as written.
 # A second run finds nothing left to rewrite.
 fixture: MarkCaret1RewritesEveryMark/Input
 step: jet run {root}/Compiler/Migrations/Migrate.jet -- mark-caret1 --write before.jet guide.md notes.txt
 exit: 0
-stdout: = "EDIT before.jet 28\nEDIT guide.md 6\nEDIT notes.txt 3\nTOTAL 37 sites in 3 files\n"
+stdout: = "EDIT before.jet 34\nEDIT guide.md 6\nEDIT notes.txt 4\nTOTAL 44 sites in 3 files\n"
 file: before.jet = MarkCaret1RewritesEveryMark/before.out
 file: guide.md = MarkCaret1RewritesEveryMark/guide.out
 file: notes.txt = MarkCaret1RewritesEveryMark/notes.out

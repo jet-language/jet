@@ -2324,10 +2324,12 @@ jfmt_fmt_marker_impl: fn(f: ^JetFmt, declaration: MarkerDecl, impls: [TraitImplB
         }
     }
     check := Int?{None}
+    row := Int?{None}
     loop (index, method) in methods {
-        if method.marker_check -> check = Val(index)
+        if method.marker_check && method.name == "check" -> check = Val(index)
+        if method.marker_check && method.name == "row" -> row = Val(index)
     }
-    if settings.len() == 0 && declaration.group == None && declaration.body == None && check == None {
+    if settings.len() == 0 && declaration.group == None && declaration.body == None && check == None && row == None {
         jfmt_write(f, "impl Marker {{}}")
         return
     }
@@ -2360,6 +2362,15 @@ jfmt_fmt_marker_impl: fn(f: ^JetFmt, declaration: MarkerDecl, impls: [TraitImplB
             jfmt_newline(f)
         }
         jfmt_fmt_marker_template(f, declaration, expand)
+        rows += 1
+    }
+    if row == .Val(index) {
+        if rows > 0 {
+            jfmt_newline(f)
+            jfmt_newline(f)
+        }
+        jfmt_emit_leading(f, methods[index].span.start)
+        jfmt_fmt_func(f, methods[index])
         rows += 1
     }
     if check == .Val(index) {
