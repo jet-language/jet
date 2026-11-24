@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 113934,
+    "rev": 113940,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58084,6 +58084,16 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "Batch 29 regression, L0517 (Tests/UILint/path_containment_string_prefix.jet emits no lint): c5-stream-b5 moved Path's methods into Core (impl Path in Core/Files/Files.jet) and rewrote sema_stmt_note_normalized_path_text (Statements.jet) to match a TExprKind .MethodCall named to_string over a .MethodCall named normalize, with receiver.ty == Type.Named{name: \"Path\"}. Under the batch 29 compiler the binding is never marked, so the Core inherent call is checked into another shape (kind or receiver type). The types display as Path. Next step: dump the checked kind of b.normalize() and match it there. The c5 stream's author is no longer running, so the orchestrator holds this."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Batch 29 suites (batch 29 compiler, compared with batch 28): golden 5169 passed, 7 failed, 1 error, 3 timeouts (batch 28: 25 failing rows); ui 3145 passed, 12 failed (batch 28: 54); cases stopped early to free the slot. Fixed since batch 28: 21 golden and 50 ui rows. New: (1) c37-b-r2 removed the sema route checker, so 6 ui snapshots lose Jet.AmbiguousRoute (http_route_ambiguous_overlap, http_route_custom_method, http_route_mixed_duplicate, web_app_page_handler_clash, web_app_route_collision, web_app_routes_same_words); (2) c38: Examples/Apps/Web/JetWeb/run.jet fails with Jet.MissingDisplay `Never` at o0, o1 and o2; (3) Examples/Concurrency/ContextOnStop.jet has an ICE at o2; (4) Tests/UILint/path_containment_string_prefix.jet emits no lint; (5) Tests/Run/Foundations/Text/run.jet times out at 600 s at every tier (passed in batch 28). Sent to the lane agents. The Taint snapshot (&& left by the write-mark migration) is fixed on dev at 28aacd56ce."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Parked for owner-ordered cleanup #6999 (2026-11-24 12:00): c13 leaf step B (f32 bits callers) and the Time __duration_* roles slice (9 names; CBD 70 counts them) are unwritten; c36-05c-r2 (derive #if conditions must fold without the comptime image) and c36-06 are parked with TypeIDSlice3-3; c18 continues under #6999 B. Queued for batch 30: c13 string/service/math-precise r2, math-f32-roles, f32-bits-leaf, c18-guard-priv, c18-a."
         },
         {
@@ -58650,7 +58660,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T17:03:06.691Z",
+      "updated": "2026-11-24T17:53:26.823Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -76410,7 +76420,28 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "G-ratchet landed on dev at b7c15263e0: Tools/Agent/PanicRatchet.jet and the guard Tests/Guards/panic_ratchet.jet, with a per-file baseline Tests/Guards/panic_ratchet.tsv (1,391 panic or unreachable calls in 213 files of the phase packages; comments and #Test blocks excluded). It only falls. Proof: jet test Tests/Guards --filter=panic_ratchet passed. Remaining G work: convert the calls to keep-going census rows. Batch 30 (building): the batch 30 patches plus B c18-c/d-r2, B-sig-value, B-sig-web, C-b headers (with a fix for RuntimeGenerators' priv __dyn_kind marker, broken on dev since every Core __ item became priv), E-split, dev's H, A-ratchet and C1, and A-comments-JetSema-r2 (JetSema 1000 to 0, repo 3,623 to 2,623). B-reach-stale-routes-r2 was reverted from the batch: dropping core.mem.mapped and core.mem.unmapping from the routes broke the runtime pack (MemoryOperationOutsideUnsafe in Core/Mem/Mem.jet); it went back for -r3."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Landed on dev (pushed): 482b00956a H (one roots table Tools/Agent/roots.env read by roots.sh, roots.mjs and Roots.jet; 9 Jet tools stop restating defaults; guard Tests/Guards/tool_roots.jet; sh, mjs and Jet agree on all 15 gauntlet cases), 0dd29b9182 A-ratchet (rule 3 plus the per-file baseline Tests/Guards/rust_era_names.tsv, 3,623 comments), 451b07890e C1 (DiagnosticRows --safety prints the safety table on demand; the dated audit is no longer rewritten). Proof run in the dev worktree with the batch 29 compiler: Tests/Guards, 216 passed, 7 failed (the known baseline: british spelling, closed_lists, copy ratchet, compiler-known Core names, doc_blocks and two grammar_highlight); tool_roots, environment_variables and rust_era all pass. H remainder: the Jet Roots readers are one file in three byte-identical, guarded copies, because a file import can't leave its directory. The only byte-duplicate scripts left in Tools are self-contained gauntlet peer harnesses (WebApp and WebWidget runner.mjs) and fixtures, which stay. Batch 31 queue: B c18-c/d-r2, reach-stale-routes-r2, B-sig-value, B-sig-web, E-split; A-comments-JetSema-r2 follows E-split."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "C plan, ranked by gain. (C-a) Copies the compiler build reads stay committed, because the seed build and `jet check` read them before any build step: Facts/BodyCodec.jet, Facts/SyntaxCodec.jet, Sema/BodyPacketCodec.jet, Sema/PreludeRows.jet, Registry/DiagnosticRows.jet, Registry/OwnedTraitRows.jet, CoreEnum*Rows, and the RuntimeGenerators tables (ExitCodes, FaultReport, ...). Compiler/build.jet regenerates each in a prep step, as it already does for prelude-sources, lexer-keywords and compiler-value-methods, so a stale copy is rewritten and a hand edit refused. (C-b) Every committed generated file's header names its generator and why it stays committed. (C-c) Catalogs committed into docs or tests are generated on demand instead: Docs/Site/Dist/e/*/index.html explain pages (DiagnosticRows writes 2284 copies), Tests/diagnostics_census.tsv, Docs/Spec/Reference/environment.md. Their readers move to `jet explain` or the site build. Also, DiagnosticCensus --write rewrites the dated audit Docs/Audits/2026-11-15-diagnostic-safety-audit.md on every batch: a dated audit must stay immutable, so that output moves to a non-audit path. Finding for A: Tools/AgentEval/DomainFoundations/Defects{,2} (121 files) are Rust-era defect evidence (rustc-rejected, Rust IR tier) and byte-copies of the Prim*/Area* programs; A should judge them."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "H finding (compiler defect): a .jet file whose first line is a #! shebang cannot file-import a sibling: `use { roots: \"Roots\" }` gives Jet.UseTargetNotFound (\"authority path Roots.jet is missing\") although Roots.jet sits beside it; the same file without the shebang line checks clean. The repro needs only two files in an empty directory. H removes the shebang from the 8 Tools/Agent tools that now import Roots.jet; all are mode 100644 and run as `jet Tools/Agent/X.jet`. The driver fix (a shebang must not change a file's source snapshot) is open under this card. H gap: ~20 Jet tools outside Tools/Agent still restate the roots defaults (Tools/CI/{AgentWorkloads,CompiledWorkloads,CompiledWorkloadPeerLauncher,CompiledWorkloadPeerLauncherCheck}.jet, Tools/Perf/* run.jet scripts, Tools/Release/Seed.jet, Tools/AgentEval/RunColdContext.jet, Tools/JetpackInfra/TestToolchainUpdate.jet). They cannot import Tools/Agent/Roots.jet (Jet.UsePathEscapesProject), so they wait for a shared-module path, or each tool directory gets a guarded copy."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -76538,7 +76569,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-24T17:01:58.874Z",
+      "updated": "2026-11-24T17:51:42.672Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     }
@@ -141023,6 +141054,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T17:53:26.823Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T17:51:42.672Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T17:51:41.233Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T17:39:01.219Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T17:36:33.767Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T17:26:42.580Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-24T17:03:06.691Z",
       "by": "Orchestrator",
