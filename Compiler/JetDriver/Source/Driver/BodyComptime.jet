@@ -914,9 +914,7 @@ jet_driver_land_local_values: fn(
             landing.staging,
         )
         if !reuse_staging -> bodies.modules = run.declared.move()
-        returned: run.graph_facts.move()
-        run.graph_facts = None
-        jet_driver_carried_return(bodies.carried, lent, returned)
+        jet_driver_carried_return(bodies.carried, lent, run.graph_facts.move())
         finished_registration := run.graph.move()
         run.graph = None
         partial_registration := run.partial_graph.move()
@@ -975,10 +973,10 @@ jet_driver_carried_lend: fn(carried: ^[SemaPassFacts]) -> JetDriverLentFacts Nev
 // Moves the facts jet_driver_carried_lend lent to a comptime run back into
 // `carried`, with the graph facts the run handed back (`returned`), which a
 // run hands back on every exit.
-jet_driver_carried_return: fn(carried: ^[SemaPassFacts], lent: ^^JetDriverLentFacts, returned: ^^SemaComptimeGraphFacts?) Never! {
+jet_driver_carried_return: fn(carried: ^[SemaPassFacts], lent: ^^JetDriverLentFacts, returned: ^^SemaComptimeGraphFacts) Never! {
     owned := lent.move()
     plan: owned.memory_plan.pop() ?? return
-    graph_facts: returned.move() ?? panic("a comptime run lost the finalization's boxed edges and copy facts")
+    graph_facts: returned.move()
     carried.push(SemaPassFacts{memory_plan: plan.move(), fixed_length_write_params: owned.fixed_length_write_params.move(), boxed_edges: graph_facts.boxed_edges.move(), copy_facts: graph_facts.copy_facts.move()})
 }
 

@@ -2528,7 +2528,7 @@ jet_driver_partition_checked_functions: fn(functions: ^[FnBody], mask: [Bool], k
 // on every exit unchanged (finalization reads their type definitions).
 // `graph_facts` holds the run's boxed edges and copy facts on every exit, the
 // ones it was given (jet_driver_run_comptime) or computed, so a caller that
-// lent them gets them back.
+// lent them gets them back; a result no run has filled yet holds none.
 JetDriverComptimeRunResult: struct {
     values: [SemaComptimeItemValue],
     functions: [SemaComptimeFunctionResult],
@@ -2543,7 +2543,7 @@ JetDriverComptimeRunResult: struct {
     graph_finished: Bool,
     trail: SemaGraphTrail,
     declared: [SemaGraphModuleResult],
-    graph_facts: SemaComptimeGraphFacts?,
+    graph_facts: SemaComptimeGraphFacts,
     carried_staging: [JetDriverComptimeStaging]{[JetDriverComptimeStaging]{}},
 }
 
@@ -2554,7 +2554,7 @@ jet_driver_comptime_run_result: fn(
     complete: Bool,
     soft_stop: Bool,
 ) -> JetDriverComptimeRunResult Never! {
-    JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None, graph: None, partial_graph: None, graph_finished: false, trail: sema_graph_trail_init(), declared: [SemaGraphModuleResult]{}, graph_facts: None}
+    JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None, graph: None, partial_graph: None, graph_finished: false, trail: sema_graph_trail_init(), declared: [SemaGraphModuleResult]{}, graph_facts: SemaComptimeGraphFacts{boxed_edges: [U32:[String]]{}, copy_facts: sema_copy_facts_table_empty()}}
 }
 
 jet_driver_comptime_lost_graph: fn(values: [SemaComptimeItemValue], functions: [SemaComptimeFunctionResult], trace: JetDriverCompileTrace) -> JetDriverComptimeRunResult Never! {
@@ -3639,7 +3639,7 @@ jet_driver_run_comptime_carried: fn(
         result.partial_graph = run_program.registration_graph.move()
     }
     run_program.registration_graph = None
-    result.graph_facts = Val(SemaComptimeGraphFacts{boxed_edges: run_program.boxed_edges.move(), copy_facts: run_program.copy_facts.move()})
+    result.graph_facts = SemaComptimeGraphFacts{boxed_edges: run_program.boxed_edges.move(), copy_facts: run_program.copy_facts.move()}
     result.trail = trail.move()
     result
 }
