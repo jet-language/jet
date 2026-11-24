@@ -731,6 +731,12 @@ IRModule: struct {
     // Fast O0 selection path: single-pass register/home allocation without
     // linear-scan, cmov selection, wrap prefix, or branch relaxation.
     fast_o0: Bool{false},
+    // Compile-time code (JetEval IR/Native.jet): each turn poll (a loop's
+    // iteration, a recursive body's entry) spends one step of the runtime's
+    // step word and enters the turn's routine once the word is below zero,
+    // which stops the call there (X64Select.jet ir_x64_armed_poll,
+    // X64Patch.jet patch_emit_armed_poll).
+    step_count: Bool{false},
     // The sources the module was compiled from, which its image records
     // (JetBackend Image/Dwarf.jet dwarf_sources) for a debugger to prove
     // the code it binds to is theirs.

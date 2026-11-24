@@ -830,7 +830,10 @@ scheduler_hook_checks_arm: fn(before: I64) {
 
 // The turn poll's routine (JetIR IR.jet IR_STOP_TURN_KEY): at a loop's
 // turn or a recursive body's entry a passed deadline is delivered too.
+// Compile-time code that spent its step limit enters it with the step word
+// below zero (ComptimeServe.jet comptime_serve_steps) and stops there.
 #Export(c) jet_rt_session_turn: fn() -> I64 {
+    if (comptime_serve_steps < I64{0}) { comptime_serve_out_of_steps() }
     scheduler_turn_give()
     control: scheduler_control_current()
     if (control != I64{0}) {

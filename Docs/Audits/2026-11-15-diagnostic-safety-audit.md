@@ -345,7 +345,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1017 | InlineAlwaysReadsTrace | Compiler/JetSema/Source/Sema/MarkerRules.jet:2438 | a function that reads `context.trace` is not `#Inline(Always)` |
 | E1018 | ComptimeValueIsRuntimeHandle | Compiler/JetSema/Source/Sema/Diagnostics.jet:506 | a compile-time value is data |
 | E1019 | ComptimeMethodCalledAtRunTime | Compiler/JetSema/Source/Sema/Diagnostics.jet:514 | a `#run fn` runs while building |
-| E1020 | ComptimeValueIsComputedFunction | Compiler/JetEval/Source/IR/Native.jet:1639 | a compile-time value is data |
+| E1020 | ComptimeValueIsComputedFunction | Compiler/JetEval/Source/IR/Native.jet:1629 | a compile-time value is data |
 | E1021 | InlineAlwaysForeign | Compiler/JetSema/Source/Sema/MarkerRules.jet:2384 | a function with a foreign body is not `#Inline(Always)` |
 | E1022 | RuntimeOnlyAtBuildTime | Compiler/JetSema/Source/Sema/Diagnostics.jet:522 | `#Runtime(.Only)` code runs only in the running program |
 | E1023 | UnknownLibraryMarker | Compiler/JetSema/Source/Sema/MarkerModules.jet:647 | a qualified marker names a marker its import's module declares |
@@ -616,9 +616,9 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3003 | DeadlineExceeded | Compiler/JetRuntime/Source/SchedulerMessages.jet:84 | a longer deadline, or less work |
 | E3005 | ContractFailed | Compiler/JetCLI/Source/CLI/ProveReport.jet:1052 | the caller or the function is fixed |
 | E3006 | Deadlock | Compiler/JetRuntime/Source/WaitCycle.jet:422 | one task of the cycle stops waiting for the others |
-| E3007 | ComptimeEndedBySignal | Compiler/JetEval/Source/IR/Native.jet:966 | the build runs again without the signal |
+| E3007 | ComptimeEndedBySignal | Compiler/JetEval/Source/IR/Native.jet:960 | the build runs again without the signal |
 | E3010 | ArithmeticOrBoundsFailure | Compiler/JetEval/Source/EvalValues.jet:169 | the operands or index are checked first |
-| E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:1108 | the `#Todo` is written |
+| E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:1106 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCLI/Source/CLI/Crash.jet:186 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:1157 | the entry handles the failure |
 | E3016 | OutputCheckNotRun | Compiler/JetCLI/Source/CLI/Host.jet:3156 | the fatal trap is fixed |

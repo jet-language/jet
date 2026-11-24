@@ -7,8 +7,10 @@
 # builds the same modules and the same program as before the stops.
 # stalls.txt changes `first`, then loops before it generates `second`, so the
 # stop comes between the two generations and `second` is never promised: its
-# name is an ordinary unknown name; comptime.sh finds the process `build: fn`
-# runs in.
+# name is an ordinary unknown name. waits.txt stops at the same place, in a
+# loop under the step limit whose turns each scan ten million bytes, so it
+# runs until the case kills or cancels it; comptime.sh finds the process
+# `build: fn` runs in.
 requires: os:unix
 requires: tool:sh
 requires: tool:pgrep
@@ -32,6 +34,7 @@ file: .jet/generated/main/first.jet == good.first # the changed `first` was neve
 file: .jet/generated/main/second.jet == good.second
 file: .jet/generated/main/first.jet.writing absent
 file: .jet/build/app == good.app # nothing was compiled or linked
+copy: waits.txt main.jet
 spawn memory: jet build main.jet
 stderr: file memory.stderr
 step: sh comptime.sh {pid:memory} KILL

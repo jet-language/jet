@@ -1,0 +1,21 @@
+// main.jet with a changed `first`, then a loop that stays under the build's
+// step limit, one step a turn, while each turn scans ten million bytes: the
+// loop runs until the case kills or cancels it, before `second` is generated.
+build: fn(b: Build) {
+    b.write_generated(.On)
+    b.generate("first") {
+        first_value: fn() -> Int { 41 }
+    }
+    text: "x".repeat(10000000)
+    total := 0
+    loop _ in 0..<1000000 {
+        total = total + text.count("y")
+    }
+    b.generate("second") {
+        second_value: fn() -> Int { first_value() + 1 }
+    }
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/first.jet", ".jet/generated/main/second.jet"], [])
+    b.default(app)
+}
+
+run: fn() { print("{second_value()}") }

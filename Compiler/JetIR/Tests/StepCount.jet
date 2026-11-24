@@ -1,0 +1,65 @@
+// Turn polls of a module that counts steps (IRModule.step_count) spend one
+// step of the runtime's step word, through both x86-64 selectors, and the
+// turn poll itself reads the word, so a spent call enters the turn's
+// routine; a module that doesn't count has no such access.
+use {
+    jet_ir.[IRModule, IROp, IRSlotKind, IR_STOP_TURN_KEY, IR_X64_COMPTIME_STEPS_SYMBOL, ir_args, ir_emit, ir_end, ir_function_new, ir_module_new, ir_open_if, ir_slot, ir_stop_poll, ir_type_row, ir_x64_compile_module]
+    jet_backend.[x64_reloc_symbol]
+    jet_foundation.[Type, compiler_threads_single]
+}
+
+// A function whose body starts with a turn poll that returns when it stops.
+step_module: fn(counted: Bool, fast: Bool) -> IRModule {
+    m := ir_module_new()
+    m.stop_points = true
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
+    f := ir_function_new("spin", "test:spin.jet.spin", "", "spin.jet", 1)
+    stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.Call, stopped, turn, none, 0, 1)
+    _ := ir_open_if(f, stopped, 1)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 1)
+    ir_end(f, 1)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 2)
+    m.entry = m.functions.len()
+    m.functions.push(f)
+    m.step_count = counted
+    m.fast_o0 = fast
+    m
+}
+
+// How many of the compiled code's relocations reach the step word: in the
+// body (`spin`) and in the turn poll.
+step_accesses: fn(counted: Bool, fast: Bool) -> {body: Int, poll: Int} {
+    m: step_module(counted, fast)
+    spin: m.entry
+    compiled := ir_x64_compile_module(m, compiler_threads_single())
+    assert(compiled.errors.len() == 0, "the module compiles: {compiled.errors.join("; ")}")
+    body := 0
+    poll := 0
+    loop function in compiled.functions {
+        loop reloc in function.relocs {
+            if x64_reloc_symbol(reloc, compiled.tables.runtime_symbols) == IR_X64_COMPTIME_STEPS_SYMBOL {
+                if function.id.value == spin -> body += 1 else -> poll += 1
+            }
+        }
+    }
+    {body: body, poll: poll}
+}
+
+#Test("a counted turn poll spends a step of the runtime's step word") {
+    loop fast in ([Bool]{false, true}) {
+        accesses: step_accesses(true, fast)
+        assert_eq(accesses.body, 1)
+        assert_eq(accesses.poll, 1)
+    }
+}
+
+#Test("a module that counts no steps never reaches the step word") {
+    loop fast in ([Bool]{false, true}) {
+        accesses: step_accesses(false, fast)
+        assert_eq(accesses.body, 0)
+        assert_eq(accesses.poll, 0)
+    }
+}

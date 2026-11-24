@@ -180,8 +180,10 @@ It is a budget, not an effect, so raising it needs no grant; the limit is
 part of the binding's source, so a changed limit computes the value again. A
 limit that is not a whole number above 0 is E0930
 ([`comptime_step_limit_zero_is_refused.jet`](../../../Tests/UI/comptime_step_limit_zero_is_refused.jet)).
-A step is measured as time: the evaluator gives n steps n / 2000
-milliseconds.
+A step is one iteration of a loop or one entry into a recursive function's
+body; a built-in operation, such as `count` on a `String`, spends no step of
+its own. Steps are counted, never timed, so a limit gives the same result on
+every machine and under any load.
 
 Compile-time work runs in a process of its own, which ends with the `jet`
 that started it however that `jet` ends, a kill included

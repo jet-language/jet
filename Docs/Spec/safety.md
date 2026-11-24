@@ -867,154 +867,147 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 67,
+      "line": 64,
       "column": 9,
       "reason": "the scratch mapping is the child's own, made above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 144,
+      "line": 141,
       "column": 9,
       "reason": "getrandom fills the first word of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 151,
+      "line": 148,
       "column": 9,
       "reason": "getrandom wrote the scratch page's first word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 187,
+      "line": 184,
       "column": 1,
       "reason": "pipe2 writes two descriptors into the first word of the caller's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 197,
+      "line": 194,
       "column": 9,
       "reason": "fcntl duplicates our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 211,
+      "line": 208,
       "column": 5,
       "reason": "closes our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 227,
+      "line": 224,
       "column": 5,
       "reason": "fcntl F_SETOWN names our own child as the owner of our own descriptor's signals"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 232,
+      "line": 229,
       "column": 5,
       "reason": "fcntl F_SETFL sets O_ASYNC on our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 241,
+      "line": 238,
       "column": 1,
       "reason": "the caller owns the `size` bytes at `buffer`, a multiple of 8"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 263,
+      "line": 260,
       "column": 5,
       "reason": "the buffer is the child's scratch mapping past its first page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 288,
+      "line": 285,
       "column": 9,
-      "reason": "the poll set is our scratch page's first three entries, which poll reads and writes; the clock words lie past them"
+      "reason": "the poll set is our scratch page's first three entries, which poll reads and writes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 311,
+      "line": 298,
       "column": 9,
       "reason": "poll wrote the entries' returned events"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 324,
+      "line": 311,
       "column": 13,
       "reason": "os_read just wrote `moved` bytes past the scratch page's first page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 340,
+      "line": 327,
       "column": 9,
       "reason": "the poll set is our scratch page's first two entries"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 345,
+      "line": 332,
       "column": 9,
       "reason": "poll reads and writes the two entries of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 353,
+      "line": 340,
       "column": 9,
       "reason": "poll wrote the entries' returned events"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 373,
+      "line": 360,
       "column": 5,
       "reason": "os_read just wrote `moved` bytes past the scratch page's first page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 383,
+      "line": 370,
       "column": 1,
       "reason": "the caller's `count` bytes at `address` lie in our mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 391,
-      "column": 1,
-      "reason": "clock_gettime writes two words at scratch + 64, past the poll set of the caller's scratch page"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 404,
+      "line": 384,
       "column": 9,
       "reason": "kills our own child"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 415,
+      "line": 395,
       "column": 9,
       "reason": "wait4 writes the status word into our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 420,
+      "line": 400,
       "column": 5,
       "reason": "wait4 wrote the status word"
     },
@@ -2869,21 +2862,28 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 95,
+      "line": 103,
       "column": 5,
       "reason": "the filter is installed once, on the image's only thread, before any call it traps"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 181,
+      "line": 145,
+      "column": 13,
+      "reason": "the step word is set on the image's only serving thread, before the call that spends it"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
+      "line": 193,
       "column": 13,
       "reason": "the compiler admits between calls of the one thread it drives; the handler only reads the flag"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 196,
+      "line": 208,
       "column": 5,
       "reason": "the serve entry runs once, on the image's only thread, before it serves"
     },
@@ -4815,56 +4815,56 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 891,
+      "line": 894,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1048,
+      "line": 1051,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1391,
+      "line": 1394,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1750,
+      "line": 1753,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1802,
+      "line": 1805,
       "column": 5,
       "reason": "openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2239,
+      "line": 2242,
       "column": 9,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2612,
+      "line": 2615,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2681,
+      "line": 2684,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -11921,28 +11921,27 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 4000:5 | "the attributes go to the fresh page's attribute words" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 4019:5 | "each read goes to the counters' own page's read words" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 4032:1 | "read fills three words of the caller's counted-run page `page`" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 67:9 | "the scratch mapping is the child's own, made above" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 144:9 | "getrandom fills the first word of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 151:9 | "getrandom wrote the scratch page's first word" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 187:1 | "pipe2 writes two descriptors into the first word of the caller's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 197:9 | "fcntl duplicates our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 211:5 | "closes our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 227:5 | "fcntl F_SETOWN names our own child as the owner of our own descriptor's signals" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 232:5 | "fcntl F_SETFL sets O_ASYNC on our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 241:1 | "the caller owns the `size` bytes at `buffer`, a multiple of 8" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 263:5 | "the buffer is the child's scratch mapping past its first page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 288:9 | "the poll set is our scratch page's first three entries, which poll reads and writes; the clock words lie past them" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 311:9 | "poll wrote the entries' returned events" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 324:13 | "os_read just wrote `moved` bytes past the scratch page's first page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 340:9 | "the poll set is our scratch page's first two entries" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 345:9 | "poll reads and writes the two entries of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 353:9 | "poll wrote the entries' returned events" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 373:5 | "os_read just wrote `moved` bytes past the scratch page's first page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 383:1 | "the caller's `count` bytes at `address` lie in our mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 391:1 | "clock_gettime writes two words at scratch + 64, past the poll set of the caller's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 404:9 | "kills our own child" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 415:9 | "wait4 writes the status word into our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 420:5 | "wait4 wrote the status word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 64:9 | "the scratch mapping is the child's own, made above" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 141:9 | "getrandom fills the first word of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 148:9 | "getrandom wrote the scratch page's first word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 184:1 | "pipe2 writes two descriptors into the first word of the caller's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 194:9 | "fcntl duplicates our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 208:5 | "closes our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 224:5 | "fcntl F_SETOWN names our own child as the owner of our own descriptor's signals" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 229:5 | "fcntl F_SETFL sets O_ASYNC on our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 238:1 | "the caller owns the `size` bytes at `buffer`, a multiple of 8" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 260:5 | "the buffer is the child's scratch mapping past its first page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 285:9 | "the poll set is our scratch page's first three entries, which poll reads and writes" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 298:9 | "poll wrote the entries' returned events" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 311:13 | "os_read just wrote `moved` bytes past the scratch page's first page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 327:9 | "the poll set is our scratch page's first two entries" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 332:9 | "poll reads and writes the two entries of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 340:9 | "poll wrote the entries' returned events" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 360:5 | "os_read just wrote `moved` bytes past the scratch page's first page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 370:1 | "the caller's `count` bytes at `address` lie in our mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 384:9 | "kills our own child" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 395:9 | "wait4 writes the status word into our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 400:5 | "wait4 wrote the status word" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 179:1 | "a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 205:5 | "the caller owns `count` writable bytes at `address`" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 212:5 | "the caller owns `count` readable bytes at `address`" |
@@ -12207,9 +12206,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 446:9 | "written under the map registry mutex, before any lease can name a slot" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 529:5 | "MAP_FIXED replaces exactly the held map's own read-only private pages with the same length of its copy; borrowed views keep their addresses" |
 | Compiler | Compiler/JetRuntime/Source/Comptime.jet | 18:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 95:5 | "the filter is installed once, on the image's only thread, before any call it traps" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 181:13 | "the compiler admits between calls of the one thread it drives; the handler only reads the flag" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 196:5 | "the serve entry runs once, on the image's only thread, before it serves" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 103:5 | "the filter is installed once, on the image's only thread, before any call it traps" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 145:13 | "the step word is set on the image's only serving thread, before the call that spends it" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 193:13 | "the compiler admits between calls of the one thread it drives; the handler only reads the flag" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 208:5 | "the serve entry runs once, on the image's only thread, before it serves" |
 | Compiler | Compiler/JetRuntime/Source/Context.jet | 363:5 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Coverage.jet | 25:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAES.jet | 26:5 | "runtime-init runs before any other thread exists" |
@@ -12485,14 +12485,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 454:5 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 463:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 477:9 | "written under the scheduler root mutex" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 891:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1048:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1391:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1750:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1802:5 | "openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2239:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2612:9 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2681:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 894:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1051:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1394:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1753:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1805:5 | "openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2242:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2615:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2684:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 41:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 164:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |

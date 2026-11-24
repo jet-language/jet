@@ -19,6 +19,9 @@ crypto_value_view: fn() -> String {
     return output
 }
 
+// The curve and hash work takes about 11 million steps, past the default
+// step limit of 10 million, so the binding raises its limit.
+#StepLimit(20000000)
 EXPECTED: #run crypto_value_view()
 
 run: fn() {

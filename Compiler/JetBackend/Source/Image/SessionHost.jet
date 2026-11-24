@@ -22,15 +22,12 @@ X64ComptimeChild: struct {
     reply: Int{-1},
     output: Int{-1},
     errors: Int{-1},
-    // One mapping: the poll set and clock (first page), then the read buffer.
+    // One mapping: the poll set (first page), then the read buffer.
     scratch: Int{0},
     // The image's entries, in the compiler's table order.
     entries: [Int]{[Int]{}},
     stdout: [U8]{[U8]{}},
     stderr: [U8]{[U8]{}},
-    // Milliseconds of child time left (-1: no limit), and whether it ran out.
-    budget: Int{-1},
-    exhausted: Bool{false},
     // The wait status once the child ended, else -1.
     status: Int{-1},
     failure: String{""},
@@ -51,8 +48,8 @@ X64ComptimeChild: struct {
 // its own image holds the image's range (a compiler `jet run` runs), starts
 // from a file instead (x64_executable_spawn_file). A failure leaves `failure`
 // set.
-x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64ComptimeChild {
-    child := X64ComptimeChild{budget: budget}
+x64_comptime_spawn: fn(image: X64Executable, stdout: Bool) -> X64ComptimeChild {
+    child := X64ComptimeChild{}
     scratch: os_map(4096 + X64_COMPTIME_BUFFER, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(scratch) {
         child.failure = "can't map the comptime child's buffers ({-scratch})"
@@ -285,25 +282,15 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
     loop bytes.len() < count {
         // pollfd {fd: i32, events: POLLIN, revents}; a closed (-1) output is skipped.
         ready := 0
-        #Unsafe("the poll set is our scratch page's first three entries, which poll reads and writes; the clock words lie past them") {
+        #Unsafe("the poll set is our scratch page's first three entries, which poll reads and writes") {
             os_store_word(poll, child.reply & 4294967295 | 1 << 32)
             os_store_word(poll + 8, child.output & 4294967295 | 1 << 32)
             os_store_word(poll + 16, child.errors & 4294967295 | 1 << 32)
-            started: x64_comptime_clock(child.scratch)
-            ready = os_syscall(7, poll, 3, child.budget, 0, 0, 0)
-            if child.budget >= 0 {
-                spent: x64_comptime_clock(child.scratch) - started
-                child.budget = if child.budget > spent -> child.budget - spent else -> 0
-            }
+            ready = os_syscall(7, poll, 3, -1, 0, 0, 0)
         }
         if ready == -4 -> next
         if os_failed(ready) {
             child.failure = "can't wait for the comptime child ({-ready})"
-            x64_comptime_reap(child, true)
-            return None
-        }
-        if ready == 0 {
-            child.exhausted = true
             x64_comptime_reap(child, true)
             return None
         }
@@ -385,13 +372,6 @@ x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
     if !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(address), count) {
         panic("the comptime child's {count} reply bytes don't fit in memory")
     }
-}
-
-// Monotonic milliseconds.
-#Unsafe("clock_gettime writes two words at scratch + 64, past the poll set of the caller's scratch page")
-x64_comptime_clock: fn(scratch: Int) -> Int {
-    _ := os_syscall(228, 1, scratch + 64, 0, 0, 0, 0)
-    os_load_word(scratch + 64) * 1000 + os_load_word(scratch + 72) /% 1000000
 }
 
 // Waits for the child (killing it first when `kill`), collecting what it
