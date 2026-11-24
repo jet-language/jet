@@ -6257,14 +6257,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3386,
+      "line": 3388,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3770,
+      "line": 3772,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
@@ -6474,7 +6474,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/HTTP/Client.jet",
-      "line": 856,
+      "line": 861,
       "column": 5,
       "reason": "checked resolver octets and port transferred into the socket carrier"
     },
@@ -12691,8 +12691,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Crypto/Vault.jet | 388:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 397:5 | "vault recipient export provider boundary" |
 | Core | Core/DB/Query.jet | 172:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Data/Data.jet | 3386:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3770:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3388:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3772:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Encoding/CBOR.jet | 110:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/CBOR.jet | 178:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CBORStream.jet | 248:9 | "the retained key copies exactly the already validated text bytes" |
@@ -12722,7 +12722,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Files/Files.jet | 666:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 759:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 161:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/HTTP/Client.jet | 856:5 | "checked resolver octets and port transferred into the socket carrier" |
+| Core | Core/HTTP/Client.jet | 861:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 136:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 143:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
 | Core | Core/Jobs/Jobs.jet | 283:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
