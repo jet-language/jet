@@ -886,12 +886,15 @@ TOriginProjection: struct {
     value: TComptimeValue,
 }
 
-// A `todo` goal checked in a function body: its source and the card naming
+// A `todo` goal checked in a function body: its source, the card naming
 // the expected type, which is kept apart from the fallback type used to keep
-// checking an unconstrained `todo`.
+// checking an unconstrained `todo`, and the in-scope names that fit that type,
+// ranked and bounded (JetSema TodoCandidates.jet): `jet check`, `jet fill` and
+// the LSP hover all read this one list.
 TTypedGoal: struct {
     span: Span,
     expected: String,
+    candidates: [String],
 }
 
 // A fixed-list index sema proved in range from its index's bounds: the index

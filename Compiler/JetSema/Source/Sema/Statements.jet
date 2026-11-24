@@ -9887,11 +9887,13 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
         }
         // #3886 the reachable last line of a function with a
         // written value return is the value it hands back, checked like `return`.
+        // A last-line `#Todo` diverges too, but it is that value's goal: it
+        // checks as `return #Todo` does, so its card names the return type.
         unit_result_return: if return_type == {
             .Val(.Result(success, _)) -> success == (Type.Named{name: "Unit"})
             .Val(_) | .None -> false
         }
-        if index + 1 == statements.len() && statements[index] == .Expr(tail) && (context.value_tail_span == (Val(expr_span(tail))) || (unit_result_return && sema_stmt_return_expr_is_carrier(tail, return_type, environment, scopes))) && !sema_stmt_refutable_expr_diverges(tail) {
+        if index + 1 == statements.len() && statements[index] == .Expr(tail) && (context.value_tail_span == (Val(expr_span(tail))) || (unit_result_return && sema_stmt_return_expr_is_carrier(tail, return_type, environment, scopes))) && (tail == .Todo(_, _, _) || !sema_stmt_refutable_expr_diverges(tail)) {
             returned: sema_stmt_check_returned_value(tail, return_type, environment, program, scopes, state, tail_store, context, diagnostics)
             if returned == {
                 .Val(value) -> {

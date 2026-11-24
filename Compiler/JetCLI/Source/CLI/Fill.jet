@@ -1,68 +1,33 @@
 // Typed goal cards and proposals validated by the same checker that checked the
-// original module. The checked function's goal rows own goal types.
+// original module. The checked function's goal rows own goal types and the
+// ranked in-scope names that fit them (JetSema TodoCandidates.jet).
 use {
     cli_files: core.files
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
-    jet_foundation.[BodyTree, FnBody, Func, Item, Span, TTypedGoal, Type, body_each_expr_child, body_each_stmt_child, body_node, diagnostic_line_at, diagnostic_render_all, type_name]
+    jet_foundation.[BodyTree, FnBody, Span, TTypedGoal, body_each_expr_child, body_each_stmt_child, body_node, diagnostic_line_at, diagnostic_render_all, type_name]
     jet_semindex.[SemEffect, semindex_doc_text]
-}
-
-JetCLIFillFunction: struct {
-    name: String,
-    return_type: String,
 }
 
 JetCLIFillGoal: struct {
     span: Span,
-    expected: String,
+    // The goal row of the function's TTypedGoal rows, or -1.
+    row: Int,
 }
 
-jet_cli_fill_function_info: fn(function: Func, infos: ^[JetCLIFillFunction]) Never! {
-    if function.params.len() == 0 && function.return_type == .Val(ty) {
-        infos.push(JetCLIFillFunction{name: function.name, return_type: type_name(ty)})
-    }
-}
-
-jet_cli_fill_function_infos: fn(items: [Item], infos: ^[JetCLIFillFunction]) Never! {
-    loop item in items {
-        if item == {
-            .Func(function) -> { jet_cli_fill_function_info(function, infos) }
-            .Struct(structure) -> {
-                loop function in structure.methods -> jet_cli_fill_function_info(function, infos)
-                loop block in structure.trait_impls {
-                    loop function in block.methods -> jet_cli_fill_function_info(function, infos)
-                }
-            }
-            .Enum(enumeration) -> {
-                loop function in enumeration.methods -> jet_cli_fill_function_info(function, infos)
-                loop block in enumeration.trait_impls {
-                    loop function in block.methods -> jet_cli_fill_function_info(function, infos)
-                }
-            }
-            .Impl(implementation) -> {
-                loop function in implementation.methods {
-                    jet_cli_fill_function_info(function, infos)
-                }
-            }
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
-    }
-}
-
-// The card of the `todo` at `span`: the last goal row checked inside it (a
+// The goal of the `todo` at `span`: the last goal row checked inside it (a
 // parenthesized `todo` keeps the row of the goal it wraps).
-jet_cli_fill_card: fn(rows: [TTypedGoal], span: Span) -> String Never! {
-    card := "(unknown)"
-    loop row in rows {
-        if row.span.start >= span.start && row.span.end <= span.end -> card = row.expected
+jet_cli_fill_goal: fn(rows: [TTypedGoal], span: Span) -> JetCLIFillGoal Never! {
+    goal := JetCLIFillGoal{span: span, row: -1}
+    loop (index, row) in rows {
+        if row.span.start >= span.start && row.span.end <= span.end -> goal.row = index
     }
-    card
+    goal
 }
 
 jet_cli_fill_expr: fn(tree: BodyTree, expression: Int, rows: [TTypedGoal], goals: ^[JetCLIFillGoal]) Never! {
     node: body_node(tree, expression)
     if node.kind == .Never(reason, _) && reason == "todo" {
-        goals.push(JetCLIFillGoal{span: node.span, expected: jet_cli_fill_card(rows, node.span)})
+        goals.push(jet_cli_fill_goal(rows, node.span))
     }
     body_each_expr_child(tree, node, fn(child: Int) { jet_cli_fill_expr(tree, child, rows, goals) })
 }
@@ -100,12 +65,10 @@ jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [SemEffect]) ->
     "none"
 }
 
-jet_cli_fill_candidate_checks: fn(file: String, source: String, goal: JetCLIFillGoal, candidate: String) -> Bool JetCLIReadError! {
-    if goal.span.start < 0 || goal.span.start > goal.span.end || goal.span.end > source.bytes().len() {
-        return false
-    }
+jet_cli_fill_candidate_checks: fn(file: String, source: String, span: Span, candidate: String) -> Bool JetCLIReadError! {
+    if span.start < 0 || span.start > span.end || span.end > source.bytes().len() -> return false
     bytes: source.bytes()
-    replacement: "{semindex_doc_text(bytes, 0, goal.span.start)}{candidate}{semindex_doc_text(bytes, goal.span.end, bytes.len())}"
+    replacement: "{semindex_doc_text(bytes, 0, span.start)}{candidate}{semindex_doc_text(bytes, span.end, bytes.len())}"
     compiled: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(replacement), None) ?? return Err(jet_cli_read_error("the fill candidate compiler failed before returning diagnostics"))
     if compiled == {
         .Refused(_) -> return false
@@ -115,37 +78,65 @@ jet_cli_fill_candidate_checks: fn(file: String, source: String, goal: JetCLIFill
     }
 }
 
-jet_cli_fill_candidates: fn(unit: JetDriverDocModule, function: FnBody, infos: [JetCLIFillFunction], goal: JetCLIFillGoal) -> [String] JetCLIReadError! {
-    candidates := [String]{}
-    loop parameter in function.params {
-        if type_name(parameter.ty) == goal.expected -> candidates.push(parameter.name)
-    }
-    loop info in infos {
-        if info.name != function.name && info.return_type == goal.expected {
-            candidates.push("{info.name}()")
-        }
-    }
-    literal: if goal.expected == {
+// The type-appropriate literal a goal of type `expected` may also take, or "".
+jet_cli_fill_literal: fn(expected: String) -> String Never! {
+    if expected == {
         "Int" -> "0"
         "Float" | "F32" -> "0.0"
         "Bool" -> "false"
         "String" -> "\"\""
         "Char" -> "'a'"
         "Unit" | "()" -> "()"
-        else -> if goal.expected.ends_with("?") -> "null" else -> ""
+        else -> if expected.ends_with("?") -> "null" else -> ""
     }
-    if literal != "" -> candidates.push(literal)
-    checked := [String]{}
-    loop candidate in candidates {
-        if !checked.contains(candidate) && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, goal, candidate) {
-            checked.push(candidate)
-        }
-    }
-    checked
 }
 
-// Also usable by `jet check`: include_candidates=false prints only the card.
-jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int?, include_candidates: Bool, json: Bool) -> String? JetCLIReadError! {
+// One goal's card: its JSON object goes on `cards` and its text is returned.
+// `jet fill` (`checked`) lists the goal's ranked in-scope names, then a
+// type-appropriate literal, each kept only when the whole source checks with
+// it in the goal's place; a call that still needs its arguments (`name(…)`)
+// is no code to check. `jet check` lists the ranked names as they are.
+jet_cli_fill_card: fn(unit: JetDriverDocModule, span: Span, goal_line: Int, name: String, effects: String, goal: TTypedGoal, checked: Bool, cards: ^[JetCLIStatusValue]) -> String JetCLIReadError! {
+    values := [JetCLIStatusValue]{}
+    listed := ""
+    if checked {
+        literal: jet_cli_fill_literal(goal.expected)
+        loop candidate in goal.candidates {
+            if !candidate.ends_with("(…)") && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, span, candidate) {
+                values.push(jet_cli_status_text(candidate))
+                listed = "{listed}    {values.len()}. {candidate} (checked)\n"
+            }
+        }
+        if literal != "" && !goal.candidates.contains(literal) && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, span, literal) {
+            values.push(jet_cli_status_text(literal))
+            listed = "{listed}    {values.len()}. {literal} (checked)\n"
+        }
+    } else {
+        loop candidate in goal.candidates -> values.push(jet_cli_status_text(candidate))
+    }
+    text := "Goal: {unit.path}:{goal_line} ({name})\n  Expected type: {goal.expected}\n  Required effects: {effects}\n"
+    if !checked {
+        shown: if goal.candidates.len() == 0 -> "none in scope" else -> goal.candidates.join(", ")
+        text = "{text}  Candidates: {shown}\n"
+    } else if values.len() == 0 {
+        text = "{text}  Candidates: none (no local expression passed the checker)\n"
+    } else { text = "{text}  Candidates:\n{listed}" }
+    cards.push(
+        jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("file", jet_cli_status_text(unit.path)),
+                jet_cli_status_field("line", jet_cli_status_int(goal_line)),
+                jet_cli_status_field("function", jet_cli_status_text(name)),
+                jet_cli_status_field("expected_type", jet_cli_status_text(goal.expected)),
+                jet_cli_status_field("required_effects", jet_cli_status_text(effects)),
+                jet_cli_status_field("candidates", jet_cli_status_array(values.move())),
+            },
+        ),
+    )
+    text
+}
+
+jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int?, checked: Bool, json: Bool) -> String? JetCLIReadError! {
     index: jet_cli_checked_semindex(result) ?? return Err(jet_cli_read_error("the checked semantic index could not be read for fill"))
     text := ""
     cards := [JetCLIStatusValue]{}
@@ -153,8 +144,6 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
         if file == .Val(filter) && jet_cli_report_path(jet_cli_report_cwd(), unit.physical_path) != jet_cli_report_path(jet_cli_report_cwd(), filter) {
             next
         }
-        infos := [JetCLIFillFunction]{}
-        jet_cli_fill_function_infos(unit.items, infos)
         loop function in unit.functions {
             if function.synthetic -> next
             goals := [JetCLIFillGoal]{}
@@ -166,29 +155,11 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
                 if line == .Val(filter_line) && filter_line != goal_line -> next
                 name: jet_cli_fill_function_name(function)
                 effects: jet_cli_fill_effects(function, unit.alias, index.effects)
-                candidates: if include_candidates -> jet_cli_fill_candidates(unit, function, infos, goal) else -> [String]{}
-                cards.push(
-                    jet_cli_status_object(
-                        [JetCLIStatusField]{
-                            jet_cli_status_field("file", jet_cli_status_text(unit.path)),
-                            jet_cli_status_field("line", jet_cli_status_int(goal_line)),
-                            jet_cli_status_field("function", jet_cli_status_text(name)),
-                            jet_cli_status_field("expected_type", jet_cli_status_text(goal.expected)),
-                            jet_cli_status_field("required_effects", jet_cli_status_text(effects)),
-                            jet_cli_status_field("candidates", jet_cli_status_texts(candidates)),
-                        },
-                    ),
-                )
-                text = "{text}Goal: {unit.path}:{goal_line} ({name})\n  Expected type: {goal.expected}\n  Required effects: {effects}\n"
-                if include_candidates {
-                    if candidates.len() == 0 {
-                        text = "{text}  Candidates: none (no local expression passed the checker)\n"
-                    } else {
-                        text = "{text}  Candidates:\n"
-                        loop (number, candidate) in candidates {
-                            text = "{text}    {number + 1}. {candidate} (checked)\n"
-                        }
-                    }
+                if goal.row >= 0 {
+                    text = "{text}{jet_cli_fill_card(unit, goal.span, goal_line, name, effects, function.typed_goals[goal.row], checked, cards)}"
+                } else {
+                    unknown: TTypedGoal{span: goal.span, expected: "(unknown)", candidates: [String]{}}
+                    text = "{text}{jet_cli_fill_card(unit, goal.span, goal_line, name, effects, unknown, checked, cards)}"
                 }
             }
         }
@@ -202,7 +173,8 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
 
 // `jet check`'s goal cards. A check retains no checked programs, so a check
 // that found `#Todo` goals (JetDriverCompileResult.typed_goals) projects the
-// file once more as Doc and prints each card without candidates.
+// file once more as Doc and prints each card with its ranked in-scope
+// candidates, unchecked (`jet fill` checks them).
 jet_cli_check_goal_cards: fn(file: String, color: Bool) -> String JetCLIReadError! {
     compiled: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc) ?? return Err(jet_cli_read_error("the goal-card projection of `{file}` failed before returning diagnostics"))
     if compiled == {

@@ -2100,12 +2100,14 @@ body_codec_get_tcomptimereport: fn(bytes: [U8], input: ^BodyCodecIn) -> TComptim
 body_codec_put_ttypedgoal: fn(out: ^BodyCodecOut, value: TTypedGoal) Never! {
     body_codec_put_span(out, value.span)
     body_codec_put_string(out, value.expected)
+    body_codec_put_list_string(out, value.candidates)
 }
 
 body_codec_get_ttypedgoal: fn(bytes: [U8], input: ^BodyCodecIn) -> TTypedGoal Never! {
     f0: body_codec_get_span(bytes, input)
     f1: body_codec_get_string(bytes, input)
-    TTypedGoal{span: f0, expected: f1}
+    f2: body_codec_get_list_string(bytes, input)
+    TTypedGoal{span: f0, expected: f1, candidates: f2}
 }
 
 body_codec_put_tindexproof: fn(out: ^BodyCodecOut, value: TIndexProof) Never! {

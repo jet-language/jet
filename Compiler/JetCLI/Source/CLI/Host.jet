@@ -336,7 +336,7 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
             if verbose && !project && !json && output.exit_code == JET_DRIVER_EXIT_OK {
                 output.stdout = jet_cli_inspect_check_text(file, watch.elapsed_millis(), diagnostics.len(), selected)
             }
-            // `emit_check_outcome`: a human check also prints each `#Todo` goal card (no candidates; `jet fill` checks those).
+            // `emit_check_outcome`: a human check also prints each `#Todo` goal card with its ranked in-scope candidates (`jet fill` checks those).
             if result.typed_goals && !json && !quiet && jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None {
                 if jet_cli_check_goal_cards(file, color) == {
                     .Ok(cards) -> { output.stdout = "{output.stdout}{cards}" }

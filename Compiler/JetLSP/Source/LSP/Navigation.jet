@@ -148,6 +148,10 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         note: lsp_producer_markdown(producer)
         markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{note}") else -> Val(note)
     }
+    // On a `#Todo`, the hover lists the goal's ranked in-scope candidates.
+    if lsp_goal_markdown(at) == .Val(goal) {
+        markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{goal}") else -> Val(goal)
+    }
     // On a line the compiler made automatic choices for, the hover lists
     // them with their reasons.
     if lsp_choices_markdown(at) == .Val(choices) {
@@ -233,6 +237,24 @@ lsp_origin_markdown: fn(checked: LSPChecked, def: SemDef) -> String? Never! {
 // Whether `path` names a module under a package's `.jet/generated/`.
 lsp_generated_module: fn(path: String) -> Bool Never! {
     path.starts_with(".jet/generated/") || path.contains("/.jet/generated/")
+}
+
+// The `#Todo` goal under the cursor in the document's checked module: its
+// expected type and the ranked in-scope names that fit it, read from the goal
+// row the check made (TTypedGoal), the list `jet check` prints. The last row
+// holding the cursor is the innermost goal.
+lsp_goal_markdown: fn(at: LSPAt) -> String? Never! {
+    module_path: at.view.module_path ?? return None
+    module_index: lsp_module_index(at.view.checked, module_path) ?? return None
+    found := String?{None}
+    loop function in at.view.checked.modules[module_index].functions {
+        loop goal in function.typed_goals {
+            if !lsp_span_holds(goal.span, at.offset) -> next
+            shown: if goal.candidates.len() == 0 -> "none in scope" else -> "`{goal.candidates.join("`, `")}`"
+            found = Val("Goal: `{goal.expected}`\n\nCandidates: {shown}")
+        }
+    }
+    found
 }
 
 // The automatic choices the check records on the hovered line of the
