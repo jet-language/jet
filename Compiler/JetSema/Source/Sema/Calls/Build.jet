@@ -947,10 +947,12 @@ sema_call_compiler_report_finding: fn(receiver: Expr, receiver_value: TExpr, arg
 // ends with the finding, raised at `part`'s span, the heard call's when no
 // `at:` is written. `part` is the CompilerCall, its CompilerName or one of its
 // CompilerArgs. The finding's `impl Diagnostic` gives its code and tier as for
-// `meta.report` (sema_compiler_report_facts). The call is checked as
+// `meta.report` (sema_compiler_report_facts). The call is checked, under the
+// rule's `CompilerRejection? Err!` result, as
 //     finding: <finding>
-//     return CompilerRejection{code: <code>, tier: <tier>, what: finding.what(), why: finding.why(), fix: finding.fix(), span: <part>.span}
-// in a frame of its own.
+//     at: <part>.span
+//     return CompilerRejection{code: <code>, tier: <tier>, what: finding.what(), why: finding.why(), fix: finding.fix(), span: at}
+// in a frame of its own: the rule reads `part` without taking it.
 sema_call_check_marker_reject: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     heard: context.marker_check_call ?? return None
     end := call.name_span.end
@@ -970,14 +972,15 @@ sema_call_check_marker_reject: fn(call: Call, expected: Type?, environment: Sema
     }
     at: span.start
     finding_name: "__jet_reject_finding_{at}"
-    part_name: "__jet_reject_at_{at}"
-    return_type: Val(Type.Option{inner: Type.Named{name: "CompilerRejection"}})
+    span_name: "__jet_reject_at_{at}"
+    return_type: Val(Type.Result{ok: Type.Option{inner: Type.Named{name: "CompilerRejection"}}, err: Type.Named{name: "Err"}})
     mark: sema_scope_mark(scopes)
     sema_scope_enter(scopes, state, "reject@{at}")
-    bindings := [Stmt]{sema_compiler_events_binding(finding_name, None, call.args[0].expr, span)}
-    if {
-        call.args.len() == 2 -> bindings.push(sema_compiler_events_binding(part_name, None, call.args[1].expr, span))
-        else -> bindings.push(sema_compiler_events_binding(part_name, None, Expr.Ident{name: "{heard}", span: span, id: AST_NODE_GENERATED}, span))
+    part: if call.args.len() == 2 -> call.args[1].expr else -> Expr.Ident{name: "{heard}", span: span, id: AST_NODE_GENERATED}
+    placed: Expr.Field{base: part, member: "span", span: span, id: AST_NODE_GENERATED}
+    bindings: [Stmt]{
+        sema_compiler_events_binding(finding_name, None, call.args[0].expr, span),
+        sema_compiler_events_binding(span_name, None, placed, span),
     }
     bound := sema_check_statements(bindings, return_type, environment, program, scopes, state, tail_store, context, diagnostics, scopes.loop_depth)
     if !bound.complete {
@@ -1002,8 +1005,7 @@ sema_call_check_marker_reject: fn(call: Call, expected: Type?, environment: Sema
         sema_call_marker_reject_text(finding_name, "why", span),
         sema_call_marker_reject_text(finding_name, "fix", span),
     }
-    part: Expr.Field{base: Expr.Ident{name: "{part_name}", span: span, id: AST_NODE_GENERATED}, member: "span", span: span, id: AST_NODE_GENERATED}
-    fields.push(ExprField{name: "span", name_span: span, value: part})
+    fields.push(ExprField{name: "span", name_span: span, value: Expr.Ident{name: "{span_name}", span: span, id: AST_NODE_GENERATED}})
     rejection: Expr.StructLit{type_name: "CompilerRejection", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED}
     checked := sema_check_statements([Stmt]{Stmt.Return{value: Val(rejection), span: span}}, return_type, environment, program, scopes, state, tail_store, context, diagnostics, scopes.loop_depth)
     if !checked.complete {
