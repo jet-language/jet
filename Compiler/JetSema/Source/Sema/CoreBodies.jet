@@ -254,7 +254,7 @@ sema_core_body_capture: fn(program: SemaProgramTables, owner_id: SymbolID, check
     packet := SemaParallelBody{job_index: 0, checked: Val(checked.move()), diagnostics: own.move(), call_facts: compiler_take_rows<SemaCallSiteFact>(call_facts), comptime_requests: compiler_take_rows<SemaComptimeRequest>(comptime_requests), name_references: compiler_take_rows<SemaNameReferenceFact>(name_references), method_input: None, wanted_hooks: false}
     if program.registration_graph == .Val(graph) {
         demand := sema_demand_capture_close(graph)
-        packet.codec_demand = compiler_take_rows<String>(demand.codecs)
+        packet.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
         packet.derive_demand = compiler_take_rows<String>(demand.derived)
         out := body_codec_out()
         out.indexed = true

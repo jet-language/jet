@@ -117,9 +117,9 @@ compiler_task_schedule: fn(graph: ^^CompilerTaskGraph, threads: CompilerThreads)
 // The heaviest ready node (the lower node on a tie) and an idle slot, which
 // it now holds. None when no node is ready or no slot is idle.
 compiler_task_schedule_next: fn(schedule: ^CompilerTaskSchedule) -> CompilerTaskStart? Never! {
-    if schedule.ready.len() == 0 || schedule.idle.len() == 0 -> return None
+    if schedule.ready.len() == 0 -> return None
+    slot: schedule.idle.pop() ?? return None
     node: compiler_task_heap_pop(schedule.ready, schedule.graph.weights)
-    slot: schedule.idle.pop() ?? panic("a compiler task schedule lost an idle slot")
     Val(CompilerTaskStart{node: node, slot: slot})
 }
 
@@ -216,7 +216,7 @@ compiler_task_heap_push: fn(heap: ^[Int], weights: [Int], node: Int) Never! {
 // Takes the first node of the non-empty heap `heap`.
 compiler_task_heap_pop: fn(heap: ^[Int], weights: [Int]) -> Int Never! {
     first: heap[0]
-    last: heap.pop() ?? panic("a compiler task heap was empty")
+    last: heap.pop() ?? return first
     if heap.len() == 0 -> return first
     heap[0] = last
     at := 0

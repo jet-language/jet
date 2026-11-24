@@ -49,7 +49,7 @@
 // Selection reads every operand of an instruction before it writes the
 // instruction's result (the builder already emits `add s <- s, one`), so a
 // pass may make a result slot equal to an operand slot.
-use jet_foundation.[CompilerThreads, Interner, NameTable, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set, name_column_value]
+use jet_foundation.[CompilerThreads, Interner, NameTable, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_taken, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set, name_column_value]
 
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
@@ -1582,7 +1582,7 @@ ir_opt_heap_push: fn(heap: ^[Int], ranks: [Int], id: Int) Never! {
 
 ir_opt_heap_pop: fn(heap: ^[Int], ranks: [Int]) -> Int Never! {
     top: heap[0]
-    last: heap.pop() ?? panic("the IR optimizer claimed from an empty queue")
+    last: heap.pop() ?? return top
     if heap.len() == 0 -> return top
     heap[0] = last
     at := 0
@@ -1617,7 +1617,7 @@ ir_opt_cells: fn(functions: ^[IRFunction]) -> [Shared<IROptCell>] {
 
 ir_opt_cell_take: fn(cell: Shared<IROptCell>) -> IRFunction {
     held := cell.guard_edit()
-    body := held.value.body.pop() ?? panic("the IR optimizer claimed a function twice")
+    body := compiler_threads_taken(held.value.body)
     body.move()
 }
 
@@ -1848,7 +1848,7 @@ ir_opt_compact_links: fn(f: ^IRFunction) Never! {
             f.b[at] = -1
             open.push(I64{at})
         } else if op == .Else { f.b[Int{open[open.len() - 1]}] = at } else if op == .End {
-            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            opener: Int{ir_construct_closed(open)}
             f.a[at] = opener
             if f.op[opener] == .If {
                 f.c[opener] = at
@@ -1889,7 +1889,7 @@ ir_opt_compact: fn(f: ^IRFunction) Never! {
             f.b[kept] = -1
             open.push(I64{kept})
         } else if op == .Else { f.b[Int{open[open.len() - 1]}] = kept } else if op == .End {
-            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            opener: Int{ir_construct_closed(open)}
             f.a[kept] = opener
             if f.op[opener] == .If {
                 f.c[opener] = kept
@@ -1948,7 +1948,7 @@ ir_opt_compact_facts: fn(f: ^IRFunction, facts: ^OptFacts) Never! {
             f.b[kept] = -1
             open.push(I64{kept})
         } else if op == .Else { f.b[Int{open[open.len() - 1]}] = kept } else if op == .End {
-            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            opener: Int{ir_construct_closed(open)}
             f.a[kept] = opener
             if f.op[opener] == .If {
                 f.c[opener] = kept

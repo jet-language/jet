@@ -6,6 +6,7 @@ use jet_foundation.[
     NameTable,
     Type,
     TypeTupleField,
+    build_time_refused,
     core_enum_variant_payload,
     core_record_field_table,
     name_column_table,
@@ -233,7 +234,7 @@ ir_compiler_owned_core_fields: fn() -> IRCompilerOwnedCore Never! {
     loop (k, owner) in owners {
         row := [TypeTupleField]{}
         loop (f, field) in fields[k] {
-            ty: types[k][f] ?? panic("missing canonical Core field {owner}.{field}")
+            ty: types[k][f] ?? build_time_refused("missing canonical Core field {owner}.{field}")
             row.push(TypeTupleField{name: field.copy(), ty: ty.copy()})
         }
         // A written marker argument's value: the compiler answers

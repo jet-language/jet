@@ -234,11 +234,15 @@ compiler_threads_joined: fn<T>(handle: ^^Task<T>) -> T Never! {
     handle.join() ?? panic(compiler_threads_failure_text(err))
 }
 
-// Takes a value back from a handoff list in a phase's lock-guarded shared
-// state. Every phase hands values to and from its threads this way: the
-// phase's own code pushes each value before the take that pops it, in the same
-// order, so the list always holds it. This checks nothing about the input;
-// it stops only if a phase's handoff code itself pops more than it pushed.
+// Takes a value back from a handoff list: one in a phase's lock-guarded
+// shared state, or the local list a `task.group` block fills for the code
+// after the group (a group block is no expression, so its value leaves
+// through a list; a failed child re-raises at its join inside the block).
+// Every phase hands values to and from its threads this way: the phase's own
+// code pushes each value before the take that pops it, in the same order, on
+// every path, so the list always holds it. This checks nothing about the
+// input; it stops only if a phase's handoff code itself pops more than it
+// pushed.
 compiler_threads_taken: fn<T>(rows: ^[T]) -> T Never! {
     rows.pop() ?? panic("a compiler phase took back a value its threads were never handed")
 }

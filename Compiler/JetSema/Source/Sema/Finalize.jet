@@ -1436,16 +1436,9 @@ sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGra
     inputs := SemaFinalizeSideInputs{table: table.move(), type_caps: type_caps.move(), library: library.move(), typestate_order: compiler_threads_heaviest_first(function_counts), jobs: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners), threads: threads, effect_bounds: effect_bounds.move()}
     sides := loop job in 0..<sema_finalize_side_jobs(parts) -> sema_finalize_side_new(job)
     found := loop _ in modules -> [Diagnostic]{}
-    results := [SemaCoreCollected]{}
-    assembled := [SemaCoreModuleUsageResult?]{}
-    contexts := [SemaCoreModuleContext?]{}
-    loop _ in 0..<inputs.jobs.len() {
-        results.push(sema_core_collected_empty())
-        assembled.push(None)
-        contexts.push(None)
-    }
+    core_rows := loop job in 0..<inputs.jobs.len() -> SemaFinalizeCoreCollected{job: job, collected: sema_core_collected_empty(), assembled: None, context: None}
     queue: SemaFinalizeCoreQueue{next: 0}
-    sema_finalize_side_claimers(owned, modules, inputs, queue, 0, workers, sides, found, results, assembled, contexts)
+    sema_finalize_side_claimers(owned, modules, inputs, queue, 0, workers, sides, found, core_rows)
     out_type_caps = inputs.type_caps.move()
     sema_finalize_side_join(sides, parts, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint)
     found.reverse()
@@ -1458,21 +1451,18 @@ sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGra
     // (jobs are in module and item order, so a module's jobs are
     // consecutive) and assembled here, with the context its first job built
     // (or, for a module without items, built here).
-    results.reverse()
-    assembled.reverse()
-    contexts.reverse()
+    core_rows.reverse()
     job := 0
     loop module_index in 0..<owned.modules.len() {
         collected := sema_core_collected_empty()
         whole := SemaCoreModuleUsageResult?{None}
         context := SemaCoreModuleContext?{None}
         loop job < inputs.jobs.len() && inputs.jobs[job].module_index == module_index {
-            part: results.pop() ?? panic("a Core usage job left its rows")
-            done := assembled.pop() ?? panic("a Core usage job left its rows")
-            built := contexts.pop() ?? panic("a Core usage job left its rows")
-            if built != None -> context = built.move()
-            if done == None -> sema_core_collected_append(collected, part) else {
-                whole = done.move()
+            // One row per job: none left past the last job.
+            row: core_rows.pop() ?? break
+            if row.context != None -> context = row.context.move()
+            if row.assembled == None -> sema_core_collected_append(collected, row.collected) else {
+                whole = row.assembled.move()
             }
             job += 1
         }
@@ -1556,17 +1546,16 @@ sema_finalize_side_join: fn(sides: ^^[SemaFinalizeSide], parts: Int, diagnostics
 // Runs side-check threads `from..<workers`, one task each, and moves every
 // result a thread returned into its slot: each side check into its job's
 // slot of `sides`, each module's typestate findings into its slot of
-// `found`, and every Core job row into its slot of `results`, `assembled`
-// and `contexts`. Every thread reads the graph, the checked modules, the
-// inputs and the queue in place: none is written or moved before the group
-// joins.
-sema_finalize_side_claimers: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], inputs: SemaFinalizeSideInputs, queue: SemaFinalizeCoreQueue, from: Int, workers: Int, sides: ^[SemaFinalizeSide], found: ^[[Diagnostic]], results: ^[SemaCoreCollected], assembled: ^[SemaCoreModuleUsageResult?], contexts: ^[SemaCoreModuleContext?]) {
+// `found`, and every Core job row into its job's slot of `core_rows`. Every
+// thread reads the graph, the checked modules, the inputs and the queue in
+// place: none is written or moved before the group joins.
+sema_finalize_side_claimers: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], inputs: SemaFinalizeSideInputs, queue: SemaFinalizeCoreQueue, from: Int, workers: Int, sides: ^[SemaFinalizeSide], found: ^[[Diagnostic]], core_rows: ^[SemaFinalizeCoreCollected]) {
     if from >= workers {
         return
     }
     task.group sema_finalize_side_threads {
         head: task sema_finalize_side_claimed(graph, modules, inputs, queue)
-        sema_finalize_side_claimers(graph, modules, inputs, queue, from + 1, workers, sides, found, results, assembled, contexts)
+        sema_finalize_side_claimers(graph, modules, inputs, queue, from + 1, workers, sides, found, core_rows)
         claimed := compiler_threads_joined(head)
         loop claimed.sides.len() > 0 {
             done: claimed.sides.pop() ?? break
@@ -1579,9 +1568,8 @@ sema_finalize_side_claimers: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
         }
         loop claimed.core.len() > 0 {
             done: claimed.core.pop() ?? break
-            results[done.job] = done.collected.move()
-            assembled[done.job] = done.assembled.move()
-            contexts[done.job] = done.context.move()
+            job: done.job
+            core_rows[job] = done.move()
         }
     }
 }

@@ -1566,10 +1566,8 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
     done := JetDriverReachHeldParse{count: 0, fragments: 0, fragment_bytes: 0, fragment_reads: 0, problem: None}
     reads_before: window.reads
     // The held modules with a declaration to parse, in `held` order: each
-    // one's place in the load's modules, the program.items positions its
-    // parse fills, and its blanked source.
-    loaded_at := [Int]{}
-    positions_at := [[Int]]{}
+    // one's blanked source, with its place in the load's modules and the
+    // program.items positions its parse fills.
     sources := [JetDriverReachSource]{}
     // The declarations whose ready parses the load reads, in `held` order:
     // each one's place in the load's modules, its program.items position,
@@ -1606,9 +1604,7 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
         }
         if positions.len() == 0 -> next
         jet_driver_blank_bytes(source, cursor, source.len())
-        loaded_at.push(row.loaded)
-        positions_at.push(positions)
-        sources.push(JetDriverReachSource{bytes: source, hold: None})
+        sources.push(JetDriverReachSource{bytes: source, hold: None, loaded: row.loaded, positions: positions})
     }
     parts := jet_driver_core_ready_programs(request.core_interface, window, ready_places, request.compiler_threads)
     done.fragment_reads = window.reads - reads_before
@@ -1630,8 +1626,9 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
     }
     parses := jet_driver_reach_parse_sources(request.compiler_threads, sources)
     failed := false
-    loop (at, loaded) in loaded_at {
-        parse: parses.pop() ?? panic("a held module lost its parse")
+    loop {
+        parse: parses.pop() ?? break
+        loaded: parse.loaded
         parsed: parse.parsed.move()
         loop diagnostic in parsed.diagnostics {
             if diagnostic.severity != DIAGNOSTIC_LINT {
@@ -1642,7 +1639,7 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
             failed = true
             next
         }
-        positions: positions_at[at]
+        positions: parse.positions
         if parsed.program.items.len() != positions.len() {
             panic("the {positions.len()} held declarations of {source_units[modules[loaded].source_unit_index].path} parsed as {parsed.program.items.len()} items")
         }
@@ -1666,13 +1663,16 @@ jet_driver_reach_held_missing: fn(done: JetDriverReachHeldParse, module_name: St
     stopped
 }
 
-// A module source the load parses again: its blanked bytes, and the Core
-// row whose hold the parse takes again (jet_driver_reach_hold), when its
-// held declarations should parse to their stubs as in the module's own
-// parse.
+// A module source the load parses again: its blanked bytes, the Core row
+// whose hold the parse takes again (jet_driver_reach_hold), when its held
+// declarations should parse to their stubs as in the module's own parse,
+// and the module's place in the load's modules (`loaded`) with the
+// program.items positions its parse fills.
 JetDriverReachSource: struct {
     bytes: [U8],
     hold: JetDriverReachHoldRow?,
+    loaded: Int,
+    positions: [Int],
 }
 
 // What a Core unit's hold reads of its row (jet_driver_parse_core_source).
@@ -1682,10 +1682,14 @@ JetDriverReachHoldRow: struct {
     runtime: Bool,
 }
 
-// A module source's parse, and how many tokens its lexer read.
+// A module source's parse, and how many tokens its lexer read; for a held
+// module's source, the module's place and positions it carried
+// (jet_driver_reach_parse_row).
 JetDriverReachParse: struct {
     parsed: ParseResult,
     tokens: Int,
+    loaded: Int{-1},
+    positions: [Int]{[Int]{}},
 }
 
 // The parses of the module sources `sources` (on several threads, moved
@@ -1710,7 +1714,7 @@ jet_driver_reach_parse_sources: fn(threads: CompilerThreads, sources: ^[JetDrive
         // last first.
         loop sources.len() > 0 {
             source: sources.pop() ?? break
-            parses.push(jet_driver_reach_parse_source(source.bytes, source.hold, threads))
+            parses.push(jet_driver_reach_parse_row(source, threads))
         }
         return parses
     }
@@ -1753,6 +1757,16 @@ jet_driver_reach_parse_source: fn(source: [U8], hold: JetDriverReachHoldRow?, th
     JetDriverReachParse{parsed: parse_lexed_with_source_threads(lexed.lexed.move(), source, lexed.line_starts, runs, threads), tokens: tokens}
 }
 
+// The parse of the held module source `source`, carrying the module's place
+// and the positions it fills.
+jet_driver_reach_parse_row: fn(source: ^^JetDriverReachSource, threads: CompilerThreads) -> JetDriverReachParse {
+    owned: source.move()
+    parse := jet_driver_reach_parse_source(owned.bytes, owned.hold, threads)
+    parse.loaded = owned.loaded
+    parse.positions = owned.positions.move()
+    parse
+}
+
 // The parses of the sources `parts` (consecutive parts, held last-first),
 // in part order: each part's on its own compiler thread, the last part's
 // on this one. Each parse runs on its thread alone, so no spawned thread
@@ -1776,7 +1790,7 @@ jet_driver_reach_parse_parts: fn(parts: ^[[JetDriverReachSource]]) -> [[JetDrive
 // One thread: the parses of the sources `sources`, in order, each
 // source's bytes gone once it has parsed.
 jet_driver_reach_parse_part: fn(sources: ^^[JetDriverReachSource]) -> [JetDriverReachParse] {
-    parsed: loop source in sources.move() -> jet_driver_reach_parse_source(source.bytes, source.hold, compiler_threads_single())
+    parsed: loop source in sources.move() -> jet_driver_reach_parse_row(source, compiler_threads_single())
     parsed
 }
 

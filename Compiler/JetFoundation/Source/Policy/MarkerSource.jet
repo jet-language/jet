@@ -131,7 +131,7 @@ marker_source_split_default: fn(value: String) -> MarkerSourceDefault? Never! {
 // The entries of a `[…]` value.
 marker_source_list: fn(value: String) -> [String] Never! {
     if !value.starts_with("[") || !value.ends_with("]") || value.len() < 2 {
-        panic("expected a `[…]` list, found `{value}`")
+        build_time_refused("expected a `[…]` list, found `{value}`")
     }
     marker_source_split_top_level(foundation_byte_text(value.bytes(), 1, value.count_bytes() - 1))
 }
@@ -140,7 +140,7 @@ marker_source_flag: fn(value: String, line: String) -> Bool Never! {
     if value == {
         "true" -> return true
         "false" -> return false
-        else -> panic("a marker fact reads `true` or `false`, found `{value}` in {line}")
+        else -> build_time_refused("a marker fact reads `true` or `false`, found `{value}` in {line}")
     }
 }
 
@@ -153,19 +153,19 @@ marker_source_unprefixed: fn(written: String) -> String Never! {
 
 marker_source_site: fn(written: String, line: String) -> String Never! {
     name: marker_source_unprefixed(written)
-    if !MARKER_SOURCE_SITES.contains(name) -> panic("`{written}` is not a marker site, in {line}")
+    if !MARKER_SOURCE_SITES.contains(name) -> build_time_refused("`{written}` is not a marker site, in {line}")
     name
 }
 
 marker_source_scope: fn(written: String, line: String) -> String Never! {
     name: marker_source_unprefixed(written)
-    if !MARKER_SOURCE_SCOPES.contains(name) -> panic("`{name}` is not a policy scope, in {line}")
+    if !MARKER_SOURCE_SCOPES.contains(name) -> build_time_refused("`{name}` is not a policy scope, in {line}")
     name
 }
 
 marker_source_resolution: fn(written: String, line: String) -> String Never! {
     name: marker_source_unprefixed(written)
-    if !MARKER_SOURCE_RESOLUTIONS.contains(name) -> panic("`{name}` is not a resolution, in {line}")
+    if !MARKER_SOURCE_RESOLUTIONS.contains(name) -> build_time_refused("`{name}` is not a resolution, in {line}")
     name
 }
 
@@ -268,8 +268,8 @@ marker_source_members: fn(text: String) -> [String] Never! {
 
 // The text between the first `{` and the last `}` of a member.
 marker_source_block: fn(member: String, what: String) -> String Never! {
-    open: marker_source_byte_index(member, 123) ?? panic("{what} without a `{{` body: {member}")
-    close: marker_source_last_byte_index(member, 125) ?? panic("{what} without a closing `}}`: {member}")
+    open: marker_source_byte_index(member, 123) ?? build_time_refused("{what} without a `{{` body: {member}")
+    close: marker_source_last_byte_index(member, 125) ?? build_time_refused("{what} without a closing `}}`: {member}")
     foundation_byte_text(member.bytes(), open + 1, close)
 }
 
@@ -326,7 +326,7 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
     group := false
     loop entry in marker_source_members(block) {
         if marker_source_is_function(entry) -> next
-        separator: marker_source_setting_separator(entry) ?? panic("a marker setting reads `name: value`, found `{entry}` in {context}")
+        separator: marker_source_setting_separator(entry) ?? build_time_refused("a marker setting reads `name: value`, found `{entry}` in {context}")
         key: foundation_byte_text(entry.bytes(), 0, separator).trim()
         value: foundation_byte_text(entry.bytes(), separator + 1, entry.count_bytes()).trim()
         if key == {
@@ -342,12 +342,12 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
             "resolution" -> resolution = marker_source_resolution(value, context)
             "companion" -> {
                 parts: marker_source_list(value)
-                if parts.len() != 2 -> panic("`companion` reads `[Rule, .Site]` in {context}")
+                if parts.len() != 2 -> build_time_refused("`companion` reads `[Rule, .Site]` in {context}")
                 companion_site = Val(TAppliedRuleCompanionSite{rule: parts[0], site: marker_source_site(parts[1], context)})
             }
             "group" -> group = true
             "from" | "timing" | "protects" -> {}
-            else -> panic("unknown marker setting `{key}` in {context}")
+            else -> build_time_refused("unknown marker setting `{key}` in {context}")
         }
     }
     if group || sites.contains("TypeUse") -> return None
@@ -357,7 +357,7 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
     variadic_name := String?{None}
     loop index in 0..<fields.len() {
         entry: fields[index]
-        colon: marker_source_byte_index(entry, 58) ?? panic("marker field without `:` in {context}: {entry}")
+        colon: marker_source_byte_index(entry, 58) ?? build_time_refused("marker field without `:` in {context}: {entry}")
         label: foundation_byte_text(entry.bytes(), 0, colon).trim()
         value: foundation_byte_text(entry.bytes(), colon + 1, entry.count_bytes()).trim()
         type_text := value.copy()

@@ -477,11 +477,11 @@ ARITHMETIC_MODE_COUNT: #run arithmetic_mode_count(embed_file("Expressions.jet"),
 // The number of ArithmeticMode cases in `text` (this file), once each is a
 // case of `Gate` in `prelude`; else the build stops naming the strays.
 arithmetic_mode_count: fn(text: String, prelude: String) -> Int {
-    modes: effect_vocabulary_enum_cases(text, "ArithmeticMode") ?? panic("Expressions.jet declares no `ArithmeticMode: enum {{ … }}`")
-    gates: effect_vocabulary_enum_cases(prelude, "Gate") ?? panic("Core/Prelude/Prelude.jet declares no `Gate: enum {{ … }}`")
+    modes: effect_vocabulary_enum_cases(text, "ArithmeticMode") ?? build_time_refused("Expressions.jet declares no `ArithmeticMode: enum {{ … }}`")
+    gates: effect_vocabulary_enum_cases(prelude, "Gate") ?? build_time_refused("Core/Prelude/Prelude.jet declares no `Gate: enum {{ … }}`")
     strays: effect_vocabulary_strays(modes, gates)
     if strays.len() > 0 {
-        panic("Expressions.jet: ArithmeticMode names escapes that `Gate` in Core/Prelude/Prelude.jet does not declare: {strays.join(", ")}")
+        build_time_refused("Expressions.jet: ArithmeticMode names escapes that `Gate` in Core/Prelude/Prelude.jet does not declare: {strays.join(", ")}")
     }
     modes.len()
 }

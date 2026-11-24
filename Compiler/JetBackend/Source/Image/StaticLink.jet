@@ -59,7 +59,7 @@
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/Research/jet-backend-design-2026-10-01.md.
 use {
-    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, name_count, name_find, name_index, name_intern, name_table, name_table_sized]
+    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_joined, compiler_threads_taken, compiler_threads_partition, compiler_threads_single, name_count, name_find, name_index, name_intern, name_table, name_table_sized]
     link_crypto: core.crypto
     link_hex: core.encoding.hex
 }
@@ -3417,11 +3417,11 @@ link_emit_pieces: fn(c: ^^LinkContext, rows: [Int], threads: CompilerThreads) ->
         index := held.value.end
         loop index > held.value.start {
             index -= 1
-            pieces.bytes[back.value.rows[index]] = held.value.bytes.pop() ?? panic("a link emitting thread lost a piece")
-            pieces.errors[back.value.rows[index]] = held.value.errors.pop() ?? panic("a link emitting thread lost its reports")
+            pieces.bytes[back.value.rows[index]] = compiler_threads_taken(held.value.bytes)
+            pieces.errors[back.value.rows[index]] = compiler_threads_taken(held.value.errors)
         }
     }
-    context := back.value.contexts.pop() ?? panic("the link emitting threads lost the link context")
+    context := compiler_threads_taken(back.value.contexts)
     LinkEmitted{context: context.move(), pieces: pieces.move()}
 }
 

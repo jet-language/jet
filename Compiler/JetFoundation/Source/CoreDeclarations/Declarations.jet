@@ -146,7 +146,7 @@ CORE_MODULE_DECLARATIONS: #run core_declarations_modules(CORE_DECLARATIONS)
 core_declarations_built: fn(core: String, parts: String, syntax: [CoreDeclarationFile], runtime: [CoreDeclarationFile], effects: [EffectVocabularyRow]) -> CoreDeclarations {
     if core_declarations_read(core, parts, syntax, runtime, effects) == {
         .Ok(declared) -> declared
-        .Err(error) -> panic(error.message)
+        .Err(error) -> build_time_refused(error.message)
     }
 }
 

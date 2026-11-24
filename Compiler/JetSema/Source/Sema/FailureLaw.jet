@@ -4,6 +4,7 @@ use {
     jet_foundation.[
         AST_NODE_GENERATED,
         AccessConvention,
+        build_time_refused,
         module_is_none,
         module_none,
         AppliedRuleApplication,
@@ -125,10 +126,10 @@ SEMA_COMPILER_ERROR_TYPES_CHECKED: #run sema_compiler_error_types_checked(SEMA_C
 sema_compiler_error_types_checked: fn(owned: [String]) -> Int {
     loop name in owned {
         if CORE_ERROR_TYPES.contains(name) {
-            panic("SEMA_COMPILER_ERROR_TYPES names {name}, which Core.rows error_types already lists")
+            build_time_refused("SEMA_COMPILER_ERROR_TYPES names {name}, which Core.rows error_types already lists")
         }
         if !ir_host_value_name(name) && ir_runtime_handle_row(name) == None && !sema_compiler_error_record(name) {
-            panic("SEMA_COMPILER_ERROR_TYPES names {name}, which no host value, runtime handle or record is")
+            build_time_refused("SEMA_COMPILER_ERROR_TYPES names {name}, which no host value, runtime handle or record is")
         }
     }
     owned.len()
@@ -1335,10 +1336,10 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
                 }
             }
             if unresolved && !generic_names.contains(name) {
-                diagnostics.push(sema_unknown_type_name(name, span, [String]{}, sema_call_source_word_span(environment, program, span, name)))
+                diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment, program), sema_call_source_word_span(environment, program, span, name)))
             }
             if !unresolved && sema_failure_written_name_unknown(name, generic_names, environment, program) {
-                diagnostics.push(sema_unknown_type_name(name, span, [String]{}, sema_call_source_word_span(environment, program, span, name)))
+                diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment, program), sema_call_source_word_span(environment, program, span, name)))
             }
         }
         // An alias can hide a second optional layer: `Maybe<Int>?` where
@@ -1552,6 +1553,14 @@ sema_type_name_span: fn(name: String, span: Span) -> Span? Never! {
 sema_type_declared_names: fn(graph: SemaRegistrationGraph, caller: Int) -> [String] Never! {
     if caller < 0 -> return [String]{}
     loop nominal in graph.modules[caller].nominals -> nominal.symbol.name.copy()
+}
+
+// The types the environment's module declares in the pass's graph.
+sema_failure_declared_type_names: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
+    if program.registration_graph == .Val(graph) {
+        return sema_type_declared_names(graph, sema_scope_caller_row(environment, graph))
+    }
+    [String]{}
 }
 
 // E0119 twice for `Name<…>` where `Name` names nothing: the missing type,

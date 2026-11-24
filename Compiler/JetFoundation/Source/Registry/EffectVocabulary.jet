@@ -96,7 +96,7 @@ effect_vocabulary_rows: fn(machine_source: String, core_source: String, meta_sou
     }
     loop row in effect_vocabulary_source_rows(meta_source, "Core/Compiler/Meta.jet", Val(machine)) {
         loop seen in rows {
-            if seen.name == row.name -> panic("Core/Compiler/Meta.jet: duplicate effect {row.name}")
+            if seen.name == row.name -> build_time_refused("Core/Compiler/Meta.jet: duplicate effect {row.name}")
         }
         rows.push(row.copy())
     }
@@ -218,20 +218,20 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                     next
                 }
                 if !listed {
-                    panic("{place}: expected the `#FX` or `#FX(…)` line above a Core effect")
+                    build_time_refused("{place}: expected the `#FX` or `#FX(…)` line above a Core effect")
                 }
             }
             if fields.len() != 3 || !fields[0].ends_with(":") || (fields[1] != "struct" && fields[1] != "enum") || fields[2] != "{{" {
-                panic("{place}: expected `Name: struct {{` or `Name: enum {{`")
+                build_time_refused("{place}: expected `Name: struct {{` or `Name: enum {{`")
             }
             name: fields[0].removesuffix(":")
             loop seen in rows {
-                if seen.name == name -> panic("{place}: duplicate effect {name}")
+                if seen.name == name -> build_time_refused("{place}: duplicate effect {name}")
             }
             if machine == .Val(known) {
                 loop seen in known {
                     if seen.name == name {
-                        panic("{place}: `{name}` is already a machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
+                        build_time_refused("{place}: `{name}` is already a machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
                     }
                 }
             }
@@ -254,10 +254,10 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             if line.starts_with(parent_head) && parent == None && family && cases.len() > 0 && body == None && expert_body == None {
                 written: line.removeprefix(parent_head).removesuffix(",").trim()
                 if written.split(".").to_list().len() != 2 || effect_vocabulary_row_at(rows, written) < 0 {
-                    panic("{place}: `parent: {written}` names no `Root.Case` effect declared above it")
+                    build_time_refused("{place}: `parent: {written}` names no `Root.Case` effect declared above it")
                 }
                 if effect_vocabulary_row_at(rows, "{written}.{cases[0]}") >= 0 {
-                    panic("{place}: `{written}` already has cases")
+                    build_time_refused("{place}: `{written}` already has cases")
                 }
                 parent = Val(written)
                 next
@@ -267,37 +267,37 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 next
             }
             if body != None || expert_body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
-                panic("{place}: expected `parent: Root.Case`, then one `irreversible: fn(self) -> Bool {{ … }}` line, then one `expert: fn(self) -> Bool {{ … }}` line in `impl Effect`")
+                build_time_refused("{place}: expected `parent: Root.Case`, then one `irreversible: fn(self) -> Bool {{ … }}` line, then one `expert: fn(self) -> Bool {{ … }}` line in `impl Effect`")
             }
             body = Val(line.removeprefix(impl_head).removesuffix(" }}").trim())
             next
         }
         if line == "impl Effect {{}}" || line == "impl Effect {{" {
-            if impl_seen -> panic("{place}: `{type_name}` has a second `impl Effect` block")
+            if impl_seen -> build_time_refused("{place}: `{type_name}` has a second `impl Effect` block")
             impl_seen = true
             in_impl = line == "impl Effect {{"
             next
         }
         if line == "}}" {
-            if !impl_seen -> panic("{place}: `{type_name}` has no `impl Effect` block")
+            if !impl_seen -> build_time_refused("{place}: `{type_name}` has no `impl Effect` block")
             if family && cases.len() == 0 {
-                panic("{place}: the effect family `{type_name}` has no cases")
+                build_time_refused("{place}: the effect family `{type_name}` has no cases")
             }
             case_rows := [EffectVocabularyRow]{}
             any := false
             // A family under a parent case names its cases below that case.
             prefix: parent ?? type_name
             loop member in cases {
-                irreversible: effect_vocabulary_fact(body, cases, Val(member)) ?? panic("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those")
-                expert: effect_vocabulary_fact(expert_body, cases, Val(member)) ?? panic("{place}: `{type_name}`'s `expert` body is not `true`, `false`, `self == .Case` or an `||` of those")
+                irreversible: effect_vocabulary_fact(body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those")
+                expert: effect_vocabulary_fact(expert_body, cases, Val(member)) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true`, `false`, `self == .Case` or an `||` of those")
                 if irreversible -> any = true
                 case_rows.push(EffectVocabularyRow{name: "{prefix}.{member}", irreversible: irreversible, kernel: kernel.copy(), expert: expert})
             }
             root := any
             root_expert := false
             if !family {
-                root = effect_vocabulary_fact(body, cases, None) ?? panic("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`")
-                root_expert = effect_vocabulary_fact(expert_body, cases, None) ?? panic("{place}: `{type_name}`'s `expert` body is not `true` or `false`")
+                root = effect_vocabulary_fact(body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`")
+                root_expert = effect_vocabulary_fact(expert_body, cases, None) ?? build_time_refused("{place}: `{type_name}`'s `expert` body is not `true` or `false`")
             }
             if parent == None {
                 rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy(), expert: root_expert})
@@ -313,16 +313,16 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             next
         }
         if !family || fields.len() != 1 || impl_seen {
-            panic("{place}: expected an effect family case name, `impl Effect` or `}}`")
+            build_time_refused("{place}: expected an effect family case name, `impl Effect` or `}}`")
         }
         // A case ends at its comma.
         member: line.removesuffix(",")
-        if cases.contains(member) -> panic("{place}: duplicate effect {type_name}.{member}")
+        if cases.contains(member) -> build_time_refused("{place}: duplicate effect {type_name}.{member}")
         case_spans.push(Span{start: start, end: start + member.bytes().len()})
         cases.push(member)
     }
-    if type_name != "" -> panic("{path}: `{type_name}` is not closed")
-    if rows.len() == 0 -> panic("{path} declares no effects")
+    if type_name != "" -> build_time_refused("{path}: `{type_name}` is not closed")
+    if rows.len() == 0 -> build_time_refused("{path} declares no effects")
     EffectVocabularyScan{rows: rows, decls: decls}
 }
 
@@ -337,12 +337,12 @@ effect_vocabulary_kernel: fn(line: String, machine: [EffectVocabularyRow], place
             if row.name == entry -> known = true
         }
         if !known {
-            panic("{place}: `{entry}` is no machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
+            build_time_refused("{place}: `{entry}` is no machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
         }
-        if kernel.contains(entry.copy()) -> panic("{place}: `{entry}` is listed twice")
+        if kernel.contains(entry.copy()) -> build_time_refused("{place}: `{entry}` is listed twice")
         kernel.push(entry.copy())
     }
-    if kernel.len() == 0 -> panic("{place}: the `#FX(…)` line lists no machine effect")
+    if kernel.len() == 0 -> build_time_refused("{place}: the `#FX(…)` line lists no machine effect")
     kernel
 }
 

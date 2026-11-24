@@ -250,8 +250,8 @@ parser_parse_source_lines_threads: fn(source: [U8], allow_reserved_identifiers: 
     if chunk_count == 0 {
         return if allow_reserved_identifiers -> parse_generated_layout(source) else -> parse_source_layout(source)
     }
-    if chunk_count == 1 {
-        only := lexed_chunks.chunks.pop() ?? panic("missing single chunk")
+    if chunk_count == 1 && lexed_chunks.chunks.pop() == .Val(popped) {
+        only := popped
         diagnostics := only.diagnostics.move()
         compiler_transfer_rows<Diagnostic>(diagnostics, only.bidi_diagnostics)
         compiler_transfer_rows<Diagnostic>(diagnostics, only.terminator_diagnostics)

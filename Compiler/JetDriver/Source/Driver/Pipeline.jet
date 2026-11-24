@@ -214,6 +214,7 @@ use {
         CompilerEventRecord,
         compiler_threads_admit,
         compiler_threads_joined,
+        compiler_threads_taken,
         CompilerTraceSink,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -5282,10 +5283,29 @@ jet_driver_keep_going_incomplete_modules: fn(kg: ^JetDriverKeepGoingLog, phase: 
     }
 }
 
-jet_driver_keep_going_skip_set: fn(skip: [String]) -> NameTable Never! {
-    set := name_column_table(skip.len())
-    loop entry in skip -> _ := name_intern(set, entry)
-    set
+// The `lower:<name>@<position>` skip entries, each read once into a
+// (position, name) pair: the position above the name's spelling id in
+// `names`, the way jet_driver_keep_going_trap_lowering probes them.
+JetDriverKeepGoingTraps: struct {
+    names: NameTable,
+    slots: [Int:Bool],
+}
+
+jet_driver_keep_going_traps: fn(skip: [String]) -> JetDriverKeepGoingTraps Never! {
+    traps := JetDriverKeepGoingTraps{names: name_column_table(skip.len()), slots: [Int:Bool]{}}
+    loop entry in skip {
+        if !entry.starts_with("lower:") -> next
+        // `rfind` counts bytes, so the name and position are cut from the bytes.
+        at: entry.rfind("@")
+        if at <= 6 -> next
+        bytes: entry.bytes()
+        digits: foundation_byte_text(bytes, at + 1, bytes.len())
+        position: Int.parse(digits) ?? next
+        if "{position}" != digits -> next
+        name: name_intern(traps.names, foundation_byte_text(bytes, 6, at))
+        traps.slots[(position << 32) | name_index(name)] = true
+    }
+    traps
 }
 
 // A checked function whose body is one unreachable stop: its signature,
@@ -5312,9 +5332,10 @@ jet_driver_keep_going_trap_body: fn(function: FnBody, reason: String) -> FnBody 
 // `lower:<name>@<position>` skip entries: the function at that position of
 // the lowering list lowers as a trap.
 jet_driver_keep_going_trap_lowering: fn(kg: ^JetDriverKeepGoingLog, functions: ^[FnBody]) {
-    skip: jet_driver_keep_going_skip_set(kg.skip)
+    traps: jet_driver_keep_going_traps(kg.skip)
     loop position in 0..<functions.len() {
-        if name_find(skip, "lower:{functions[position].name}@{position}") == None -> next
+        name: name_find(traps.names, functions[position].name) ?? next
+        if traps.slots.get((position << 32) | name_index(name)) == None -> next
         // The report and the trap read the row in place; the slot is written
         // only after the trap row is built, when no view of it is live.
         trap: jet_driver_keep_going_trap_body_row(kg, functions[position], "lowered as a trap: an earlier keep-going run crashed lowering it", "keep-going trap: lowering this function crashed an earlier run")
@@ -6877,8 +6898,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
             repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
             out.push(compiler_threads_joined(reg_task))
         }
-        // Unreachable: the group above pushed the one joined row.
-        out.pop() ?? panic("lost registered function keys")
+        compiler_threads_taken(out)
     } else -> {
         repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
         jet_driver_registered_function_keys(registration_graph)

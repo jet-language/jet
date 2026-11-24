@@ -201,7 +201,7 @@ builtin_numeric_family_kinds: fn(prelude: String) -> [BuiltinNumericKind] Never!
         {name: "Float", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
     }
     loop alias in foundation_size_alias_rows(prelude) {
-        ty: foundation_family_type(alias.family, alias.sizes) ?? panic("`{alias.name}` names no family size")
+        ty: foundation_family_type(alias.family, alias.sizes) ?? build_time_refused("`{alias.name}` names no family size")
         integer: alias.family != "IEEE"
         signed: alias.family != "Unsigned"
         bits: if integer -> alias.sizes[0] else -> 1 + alias.sizes[0] + alias.sizes[1]
@@ -231,7 +231,7 @@ BUILTIN_NUMERIC_SOURCES: #run builtin_numeric_family_sources(embed_file("toolcha
 builtin_numeric_family_sources: fn(prelude: String) -> [BuiltinNumericSource] Never! {
     sources := [BuiltinNumericSource]{{method: "from_int", source: "Int"}}
     loop alias in foundation_size_alias_rows(prelude) {
-        ty: foundation_family_type(alias.family, alias.sizes) ?? panic("`{alias.name}` names no family size")
+        ty: foundation_family_type(alias.family, alias.sizes) ?? build_time_refused("`{alias.name}` names no family size")
         if type_name(ty) != alias.name -> next
         sources.push(BuiltinNumericSource{method: "from_{alias.name.lower()}", source: type_name(ty)})
     }

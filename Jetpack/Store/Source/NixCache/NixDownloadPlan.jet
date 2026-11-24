@@ -13,7 +13,8 @@ STORE_NIX_INT_MAX: 9223372036854775807
 
 STORE_NIX_THROUGHPUT_CONFIG: "config/nix-cache-v1.throughput"
 
-NixPlanState: enum {
+// Whether a planned package is new, already in the store, or repaired.
+PlanState: enum {
     New,
     Cached,
     Repaired,
@@ -21,7 +22,7 @@ NixPlanState: enum {
 
 NixPlanItem: struct {
     package: String,
-    state: NixPlanState,
+    state: PlanState,
     download_bytes: Int,
     disk_bytes: Int,
 }
@@ -149,7 +150,7 @@ store_plan_nix_downloads: fn(verification: ^StoreVerification, roots: HangarRoot
                     plan.new = store_nix_checked_add(plan.new, 1, "Nix closure new package count overflowed")
                 }
             }
-            state: if repaired -> NixPlanState.Repaired else -> NixPlanState.New
+            state: if repaired -> PlanState.Repaired else -> PlanState.New
             plan.items.push(NixPlanItem{package: store_nix_store_name(store_path), state: state, download_bytes: file_size, disk_bytes: info.info.nar_size})
             loop name in info.info.references {
                 reference: "{store_dir}/{name}"

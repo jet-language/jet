@@ -356,7 +356,7 @@ ir_drop_build_code: fn(f: IRFunction, plan: IRDropPlan) -> IROptCode Never! {
             code.b[kept] = -1
             open.push(I64{kept})
         } else if op == .Else { code.b[Int{open[open.len() - 1]}] = kept } else if op == .End {
-            opener: Int{open.pop() ?? panic("ir_drop_build_code: End without an open construct")}
+            opener: Int{ir_construct_closed(open)}
             code.a[kept] = opener
             if code.op[opener] == .If {
                 code.c[opener] = kept

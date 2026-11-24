@@ -92,7 +92,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: ^IRFunction, promote: Bool) -> Int Nev
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .End || op == .Else {
-            closed: open.pop() ?? panic("ir_opt_scalar_replace: End without an open construct")
+            closed: ir_construct_closed(open)
             if closed == .Loop -> depth -= 1
         }
         if op == .Block || op == .Loop || op == .If || op == .Else {

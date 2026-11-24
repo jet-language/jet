@@ -147,7 +147,7 @@ ir_opt_nesting: fn(f: IRFunction) -> OptNesting Never! {
         if op == .Block || op == .Loop || op == .If -> open.push(I64{at}) else if op == .Else {
             els[Int{open[open.len() - 1]}] = at
         } else if op == .End {
-            opener: Int{open.pop() ?? panic("ir_opt_nesting: End without an open construct")}
+            opener: Int{ir_construct_closed(open)}
             end[opener] = at
         }
     }

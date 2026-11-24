@@ -104,7 +104,7 @@ TShapeFormatName: struct {
 RENAME_PARAMETERS: #run rename_parameters_read()
 
 rename_parameters_read: fn() -> [String] Never! {
-    rule: registration_marker_rule(MARKER_RENAME) ?? panic("the Prelude declares no `#Rename`")
+    rule: registration_marker_rule(MARKER_RENAME) ?? build_time_refused("the Prelude declares no `#Rename`")
     loop parameter in rule.signature.params -> parameter.name
 }
 

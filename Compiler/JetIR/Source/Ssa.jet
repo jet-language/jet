@@ -192,7 +192,7 @@ ir_ssa_written: fn(s: ^IRSsa, f: IRFunction) Never! {
             next
         }
         if op == .End {
-            join: open.pop() ?? panic("ir_ssa_written: End without an open construct")
+            join: ir_construct_closed(open)
             outer: open.len()
             loop slot in s.join_slots[join] {
                 if depth[slot] > outer -> depth[slot] = outer
@@ -374,7 +374,7 @@ ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
                 } else { live = false }
             }
             .End -> {
-                opener: open.pop() ?? panic("ir_ssa_build: End without an open construct")
+                opener: ir_construct_closed(open)
                 _ := branch.pop()
                 _ := saved.pop()
                 join: s.join_of[opener]

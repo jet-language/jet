@@ -53,32 +53,24 @@ JetLibScalar: enum {
     Text = 3,
 }
 
-// The access convention carried with each native parameter: the C scalar
-// representation stays homogeneous while the Jet ownership contract survives.
-// Each case number is the byte a .jetlib header stores for it.
-#[Specified, Layout(U8)]
-JetLibAccess: enum {
-    Read = 0,
-    Write = 1,
-    Move = 2,
-}
-
-// One exact C ABI row: `symbol` is the emitted foreign name; access
-// conventions stay explicit metadata, never inferred from generated code.
+// One exact C ABI row: `symbol` is the emitted foreign name; each parameter's
+// AccessConvention stays explicit metadata, never inferred from generated
+// code, so the C scalar representation stays homogeneous while the Jet
+// ownership contract survives.
 JetLibExport: struct {
     name: String,
     symbol: String,
     scalar: JetLibScalar,
     params: U32,
-    conventions: [JetLibAccess],
+    conventions: [AccessConvention],
 
     new: fn(name: String, scalar: JetLibScalar, params: Int) -> JetLibExport Never! {
-        conventions := [JetLibAccess]{}
-        loop _ in 0..<params -> conventions.push(JetLibAccess.Read)
+        conventions := [AccessConvention]{}
+        loop _ in 0..<params -> conventions.push(AccessConvention.Read)
         JetLibExport.with_conventions(name, scalar, conventions)
     }
 
-    with_conventions: fn(name: String, scalar: JetLibScalar, conventions: [JetLibAccess]) -> JetLibExport Never! {
+    with_conventions: fn(name: String, scalar: JetLibScalar, conventions: [AccessConvention]) -> JetLibExport Never! {
         assert(conventions.len() <= 4294967295, "a function cannot have more than u32 params")
         JetLibExport{name: name, symbol: pkg_jetlib_c_symbol(name), scalar: scalar, params: U32{conventions.len()}, conventions: conventions}
     }
@@ -231,10 +223,10 @@ JetLibStamp: struct {
             if params > JETLIB_MAX_EXPORT_PARAMS {
                 return Err(".jetlib export has too many parameters")
             }
-            conventions := [JetLibAccess]{}
+            conventions := [AccessConvention]{}
             loop _ in 0..<params {
                 convention: reader.take_byte() ?? return Err("truncated .jetlib header (access convention)")
-                conventions.push(JetLibAccess.from_int(convention) ?? return Err("unknown .jetlib access-convention tag {convention}"))
+                conventions.push(AccessConvention.from_int(convention) ?? return Err("unknown .jetlib access-convention tag {convention}"))
             }
             exports.push(JetLibExport{name: name, symbol: symbol, scalar: scalar, params: U32{params}, conventions: conventions})
         }

@@ -1,0 +1,9 @@
+// Stops jet's own build with `message`. Only `#run` constant initializers and
+// tests reach a caller of this: each caller reads a source or a table that
+// ships with the compiler while jet itself builds, so a refusal is a static
+// assertion on that build, and no user's compile ever runs it (the built
+// compiler holds none of these callers). Tests/Guards/build_time.jet fails
+// when run-time code reaches a caller.
+build_time_refused: fn(message: String) -> Never Never! {
+    panic(message)
+}

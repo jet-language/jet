@@ -6,11 +6,19 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+    jet_foundation.[Diagnostic, EvidenceFacet, diagnostic_from_registry, diagnostic_render_all, evidence_facet_name]
+    jet_pkg_model.[pkg_authority_source_walk_skips]
 }
 
-// The `--lens` values, in report order.
-JET_CLI_PROOF_LENSES: [String]{"all", "refinements", "effects", "taint", "contracts", "tests", "budgets", "replay", "solver"}
+// The `--lens` values, in report order: the evidence facets' names.
+jet_cli_proof_lenses: fn() -> [String] Never! {
+    names := [String]{}
+    loop {
+        facet: EvidenceFacet.from_int(names.len()) ?? break
+        names.push(evidence_facet_name(facet))
+    }
+    names
+}
 
 // Authority files a directory target never counts as proof members.
 JET_CLI_PROVE_AUTHORITY_FILES: [String]{"package.jet", "pkg.jet", "workspace.jet", "env.jet", "config.jet", "build.jet"}
@@ -104,7 +112,7 @@ jet_cli_prove_lens_names: fn(lenses: [String]) -> [String] Never! {
         return if lenses.contains("solver") -> [String]{"all", "solver"} else -> [String]{"all"}
     }
     names := [String]{}
-    loop lens in JET_CLI_PROOF_LENSES {
+    loop lens in jet_cli_proof_lenses() {
         if lenses.contains(lens) -> names.push(lens.copy())
     }
     names
@@ -197,13 +205,13 @@ jet_cli_prove_parse: fn(words: [String]) -> JetCLIProveRequest JetCLIProveRefusa
                 value = next_word
                 if index < words.len() -> index += 1
             }
-            if !JET_CLI_PROOF_LENSES.contains(value) {
+            if !jet_cli_proof_lenses().contains(value) {
                 target: if positionals.len() > 0 -> positionals[0].copy() else -> "TARGET"
                 return Err(
                     JetCLIProveRefusal{
                         code: "E2941",
                         what: "unknown proof lens `{value}`",
-                        why: "`jet prove` accepts {JET_CLI_PROOF_LENSES.join(", ")}",
+                        why: "`jet prove` accepts {jet_cli_proof_lenses().join(", ")}",
                         fix: "try `jet prove {target} --lens tests`",
                         exit_code: JET_DRIVER_EXIT_USAGE,
                     },
@@ -328,7 +336,7 @@ jet_cli_prove_collect: fn(directory: String, found: ^[String]) -[FS]> JetCLIRead
             if cli_files.is_dir(path) -> next
             return Err(jet_cli_read_error("proof target contains symlink `{path}`"))
         }
-        if entry.name.starts_with(".") || JET_CLI_SKIPPED_NAMES.contains(entry.name) -> next
+        if pkg_authority_source_walk_skips(entry.name) -> next
         if info.is_dir {
             jet_cli_prove_collect(path, found)
             next

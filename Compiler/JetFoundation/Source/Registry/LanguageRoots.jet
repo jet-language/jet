@@ -27,13 +27,13 @@ trait_impl_strings: fn(text: String, trait_name: String, constant: String) -> [S
                 found = true
             }
             open && trimmed == "}}" -> {
-                if !found -> panic("an `impl {trait_name}` block has no `{constant}: \"…\",` line")
+                if !found -> build_time_refused("an `impl {trait_name}` block has no `{constant}: \"…\",` line")
                 open = false
             }
             else -> {}
         }
     }
-    if values.len() == 0 -> panic("the text declares no `impl {trait_name}` block")
+    if values.len() == 0 -> build_time_refused("the text declares no `impl {trait_name}` block")
     values
 }
 

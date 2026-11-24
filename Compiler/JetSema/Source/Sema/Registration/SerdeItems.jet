@@ -77,6 +77,8 @@ use jet_foundation.[
     name_find,
     name_index,
     name_intern,
+    name_pair_find_slot,
+    name_pair_slot,
     name_table_sized,
     NameTable,
 ]
@@ -2002,21 +2004,29 @@ sema_serde_items_result_switch: fn(subject: Expr, ok_binding: String, ok_body: [
 // codec call (sema_expr_record_call_fact), and the wire fields of a codec
 // whose body is generated (sema_codec_fill_demanded).
 
-// Every requirement once in `keys` ("{trait}|{type leaf}"), `present` by id
-// while it stands (an undone codec body forgets its own,
-// sema_codec_undo_body); `order` holds the keys the next codec wave has not
-// taken yet. While `capturing`, `captured` also gets every requirement a
-// check records, met before or not (sema_demand_capture_open).
+// One codec requirement: `trait_name` (Encode or Decode) met at the
+// nominal whose leaf name is `type_name`.
+SemaCodecWant: struct {
+    trait_name: String,
+    type_name: String,
+}
+
+// Every requirement once: `present` by its (trait, type leaf) pair slot
+// over `names` (name_pair_slot) while it stands (an undone codec body
+// forgets its own, sema_codec_undo_body); `order` holds the requirements
+// the next codec wave has not taken yet. While `capturing`, `captured` also
+// gets every requirement a check records, met before or not
+// (sema_demand_capture_open).
 SemaCodecDemand: struct {
-    keys: NameTable,
-    present: [Bool],
-    order: [String],
+    names: NameTable,
+    present: [Int:Bool],
+    order: [SemaCodecWant],
     capturing: Bool{false},
-    captured: [String]{[String]{}},
+    captured: [SemaCodecWant]{[SemaCodecWant]{}},
 }
 
 sema_codec_demand_new: fn() -> SemaCodecDemand Never! {
-    SemaCodecDemand{keys: name_table_sized(16), present: [Bool]{false}, order: [String]{}}
+    SemaCodecDemand{names: name_table_sized(16), present: [Int:Bool]{}, order: [SemaCodecWant]{}}
 }
 
 // The generated codec methods by symbol key, so a checked call and a codec
@@ -2043,9 +2053,7 @@ sema_codec_demand_type: fn(graph: SemaRegistrationGraph, trait_name: String, ty:
     }
     names := [String]{}
     sema_codec_type_names(ty, names)
-    if names.len() > 0 {
-        sema_codec_demand_add(graph.codec_demand, sema_codec_demand_keys(trait_name, names))
-    }
+    if names.len() > 0 -> sema_codec_demand_add(graph.codec_demand, trait_name, names)
 }
 
 // The nominal leaf names inside `ty`: the type itself, its type arguments,
@@ -2094,35 +2102,26 @@ sema_serde_graph_codecs: fn(graph: SemaRegistrationGraph, items: [Item]) -> Sema
     codecs
 }
 
-// The requirements that `trait_name` (Encode or Decode) is met at each of
-// `names`, as the demand keys them ("{trait}|{type leaf}").
-sema_codec_demand_keys: fn(trait_name: String, names: [String]) -> [String] Never! {
-    keys := [String]{}
-    loop name in names -> keys.push("{trait_name}|{name}")
-    keys
+// Records that `trait_name` (Encode or Decode) is met at each of
+// `type_names`.
+sema_codec_demand_add: fn(demand: Shared<SemaCodecDemand>, trait_name: String, type_names: [String]) {
+    permit: demand.guard_edit()
+    loop type_name in type_names -> sema_codec_demand_record(permit.value, trait_name, type_name)
 }
 
-sema_codec_demand_add: fn(demand: Shared<SemaCodecDemand>, keys: [String]) {
-    permit: demand.guard_edit()
-    loop key in keys {
-        if permit.value.capturing -> permit.value.captured.push(key.copy())
-        id: name_index(name_intern(permit.value.keys, key))
-        if id == permit.value.present.len() -> permit.value.present.push(false)
-        if permit.value.present[id] -> next
-        permit.value.present[id] = true
-        permit.value.order.push(key.copy())
-    }
+// Records that `trait_name` is met at `type_name`: captured while
+// `capturing`, and queued for the next codec wave unless it stands already.
+sema_codec_demand_record: fn(demand: ^SemaCodecDemand, trait_name: String, type_name: String) Never! {
+    if demand.capturing -> demand.captured.push(SemaCodecWant{trait_name: trait_name, type_name: type_name})
+    slot: name_pair_slot(demand.names, trait_name, type_name)
+    if demand.present.get(slot) ?? false -> return
+    demand.present[slot] = true
+    demand.order.push(SemaCodecWant{trait_name: trait_name, type_name: type_name})
 }
 
-sema_codec_demand_take: fn(demand: Shared<SemaCodecDemand>) -> [String] {
+sema_codec_demand_take: fn(demand: Shared<SemaCodecDemand>) -> [SemaCodecWant] {
     permit: demand.guard_edit()
-    keys := [String]{}
-    loop permit.value.order.len() > 0 {
-        key: permit.value.order.pop() ?? break
-        keys.push(key)
-    }
-    keys.reverse()
-    keys
+    compiler_take_rows<SemaCodecWant>(permit.value.order)
 }
 
 // A checked call reaches a codec: a generated codec method itself, or an
@@ -2136,7 +2135,8 @@ sema_codec_demand_call: fn(program: SemaProgramTables, callee: SymbolID?, value:
         if callee == .Val(id) {
             if graph.codec_method_rows.get(id.id) == .Val(found) {
                 trait_name: graph.modules[found.module_index].impls[found.row].trait_name ?? return
-                sema_codec_demand_add(graph.codec_demand, sema_codec_demand_keys(trait_name, [String]{graph.modules[found.module_index].impls[found.row].target_type_name}))
+                permit: graph.codec_demand.guard_edit()
+                sema_codec_demand_record(permit.value, trait_name, graph.modules[found.module_index].impls[found.row].target_type_name)
                 return
             }
         }
@@ -2171,10 +2171,10 @@ sema_codec_pending_body: fn(graph: SemaRegistrationGraph, module_index: Int, row
 sema_codec_generated_body: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, method: String) -> [Stmt]? Never! {
     if !graph.modules[module_index].impls[row].declaration.is_generated_serde -> return None
     trait_name: graph.modules[module_index].impls[row].trait_name ?? return None
-    keys := name_table_sized(64)
-    positions := [Int]{-1}
-    sema_codec_index_module(graph.modules[module_index].program.items, module_index, keys, positions)
-    position: sema_codec_position(keys, positions, "{module_index}|{graph.modules[module_index].impls[row].target_type_name}") ?? return None
+    names := name_table_sized(64)
+    positions := [SemaCodecItemKey:Int]{}
+    sema_codec_index_module(graph.modules[module_index].program.items, module_index, names, positions)
+    position: sema_codec_position(names, positions, module_index, graph.modules[module_index].impls[row].target_type_name, "") ?? return None
     generated: sema_serde_items_codec_body(graph.modules[module_index].program.items, position, trait_name, graph.modules[module_index].impls[row].declaration.span) ?? return None
     Val(sema_serde_items_method_body(generated, method))
 }
@@ -2204,30 +2204,28 @@ sema_codec_method_body: fn(graph: SemaRegistrationGraph, type_name: String, id: 
 sema_codec_fill_demanded: fn(graph: ^SemaRegistrationGraph, trail: ^SemaGraphTrail) -> [Int] {
     wave := [Int:Bool]{}
     modules := [Int]{}
-    position_keys := name_table_sized(64)
-    positions := [Int]{-1}
+    position_names := name_table_sized(64)
+    positions := [SemaCodecItemKey:Int]{}
     indexed := [Int:Bool]{}
     loop {
-        keys: sema_codec_demand_take(graph.codec_demand)
-        if keys.len() == 0 -> break
-        loop key in keys {
-            parts: key.split("|").to_list()
-            if parts.len() != 2 -> next
-            trait_name: parts[0]
-            rows: sema_registration_impl_rows_named(graph, parts[1])
+        wants: sema_codec_demand_take(graph.codec_demand)
+        if wants.len() == 0 -> break
+        loop want in wants {
+            trait_name: want.trait_name
+            rows: sema_registration_impl_rows_named(graph, want.type_name)
             loop row_ref in rows {
                 module_index: row_ref.module_index
                 row: row_ref.row
                 if graph.modules[module_index].impls[row].trait_name != (Val(trait_name)) -> next
                 if !sema_codec_impl_pending(graph.modules[module_index].impls[row]) -> next
                 if indexed.get(module_index) == None {
-                    sema_codec_index_module(graph.modules[module_index].program.items, module_index, position_keys, positions)
+                    sema_codec_index_module(graph.modules[module_index].program.items, module_index, position_names, positions)
                     indexed[module_index] = true
                 }
-                type_key: "{module_index}|{graph.modules[module_index].impls[row].target_type_name}"
-                declaration: sema_codec_position(position_keys, positions, type_key) ?? next
+                type_name: graph.modules[module_index].impls[row].target_type_name
+                declaration: sema_codec_position(position_names, positions, module_index, type_name, "") ?? next
                 generated: sema_serde_items_codec_body(graph.modules[module_index].program.items, declaration, trait_name, graph.modules[module_index].impls[row].declaration.span) ?? next
-                sema_codec_set_body(graph, module_index, row, generated, sema_codec_position(position_keys, positions, "{type_key}|{trait_name}"))
+                sema_codec_set_body(graph, module_index, row, generated, sema_codec_position(position_names, positions, module_index, type_name, trait_name))
                 trail.entries.push(SemaGraphUndo.CodecBody{module_index: module_index, row: row})
                 if !modules.contains(module_index) -> modules.push(module_index)
                 wave[sema_codec_wave_slot(module_index, row)] = true
@@ -2243,38 +2241,45 @@ sema_codec_fill_demanded: fn(graph: ^SemaRegistrationGraph, trail: ^SemaGraphTra
 // (graph.codec_wave_rows): the module above the row's 32 bits.
 sema_codec_wave_slot: fn(module_index: Int, row: Int) -> Int Never! { (module_index << 32) | row }
 
-// The item position the codec fill indexed under `key`
-// (sema_codec_index_module), if any.
-sema_codec_position: fn(keys: NameTable, positions: [Int], key: String) -> Int? Never! {
-    name: name_find(keys, key) ?? return None
-    id: name_index(name)
-    if id == 0 -> return None
-    Val(positions[id])
+// An item the codec fill indexes (sema_codec_index_module) in module
+// `module_index`: a type's declaration, `pair` the type's name with the
+// empty name, or a generated codec impl, `pair` its type and trait names;
+// each pair a slot over the fill's names (name_pair_slot).
+SemaCodecItemKey: struct {
+    module_index: Int,
+    pair: Int,
 }
 
-// Module `module_index`'s item positions for the codec fill: its first struct,
-// enum or distinct per name ("{module}|{name}") and its first generated codec impl item
-// per type and trait ("{module}|{type}|{trait}"), each key interned in `keys`
-// and its position in `positions` by id. Filling rewrites impl items in
-// place, so the positions hold for the whole fill.
-sema_codec_index_module: fn(items: [Item], module_index: Int, keys: ^NameTable, positions: ^[Int]) Never! {
+// The item position the codec fill indexed for `type_name` and
+// `trait_name` (empty for the type's declaration) in module
+// `module_index`, if any.
+sema_codec_position: fn(names: NameTable, positions: [SemaCodecItemKey:Int], module_index: Int, type_name: String, trait_name: String) -> Int? Never! {
+    pair: name_pair_find_slot(names, type_name, trait_name) ?? return None
+    positions.get(SemaCodecItemKey{module_index: module_index, pair: pair})
+}
+
+// Module `module_index`'s item positions for the codec fill: its first
+// struct, enum or distinct per name and its first generated codec impl item
+// per type and trait, each keyed as SemaCodecItemKey over `names`. Filling
+// rewrites impl items in place, so the positions hold for the whole fill.
+sema_codec_index_module: fn(items: [Item], module_index: Int, names: ^NameTable, positions: ^[SemaCodecItemKey:Int]) Never! {
     loop (position, item) in items {
-        key := ""
+        pair := 0
         if item == {
-            .Struct(definition) -> { key = "{module_index}|{definition.name}" }
-            .Enum(definition) -> { key = "{module_index}|{definition.name}" }
-            .Distinct(definition) -> { key = "{module_index}|{definition.name}" }
+            .Struct(definition) -> { pair = name_pair_slot(names, definition.name, "") }
+            .Enum(definition) -> { pair = name_pair_slot(names, definition.name, "") }
+            .Distinct(definition) -> { pair = name_pair_slot(names, definition.name, "") }
             .Impl(implementation) -> {
                 if !implementation.is_generated_serde -> next
                 trait_name: implementation.trait_name ?? next
-                key = "{module_index}|{implementation.type_name}|{trait_name}"
+                pair = name_pair_slot(names, implementation.type_name, trait_name)
             }
             .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
                 next
             }
         }
-        id: name_index(name_intern(keys, key))
-        if id == positions.len() -> positions.push(position)
+        key: SemaCodecItemKey{module_index: module_index, pair: pair}
+        if positions.get(key) == None -> positions[key] = position
     }
 }
 
@@ -2317,10 +2322,10 @@ sema_codec_undo_body: fn(graph: ^SemaRegistrationGraph, module_index: Int, row: 
     position: sema_codec_impl_position(graph.modules[module_index].program.items, graph.modules[module_index].impls[row].target_type_name, graph.modules[module_index].impls[row].trait_name)
     sema_codec_set_body(graph, module_index, row, SemaSerdeCodecBody{body: [Stmt]{}, read: [Stmt]{}, wire: [Type]{}}, position)
     trait_name: graph.modules[module_index].impls[row].trait_name ?? return
-    key: "{trait_name}|{graph.modules[module_index].impls[row].target_type_name}"
     demand := graph.codec_demand
     permit: demand.guard_edit()
-    if name_find(permit.value.keys, key) == .Val(name) -> permit.value.present[name_index(name)] = false
+    slot: name_pair_find_slot(permit.value.names, trait_name, graph.modules[module_index].impls[row].target_type_name) ?? return
+    if permit.value.present.get(slot) != None -> permit.value.present[slot] = false
 }
 
 // Demand-checked derives. A compiler-owned module (the Prelude error module,
@@ -2368,7 +2373,7 @@ sema_derive_demand_add: fn(demand: Shared<SemaDeriveDemand>, keys: [String]) {
 }
 
 // The codecs and derived methods one comptime function check demanded
-// (sema_check_comptime_function), each recorded key once or more. A body
+// (sema_check_comptime_function), each recorded once or more. A body
 // pass that takes the check's result instead of checking the function as a
 // body records them again (sema_demand_capture_replay), so it demands the
 // generated bodies a check of its own would. Otherwise a pass that reuses
@@ -2376,7 +2381,7 @@ sema_derive_demand_add: fn(demand: Shared<SemaDeriveDemand>, keys: [String]) {
 // that function reaches, and a local value splice
 // (LocalSplice.jet) sees its owner checks demand apart.
 SemaDemandCapture: struct {
-    codecs: [String],
+    codecs: [SemaCodecWant],
     derived: [String],
 }
 
@@ -2394,8 +2399,11 @@ sema_demand_capture_close: fn(graph: SemaRegistrationGraph) -> SemaDemandCapture
 }
 
 // Records a reused check's demand (`codecs`, `derived`) again.
-sema_demand_capture_replay: fn(graph: SemaRegistrationGraph, codecs: [String], derived: [String]) {
-    if codecs.len() > 0 -> sema_codec_demand_add(graph.codec_demand, codecs)
+sema_demand_capture_replay: fn(graph: SemaRegistrationGraph, codecs: [SemaCodecWant], derived: [String]) {
+    if codecs.len() > 0 {
+        permit: graph.codec_demand.guard_edit()
+        loop want in codecs -> sema_codec_demand_record(permit.value, want.trait_name, want.type_name)
+    }
     if derived.len() > 0 -> sema_derive_demand_add(graph.derive_demand, derived)
 }
 
@@ -2408,11 +2416,11 @@ sema_demand_drain: fn(graph: SemaRegistrationGraph) -> SemaDemandCapture {
     SemaDemandCapture{codecs: codecs.move(), derived: derived.move()}
 }
 
-sema_codec_demand_drain: fn(graph: SemaRegistrationGraph) -> [String] {
+sema_codec_demand_drain: fn(graph: SemaRegistrationGraph) -> [SemaCodecWant] {
     permit := graph.codec_demand.guard_edit()
-    keys := compiler_take_rows<String>(permit.value.order)
-    permit.value.keys = name_table_sized(16)
-    permit.value.present = [Bool]{false}
+    keys := compiler_take_rows<SemaCodecWant>(permit.value.order)
+    permit.value.names = name_table_sized(16)
+    permit.value.present = [Int:Bool]{}
     keys
 }
 
@@ -2427,10 +2435,10 @@ sema_derive_demand_drain: fn(graph: SemaRegistrationGraph) -> [String] {
     keys
 }
 
-sema_codec_demand_capture_take: fn(graph: SemaRegistrationGraph, capturing: Bool) -> [String] {
+sema_codec_demand_capture_take: fn(graph: SemaRegistrationGraph, capturing: Bool) -> [SemaCodecWant] {
     permit := graph.codec_demand.guard_edit()
     permit.value.capturing = capturing
-    compiler_take_rows<String>(permit.value.captured)
+    compiler_take_rows<SemaCodecWant>(permit.value.captured)
 }
 
 sema_derive_demand_capture_take: fn(graph: SemaRegistrationGraph, capturing: Bool) -> [String] {

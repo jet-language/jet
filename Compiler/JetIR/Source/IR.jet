@@ -1152,8 +1152,18 @@ ir_else: fn(f: ^IRFunction, line: Int) Never! {
     f.b[opener] = ir_emit(f, IROp.Else, -1, -1, -1, -1, line)
 }
 
+// The opener an End closes (or an Else, which a walk closes and reopens), taken
+// off a stack of open constructs. Every IR function is built through ir_open,
+// ir_open_if and ir_end, which the builder calls in pairs, and a pass removes a
+// construct only together with its End, so each End and Else closes a
+// construct the stack holds. This checks nothing about the program being
+// compiled; it stops only if the builder or a pass broke that nesting.
+ir_construct_closed: fn<T>(open: ^[T]) -> T Never! {
+    open.pop() ?? panic("an IR End closed no open construct")
+}
+
 ir_end: fn(f: ^IRFunction, line: Int) Never! {
-    opener: f.open.pop() ?? panic("ir_end without an open construct")
+    opener: ir_construct_closed(f.open)
     end: ir_emit(f, IROp.End, -1, opener, -1, -1, line)
     if f.op[opener] == .If {
         f.c[opener] = end
