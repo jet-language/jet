@@ -1225,11 +1225,6 @@ sema_call_try_core_direct_record: fn(record: CoreCallRecord, args: [CallArg], ty
     reflect := sema_call_try_reflect_core_call(record, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reflect.handled -> return reflect
 
-    // Every `core.compute` call is recorded before any
-    // route returns, so a source-owned member stays visible to the autodiff
-    // trace check exactly like a transform.
-    _ := sema_compute_record_core_call(record, span, context)
-
     reactive := sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reactive.handled -> return reactive
 

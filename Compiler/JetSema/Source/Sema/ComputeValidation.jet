@@ -2,7 +2,6 @@
 // Compute-call effects live in the ordinary effect graph; these facts retain
 // the separate proof obligations that graph edges cannot express.
 use jet_foundation.[
-    CoreCallRecord,
     Diagnostic,
     Span,
 ]
@@ -92,12 +91,6 @@ sema_compute_index: fn(modules: [SemaGraphModuleResult], work: ^SemaComputeValid
 SemaComputePanicMemo: struct {
     function_key: String,
     safe: Bool,
-}
-
-sema_compute_record_core_call: fn(record: CoreCallRecord, span: Span, context: ^SemaCheckContext) -> Bool Never! {
-    if record.module_name != "core.compute" -> return false
-    context.compute_calls.push(SemaComputeCallFact{method: record.member, span: span})
-    true
 }
 
 sema_compute_record_autodiff_obligation: fn(method: String, target: String, span: Span, context: ^SemaCheckContext) Never! {
