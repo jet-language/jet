@@ -1,0 +1,35 @@
+# Every gate a program writes lands in the one ledger: the unsafe region, the
+# impure and nondeterministic marks, the host-fact read, the taint scrub and
+# the precision demotion. `jet inspect gates` counts each kind with every
+# security kind first, the JSON counts keep that order, and `--kind` selects
+# one kind.
+fixture: InspectGatesCountsEachKindSecurityFirst.fixture
+env: NO_COLOR=1
+step: jet inspect gates main.jet
+exit: 0
+stdout: ~ "unsafe: 1"
+stdout: ~ "impure: 1"
+stdout: ~ "nondeterministic: 1"
+stdout: ~ "host_facts: 1"
+stdout: ~ "taint_scrub: 1"
+stdout: ~ "precision_demotion: 1"
+stdout: before "unsafe: 1" "impure: 1" # security kinds in the ledger's order
+stdout: before "impure: 1" "nondeterministic: 1"
+stdout: before "nondeterministic: 1" "host_facts: 1"
+stdout: before "host_facts: 1" "taint_scrub: 1" # every security kind before the knowledge planes
+stdout: before "taint_scrub: 1" "precision_demotion: 1"
+step: jet inspect gates --json main.jet
+exit: 0
+json: stdout doc $.gates.counts.unsafe = 1
+json: stdout doc $.gates.counts.host_facts = 1
+json: stdout doc $.gates.counts.taint_scrub = 1
+json: stdout doc $.gates.counts.precision_demotion = 1
+stdout: before "\"unsafe\":1" "\"host_facts\":1" # the counts keep the kind order
+stdout: before "\"host_facts\":1" "\"taint_scrub\":1"
+stdout: before "\"taint_scrub\":1" "\"precision_demotion\":1"
+step: jet inspect gates --kind taint_scrub main.jet
+exit: 0
+stdout: ~ "taint_scrub: 1" # the filter selects one kind
+stdout: ~ "#Scrub(Input)"
+stdout: !~ "unsafe:"
+stdout: !~ "precision_demotion:"

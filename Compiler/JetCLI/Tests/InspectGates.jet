@@ -60,6 +60,22 @@ use {
     if detail.contains("17 entries") || !detail.contains("hash 16  trusted project hash status=recorded") {
         panic("security groups must never collapse")
     }
+    mixed := GateLedger{}
+    gate_ledger_push(mixed, jet_cli_gate_external(GateKind.PrecisionDemotion, "expression", "run.jet", "approx", "demotion", ["run.jet"]))
+    gate_ledger_push(mixed, jet_cli_gate_external(GateKind.HostFacts, "build", "run.jet", "#build.host.os", "read of the machine running the build", ["run.jet"]))
+    gate_ledger_push(mixed, jet_cli_gate_external(GateKind.TaintScrub, "expression", "run.jet", "#Scrub(Input)", "scrub", ["run.jet"]))
+    gate_ledger_push(mixed, jet_cli_gate_external(GateKind.LinkOverride, "build", "command line", "--libs=m", "link input", ["command line"]))
+    gate_ledger_sort(mixed)
+    kinds: jet_cli_gates_report(mixed, [], None, None, false)
+    link_at: kinds.index_of("link_override: 1") ?? panic("link_override count")
+    host_at: kinds.index_of("host_facts: 1") ?? panic("host_facts count")
+    scrub_at: kinds.index_of("taint_scrub: 1") ?? panic("taint_scrub count")
+    demotion_at: kinds.index_of("precision_demotion: 1") ?? panic("precision_demotion count")
+    if !(link_at < host_at && host_at < scrub_at && scrub_at < demotion_at) -> panic("security kinds come first")
+    counted: jet_cli_gates_report(mixed, [], None, None, true)
+    if !counted.contains("\"counts\":{{\"link_override\":1,\"host_facts\":1,\"taint_scrub\":1,\"precision_demotion\":1}}") {
+        panic("JSON counts follow the kind order")
+    }
     trust: jet_cli_gate_trust_entries("/home/.jet/trust", [TrustRecord]{TrustRecord.Hash{hash: "abc"}, TrustRecord.Pattern{pattern: "/project/*"}, TrustRecord.Grant(TrustGrant{authority: "unknown", subject: "value:with:colons", scope: "repo"}), TrustRecord.Raw{line: "raw"}, TrustRecord.Hash{hash: "abc"}})
     if trust.len() != 5 || trust[2].subject != "unknown:value:with:colons" || trust[2].scope != "repo" || trust[3].detail != "raw trust record" {
         panic("typed trust records preserved")
