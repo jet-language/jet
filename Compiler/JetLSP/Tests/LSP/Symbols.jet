@@ -182,6 +182,21 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
     assert_eq(lsp_test_rows(lsp_test_field(result, "items")).len(), 0)
 }
 
+#Test("completion reads the word being written from the lexer's tokens") {
+    server := lsp_test_main_server()
+    // Inside `add` on line 5, the word's start narrows the names.
+    inside: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 6)))
+    assert(inside.contains("add=3") && !inside.contains("run=3"), "the start of `add` is the prefix")
+    // A comment's text is no word, so nothing narrows there.
+    lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN.replace("add(1, add(2, 3))", "0 // ad"))
+    comment: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 11)))
+    assert(comment.contains("add=3") && comment.contains("run=3"), "a comment's text is no prefix")
+    // A `.` after a call's `)` has no receiver word.
+    lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN.replace("add(1, add(2, 3))", "add(1, 2)."))
+    after_call: lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 14))
+    assert_eq(lsp_test_rows(lsp_test_field(after_call, "items")).len(), 0)
+}
+
 LSP_TEST_MARKERS: `#Codable
 Pixel: struct {
     r: Int

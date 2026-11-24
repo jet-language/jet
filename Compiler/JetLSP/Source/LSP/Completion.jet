@@ -5,6 +5,7 @@
 use {
     core.encoding.[Dyn]
     jet_foundation.[TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, type_name]
+    jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT]
     jet_semindex.[SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
 }
 
@@ -29,18 +30,41 @@ lsp_completion_item_json: fn(symbol: SemSymbol) -> String Never! {
     "{{\"label\":{foundation_json_quote(symbol.name)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{documentation}}}"
 }
 
-// The identifier text before `offset`: ASCII letters, digits, `_`, and any
-// non-ASCII byte.
-lsp_completion_prefix_start: fn(bytes: [U8], offset: Int) -> Int Never! {
-    start := offset
-    loop start > 0 {
-        code: Int{bytes[start - 1]}
-        if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95 || code >= 128) {
-            break
-        }
-        start -= 1
+// A word the lexer reads: an identifier or a keyword.
+lsp_word_token: fn(token: Token) -> Bool Never! {
+    token.kind == TOKEN_IDENT || lsp_keyword_token_kind(token.kind)
+}
+
+// Where completion's prefix starts: at the word token the cursor is inside
+// or just past, else at the cursor.
+lsp_completion_prefix_start: fn(lexed: Lexed, offset: Int) -> Int Never! {
+    loop token in lexed.tokens {
+        if token.span.start >= offset -> break
+        if token.span.end >= offset && lsp_word_token(token) -> return token.span.start
     }
-    start
+    offset
+}
+
+// What a completion at `start` follows: no `.` ending there, or a `.`
+// written right after a receiver word, or a `.` after anything else.
+LSPCompletionAfter: enum {
+    Plain,
+    Receiver(token: Token),
+    Stray,
+}
+
+lsp_completion_after: fn(lexed: Lexed, start: Int) -> LSPCompletionAfter Never! {
+    dot := -1
+    loop index in 0..<lexed.tokens.len() {
+        token: lexed.tokens[index]
+        if token.span.end > start -> break
+        if token.span.end == start && token.kind == TOKEN_DOT -> dot = index
+    }
+    if dot < 0 -> return LSPCompletionAfter.Plain
+    if dot == 0 -> return LSPCompletionAfter.Stray
+    receiver: lexed.tokens[dot - 1]
+    if receiver.span.end != lexed.tokens[dot].span.start || !lsp_word_token(receiver) -> return LSPCompletionAfter.Stray
+    LSPCompletionAfter.Receiver{token: receiver}
 }
 
 // The owner name a value of `ty` has members under: a list is `List`, a map
@@ -114,16 +138,14 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     position: lsp_params_position(params) ?? return lsp_response(id, "null")
     bytes: view.doc.text.bytes()
     offset: lsp_checked_offset_bytes(lsp_line_table_bytes(bytes), bytes, position) ?? return lsp_error_response(id, -32602, "position is outside the document")
-    start: lsp_completion_prefix_start(bytes, offset)
+    start: lsp_completion_prefix_start(view.lexed, offset)
     prefix: foundation_byte_text(bytes, start, offset)
     member := LSPMemberScope?{None}
-    if start > 0 && bytes[start - 1] == (U8{46}) {
-        receiver_end: start - 1
-        empty: lsp_response(id, "{{\"isIncomplete\":false,\"items\":[]}}")
-        if receiver_end == 0 || lsp_completion_prefix_start(bytes, receiver_end) == receiver_end {
-            return empty
-        }
-        member = Val(lsp_member_scope(view, receiver_end - 1) ?? return empty)
+    after: lsp_completion_after(view.lexed, start)
+    if after == {
+        .Plain -> {}
+        .Receiver(token) -> member = Val(lsp_member_scope(view, token.span.end - 1) ?? return lsp_response(id, "{{\"isIncomplete\":false,\"items\":[]}}"))
+        .Stray -> return lsp_response(id, "{{\"isIncomplete\":false,\"items\":[]}}")
     }
     seen := [String:Bool]{}
     items := [String]{}

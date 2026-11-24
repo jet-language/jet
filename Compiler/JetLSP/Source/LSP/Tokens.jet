@@ -107,7 +107,7 @@ lsp_token_class: fn(token: Token, classes: [Int:LSPNameClass]) -> LSPNameClass? 
     if kind == TOKEN_IDENT -> return classes.get(token.span.end)
     // `self` a call writes through is classed as that write.
     if kind == TOKEN_SELF && classes.has_key(token.span.end) -> return classes.get(token.span.end)
-    if (kind >= TOKEN_TRUE && kind <= TOKEN_RETURN) || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE) {
+    if lsp_keyword_token_kind(kind) {
         return Val(LSPNameClass{kind: LSP_TOKEN_KEYWORD, modifiers: 0})
     }
     if kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_CHAR {
@@ -120,6 +120,12 @@ lsp_token_class: fn(token: Token, classes: [Int:LSPNameClass]) -> LSPNameClass? 
         return Val(LSPNameClass{kind: LSP_TOKEN_COMMENT, modifiers: 0})
     }
     None
+}
+
+// The lexer kinds of the language's keywords, `true` through `return` and
+// `fn` through `module`.
+lsp_keyword_token_kind: fn(kind: Int) -> Bool Never! {
+    (kind >= TOKEN_TRUE && kind <= TOKEN_RETURN) || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE)
 }
 
 // A classified stretch of the document.
