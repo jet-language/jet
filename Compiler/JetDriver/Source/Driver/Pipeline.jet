@@ -2724,6 +2724,7 @@ jet_driver_comptime_item_value: fn(interner: Interner, source: SemaComptimeItemS
         value: value,
         ty: body_type(interner, expression.tree, expression.root),
         shared_holder: source.module_value && sema_comptime_shared_payload(expression.tree, expression.root) != None,
+        place: source.place,
     }
 }
 
@@ -2814,6 +2815,7 @@ jet_driver_comptime_local_value_runs: fn(values: ^[SemaComptimeItemValue], sourc
             kind: source.kind,
             value: sema_comptime_local_value_failure(reason),
             ty: source.expected_type ?? Type.Named{name: "Unit"},
+            place: source.place,
         },
     )
 }

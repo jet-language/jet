@@ -474,6 +474,9 @@ SemaComptimeItemSource: struct {
     // A body site's run-time locals and parameters, which its staged check
     // names as run-time values (E0640) when the code reads one.
     runtime_locals: [String]{[String]{}},
+    // A body site's place, which its landed value keeps for the body checks
+    // that read it (SemaComptimeBodyValue.place).
+    place: SemaComptimeBodyPlace?{None},
 }
 
 SemaComptimeItemRequest: struct {
@@ -507,6 +510,8 @@ SemaComptimeItemValue: struct {
     // A module `Shared{X}` holder (sema_comptime_shared_payload): `value` is
     // the payload the build folded, `ty` the holder's Shared type.
     shared_holder: Bool{false},
+    // A body site's place (SemaComptimeItemSource.place).
+    place: SemaComptimeBodyPlace?{None},
 }
 
 sema_comptime_body_value_from_item: fn(value: SemaComptimeItemValue) -> SemaComptimeBodyValue Never! {
@@ -516,6 +521,7 @@ sema_comptime_body_value_from_item: fn(value: SemaComptimeItemValue) -> SemaComp
         destination_key: value.destination_key,
         value: value.value,
         ty: value.ty,
+        place: value.place,
     }
 }
 

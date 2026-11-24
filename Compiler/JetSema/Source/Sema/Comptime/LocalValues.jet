@@ -200,7 +200,8 @@ sema_comptime_value_runtime_handle: fn(ty: Type, environment: SemaScopeEnvironme
 // The key of the value computed ahead for the local whose initializer
 // spans `source_span` and whose name spans `site_span`, in the function
 // `function_key` of module `module_identity`. It is apart from the site's
-// own key (sema_comptime_body_source_key), so no body check reads it.
+// own key, and the value has no place (SemaComptimeItemSource.place), so no
+// body check reads it.
 sema_comptime_local_value_ahead_key: fn(module_identity: ModuleID, function_key: String, source_span: Span, site_span: Span) -> String Never! {
     "{module_identity.id}.{sema_comptime_local_value_ahead_destination(function_key, source_span, site_span)}"
 }
@@ -218,6 +219,7 @@ sema_comptime_local_value_ahead_site: fn(site: SemaComptimeBodySource) -> SemaCo
     source.key = sema_comptime_local_value_ahead_key(site.module_identity, site.function_key, site.span, site.site_span)
     source.destination_key = sema_comptime_local_value_ahead_destination(site.function_key, site.span, site.site_span)
     source.ahead = true
+    source.place = None
     source
 }
 
@@ -486,6 +488,7 @@ sema_comptime_local_values_ahead: fn(values: [SemaComptimeItemValue], pending: [
                 kind: SemaComptimeItemKind.BodyExpression,
                 value: values[row].value,
                 ty: if runs -> source.expected_type else -> values[row].ty,
+                place: Val(sema_comptime_body_source_place(source)),
             },
         )
     }
