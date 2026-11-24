@@ -695,13 +695,22 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
                 capture.entry_module = Val(modules.len())
             }
         } else {
-            if unit.root_index < 0 || unit.file_index < 0 || unit.source_origin != SemaSourceOrigin.Snapshot || unit.root_index >= request.authorized_sources.roots.len() {
-                next
+            if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> next
+            root: request.authorized_sources.roots[unit.root_index]
+            if unit.file_index < 0 && unit.source_origin == SemaSourceOrigin.CompilerGenerated && request.doc_generated_modules {
+                // A module `build: fn` generated sits where its path names
+                // under its package root.
+                generated: (loop (row_index, row) in request.generated_modules {
+                    if row.package_identity == unit.package_identity && row.relative_path == unit.relative_path -> break row_index
+                } ?? -1)
+                if generated < 0 -> next
+                physical_path = jet_driver_physical_path(root.canonical_path, unit.relative_path)
+                source = request.generated_modules[generated].source
+            } else {
+                if unit.file_index < 0 || unit.source_origin != SemaSourceOrigin.Snapshot || unit.file_index >= root.files.len() -> next
+                physical_path = root.files[unit.file_index].path
+                source = root.files[unit.file_index].source
             }
-            source_files: request.authorized_sources.roots[unit.root_index].files
-            if unit.file_index >= source_files.len() -> next
-            physical_path = source_files[unit.file_index].path
-            source = source_files[unit.file_index].source
         }
         modules.push(
             JetDriverDocModule{

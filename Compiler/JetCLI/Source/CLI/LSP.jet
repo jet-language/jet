@@ -44,15 +44,24 @@ JetCLILSPChecker: struct {
                 .Prepared(request, snapshot) -> {
                     demanded := request.move()
                     demanded.doc_core_on_demand = true
-                    // A compile that fails outright publishes nothing, as a
-                    // refusal does; the client's log shows why.
-                    result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}}) ?? {
+                    demanded.doc_generated_modules = true
+                    // The modules the package's `build: fn` generates load
+                    // beside its sources, as under `jet check`, and what the
+                    // build reported follows the compile's reports. A compile
+                    // that fails outright publishes nothing, as a refusal
+                    // does; the client's log shows why.
+                    generated: jet_cli_generated_request(demanded) ?? {
+                        lsp_write_log("internal compiler error checking `{entry}`: {err.message}").drop("standard error is the log; a failed log write has nowhere to go")
+                        return LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
+                    }
+                    result := jet_driver_compile_keep_going(generated.request.move(), JetDriverKeepGoing{skip: [String]{}}) ?? {
                         lsp_write_log("internal compiler error checking `{entry}`: {err}").drop("standard error is the log; a failed log write has nowhere to go")
                         return LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
                     }
                     if result.internal_problem == .Val(problem) {
                         lsp_write_log("internal compiler error checking `{entry}`: {problem}").drop("standard error is the log; a failed log write has nowhere to go")
                     }
+                    loop report in generated.reports.move() -> result.diagnostics.push(report)
                     diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
                     reports: jet_cli_lsp_reports(entry, given, entry_slot, diagnostics)
                     if result.doc_modules.len() == 0 {
