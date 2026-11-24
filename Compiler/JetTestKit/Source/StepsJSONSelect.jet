@@ -131,6 +131,17 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
                     if kit_steps_json_filter_matches(item, filter) -> selected.push(item.copy())
                 }
                 if selected.len() == 0 -> return Val([Dyn]{})
+                // A key or projection after a filter reads each match, as after
+                // `[*]`; an index, `*` or another filter reads the matched array.
+                following: if depth + 1 < parts.len() -> parts[depth + 1] else -> ""
+                if following.starts_with(".") || following.starts_with("\"") || following.starts_with("{{") {
+                    values := [Dyn]{}
+                    loop item in selected {
+                        children: kit_steps_json_select(item, parts, depth + 1) ?? return None
+                        loop child in children -> values.push(child)
+                    }
+                    return Val(values)
+                }
                 return kit_steps_json_select(Dyn.Array(selected), parts, depth + 1)
             }
             if part == "*" {
