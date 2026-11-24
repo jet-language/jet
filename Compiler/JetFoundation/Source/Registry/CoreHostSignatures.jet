@@ -38,8 +38,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.files __remove_at_raw Int,[u8] Result<Unit,IOError>
     core.http.client jet_http_build_resolve String,Int Result<[[u8]],String>
     core.watcher __event WatchHandle Event<WatchEvent>
-    core.process pipeline [ProcessSpec] Result<ProcessReceipt,IOError>
-    core.process jet_process_exit_status_raw Int String?
     jet_builtins process_child_id ProcessChild Int
     jet_builtins process_child_wait ProcessChild Result<ProcessReceipt,IOError>
     jet_builtins process_child_exited ProcessChild Result<Bool,IOError>
@@ -60,7 +58,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.term take Int Result<[u8],IOError>
     core.term stdout - Stdout
     core.term stderr - Stderr
-    core.term jet_term_is_terminal_raw Int Bool
     core.process __spec_fields [String],Bool,String,Bool,[String],[String],[String],Bool,ProcessStreamMode,ProcessStreamMode,ProcessStreamMode,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Bool,TerminalPolicy,Bool,String ProcessSpec
     core.process __spec_parent_death ProcessSpec ProcessSpec
     core.files __directory_fd Int (available:Bool,held:Bool,fd:Int)
@@ -74,15 +71,10 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.sync map_set SyncMap,String,String SyncMap
     core.testing fake_clock Int Clock
     jet_builtins evidence_read String EvidenceRead
-    jet_builtins record_failure String,String Unit
-    jet_builtins clear_failure - Unit
-    jet_builtins skip String Unit
     jet_builtins temp_facts - TempFacts
     jet_builtins temp_join String TempPath
     jet_builtins temp_remove [U8] TempRemove
     jet_builtins temp_create [U8] TempCreate
-    jet_builtins text_window String,U64,U64 String
-    jet_builtins suite_snapshot - Test
     jet_builtins to_bits_f32 F32 Int
     jet_builtins from_bits_f32 Int F32
     core.testing world fn(DeterministicWorld;Unit) Unit

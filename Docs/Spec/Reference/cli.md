@@ -148,9 +148,10 @@ The compiler's completion reader performs one nonblocking open and then inspects
 and reads that same handle; it never executes the application. Its private Core
 member `jet_std_files_open_reader_nonblocking` uses the existing runtime symbol
 and `FileReader`/`IOError` carriers. The terminal-context and waited-child facts
-likewise retain the existing `jet_term_is_terminal_raw` and
-`jet_process_exit_status_raw` runtime spellings, rather than reserved
-double-underscore member aliases or alternate host APIs.
+are the `jet.runtime.term.is_terminal` and `jet.runtime.process.exit_status`
+bindings of the existing `jet_term_is_terminal_raw` and
+`jet_process_exit_status_raw` runtime exports, rather than Core members,
+reserved double-underscore member aliases or alternate host APIs.
 Checked-build DNS and pinned byte transport likewise keep the
 `jet_http_build_resolve` (runtime) and `jet_http_build_get` (Jet source over
 `core.net` and `core.net.tls`) spellings. Driver retains address
