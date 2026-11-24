@@ -1,0 +1,25 @@
+// A child's `terminal` is optional: `.resize()` on it names the unwrap
+// (E0311) and is not reported as a missing method. The Option receiver's
+// fast path in sema_expr_try_method_special_routes reaches the process
+// handle route for this case.
+use jet_driver.[JetDriverCompileMode, jet_driver_compile]
+
+#Test("resizing a child's optional terminal names the unwrap") {
+    source: [String]{
+        "use process: core.process",
+        "",
+        "run: fn() {{",
+        "    child: process.cmd([\"echo\", \"plain\"]).spawn() ?? panic(\"spawn failed\")",
+        "    child.terminal.resize(TerminalSize{{cols: 80, rows: 24}})",
+        "}}",
+        "",
+    }
+    request := seams_request(source.join("\n"), JetDriverCompileMode.Program)
+    request.core_sources = idiom_core_rows()
+    result: jet_driver_compile(request)
+    codes := [String]{}
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == 1 -> codes.push("{diagnostic.code} {diagnostic.what}")
+    }
+    assert(codes == [String]{"E0311 `.resize()` needs `TerminalSession`, not `TerminalSession?`"}, codes.join("; "))
+}
