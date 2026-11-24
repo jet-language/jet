@@ -75,7 +75,7 @@ ir_opt_hoist_unique: fn(m: IRModule, f: ^IRFunction, keys: [String], notes: ^[St
         outer.push(-1)
         ends.push(-1)
         if op == .End || op == .Else {
-            opener: open.pop() ?? panic("ir_opt_hoist_unique: End without an open construct")
+            opener: ir_construct_closed(open)
             if f.op[opener] == .Loop {
                 _ := loops.pop()
                 ends[opener] = at

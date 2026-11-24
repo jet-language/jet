@@ -1848,7 +1848,7 @@ ir_opt_compact_links: fn(f: ^IRFunction) Never! {
             f.b[at] = -1
             open.push(I64{at})
         } else if op == .Else { f.b[Int{open[open.len() - 1]}] = at } else if op == .End {
-            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            opener: Int{ir_construct_closed(open)}
             f.a[at] = opener
             if f.op[opener] == .If {
                 f.c[opener] = at
@@ -1889,7 +1889,7 @@ ir_opt_compact: fn(f: ^IRFunction) Never! {
             f.b[kept] = -1
             open.push(I64{kept})
         } else if op == .Else { f.b[Int{open[open.len() - 1]}] = kept } else if op == .End {
-            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            opener: Int{ir_construct_closed(open)}
             f.a[kept] = opener
             if f.op[opener] == .If {
                 f.c[opener] = kept
@@ -1948,7 +1948,7 @@ ir_opt_compact_facts: fn(f: ^IRFunction, facts: ^OptFacts) Never! {
             f.b[kept] = -1
             open.push(I64{kept})
         } else if op == .Else { f.b[Int{open[open.len() - 1]}] = kept } else if op == .End {
-            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            opener: Int{ir_construct_closed(open)}
             f.a[kept] = opener
             if f.op[opener] == .If {
                 f.c[opener] = kept
