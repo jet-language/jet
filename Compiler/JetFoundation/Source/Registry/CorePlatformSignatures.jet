@@ -8,7 +8,7 @@
 // or a comma list of positional parameter types, each optionally prefixed `^^`
 // (taken) or `^` (written); `return` is `-` (none) or a type; the optional
 // fifth field names the signature's unconstrained type parameters. Types:
-// `String` `Int` `Float` `Bool` `Char`; `u8` / `i32` / `U16` / `I64` (IntN); `[T]` list;
+// `String` `Int` `Float` `F32` `Bool` `Char`; `u8` / `i32` / `U16` / `I64` (IntN); `[T]` list;
 // `[K:V]` map; `T?` option; `Result<T,E>`; `Union<A,B,…>`; `Name<T,…>`
 // (Apply); `fn(A,B)` and `fn(A,B;R)` (no effect row or call metadata);
 // `(name:T,…)` tuple; `callback` (`core_host_callback_type`); any other name
@@ -222,6 +222,7 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         "String" -> return CoreSigRowType{ty: Type.String, next: end}
         "Int" -> return CoreSigRowType{ty: Type.Int, next: end}
         "Float" -> return CoreSigRowType{ty: Type.Float, next: end}
+        "F32" -> return CoreSigRowType{ty: Type.Float32, next: end}
         "Bool" -> return CoreSigRowType{ty: Type.Bool, next: end}
         "Char" -> return CoreSigRowType{ty: Type.Char, next: end}
         "callback" -> return CoreSigRowType{ty: core_host_callback_type(), next: end}
