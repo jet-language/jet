@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6999,
-    "rev": 113917,
+    "nextNum": 7000,
+    "rev": 113925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58084,6 +58084,21 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "c18 proof command: the guard's proof is `jet test Tests/Guards/CoreDeclarations`. A `--filter core_declarations` run matches no test. The guard was red on dev because the Core declaration checks missed `priv __x: fn` lines (176 false problems); 6851-c18-guard-priv fixes that and is queued for batch 30 with c18-a (core.compute, 59 dispatcher rows)."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c13 decision: core.math's by-name helpers (64 of the 123 CBD rows left: precise math built as __{type}_{op}, F32 as __{member}_f32) move to roles next, ahead of the 26 Core-only rows, because they carry the largest share of the remaining gap. They use the one existing mechanism, a plain #Builtin.Role case per helper ({Type}{Op}, {Member}F32, about 93 cases), and PreciseBind and the F32 lowering look the role up the way every other family does. No parameterized role form is added."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Batch 27 landed on dev (e7155486f3), one commit per submission: c36-02 one maker graph 689cc79e4f, c36-03 in-sema makers 91d3a32bb0, c5 time-b2 72a593f2e2, c13 stale rows 865e858f05, c13 units roles 307c05de2f, c13 compute roles 0ed47ff071, c5 time-c1 3eab75d0b7, c30 CompilerCall type c584d98f05. Merged into master 9ddc0975d6. Batch 27 suite against batch 26: golden 66 and UI 54 new failures, grouped into roots for the fix sweep (Duration ledger, mark texts, compute role item, three still unexplained)."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "c13 Args decision revised (orchestrator): A replaced by A'. CLIEntry builds its role-to-helper table at compile time (#run over the #Builtin.Role markers in Core/Args/Args.jet). Compiler source spells only role names, and a missing filler fails the compiler build. Member lookup is unchanged, so user code naming a role stays an ordinary unknown member. Generated wrapper calls to priv helpers pass through the one existing generated-code visibility path."
         },
         {
@@ -58630,7 +58645,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T15:33:05.960Z",
+      "updated": "2026-11-24T16:50:59.053Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -58652,6 +58667,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "6852-c8-reach-paths landed on dev 939fda3b63."
+        },
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
@@ -58912,7 +58932,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T14:49:12.862Z",
+      "updated": "2026-11-24T15:42:21.289Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -65397,6 +65417,11 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "6903-c20-use-b (core.term take_within) landed on dev 4840d00c3e, and 6903-casing-r2 931e1e0c96. 6903-c20-use-c (LSP request cancellation) is in batch 28."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Owner question open (2026-11-24): D-LSP-HOSTDOC1 'Engineer away downsides'. Queued for G1Facts-2 after its c22 and 6902-c11 fixes; the reworked ballot comes with a dated adversarial review audit."
         }
       ],
@@ -65672,7 +65697,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-24T14:11:44.104Z",
+      "updated": "2026-11-24T15:42:20.355Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 25
     },
@@ -76279,6 +76304,16 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "Correction: the migration commit on dev is f5d6176d36."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Step B landed on dev: 6998-b-core 640f60846a and the migration (2921 files, every change & to ^ / && to ^^) 3d at the e7155486f3 tip, merged into master 9ddc0975d6. Sweep items owned by G1Generation-2: diagnostic message texts still spell & marks (53 UI snapshots), the migration misses a mark after the && operator (one site, DebugCompile.jet, fixed by hand in batch 28), and 9 golden sources the migration did not reach."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Owner ruling, 2026-11-24, verbatim: \"I approve the & and && to ^ and ^^ conversion\". It followed the side-by-side comparison of the two spellings (24 excerpts from dev, five whole files and a layered program that runs today). The card now carries the mark cutover; the drafted link move D-LINK-CARET1 is withdrawn because ^ now marks a write, and links keep @. D-MARK-CARET1 holds the ruling as a draft until its review is posted, after which it is ratified A with the quoted ruling."
         },
         {
@@ -76349,9 +76384,36 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T13:44:02.626Z",
-      "updated": "2026-11-24T14:11:00.326Z",
+      "updated": "2026-11-24T15:42:26.740Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 5
+    },
+    {
+      "id": "c0mhrplj",
+      "num": 6999,
+      "title": "Compiler cleanup: Rust remnants, one source of truth, architecture and idiom",
+      "body": "Owner order (2026-11-24 12:00): handle every finding of the cleanup analysis by 15:00. This work takes precedence over #6851. Tools written in other languages are NOT removed yet; they are only deduplicated and organized. Findings (measured on dev e7155486f3): about 3,800 comment lines in Compiler/Core/Jetpack cite the deleted Rust original; the Core API is restated in up to six places (Core sources, Core.rows, CoreSurfaceInventory.rows, the Registry signature tables, CoreRecordRows/BuiltinMethods/BuiltinStatics/RuntimeHandles, 27 backend *ABI.jet hand layouts); 938 hand closed lists without a home and 315 shared-member pairs; about 93k committed generated lines; the tool roots table in four copies; 701 sema signatures thread the same context bundle and 407 functions take 12+ parameters; 2,067 panic( calls in compiler source; few yielding loops, patterns, pipes or methods against 8,585 push loops.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "G1",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Ranked by size of the finding: B (one Core truth) and E (sema context) are largest, then A (Rust remnants), D (closed lists), F (idiom), C (generated copies), G (panics), H (tool roots). E's redesign needs its adversarial review audit first. Staffing: G1Generation-2 B then D; G1Facts-2 A then G; TypeIDSlice3-3 E then F; orchestrator H and C.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-24T17:01:07.086Z",
+      "updated": "2026-11-24T17:01:07.086Z",
+      "updatedBy": "Orchestrator"
     }
   ],
   "decisions": [
@@ -140834,6 +140896,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T17:01:07.086Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0mhrplj",
+      "note": "Compiler cleanup: Rust remnants, one source of truth, architecture and idiom"
+    },
+    {
+      "at": "2026-11-24T16:50:59.053Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T16:20:34.386Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T15:42:26.740Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T15:42:21.289Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T15:42:20.355Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mbiq9g",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T15:42:19.410Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T15:42:18.447Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-24T15:33:05.961Z",
       "by": "Orchestrator",
