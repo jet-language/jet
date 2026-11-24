@@ -5,7 +5,7 @@
 // and a Constraint its constraint shell; every producer borrows its inputs and
 // returns an owned shell, except a strength, which consumes the constraint and
 // hands back the same shell.
-use jet_foundation.[Span, BodyHandleOp, TBinaryOp, TLocal, Type]
+use jet_foundation.[Span, BodyHandleOp, BinOp, TLocal, Type]
 
 ir_layout_value_type: fn(ty: Type) -> Bool Never! {
     if ir_untag(ty) == .Named(name) {
@@ -48,7 +48,7 @@ ir_layout_literal: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value
 }
 
 // `a + b` / `a - b` over layout values.
-ir_layout_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
+ir_layout_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, op: BinOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
     export := ""
     if op == {
         .Add -> export = "jet_rt_layout_add"
@@ -68,7 +68,7 @@ ir_layout_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, op: TB
 
 // `a <= b` / `a >= b` / `a == b`: the Constraint (Le0/Ge1/Eq2), registered
 // with the layout its variables belong to.
-ir_layout_compare: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
+ir_layout_compare: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, op: BinOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
     code := 0
     if op == {
         .Le -> code = 0

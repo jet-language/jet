@@ -11,7 +11,7 @@ use {
         Span,
         Stmt,
         TextEdit,
-        TBinaryOp,
+        BinOp,
         Type,
         core_enum_cases,
         core_enum_payload_variants,
@@ -265,7 +265,7 @@ sema_coverage_table: fn(conditions: [TExpr]) -> SemaCoverageTable? {
 
 // The pattern test that starts a guarded arm's `&&` chain.
 sema_coverage_guard_test: fn(condition: TExpr) -> TExpr? {
-    if condition.kind == .Binary(op, _, _, lhs, _) && op == TBinaryOp.And {
+    if condition.kind == .Binary(op, _, _, lhs, _) && op == BinOp.And {
         // copy: `lhs` is a payload of read parameter `condition`; the Val carrier owns this one
         if lhs.kind == .PatternMatches(_, _) -> return Val(lhs.copy())
         return sema_coverage_guard_test(lhs)
@@ -936,7 +936,7 @@ sema_coverage_else_head_of_expr: fn(condition: TExpr) -> SemaCoverageElseHead? {
         // copy: `tested` is a payload of read parameter `condition`; the head owns its own.
         .PatternMatches(tested, pattern) -> Val(SemaCoverageElseHead{subject: tested.copy(), shape: Val(sema_coverage_else_shape(pattern.shape))})
         .Binary(op, _, _, lhs, _) -> {
-            if op != TBinaryOp.And -> return None
+            if op != BinOp.And -> return None
             inner: sema_coverage_else_head_of_expr(lhs) ?? return None
             Val(SemaCoverageElseHead{subject: inner.subject, shape: None})
         }

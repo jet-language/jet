@@ -133,7 +133,7 @@ sema_expr_check_layout_binary: fn(op: BinOp, left: TExpr, right: TExpr, span: Sp
     result_type: result.result_type ?? return SemaExpressionLayoutBinaryCheck{handled: true, value: None}
     lowered_left: sema_expression_layout_literal(left)
     lowered_right: sema_expression_layout_literal(right)
-    value: if op == BinOp.Add || op == BinOp.Sub -> sema_tree_node(result_type, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lowered_left, rhs: lowered_right}, span) else -> sema_tree_node(result_type, TExprKind.LayoutCompare{op: sema_expr_tree_binary_op(op), lhs: lowered_left, rhs: lowered_right}, span)
+    value: if op == BinOp.Add || op == BinOp.Sub -> sema_tree_node(result_type, TExprKind.Binary{op: op, overflow: false, line: line, lhs: lowered_left, rhs: lowered_right}, span) else -> sema_tree_node(result_type, TExprKind.LayoutCompare{op: op, lhs: lowered_left, rhs: lowered_right}, span)
     checked: sema_expr_expected(value, expected, environment, program, diagnostics)
     SemaExpressionLayoutBinaryCheck{handled: true, value: checked}
 }

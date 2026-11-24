@@ -33,7 +33,6 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKind,
-    TBinaryOp,
     TLocal,
     TypeKind,
     TMethodRef,
@@ -1507,7 +1506,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
     if op == None && sema_copy_site_check_assignment(expr, environment, program, scopes, check.context, diagnostics) {
         return sema_stmt_assign_exit(check.context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 5")
     }
-    tree_op := TBinaryOp?{None}
+    tree_op := BinOp?{None}
     if op != None {
         operator: op
         // A record place whose type implements no hook for this operator has no
@@ -1521,7 +1520,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
             diagnostics.push(if target == .Field(_, member, _) -> sema_slot_holds_mismatch("field `{member}`", "field", place.ty, result, op_span) else -> sema_type_mismatch(place.ty, result, op_span, program))
             return sema_stmt_assign_exit(check.context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 16")
         }
-        tree_op = Val(sema_stmt_binary_type(operator))
+        tree_op = Val(operator)
     }
     sema_ownership_release_value_only_views(check, target)
     if !sema_ownership_check_lvalue_write_as(check.state, target, !sema_stmt_place_writes_through_view(place), scopes, diagnostics) {

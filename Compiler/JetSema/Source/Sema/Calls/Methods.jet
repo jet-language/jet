@@ -614,7 +614,7 @@ sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, 
     ordering: method == "compare"
     op: if ordering -> BinOp.Compare else -> BinOp.Eq
     result_ty: if ordering -> Type.Named{name: "Ordering"} else -> Type.Bool
-    value: sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: receiver_value, rhs: argument}, span)
+    value: sema_tree_node(result_ty, TExprKind.Binary{op: op, overflow: false, line: line, lhs: receiver_value, rhs: argument}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

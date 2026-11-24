@@ -20,7 +20,7 @@ use {
         Symbol,
         SymbolID,
         SymbolKind,
-        TBinaryOp,
+        BinOp,
         TBranchClass,
         TCapture,
         TCaptureFacts,
@@ -1428,7 +1428,7 @@ sema_readiness_tree: fn(table: ^^SemaReadinessTable, branches: ^^[SemaStatementR
             }
         }
         loop statement in branch.value.move() -> body.push(statement)
-        condition: sema_tree_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: 0, lhs: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span), rhs: sema_tree_node(Type.Int, TExprKind.IntLit{value: selected, width: None}, span)}, span)
+        condition: sema_tree_node(Type.Bool, TExprKind.Binary{op: BinOp.Eq, overflow: false, line: 0, lhs: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span), rhs: sema_tree_node(Type.Int, TExprKind.IntLit{value: selected, width: None}, span)}, span)
         reversed.push(TMixedArm{condition: condition, body: body})
     }
     dispatch := [TMixedArm]{}

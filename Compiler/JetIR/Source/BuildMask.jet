@@ -21,7 +21,7 @@
 // drops the tag), but not one a constant makes. IR Lint follows the values
 // computed from these after the build and after each pass (Lint.jet
 // ir_lint_fixed).
-use jet_foundation.[BodyIfCond, BodyPlace, body_stmt, body_type_id, FnBody, Span, TBinaryOp, Type, type_kind, type_syntax]
+use jet_foundation.[BodyIfCond, BodyPlace, body_stmt, body_type_id, FnBody, Span, BinOp, Type, type_kind, type_syntax]
 
 // Which types of the checked body's type table are fixed (IRBuilder.fixed_ids).
 // An instance's types are its own, so it marks none.
@@ -204,7 +204,7 @@ ir_masked_if_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, condition: Bod
 
 // `x = v` (or `x op= v`) in an arm of a masked branch: `x` keeps its old
 // value where the arm's Bool fails.
-ir_masked_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: BodyPlace, op: TBinaryOp?, value: Int, span: Span) Never! {
+ir_masked_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: BodyPlace, op: BinOp?, value: Int, span: Span) Never! {
     binding: if place == {
         .Local(local) -> ir_lookup_local(b, local) ?? {
             return ir_fail(b, span, "assignment to unknown local {local.name}")

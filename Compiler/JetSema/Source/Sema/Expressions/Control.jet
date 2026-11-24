@@ -26,7 +26,6 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKind,
-    TBinaryOp,
     TFailureCarrier,
     TLetTy,
     TLocal,
@@ -2525,7 +2524,7 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
                 bindings := left_checked.bindings
                 loop binding in right_check.bindings -> bindings.push(binding)
                 right_checked: right_check.checked ?? return sema_expression_condition_failed(bindings)
-                value: sema_tree_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.And, overflow: false, line: 0, lhs: left_checked.value, rhs: right_checked.value}, span)
+                value: sema_tree_node(Type.Bool, TExprKind.Binary{op: BinOp.And, overflow: false, line: 0, lhs: left_checked.value, rhs: right_checked.value}, span)
                 return sema_expression_condition_checked(SemaCheckedCondition{condition: TIfCond.And{left: left_checked.condition, right: right_checked.condition}, value: value, bindings: bindings})
             }
         }
@@ -3280,7 +3279,6 @@ sema_expression_compare_chain: fn(operands: [Expr], ops: [BinOp], hooks: [Bool],
         checked.push(value)
     }
     line: sema_source_line_at(environment.source_segments, span) ?? return None
-    tree_ops := [TBinaryOp]{}
     loop (index, op) in ops {
         if op == BinOp.And || op == BinOp.Or || op == BinOp.Compare {
             diagnostics.push(sema_error("E0109", expr_span(operands[index + 1]), "this operator cannot join a comparison chain", "a chain combines ordered or equality comparisons", "use a separate boolean expression"))
@@ -3295,8 +3293,7 @@ sema_expression_compare_chain: fn(operands: [Expr], ops: [BinOp], hooks: [Bool],
                 _: sema_expr_binary_type(op, checked[index].ty, checked[index + 1].ty, expr_span(operands[index + 1]), diagnostics) ?? return None
             }
         }
-        tree_ops.push(sema_expr_tree_binary_op(op))
     }
-    value: sema_tree_node(Type.Bool, TExprKind.CompareChain{operands: checked, operators: tree_ops, hooks: hooks}, span)
+    value: sema_tree_node(Type.Bool, TExprKind.CompareChain{operands: checked, operators: ops, hooks: hooks}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)
 }

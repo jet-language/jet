@@ -27,7 +27,6 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKind,
-    TBinaryOp,
     TComptimeValue,
     TDestructureBinding,
     TEffectSpan,
@@ -1429,7 +1428,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if sema_ownership_lambda_write_borrow_active(check.state, name) {
         diagnostics.push(sema_ownership_diag_stored_lambda_write(name, name_span))
     }
-    tree_op := TBinaryOp?{None}
+    tree_op := BinOp?{None}
     if op != None {
         operator: op
         result: sema_stmt_compound_result(operator, required, checked.ty, expr, op_span, scopes, diagnostics) ?? return None
@@ -1437,7 +1436,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
             diagnostics.push(sema_slot_holds_mismatch("`{name}`", "binding", required, result, name_span))
             return None
         }
-        tree_op = Val(sema_stmt_binary_type(operator))
+        tree_op = Val(operator)
     }
     sema_ownership_release_value_only_views(check, LValue.Local{name: name, name_span: name_span})
     if !sema_ownership_check_lvalue_write(check.state, LValue.Local{name: name, name_span: name_span}, scopes, diagnostics) {
@@ -1518,7 +1517,7 @@ sema_stmt_check_module_storage_assignment: fn(symbol: Symbol, name: String, name
         widen_line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         checked = sema_expr_numeric_literal_conversion(checked, required, checked.span, widen_line, diagnostics) ?? return None
     }
-    tree_op := TBinaryOp?{None}
+    tree_op := BinOp?{None}
     if op != None {
         operator: op
         result: sema_stmt_compound_result(operator, required, checked.ty, expr, op_span, scopes, diagnostics) ?? return None
@@ -1526,7 +1525,7 @@ sema_stmt_check_module_storage_assignment: fn(symbol: Symbol, name: String, name
             diagnostics.push(sema_type_mismatch(required, result, op_span, program))
             return None
         }
-        tree_op = Val(sema_stmt_binary_type(operator))
+        tree_op = Val(operator)
     }
     if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, check.state, check.context, diagnostics, false) {
         return None

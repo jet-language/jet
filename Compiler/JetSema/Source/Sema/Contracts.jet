@@ -30,7 +30,7 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKind,
-    TBinaryOp,
+    BinOp,
     TContractDisposition,
     TContractKind,
     TContractSite,
@@ -744,7 +744,7 @@ sema_contract_index_interval: fn(expr: TExpr, environment: SemaScopeEnvironment,
     Val(found)
 }
 
-sema_contract_interval_comparison: fn(op: TBinaryOp, left: TIntegerRange, right: TIntegerRange) -> Bool Never! {
+sema_contract_interval_comparison: fn(op: BinOp, left: TIntegerRange, right: TIntegerRange) -> Bool Never! {
     if op == {
         .Eq -> left.lo == left.hi && left.lo == right.lo && left.hi == right.hi
         .Ne -> left.hi < right.lo || right.hi < left.lo
