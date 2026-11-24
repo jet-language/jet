@@ -65,13 +65,14 @@ sema_field_ref_selector: fn(expr: Expr) -> Bool Never! {
 // a diagnostic in `diagnostics` when it names no field of `M`.
 sema_field_ref_probe: fn(expr: Expr, ref_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Type? {
     fact: sema_field_ref_field(expr, ref_type, environment, program, scopes, context, diagnostics) ?? return None
-    Val(sema_field_ref_value_type(ref_type, fact.field_ty))
+    sema_field_ref_value_type(ref_type, fact.field_ty)
 }
 
-// `FieldRef<M, field_ty>` from a resolved `FieldRef<M, T>`.
-sema_field_ref_value_type: fn(ref_type: Type, field_ty: Type) -> Type Never! {
-    if ref_type == .Apply(name, args) -> return Type.Apply{name: name, args: [Type]{args[0].copy(), field_ty}}
-    panic("a resolved FieldRef is an applied type")
+// `FieldRef<M, field_ty>` from a resolved `FieldRef<M, T>`; None for any
+// type that is not applied.
+sema_field_ref_value_type: fn(ref_type: Type, field_ty: Type) -> Type? Never! {
+    if ref_type == .Apply(name, args) -> return Val(Type.Apply{name: name, args: [Type]{args[0].copy(), field_ty}})
+    None
 }
 
 // A selector where a `FieldRef<M, T>` is expected: the field reference it
@@ -89,7 +90,7 @@ sema_field_ref_check: fn(expr: Expr, expected: Type?, environment: SemaScopeEnvi
 sema_field_ref_check_as: fn(expr: Expr, ref_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     fact: sema_field_ref_field(expr, ref_type, environment, program, scopes, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     member_span: expr_span(expr)
-    value_type: sema_field_ref_value_type(ref_type, fact.field_ty)
+    value_type: sema_field_ref_value_type(ref_type, fact.field_ty) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     value: sema_field_ref_value(value_type, fact.symbol.name, member_span, environment, program, scopes, context)
     context.name_references.push(sema_name_reference(member_span, fact.symbol, Val(SymbolKind.Field)))
     checked: value ?? return SemaDirectSpecialCheck{handled: true, value: None}
