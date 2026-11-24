@@ -97,12 +97,6 @@ SemaTaintFieldFact: struct {
     span: Span,
 }
 
-SemaTaintBindingFact: struct {
-    name: String,
-    tags: [String],
-    type_name: String?,
-}
-
 SemaTaintCatalog: struct {
     tags: [SemaTaintTagFact],
     callables: [SemaTaintCallableFact],
@@ -245,18 +239,13 @@ SemaTaintModuleScope: struct {
     callable_scope: SemaTaintSlots,
 }
 
-// The taint plane's facts at one point (SemaFlowPlane): each binding's tags
-// and type, and whether any binding holds a tag. Where paths meet, a
-// binding holds every tag either path gave it; its type survives only when
-// both paths agree.
-SemaTaintFacts: struct {
-    bindings: [SemaTaintBindingFact],
-    any_tagged_binding: Bool{false},
-
+// The taint plane (SemaFlowPlane). A binding's fact in the store is its
+// tags (`many`) and its declared type name (`one`, "" for none). Where paths
+// meet, a binding holds every tag either path gave it; its type survives
+// only when both paths agree.
+SemaTaintPlane: struct {
     impl SemaFlowPlane {
-        flow_join: fn(self, other: SemaTaintFacts, _splits: &[SemaFlowSplit]) -> SemaTaintFacts Never! {
-            SemaTaintFacts{bindings: sema_taint_join_bindings(self.bindings, other.bindings), any_tagged_binding: self.any_tagged_binding || other.any_tagged_binding}
-        }
+        flow_join: fn(self, _binding: Int, one: SemaFlowFact, other: SemaFlowFact, _splits: &[SemaFlowSplit]) -> SemaFlowFact Never! { sema_taint_join(one, other) }
     }
 }
 
@@ -265,10 +254,12 @@ SemaTaintFlowState: struct {
     module_identity: ModuleID,
     // The AST tables of the module walked now.
     tables: ASTTables{ASTTables{}},
-    // The flow walk of the taint plane (Flow.jet): the facts at the current
-    // point, whether the current path has left its block, and the facts of
-    // each path that left the innermost loop.
-    flow: SemaFlowWalk<SemaTaintFacts>,
+    // The flow walk of the taint plane (Flow.jet): the store at the current
+    // point, whether the current path has left its block, and the store of
+    // each path that left the innermost loop. `locals` interns the binding
+    // names; the store keys their facts by their ids.
+    flow: SemaFlowWalk<SemaTaintPlane>,
+    locals: NameTable{name_table_sized(64)},
     // The scope (SemaTaintModuleScope) of each module the state walked,
     // built on its first walk and read by every later one: its row by module
     // identity, and the row of the module walked now (-1: none yet, whose
@@ -936,7 +927,7 @@ sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: ModuleI
 // for a local function value, else the module's own function, or the one an
 // import or the module's package binds the name to.
 sema_taint_bare_callable: fn(state: SemaTaintFlowState, name: String) -> SemaTaintCallableFact? {
-    if sema_taint_binding_index(state.flow.current.bindings, name) != None -> return None
+    if sema_taint_bound(state, name) -> return None
     slot := sema_taint_index_row(state.catalog.callable_index, state.module_identity, "|{name}")
     if slot == None && state.scope_at >= 0 {
         slot = sema_taint_slot(state.scopes[state.scope_at].callable_scope, name)
@@ -950,7 +941,7 @@ sema_taint_bare_callable: fn(state: SemaTaintFlowState, name: String) -> SemaTai
 // import alias names, else a method of the receiver's declared type.
 sema_taint_method_callable: fn(state: SemaTaintFlowState, receiver: Expr, method: String) -> SemaTaintCallableFact? {
     if receiver == .Ident(alias, _, _) {
-        if sema_taint_binding_index(state.flow.current.bindings, alias) == None && state.scope_at >= 0 {
+        if !sema_taint_bound(state, alias) && state.scope_at >= 0 {
             loop item in state.scopes[state.scope_at].imports {
                 if item.alias != alias || module_is_none(item.module_identity) -> next
                 return sema_taint_find_callable(state.catalog, item.module_identity, "", method)
@@ -1080,48 +1071,22 @@ sema_taint_validate_type_tags: fn(graph: SemaRegistrationGraph, ty: Type, module
     }
 }
 
-sema_taint_binding_index: fn(bindings: [SemaTaintBindingFact], name: String) -> Int? {
-    index := bindings.len() - 1
-    loop index >= 0 {
-        if bindings[index].name == name -> return Val(index)
-        index -= 1
-    }
-    None
-}
-
-sema_taint_copy_bindings: fn(bindings: [SemaTaintBindingFact]) -> [SemaTaintBindingFact] Never! {
-    result := [SemaTaintBindingFact]{}
-    if bindings.len() > 0 -> result.try_reserve(bindings.len()) ?? panic("reserve failed")
-    loop binding in bindings {
-        tags: if binding.tags.len() == 0 -> [String]{} else -> binding.tags.copy()
-        result.push(SemaTaintBindingFact{name: binding.name, tags: tags, type_name: binding.type_name})
-    }
-    result
-}
-
-sema_taint_set_binding: fn(bindings: &[SemaTaintBindingFact], name: String, tags: [String], type_name: String?) Never! {
-    index: sema_taint_binding_index(bindings, name)
-    copied: if tags.len() == 0 -> [String]{} else -> tags.copy()
-    if {
-        index == None -> {
-            bindings.push(SemaTaintBindingFact{name: name, tags: copied, type_name: type_name})
-        }
-        else -> {
-            bindings[index] = SemaTaintBindingFact{name: name, tags: copied, type_name: type_name}
-        }
-    }
+// Whether `name` is a binding on the current path.
+sema_taint_bound: fn(state: SemaTaintFlowState, name: String) -> Bool Never! {
+    id: name_find(state.locals, name) ?? return false
+    sema_flow_fact(state.flow.current, name_index(id)).held
 }
 
 sema_taint_bind: fn(state: &SemaTaintFlowState, name: String, tags: [String], type_name: String?) Never! {
-    if tags.len() > 0 -> state.flow.current.any_tagged_binding = true
-    sema_taint_set_binding(state.flow.current.bindings, name, tags, type_name)
+    id: name_index(name_intern(state.locals, name))
+    sema_flow_put(state.flow.current, id, SemaFlowFact{held: true, one: type_name ?? "", many: tags.copy()})
 }
 
 // The tags of the binding `name`; none when no binding has that name.
 sema_taint_binding_tags: fn(state: SemaTaintFlowState, name: String) -> [String] Never! {
-    if !state.flow.current.any_tagged_binding -> return [String]{}
-    index: sema_taint_binding_index(state.flow.current.bindings, name) ?? return [String]{}
-    state.flow.current.bindings[index].tags
+    if !state.flow.current.any_many -> return [String]{}
+    id: name_find(state.locals, name) ?? return [String]{}
+    sema_flow_fact(state.flow.current, name_index(id)).many
 }
 
 sema_taint_destinations_can_deny: fn(catalog: SemaTaintCatalog, destinations: [String]) -> Bool Never! {
@@ -1143,8 +1108,10 @@ sema_taint_name_is_source: fn(catalog: SemaTaintCatalog, name: String) -> Bool N
 
 // The type name of the binding `name`; None when no binding has that name.
 sema_taint_binding_type: fn(state: SemaTaintFlowState, name: String) -> String? Never! {
-    index: sema_taint_binding_index(state.flow.current.bindings, name) ?? return None
-    state.flow.current.bindings[index].type_name
+    id: name_find(state.locals, name) ?? return None
+    fact: sema_flow_fact(state.flow.current, name_index(id))
+    if fact.one == "" -> return None
+    Val(fact.one)
 }
 
 // The tags whose `from` covers a call to one of `destinations`. In a Core
@@ -2651,7 +2618,7 @@ sema_taint_check_call_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTai
     if !sema_taint_any_fixed(state, call.args) {
         return
     }
-    if sema_taint_binding_index(state.flow.current.bindings, call.name) != None {
+    if sema_taint_bound(state, call.name) {
         sema_taint_refuse_indirect(state, call.args)
         return
     }
@@ -2685,7 +2652,7 @@ sema_taint_check_method_crossing: fn(graph: SemaRegistrationGraph, state: &SemaT
         return
     }
     if receiver == .Ident(alias, _, _) {
-        if sema_taint_binding_index(state.flow.current.bindings, alias) == None {
+        if !sema_taint_bound(state, alias) {
             target: sema_taint_import_module(graph, state.module_identity, alias)
             if !module_is_none(target) {
                 function: sema_taint_body_of(graph, target, "", method) ?? return
@@ -2913,7 +2880,7 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
         .OrFallback(value, fallback, _, _, _) -> {
             sema_taint_check_steer(state, value, "a `??` fallback (it branches on whether the value is there)")
             sema_taint_check_expr(graph, state, value)
-            paths := [SemaTaintFacts]{state.flow.current.copy()}
+            paths := [SemaFlowFacts]{state.flow.current.copy()}
             if fallback == {
                 .Value(other) -> { sema_taint_check_expr(graph, state, other) }
                 .Block(body, tail, _) -> {
@@ -2942,7 +2909,7 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             sema_taint_check_expr(graph, state, cond)
             if test != "" -> state.under.push(test.copy())
             before: state.flow.current.copy()
-            paths := [SemaTaintFacts]{}
+            paths := [SemaFlowFacts]{}
             sema_taint_check_block(graph, state, then_body)
             if !state.flow.ended -> sema_taint_check_expr(graph, state, then_value)
             sema_flow_reach(state.flow, paths)
@@ -3107,7 +3074,7 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             tests: sema_taint_mask_arms(state, subject, arms, else_body, span)
             under: state.under.len()
             before: state.flow.current.copy()
-            paths := [SemaTaintFacts]{}
+            paths := [SemaFlowFacts]{}
             loop index in 0..<arms.len() {
                 sema_flow_restore(state.flow, before)
                 sema_taint_check_expr(graph, state, arms[index].cond)
@@ -3177,7 +3144,7 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
             sema_taint_check_expr(graph, state, cond)
             before: state.flow.current.copy()
-            paths := [SemaTaintFacts]{}
+            paths := [SemaFlowFacts]{}
             sema_taint_walk_path(graph, state, before, then_body, paths)
             if else_body == .Val(body) -> sema_taint_walk_path(graph, state, before, body, paths)
             splits := [SemaFlowSplit]{}
@@ -3202,43 +3169,34 @@ sema_taint_check_block: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSt
 }
 
 // A body's walk from no bindings.
-sema_taint_flow_start: fn() -> SemaFlowWalk<SemaTaintFacts> Never! {
-    sema_flow_start(SemaTaintFacts{bindings: [SemaTaintBindingFact]{}})
+sema_taint_flow_start: fn() -> SemaFlowWalk<SemaTaintPlane> Never! {
+    sema_flow_start(SemaTaintPlane{}, sema_flow_facts(SEMA_FLOW_PLANE_TAINT))
 }
 
 // Walk one path from `before`; when it falls through to the end of `body`,
-// its facts join `paths`.
-sema_taint_walk_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, before: SemaTaintFacts, body: [Stmt], paths: &[SemaTaintFacts]) {
+// its store joins `paths`.
+sema_taint_walk_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, before: SemaFlowFacts, body: [Stmt], paths: &[SemaFlowFacts]) {
     sema_flow_restore(state.flow, before)
     sema_taint_check_block(graph, state, body)
     sema_flow_reach(state.flow, paths)
 }
 
-sema_taint_join_bindings: fn(left: [SemaTaintBindingFact], right: [SemaTaintBindingFact]) -> [SemaTaintBindingFact] Never! {
-    result := sema_taint_copy_bindings(left)
-    loop binding in right {
-        index := sema_taint_binding_index(result, binding.name)
-        if index == None {
-            tags: if binding.tags.len() == 0 -> [String]{} else -> binding.tags.copy()
-            result.push(SemaTaintBindingFact{name: binding.name, tags: tags, type_name: binding.type_name})
-        } else {
-            current := result[index ?? 0]
-            tags := if current.tags.len() == 0 -> [String]{} else -> current.tags.copy()
-            sema_taint_union(tags, binding.tags)
-            type_name := current.type_name
-            if type_name == None -> type_name = binding.type_name
-            if type_name != None && binding.type_name != None && type_name != binding.type_name {
-                type_name = None
-            }
-            result[index ?? 0] = SemaTaintBindingFact{name: binding.name, tags: tags, type_name: type_name}
-        }
-    }
-    result
+// The taint plane's join (SemaFlowPlane): a binding on one path only keeps
+// its fact; one on both holds both tag sets, and its type when they agree.
+sema_taint_join: fn(one: SemaFlowFact, other: SemaFlowFact) -> SemaFlowFact Never! {
+    if !one.held -> return other.copy()
+    if !other.held -> return one.copy()
+    tags := one.many.copy()
+    sema_taint_union(tags, other.many)
+    type_name := one.one
+    if type_name == "" -> type_name = other.one
+    if other.one != "" && type_name != other.one -> type_name = ""
+    SemaFlowFact{held: true, one: type_name, many: tags}
 }
 
 // The paths that fall through meet (sema_flow_meet); the taint join loses
 // no tag, so it reports no split.
-sema_taint_meet: fn(state: &SemaTaintFlowState, paths: [SemaTaintFacts]) Never! {
+sema_taint_meet: fn(state: &SemaTaintFlowState, paths: [SemaFlowFacts]) Never! {
     splits := [SemaFlowSplit]{}
     sema_flow_meet(state.flow, paths, splits)
 }

@@ -1,0 +1,118 @@
+use ffs_files: core.files
+
+// One flow-fact store (D-FACT-FLOW1=A): every per-binding fact a plane keeps
+// along a body lives in JetSema's Flow.jet store (SemaFlowFacts), keyed by
+// plane and binding, and a plane supplies only its join. JetSema fails here
+// when it grows a private per-binding fact map:
+// - a plane (a type with `impl SemaFlowPlane`) that holds fields of its own;
+// - a per-binding fact row (`...BindingFact` / `...BindingFacts`) outside
+//   Flow.jet, except the borrow checker's, which is a prover and no plane
+//   (D-FACT-OWN1=A);
+// - a second path walk: a struct with both an `ended: Bool` and an
+//   `exits: [...]` field outside Flow.jet.
+FFS_ROOT: "Compiler/JetSema/Source"
+
+FFS_HOME: "Compiler/JetSema/Source/Sema/Flow.jet"
+
+FFS_STORE: "SemaFlowFacts: struct {{"
+
+FFS_PROVER_ROWS: [String]{"SemaOwnershipBindingFact"}
+
+// The name a column-0 line declares as a struct, "" for any other line.
+ffs_struct_name: fn(line: String) -[]> String {
+    if !line.ends_with(": struct {{") && !line.contains(": struct<") -> return ""
+    if line.starts_with(" ") || line.starts_with("/") -> return ""
+    line.split(":").to_list()[0]
+}
+
+// Whether `line` is a field of a struct body: one indent, a name and `: `.
+ffs_field: fn(line: String) -[]> Bool {
+    if !line.starts_with("    ") || line.starts_with("     ") -> return false
+    rest: line.trim()
+    if rest.starts_with("//") || rest.starts_with("impl ") -> return false
+    name: rest.split(": ").to_list()[0]
+    if name.len() == rest.len() || name.len() == 0 -> return false
+    loop byte in name.bytes() {
+        code: Int{byte}
+        if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return false
+    }
+    // A method of the struct (`name: fn(...)`) is no field.
+    !rest.starts_with("{name}: fn")
+}
+
+// The refusals of one struct `name` of `path` whose body is `body`, as
+// `path:line: why`.
+ffs_check_struct: fn(path: String, line: Int, name: String, body: [String], out: &[String]) -[]> {
+    home: path == FFS_HOME
+    fields := [String]{}
+    plane := false
+    loop text in body {
+        if text.trim() == "impl SemaFlowPlane {{" -> plane = true
+        if ffs_field(text) -> fields.push(text.trim())
+    }
+    if plane && fields.len() > 0 {
+        out.push("{path}:{line}: plane {name} holds fields of its own ({fields.join("; ")}); its facts belong in SemaFlowFacts")
+    }
+    if !home && (name.ends_with("BindingFact") || name.ends_with("BindingFacts")) && !FFS_PROVER_ROWS.contains(name) {
+        out.push("{path}:{line}: {name} is a private per-binding fact row; keep the facts in SemaFlowFacts")
+    }
+    ended := false
+    exits := false
+    loop field in fields {
+        if field.starts_with("ended: Bool") -> ended = true
+        if field.starts_with("exits: [") -> exits = true
+    }
+    if !home && ended && exits {
+        out.push("{path}:{line}: {name} is a second path walk; walk with SemaFlowWalk")
+    }
+}
+
+// Every refusal under `path`. Symbolic links and hidden entries are skipped.
+ffs_scan: fn(path: String, out: &[String]) -[FS]> {
+    if ffs_files.is_symlink(path) -> return
+    if ffs_files.is_dir(path) {
+        loop child in (ffs_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") -> next
+            ffs_scan(child.path, out)
+        }
+        return
+    }
+    if !path.ends_with(".jet") -> return
+    text: ffs_files.read(path) ?? return
+    lines: text.lines()
+    index := 0
+    loop index < lines.len() {
+        name: ffs_struct_name(lines[index])
+        if name == "" {
+            index += 1
+            next
+        }
+        start: index
+        body := [String]{}
+        index += 1
+        loop index < lines.len() && lines[index] != "}}" {
+            body.push(lines[index])
+            index += 1
+        }
+        ffs_check_struct(path, start + 1, name, body, out)
+    }
+}
+
+#Test("fact_flow_one_store") {
+    guards_enter_root()
+    home: ffs_files.read(FFS_HOME) ?? panic("read {FFS_HOME}: {err}")
+    assert(home.lines().contains(FFS_STORE), "{FFS_HOME} must hold the one flow-fact store")
+    found := [String]{}
+    ffs_scan(FFS_ROOT, found)
+    assert_eq(found.join("\n"), "")
+
+    // The matcher refuses each shape it names.
+    shapes := [String]{}
+    ffs_check_struct("x.jet", 1, "SemaXPlane", [String]{"    rows: [Int],", "    impl SemaFlowPlane {{", "        flow_join: fn(self) {{}}", "    }}"}, shapes)
+    ffs_check_struct("x.jet", 2, "SemaXBindingFact", [String]{"    name: String,"}, shapes)
+    ffs_check_struct("x.jet", 3, "SemaXWalk", [String]{"    ended: Bool,", "    exits: [Int],"}, shapes)
+    ffs_check_struct("x.jet", 4, "SemaXFieldless", [String]{"    impl SemaFlowPlane {{", "        flow_join: fn(self, one: Int) -> Int Never! {{}}", "    }}"}, shapes)
+    assert_eq(shapes.len(), 3)
+    assert(!ffs_field("    flow_join: fn(self) {{}}"))
+    assert(ffs_field("    current: SemaFlowFacts,"))
+}
