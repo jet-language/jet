@@ -526,19 +526,9 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         }
         // The CSV query reads its file.
         "core.db.query" -> if member == "query" -> Val("FS") else -> None
-        // A service file leaf names the one leaf it needs, as core.files
-        // does; the lock and workflow sleeps name Time. A service's record
-        // stamps read the wall clock, its authority tokens draw from the OS
-        // generator, and its store identity resolves against the working
-        // directory. The process id in a temporary name only avoids a collision,
-        // so, like an atomic write's, it is part of the write (host-reads.md H7).
-        "core.service" -> if member == {
-            "state_store" | "__host_path_kind" | "__host_stat" | "__host_read_bytes" | "__host_append_bytes" | "__host_create_dirs" | "__host_reserve" | "__host_finish" | "__host_rename" | "__host_sync_parent" | "__host_close" | "__host_remove" | "__host_fsync" | "__host_set_mode" -> Val("FS")
-            "__host_entropy" -> Val("Rand")
-            "__host_current_dir" -> Val("Env")
-            "__host_wall_sample" | "__host_sleep_ns" | "__host_sleep_wait_ns" -> Val("Time")
-            else -> None
-        }
+        // A service's state store reads and writes its file. Its host
+        // leaves are jet.runtime bindings that carry their own rows.
+        "core.service" -> if member == "state_store" -> Val("FS") else -> None
         "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.
@@ -595,12 +585,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             "run" -> Val("Time.Wait")
             else -> None
         }
-        "core.service" -> if member == {
-            "state_store" | "__host_path_kind" | "__host_stat" | "__host_read_bytes" -> Val("FS.Read")
-            "__host_append_bytes" | "__host_create_dirs" | "__host_reserve" | "__host_finish" | "__host_rename" | "__host_sync_parent" | "__host_close" | "__host_remove" | "__host_fsync" | "__host_set_mode" -> Val("FS.Write")
-            "__host_sleep_ns" | "__host_sleep_wait_ns" -> Val("Time.Wait")
-            else -> None
-        }
+        "core.service" -> if member == "state_store" -> Val("FS.Read") else -> None
         "core.time" -> if member == {
             "zone" | "parse_zoned" -> Val("FS.Read")
             "sleep" | "sleep_until" -> Val("Time.Wait")

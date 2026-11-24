@@ -20,6 +20,8 @@ use {
     service_tasks: core.tasks
     service_time: core.time
     service_files_rt: jet.runtime.files
+    service_sys_rt: jet.runtime.sys
+    service_time_rt: jet.runtime.time
     core.prelude.[TaskFailure]
 }
 
@@ -1076,49 +1078,49 @@ channel_close: fn(channel: Shared<ServiceChannel>) Never! {
 
 // Host leaves. Each is one existing runtime primitive with no service policy.
 service_now: fn() -> Int Never! {
-    sample: core.service.__host_wall_sample()
-    if sample.before_epoch -> return 9223372036854775807
-    millis: sample.nanoseconds /% 1000000
-    if sample.seconds > (9223372036854775807 - millis) /% 1000 -> return 9223372036854775807
-    sample.seconds * 1000 + millis
+    sample: service_time_rt.wall_sample()
+    if sample.pre_epoch -> return 9223372036854775807
+    millis: sample.fraction_ns /% 1000000
+    if sample.epoch_seconds > (9223372036854775807 - millis) /% 1000 -> return 9223372036854775807
+    sample.epoch_seconds * 1000 + millis
 }
 
 service_issue_authority: fn() -> String ServiceError! {
-    bytes: core.service.__host_entropy(32) ?? return Err(ServiceError.Policy("service authority cannot obtain cryptographic entropy"))
+    bytes: service_sys_rt.service_entropy(32) ?? return Err(ServiceError.Policy("service authority cannot obtain cryptographic entropy"))
     if bytes.len() != 32 {
         return Err(ServiceError.Policy("service authority cannot obtain cryptographic entropy"))
     }
     Ok("sa-{service_encoding.bytes_to_hex(bytes)}")
 }
 
-service_sleep_ms: fn(millis: Int) Never! { core.service.__host_sleep_ns(millis * 1000000) }
+service_sleep_ms: fn(millis: Int) Never! { service_time_rt.sleep_ns(millis * 1000000) }
 
 // symlink_metadata kind: 0 file, 1 directory, 2 symlink, otherwise other.
-service_path_kind: fn(path: String) -> Int IOError! { core.service.__host_path_kind(path) }
+service_path_kind: fn(path: String) -> Int IOError! { service_files_rt.path_kind(path) }
 
 // The stat row of `path` itself (links not followed); see core.files.stat.
-service_stat: fn(path: String) -> [Int] IOError! { core.service.__host_stat(-1, path, false) }
+service_stat: fn(path: String) -> [Int] IOError! { service_files_rt.stat_at(-1, path, false) }
 
-service_read_bytes: fn(path: String) -> [U8] IOError! { core.service.__host_read_bytes(path) }
+service_read_bytes: fn(path: String) -> [U8] IOError! { service_files_rt.read_bytes_os(path) }
 
-service_remove: fn(path: String) IOError! { core.service.__host_remove(path) }
+service_remove: fn(path: String) IOError! { service_files_rt.remove_raw(path) }
 
-service_create_dirs: fn(path: String) IOError! { core.service.__host_create_dirs(path) }
+service_create_dirs: fn(path: String) IOError! { service_files_rt.create_dirs_os(path) }
 
 // Create `path` exclusively with mode 0600 and write `bytes` durably. An
 // existing name is AlreadyExists, the one kind lock acquisition retries.
 service_create_private: fn(path: String, bytes: [U8]) IOError! {
-    handle: core.service.__host_reserve(path, path)
-    if core.service.__host_set_mode(path, 384) == {
+    handle: service_files_rt.atomic_reserve(path, path)
+    if service_files_rt.set_mode_raw(path, 384) == {
         .Err(error) -> {
-            core.service.__host_close(handle)
-            core.service.__host_remove(path).drop("the reserved name is removed best-effort")
+            service_files_rt.atomic_close(handle)
+            service_files_rt.remove_raw(path).drop("the reserved name is removed best-effort")
             return Err(error)
         }
         .Ok(_) -> {}
     }
-    result: core.service.__host_finish(handle, bytes, path, path)
-    core.service.__host_close(handle)
+    result: service_files_rt.atomic_finish(handle, bytes, path, path)
+    service_files_rt.atomic_close(handle)
     result
 }
 
@@ -1127,20 +1129,20 @@ service_create_private: fn(path: String, bytes: [U8]) IOError! {
 service_replace_private: fn(path: String, temporary: String, bytes: [U8]) IOError! {
     if service_create_private(temporary, bytes) == {
         .Err(error) -> {
-            core.service.__host_remove(temporary).drop("the temporary is removed best-effort")
+            service_files_rt.remove_raw(temporary).drop("the temporary is removed best-effort")
             return Err(error)
         }
         .Ok(_) -> {}
     }
-    if core.service.__host_rename(temporary, path) == {
+    if service_files_rt.atomic_rename(temporary, path) == {
         .Err(error) -> {
-            core.service.__host_remove(temporary).drop("the temporary is removed best-effort")
+            service_files_rt.remove_raw(temporary).drop("the temporary is removed best-effort")
             return Err(error)
         }
         .Ok(_) -> {}
     }
     parent: state_parent_lex(path, false) ?? "."
-    core.service.__host_sync_parent(if parent == "" -> "." else -> parent, path)
+    service_files_rt.atomic_sync_parent(if parent == "" -> "." else -> parent, path)
 }
 
 // Append `bytes` to `path`, creating it private (0600) first, then fsync.
@@ -1150,17 +1152,52 @@ service_append_private: fn(path: String, bytes: [U8]) IOError! {
         .Err(error) -> return Err(error)
         .Ok(_) -> {}
     }
-    core.service.__host_append_bytes(path, bytes)
-    core.service.__host_fsync(path)
+    service_files_rt.append_bytes_os(path, bytes)
+    service_files_rt.fsync_raw(path)
 }
 
-service_pid: fn() -> Int Never! { core.service.__host_pid() }
+service_pid: fn() -> Int Never! { service_files_rt.atomic_pid() }
 
 service_current_dir: fn() -> String? Never! {
-    if core.service.__host_current_dir() == {
+    if service_sys_rt.service_current_dir() == {
         .Ok(value) -> Val(value)
         .Err(_) -> None
     }
+}
+
+#Test("service host leaves answer the values the host holds") {
+    now_ms: service_time.unix_ms(service_time.now())
+    stamp: service_now()
+    assert(stamp >= now_ms - 5000 && stamp <= now_ms + 5000)
+    service_sleep_ms(30)
+    assert(service_now() >= stamp + 30)
+    assert_eq(service_time_rt.workflow_sleep_wait(1000000), 0)
+    authority: service_issue_authority() ?? panic("authority: {err}")
+    assert_eq(authority.len(), 67)
+    assert(authority.starts_with("sa-"))
+    assert(authority != (service_issue_authority() ?? panic("authority: {err}")))
+    assert_eq(service_pid(), service_sys.pid())
+    assert_eq(service_current_dir() ?? "", service_sys.current_dir() ?? panic("current_dir: {err}"))
+    dir: service_files.mkdtemp("jet-service-leaves") ?? panic("no temp dir: {err}")
+    nested: "{dir}/a/b"
+    service_create_dirs(nested) ?? panic("create_dirs: {err}")
+    assert_eq(service_path_kind(nested) ?? -1, 1)
+    file: "{nested}/state"
+    service_create_private(file, "one".bytes()) ?? panic("create_private: {err}")
+    assert_eq(service_path_kind(file) ?? -1, 0)
+    row: service_stat(file) ?? panic("stat: {err}")
+    assert_eq(row[0], 0)
+    assert_eq(row[1], 3)
+    assert_eq(row[2] % 512, 384)
+    assert(service_create_private(file, "two".bytes()) == .Err(.AlreadyExists(_)))
+    service_append_private(file, " two".bytes()) ?? panic("append_private: {err}")
+    assert_eq(String.from_bytes(service_read_bytes(file) ?? panic("read: {err}")) ?? "", "one two")
+    service_replace_private(file, "{nested}/state.tmp", "three".bytes()) ?? panic("replace_private: {err}")
+    assert_eq(String.from_bytes(service_read_bytes(file) ?? panic("read: {err}")) ?? "", "three")
+    assert(service_path_kind("{nested}/state.tmp") == .Err(.NotFound(_)))
+    service_remove(file) ?? panic("remove: {err}")
+    assert(service_read_bytes(file) == .Err(.NotFound(_)))
+    service_files.remove_all(dir) ?? ()
 }
 
 // Absolute, lexically normalized store path: `.` dropped, `..` pops.
@@ -2362,11 +2399,11 @@ state_append: fn(authority: TreeStateAuthority, record: String) ServiceError! {
     if row[1] > 134217728 - frame.len() {
         return Err(ServiceError.Policy("service state store exceeds its byte limit"))
     }
-    if core.service.__host_append_bytes(authority.store, frame) == {
+    if service_files_rt.append_bytes_os(authority.store, frame) == {
         .Err(error) -> return Err(state_error("cannot append state event: {error}"))
         .Ok(_) -> {}
     }
-    if core.service.__host_fsync(authority.store) == {
+    if service_files_rt.fsync_raw(authority.store) == {
         .Err(error) -> { Err(state_error("cannot sync state event: {error}")) }
         .Ok(_) -> Ok()
     }
@@ -3340,7 +3377,7 @@ priv workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceEr
     workflow_append_handle(workflow, "workflow-wait-sleep:{workflow.run_id}:{nanos}")
     // The wait ends in a code instead of unwinding, so a canceled or
     // deadline-blown sleep is recorded before the workflow fails.
-    if core.service.__host_sleep_wait_ns(nanos) == {
+    if service_time_rt.workflow_sleep_wait(nanos) == {
         1 -> {
             workflow_append_handle(workflow, "workflow-wait-sleep-canceled:{workflow.run_id}")
             Err(ServiceError.Policy("workflow sleep was canceled"))
@@ -4171,11 +4208,11 @@ authority_append: fn(runtime: ServiceRuntime, op: String, fields: [String]) Serv
             .Ok(_) -> return Ok()
         }
     }
-    if core.service.__host_append_bytes(runtime.store, record) == {
+    if service_files_rt.append_bytes_os(runtime.store, record) == {
         .Err(error) -> return Err(authority_error("could not append service receipt: {error}"))
         .Ok(_) -> {}
     }
-    if core.service.__host_fsync(runtime.store) == {
+    if service_files_rt.fsync_raw(runtime.store) == {
         .Err(error) -> { Err(authority_error("could not commit service receipt: {error}")) }
         .Ok(_) -> Ok()
     }
