@@ -311,7 +311,7 @@ jet_cli_semindex_payload: fn(index: SemIndex) -> String {
     effects: loop fact in index.effects -> jet_cli_sem_json_effect(fact)
     arithmetic: loop fact in index.arithmetic -> jet_cli_sem_json_arithmetic(fact)
     members: loop member in index.members -> jet_cli_sem_json_member(member)
-    semindex_display_text(index, "{{\"schema_version\":{SEMINDEX_SCHEMA_VERSION},\"definitions\":[{definitions.join(",")}],\"definition_facts\":[{facts.join(",")}],\"derivations\":[{derivations.join(",")}],\"instances\":[{instances.join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{graphs.join(",")}],\"package_facts\":null,\"workspace_overlays\":null,\"effect_projection\":{jet_cli_sem_json_effect_projection(index.effect_projection)},\"references\":[{references.join(",")}],\"calls\":[{calls.join(",")}],\"effects\":[{effects.join(",")}],\"arithmetic\":[{arithmetic.join(",")}],\"members\":[{members.join(",")}]}}")
+    semindex_display_text(index, "{{\"schema_version\":{SEMINDEX_SCHEMA_VERSION},\"definitions\":[{definitions.join(",")}],\"definition_facts\":[{facts.join(",")}],\"derivations\":[{derivations.join(",")}],\"instances\":[{instances.join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{graphs.join(",")}],\"package_facts\":{jet_cli_sem_json_package_facts(index.package_facts)},\"workspace_overlays\":{jet_cli_sem_json_workspace_overlays(index.workspace_overlays)},\"effect_projection\":{jet_cli_sem_json_effect_projection(index.effect_projection)},\"references\":[{references.join(",")}],\"calls\":[{calls.join(",")}],\"effects\":[{effects.join(",")}],\"arithmetic\":[{arithmetic.join(",")}],\"members\":[{members.join(",")}]}}")
 }
 
 // `SemIndex.to_status_envelope().json()`: the `inspect.semindex` status

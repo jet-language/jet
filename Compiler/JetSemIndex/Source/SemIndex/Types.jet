@@ -19,6 +19,7 @@ use jet_foundation.[
     Field,
     Param,
 ]
+use jet_pkg_model.[OverlayPolicy, PackageFacts]
 
 // `SCHEMA_VERSION`: bump when the exported fact shape changes incompatibly,
 // and record the change in Docs/Spec/Reference/semantic-index.md.
@@ -329,6 +330,11 @@ SemIndex: struct {
     outputs: [SemOutput],
     state_graphs: [SemStateGraph],
     effect_projection: SemEffectProjection,
+    // The package facts of the entry the index was built from, and the
+    // overlay policy of its workspace (semindex_attach_package_facts); None
+    // for a standalone file, or before they are attached.
+    package_facts: PackageFacts?{None},
+    workspace_overlays: OverlayPolicy?{None},
     references: [SemRef],
     calls: [SemCall],
     effects: [SemEffect],

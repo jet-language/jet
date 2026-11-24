@@ -45,6 +45,12 @@ order:
 | `arithmetic` | Arithmetic operations with their overflow policy and spans. |
 | `members` | Fields, variants, inline, external inherent and trait methods and trait requirements, in stable owner order. |
 
+`jet inspect semindex` fills `package_facts` and `workspace_overlays` from the
+package model for the entry it indexed. It never writes a partial index: a
+package the model cannot compose stops the command with the model's package
+diagnostic, and a workspace lock that no longer matches its sources stops it
+with Jet.StaleLockFile.
+
 ## Compiler facade projection
 
 The typed `CompilerSemanticIndex` that the compiler facade's `check` returns

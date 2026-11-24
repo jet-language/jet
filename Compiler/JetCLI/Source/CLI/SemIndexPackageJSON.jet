@@ -1,0 +1,158 @@
+// The `package_facts` and `workspace_overlays` members of the semantic
+// index's JSON: the package model's facts as the index carries them, never
+// re-resolved. Fixed keys keep their order, map keys sort, list rows keep
+// theirs, an absent value is `null`, and a dependency's source is the
+// model's redacted display.
+use jet_pkg_model.[
+    ConfigFacts,
+    DepSource,
+    EnvironmentFact,
+    MemberRef,
+    OutputFact,
+    OutputPayload,
+    OverlayPolicy,
+    PackageAuthority,
+    PackageFacts,
+    ServiceFact,
+    TrustDecision,
+    pkg_dep_display_redacted,
+]
+
+// The keys of a map, sorted.
+jet_cli_sem_pkg_keys: fn<V>(values: [String:V]) -> [String] Never! {
+    names := values.keys().to_list()
+    names.sort()
+    names
+}
+
+jet_cli_sem_pkg_optional_strings: fn(values: [String]?) -> String Never! {
+    strings: values ?? return "null"
+    jet_cli_sem_json_strings(strings)
+}
+
+jet_cli_sem_pkg_string_map: fn(values: [String:String]) -> String Never! {
+    parts: loop name in jet_cli_sem_pkg_keys(values) -> "{jet_cli_json_string(name)}:{jet_cli_json_string(values[name])}"
+    "{{{parts.join(",")}}}"
+}
+
+jet_cli_sem_pkg_trust: fn(decision: TrustDecision) -> String Never! {
+    name: if decision == {
+        .Allow -> "allow"
+        .Prompt -> "prompt"
+        .Deny -> "deny"
+    }
+    jet_cli_json_string(name)
+}
+
+jet_cli_sem_pkg_optional_trust: fn(decision: TrustDecision?) -> String Never! {
+    value: decision ?? return "null"
+    jet_cli_sem_pkg_trust(value)
+}
+
+jet_cli_sem_pkg_authority: fn(authority: PackageAuthority) -> String Never! {
+    grants: loop grant in authority.grants -> "{jet_cli_json_string(grant.package)}:{jet_cli_sem_json_strings(grant.rights)}"
+    trust := "null"
+    if authority.trust == .Val(policy) {
+        services: loop service in policy.services -> "{jet_cli_json_string(service.service)}:{jet_cli_sem_pkg_trust(service.decision)}"
+        require := "null"
+        if policy.require == .Val(floor) -> require = jet_cli_json_string(floor.label())
+        trust = "{{\"default\":{jet_cli_sem_pkg_optional_trust(policy.default)},\"ci\":{jet_cli_sem_pkg_optional_trust(policy.ci_prompt)},\"services\":{{{services.join(",")}}},\"require\":{require}}}"
+    }
+    providers: loop provider in authority.providers -> "{jet_cli_json_string(provider.provider)}:{{\"registry\":{jet_cli_json_string(provider.registry)},\"allow\":{jet_cli_sem_json_strings(provider.allow)},\"deny\":{jet_cli_sem_json_strings(provider.deny)}}}"
+    "{{\"allow\":{jet_cli_sem_pkg_optional_strings(authority.allow)},\"deny\":{jet_cli_sem_pkg_optional_strings(authority.deny)},\"grants\":{{{grants.join(",")}}},\"trust\":{trust},\"providers\":{{{providers.join(",")}}}}}"
+}
+
+jet_cli_sem_pkg_services: fn(values: [String:ServiceFact]) -> String Never! {
+    parts := [String]{}
+    loop name in jet_cli_sem_pkg_keys(values) {
+        service: values[name]
+        ports: loop port in service.ports -> "{port}"
+        parts.push("{jet_cli_json_string(name)}:{{\"enable\":{jet_cli_sem_json_bool(service.enable)},\"ports\":[{ports.join(",")}],\"ready\":{jet_cli_sem_json_optional(service.ready)},\"fields\":{jet_cli_sem_pkg_string_map(service.fields)}}}")
+    }
+    "{{{parts.join(",")}}}"
+}
+
+jet_cli_sem_pkg_environments: fn(values: [String:EnvironmentFact]) -> String Never! {
+    parts := [String]{}
+    loop name in jet_cli_sem_pkg_keys(values) {
+        environment: values[name]
+        parts.push("{jet_cli_json_string(name)}:{{\"name\":{jet_cli_json_string(environment.name)},\"tools\":{jet_cli_sem_json_strings(environment.tools)},\"services\":{jet_cli_sem_pkg_services(environment.services)},\"secrets\":{jet_cli_sem_pkg_string_map(environment.secrets)},\"fields\":{jet_cli_sem_pkg_string_map(environment.fields)}}}")
+    }
+    "{{{parts.join(",")}}}"
+}
+
+// An output's checked payload. A number keeps the spelling the model checked.
+jet_cli_sem_pkg_payload: fn(value: OutputPayload) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> jet_cli_sem_json_bool(flag)
+        .Number(text) -> text
+        .String(text) -> jet_cli_json_string(text)
+        .Array(values) -> {
+            parts: loop child in values -> jet_cli_sem_pkg_payload(child)
+            "[{parts.join(",")}]"
+        }
+        .Object(values) -> {
+            parts: loop name in jet_cli_sem_pkg_keys(values) -> "{jet_cli_json_string(name)}:{jet_cli_sem_pkg_payload(values[name])}"
+            "{{{parts.join(",")}}}"
+        }
+    }
+}
+
+// The outputs, by name. Each carries the provenance of `outputs.<name>`, or
+// an empty list.
+jet_cli_sem_pkg_outputs: fn(values: [String:OutputFact], provenance: [String:[String]]) -> String Never! {
+    parts := [String]{}
+    loop name in jet_cli_sem_pkg_keys(values) {
+        output: values[name]
+        origins: provenance.get("outputs.{name}") ?? [String]{}
+        parts.push("{{\"name\":{jet_cli_json_string(output.name)},\"kind\":{jet_cli_json_string(output.kind.debug_name().to_lower())},\"entry\":{jet_cli_sem_json_optional(output.entry)},\"fields\":{jet_cli_sem_pkg_string_map(output.fields)},\"payload\":{jet_cli_sem_pkg_payload(output.payload)},\"provenance\":{jet_cli_sem_json_strings(origins)}}}")
+    }
+    "[{parts.join(",")}]"
+}
+
+jet_cli_sem_pkg_deps: fn(values: [String:DepSource]) -> String Never! {
+    parts: loop name in jet_cli_sem_pkg_keys(values) -> "{{\"name\":{jet_cli_json_string(name)},\"source\":{jet_cli_json_string(pkg_dep_display_redacted(values[name]))}}}"
+    "[{parts.join(",")}]"
+}
+
+jet_cli_sem_pkg_config: fn(value: ConfigFacts) -> String Never! {
+    "{{\"name\":{jet_cli_sem_json_optional(value.name)},\"version\":{jet_cli_sem_json_optional(value.version)},\"source\":{jet_cli_sem_json_optional(value.source)},\"deps\":{jet_cli_sem_pkg_deps(value.deps)},\"services\":{jet_cli_sem_pkg_services(value.services)},\"outputs\":{jet_cli_sem_pkg_outputs(value.outputs, [String:[String]]{})},\"environments\":{jet_cli_sem_pkg_environments(value.environments)},\"defaults\":{jet_cli_sem_pkg_string_map(value.defaults)},\"origin\":{jet_cli_json_string(value.origin)}}}"
+}
+
+jet_cli_sem_pkg_member: fn(member: MemberRef) -> String Never! {
+    if member == {
+        .Path(path) -> "{{\"kind\":\"path\",\"path\":{jet_cli_json_string(path)}}}"
+        .Find(path) -> "{{\"kind\":\"find\",\"path\":{jet_cli_json_string(path)}}}"
+    }
+}
+
+// `package_facts`: the composed facts of the entry's package and the
+// model's semantic digest of them.
+jet_cli_sem_json_package_facts: fn(facts: PackageFacts?) -> String Never! {
+    package: facts ?? return "null"
+    configs: loop name in jet_cli_sem_pkg_keys(package.inline_configs) -> "{jet_cli_json_string(name)}:{jet_cli_sem_pkg_config(package.inline_configs[name])}"
+    members: loop member in package.members -> jet_cli_sem_pkg_member(member)
+    provenance: loop name in jet_cli_sem_pkg_keys(package.provenance) -> "{jet_cli_json_string(name)}:{jet_cli_sem_json_strings(package.provenance[name])}"
+    "{{\"name\":{jet_cli_json_string(package.name)},\"version\":{jet_cli_sem_json_optional(package.version)},\"jet\":{jet_cli_sem_json_optional(package.jet)},\"source\":{jet_cli_sem_json_optional(package.source)},\"deps\":{jet_cli_sem_pkg_deps(package.deps)},\"services\":{jet_cli_sem_pkg_services(package.services)},\"outputs\":{jet_cli_sem_pkg_outputs(package.outputs, package.provenance)},\"environments\":{jet_cli_sem_pkg_environments(package.environments)},\"defaults\":{jet_cli_sem_pkg_string_map(package.defaults)},\"configs\":{jet_cli_sem_json_strings(package.configs)},\"resolved_config_paths\":{jet_cli_sem_json_strings(package.resolved_config_paths)},\"inline_configs\":{{{configs.join(",")}}},\"members\":[{members.join(",")}],\"provenance\":{{{provenance.join(",")}}},\"authority\":{jet_cli_sem_pkg_authority(package.authority)},\"origin\":{jet_cli_json_string(package.origin)},\"semantic_digest\":{jet_cli_json_string(package.semantic_digest())}}}"
+}
+
+// `workspace_overlays`: the overlay policy the workspace lock records, as
+// recorded.
+jet_cli_sem_json_workspace_overlays: fn(policy: OverlayPolicy?) -> String Never! {
+    overlay_policy: policy ?? return "null"
+    grants: loop grant in overlay_policy.build_grants -> "{{\"package\":{jet_cli_json_string(grant.subject)},\"effects\":{jet_cli_sem_json_strings(grant.effects)}}}"
+    overlays := [String]{}
+    loop overlay in overlay_policy.overlays {
+        provider := "null"
+        if overlay.provider == .Val(value) -> provider = "{{\"provider\":{jet_cli_json_string(value.provider)},\"channel\":{jet_cli_sem_json_optional(value.channel)}}}"
+        packages := [String]{}
+        loop package in overlay.packages {
+            env: loop entry in package.env -> "[{jet_cli_json_string(entry.key)},{jet_cli_json_string(entry.value)}]"
+            priorities: loop field in jet_cli_sem_pkg_keys(package.field_priorities) -> "{jet_cli_json_string(field)}:{package.field_priorities[field]}"
+            packages.push("{{\"package\":{jet_cli_json_string(package.package)},\"source\":{jet_cli_sem_json_optional(package.source)},\"version\":{jet_cli_sem_json_optional(package.version)},\"flags\":{jet_cli_sem_json_strings(package.flags)},\"priority\":{package.priority},\"field_priorities\":{{{priorities.join(",")}}},\"env\":[{env.join(",")}],\"patches\":{jet_cli_sem_json_strings(package.patches)},\"allow_unfree\":{jet_cli_sem_json_bool(package.allow_unfree)}}}")
+        }
+        overlays.push("{{\"name\":{jet_cli_json_string(overlay.name)},\"provider\":{provider},\"packages\":[{packages.join(",")}]}}")
+    }
+    "{{\"allow_unfree\":{jet_cli_sem_json_strings(overlay_policy.allow_unfree)},\"build_deny\":{jet_cli_sem_json_strings(overlay_policy.build_deny)},\"build_grants\":[{grants.join(",")}],\"overlays\":[{overlays.join(",")}]}}"
+}

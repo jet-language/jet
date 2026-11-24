@@ -1,0 +1,19 @@
+# The semantic index carries the package facts of the entry it was built
+# from, and null for a standalone file. A workspace lock that no longer
+# matches its sources stops the index with Jet.StaleLockFile instead of a
+# partial index.
+fixture: PackageFactsAndStaleLock.fixture
+step: jet inspect semindex {work}/shop/app/run.jet --json
+exit: 0
+json: stdout doc $.semindex.package_facts.name = "app"
+json: stdout doc $.semindex.package_facts.version = "0.3.0"
+json: stdout doc $.semindex.workspace_overlays = null
+step: jet inspect semindex {work}/loose/run.jet --json
+exit: 0
+json: stdout doc $.semindex.package_facts = null
+json: stdout doc $.semindex.workspace_overlays = null
+write: shop/.jet/lock = "[[workspace_member]]"
+step: jet inspect semindex {work}/shop/app/run.jet
+exit: 1
+stderr: ~ "Error: Jet.StaleLockFile: " # the stale workspace lock's row heads the report
+stderr: ~ "is malformed or stale" # the lock diagnostic, not a check error

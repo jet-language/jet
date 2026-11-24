@@ -237,7 +237,7 @@ use {
     ]
     jet_plugin.[jet_plugin_link]
     jet_sema.[SEMA_CLI_ENTRY_NAME, sema_no_run_diagnostic, sema_user_template_ct_value]
-    jet_semindex.[SemIndex]
+    jet_semindex.[SemIndex, semindex_attach_package_facts]
     jet_pkg_model.[
         JET_VERSION,
         ClaimsGrade,
@@ -3943,7 +3943,17 @@ jet_cli_semindex_result: fn(file: String, color: Bool, json: Bool, result: JetDr
         return JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    index: jet_cli_checked_semindex(result)
+    index := jet_cli_checked_semindex(result)
+    // The entry's package facts and its workspace's overlay policy; a package
+    // the model cannot compose or a stale workspace lock fails the command as
+    // a check error does.
+    if semindex_attach_package_facts(index, cli_files.realpath(file) ?? file) == .Val(failure) {
+        source: cli_files.read(file) ?? ""
+        if json {
+            return JetDriverVerbOutput{stdout: jet_cli_render_all_json(jet_cli_report_base(file), file, source, [Diagnostic]{failure}), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+        return JetDriverVerbOutput{stdout: "", stderr: "{diagnostic_render_all(file, source, [Diagnostic]{failure}, color)}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
     if json {
         return JetDriverVerbOutput{stdout: "{jet_cli_semindex_status_json(index)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
