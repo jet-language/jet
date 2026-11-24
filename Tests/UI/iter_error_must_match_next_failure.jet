@@ -1,0 +1,30 @@
+// An Iterator that writes its `Error` writes the failure its `next` declares.
+#Error
+ReadError: enum {
+    Torn,
+}
+
+#Error
+AppError: enum {
+    Read,
+}
+
+Reads: struct {
+    left: Int,
+
+    impl Iterator {
+        Item: Int,
+        Error: AppError,
+
+        next: fn(&self) -> Int? ReadError! {
+            if self.left == 0 -> return Err(ReadError.Torn)
+            self.left -= 1
+            Val(self.left)
+        }
+    }
+}
+
+run: fn() {
+    reads := Reads{left: 1}
+    print(reads.left)
+}

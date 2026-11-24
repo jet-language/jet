@@ -949,6 +949,9 @@ a caller's source names it as `&Iter<T>`.
 first item. Adapter callbacks run only when an item is pulled through them, and
 the item that ends a `take_while` is consumed and not yielded. User types that
 implement `Iterator` expose the same `next` with the same exclusive receiver.
+Their `next` answers `Item? Error!`: `Error` is the failure `next` declares,
+`Never` when it declares none, and a loop over such a type passes that failure
+up from its header as an implicit fallible call does.
 
 The zip family is available as a free call or a method. `zip` requires equal
 lengths, `zip_short` stops at the shortest input, and `zip_pad` reaches the

@@ -296,10 +296,14 @@ Rollback: trait {
     restore: fn(&self, snap: Snapshot) Never!,
 }
 
-// A cursor: `loop x in cursor`.
+// A cursor: `loop x in cursor`. `next` answers the next item, `None` once
+// the cursor is spent, or fails with `Error`. An impl that leaves `Error`
+// unset has the failure its `next` declares, `Never` when it declares none.
+// A loop over the cursor passes a failure up as a call of `next` would.
 Iterator: trait {
     Item: type,
-    next: fn(&self) -> Item? Never!,
+    Error: type,
+    next: fn(&self) -> Item? Error!,
 }
 
 // Zero-copy `loop x in value`.

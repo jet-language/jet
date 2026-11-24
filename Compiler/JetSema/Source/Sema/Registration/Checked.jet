@@ -3436,7 +3436,11 @@ sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_ro
                             break
                         }
                     }
-                    if !bound -> unset.push(declared.name)
+                    // An owned trait infers it from a method's failure
+                    // (`Iterator.Error`, sema_owned_bind_failure below).
+                    if !bound && !sema_owned_failure_infers(trait_name, declared.name) {
+                        unset.push(declared.name)
+                    }
                 }
             }
         }
@@ -3452,6 +3456,9 @@ sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_ro
     associated_types := loop associated in associated_type_impls -> associated.ty.copy()
     associated_names.push("Self")
     associated_types.push(target_type.copy())
+    loop row in rows {
+        sema_owned_bind_failure(trait_name, methods[row].declaration, associated_names, associated_types)
+    }
     loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
         found := -1
         loop row in rows {

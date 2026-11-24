@@ -1,0 +1,221 @@
+// An Iterator's `next` may fail. Its `Error` is the failure `next` declares,
+// inferred when the impl leaves it unset. A loop over an Iterable calls `next`
+// in its header, so a failure there passes up as an implicit fallible call's
+// does: as the function's own failure, through a `From` conversion, or into a
+// failure the function infers. The loop closes the iterator it owns and calls
+// `next` no more. Called directly, `next` answers each outcome: a failure it
+// recovers from, a terminal failure and then None, and None for good.
+#Error
+ReadError: enum {
+    Torn,
+    Gone,
+}
+
+#Error
+AppError: enum {
+    ReadTorn,
+    ReadGone,
+}
+
+impl AppError.From(ReadError) {
+    from: fn(error: ReadError) -> AppError {
+        if error == {
+            .Torn -> AppError.ReadTorn
+            .Gone -> AppError.ReadGone
+        }
+    }
+}
+
+read_error_name: fn(error: ReadError) -> String {
+    if error == {
+        .Torn -> "torn"
+        .Gone -> "gone"
+    }
+}
+
+app_error_name: fn(error: AppError) -> String {
+    if error == {
+        .ReadTorn -> "read torn"
+        .ReadGone -> "read gone"
+    }
+}
+
+// Reads 1 up to `end`. It fails once before reading `torn` and then reads
+// on, and fails for good at `gone`, after which it answers None.
+Reads: struct {
+    priv at: Int,
+    priv end: Int,
+    priv torn: Int,
+    priv gone: Int,
+    priv tears: Int,
+    priv calls: Int,
+    priv name: String,
+
+    impl Iterator {
+        Item: Int,
+
+        next: fn(&self) -> Int? ReadError! {
+            self.calls += 1
+            if self.at >= self.end -> return None
+            if self.at + 1 == self.torn && self.tears == 0 {
+                self.tears += 1
+                return Err(ReadError.Torn)
+            }
+            self.at += 1
+            if self.at == self.gone {
+                self.at = self.end
+                return Err(ReadError.Gone)
+            }
+            Val(self.at)
+        }
+    }
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name} after {self.calls} calls") }
+    }
+}
+
+Source: struct {
+    priv end: Int,
+    priv torn: Int,
+    priv gone: Int,
+    priv name: String,
+
+    impl Iterable {
+        Iter: Reads,
+
+        iter: fn(&&self) -> Reads {
+            Reads{at: 0, end: self.end, torn: self.torn, gone: self.gone, tears: 0, calls: 0, name: self.name}
+        }
+    }
+}
+
+source: fn(end: Int, torn: Int, gone: Int, name: String) -> Source {
+    Source{end: end, torn: torn, gone: gone, name: name}
+}
+
+// Writes its `Error`, the failure its `next` declares.
+Strict: struct {
+    priv left: Int,
+
+    impl Iterator {
+        Item: Int,
+        Error: ReadError,
+
+        next: fn(&self) -> Int? ReadError! {
+            if self.left == 0 -> return Err(ReadError.Gone)
+            self.left -= 1
+            Val(self.left)
+        }
+    }
+}
+
+StrictSource: struct {
+    priv from: Int,
+
+    impl Iterable {
+        Iter: Strict,
+
+        iter: fn(&&self) -> Strict { Strict{left: self.from} }
+    }
+}
+
+strict: fn(from: Int) -> StrictSource { StrictSource{from: from} }
+
+// Writes `Error: Never`, as its `next` can't fail.
+Plain: struct {
+    priv left: Int,
+
+    impl Iterator {
+        Item: Int,
+        Error: Never,
+
+        next: fn(&self) -> Int? {
+            if self.left == 0 -> return None
+            self.left -= 1
+            Val(self.left)
+        }
+    }
+}
+
+PlainSource: struct {
+    priv from: Int,
+
+    impl Iterable {
+        Iter: Plain,
+
+        iter: fn(&&self) -> Plain { Plain{left: self.from} }
+    }
+}
+
+plain: fn(from: Int) -> PlainSource { PlainSource{from: from} }
+
+sum: fn(end: Int, torn: Int, gone: Int, name: String) -> Int ReadError! {
+    total := 0
+    loop item in source(end, torn, gone, name) {
+        print("item {item}")
+        total += item
+    }
+    Ok(total)
+}
+
+sum_app: fn(end: Int, torn: Int) -> Int AppError! {
+    total := 0
+    loop item in source(end, torn, 0, "app") -> total += item
+    Ok(total)
+}
+
+sum_inferred: fn(end: Int, gone: Int) -> Int {
+    total := 0
+    loop item in source(end, 0, gone, "inferred") -> total += item
+    total
+}
+
+strict_total: fn(from: Int) -> Int ReadError! {
+    total := 0
+    loop item in strict(from) -> total += item
+    Ok(total)
+}
+
+walk_by_hand: fn() {
+    cursor := Reads{at: 0, end: 5, torn: 2, gone: 3, tears: 0, calls: 0, name: "hand"}
+    loop _ in 0..<6 {
+        print(
+            if cursor.next() == {
+                .Val(item) -> "item {item}"
+                .None -> "none"
+                .Err(error) -> "failed {read_error_name(error)}"
+            },
+        )
+    }
+}
+
+run: fn() {
+    if sum(4, 0, 0, "whole") == {
+        .Ok(total) -> { print("whole total {total}") }
+        .Err(error) -> print("whole failed {read_error_name(error)}")
+    }
+    if sum(5, 2, 0, "torn") == {
+        .Ok(total) -> { print("torn total {total}") }
+        .Err(error) -> print("torn failed {read_error_name(error)}")
+    }
+    if sum(5, 0, 3, "gone") == {
+        .Ok(total) -> { print("gone total {total}") }
+        .Err(error) -> print("gone failed {read_error_name(error)}")
+    }
+    if sum_app(4, 2) == {
+        .Ok(total) -> { print("app total {total}") }
+        .Err(error) -> print("app {app_error_name(error)}")
+    }
+    if sum_inferred(3, 2) == {
+        .Ok(total) -> { print("inferred total {total}") }
+        .Err(_) -> print("inferred failed")
+    }
+    if strict_total(2) == {
+        .Ok(total) -> { print("strict total {total}") }
+        .Err(error) -> print("strict failed {read_error_name(error)}")
+    }
+    loop item in plain(3) -> print("plain {item}")
+    walk_by_hand()
+    print("done")
+}

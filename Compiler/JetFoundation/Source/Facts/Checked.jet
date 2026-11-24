@@ -457,7 +457,9 @@ TForInMethod: enum {
     LinesProcessStream,
     ChannelReceiver,
     EncodingReader(reader_type: String),
-    Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String, item_type: Type),
+    // `failure` routes a failure of `next` up from the loop header, as an
+    // implicit fallible call routes it; `Never` when `next` can't fail.
+    Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String, item_type: Type, failure: TTryConvert),
 }
 
 TPreludeArg: enum {

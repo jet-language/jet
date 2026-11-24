@@ -3047,19 +3047,33 @@ sema_type_associated: fn(graph: SemaRegistrationGraph, actual: Type, trait_name:
 
 sema_type_associated_nominal: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, trait_symbol: Symbol, associated_name: String) -> Type? {
     resolved_type := Type?{None}
+    // An associated type an owned trait infers from a method's failure
+    // (`Iterator.Error`) is that method's failure when the impl leaves it
+    // unset (sema_owned_failure_binds).
     loop module_index in 0..<graph.modules.len() {
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
             trait_matches: sema_type_graph_impl_matches_trait(graph, graph.modules[module_index].impls[impl_index], trait_symbol) ?? next
             if !trait_matches -> next
             target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? next
             if !target_matches -> next
+            written := false
             associated_types: graph.modules[module_index].impls[impl_index].associated_types.len()
             loop associated_index in 0..<associated_types {
                 if graph.modules[module_index].impls[impl_index].associated_types[associated_index].symbol.name != associated_name {
                     next
                 }
                 if resolved_type != None -> return None
+                written = true
                 resolved_type = Val(sema_type_resolve_declared(graph, graph.modules[module_index].impls[impl_index].associated_types[associated_index].ty, graph.modules[module_index].impls[impl_index].source_module_identity))
+            }
+            if written -> next
+            loop method in graph.modules[module_index].impls[impl_index].methods {
+                if !sema_owned_failure_binds(trait_symbol.name, associated_name, method.declaration.name) {
+                    next
+                }
+                if resolved_type != None -> return None
+                resolved_type = Val(sema_type_resolve_failure(graph, method.declaration.return_type, graph.modules[module_index].impls[impl_index].source_module_identity))
+                break
             }
         }
     }
@@ -3070,12 +3084,34 @@ sema_type_associated_nominal: fn(graph: SemaRegistrationGraph, nominal: SemaRegi
             if graph.modules[trait_row.module_index].nominals[trait_row.row].symbol.id != trait_symbol.id {
                 next
             }
+            written := false
             loop associated in block.assoc_type_impls {
                 if associated.name != associated_name -> next
                 if resolved_type != None -> return None
+                written = true
                 resolved_type = Val(sema_type_resolve_declared(graph, associated.ty, nominal.symbol.module_identity))
+            }
+            if written -> next
+            loop method in block.methods {
+                if !sema_owned_failure_binds(trait_symbol.name, associated_name, method.name) {
+                    next
+                }
+                if resolved_type != None -> return None
+                resolved_type = Val(sema_type_resolve_failure(graph, method.return_type, nominal.symbol.module_identity))
+                break
             }
         }
     }
     resolved_type
+}
+
+// The failure a method declares in its written return (the error of
+// `T E!`, else `Never`), resolved as an associated type it binds.
+sema_type_resolve_failure: fn(graph: SemaRegistrationGraph, return_type: Type?, caller_module_identity: ModuleID) -> Type Never! {
+    if return_type == .Val(written) {
+        if written == .Result(_, error) {
+            return sema_type_resolve_declared(graph, error, caller_module_identity)
+        }
+    }
+    sema_type_resolve_declared(graph, Type.Named{name: "Never"}, caller_module_identity)
 }
