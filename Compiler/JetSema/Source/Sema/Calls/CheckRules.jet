@@ -233,13 +233,24 @@ sema_call_rules_hear_stand_in: fn(
 // each heard method call's name and its receiver's table, which a call
 // chained on it adds to.
 SemaRuleTables: struct {
-    heard: [String]{[String]{}},
-    assigned: [String]{[String]{}},
+    heard: [SemaRuleBinding]{[SemaRuleBinding]{}},
+    assigned: [SemaRuleBinding]{[SemaRuleBinding]{}},
     assigned_at: [Int]{[Int]{}},
-    joined: [String]{[String]{}},
+    joined: [SemaRuleBinding]{[SemaRuleBinding]{}},
     joined_tables: [String]{[String]{}},
     calls_at: [Int]{[Int]{}},
     call_tables: [String]{[String]{}},
+}
+
+// A binding of SemaRuleTables: the body keyed `owner` and the binding's
+// key (SemaScopeBinding.key) in it.
+SemaRuleBinding: struct {
+    owner: String,
+    binding: String,
+}
+
+sema_rule_binding_is: fn(written: SemaRuleBinding, owner: String, binding: String) -> Bool Never! {
+    written.binding == binding && written.owner == owner
 }
 
 // The table a heard call's `receiver` names, in the body keyed `owner`. A
@@ -256,19 +267,20 @@ sema_rule_table: fn(receiver: Expr, owner: String, scopes: SemaScopeTable, conte
         }
     }
     if receiver == .Ident(name, span, _) && sema_scope_resolve_index(scopes, name) == .Val(binding) {
-        key: "{owner}:{scopes.bindings[binding].key}"
+        key: scopes.bindings[binding].key
         heard := false
         loop written in context.rule_tables.heard {
-            if written == key -> heard = true
+            if sema_rule_binding_is(written, owner, key) -> heard = true
         }
-        if !heard -> context.rule_tables.heard.push("{key}")
-        base := "{key}"
-        loop (index, joined) in context.rule_tables.joined {
-            if joined == key -> base = "{context.rule_tables.joined_tables[index]}"
+        if !heard -> context.rule_tables.heard.push(SemaRuleBinding{owner: owner, binding: key})
+        joined := -1
+        loop (index, written) in context.rule_tables.joined {
+            if sema_rule_binding_is(written, owner, key) -> joined = index
         }
+        base: if joined >= 0 -> "{context.rule_tables.joined_tables[joined]}" else -> "{owner}:{key}"
         generation := 0
         loop (index, assigned) in context.rule_tables.assigned {
-            if assigned == key && context.rule_tables.assigned_at[index] < span.start -> generation += 1
+            if sema_rule_binding_is(assigned, owner, key) && context.rule_tables.assigned_at[index] < span.start -> generation += 1
         }
         return "{base}#{generation}"
     }
@@ -282,7 +294,7 @@ sema_rule_table_join: fn(binding: Binding, scopes: SemaScopeTable, context: ^Sem
     if binding.init == .MethodCall(_, _, method_span, _, _, _, _) && sema_scope_resolve_index(scopes, binding.name) == .Val(index) {
         loop (call, at) in context.rule_tables.calls_at {
             if at == method_span.start {
-                context.rule_tables.joined.push("{sema_scope_function_owner_key(scopes)}:{scopes.bindings[index].key}")
+                context.rule_tables.joined.push(SemaRuleBinding{owner: sema_scope_function_owner_key(scopes), binding: scopes.bindings[index].key})
                 context.rule_tables.joined_tables.push("{context.rule_tables.call_tables[call]}")
                 return
             }
@@ -295,13 +307,14 @@ sema_rule_table_join: fn(binding: Binding, scopes: SemaScopeTable, context: ^Sem
 sema_rule_table_assigned: fn(root: String, at: Span, scopes: SemaScopeTable, context: ^SemaCheckContext) Never! {
     if context.rule_tables.heard.len() == 0 -> return
     index: sema_scope_resolve_index(scopes, root) ?? return
-    key: "{sema_scope_function_owner_key(scopes)}:{scopes.bindings[index].key}"
+    owner: sema_scope_function_owner_key(scopes)
+    key: scopes.bindings[index].key
     loop written in context.rule_tables.heard {
-        if written == key {
+        if sema_rule_binding_is(written, owner, key) {
             loop (row, assigned) in context.rule_tables.assigned {
-                if assigned == key && context.rule_tables.assigned_at[row] == at.start -> return
+                if sema_rule_binding_is(assigned, owner, key) && context.rule_tables.assigned_at[row] == at.start -> return
             }
-            context.rule_tables.assigned.push(key)
+            context.rule_tables.assigned.push(SemaRuleBinding{owner: owner, binding: key})
             context.rule_tables.assigned_at.push(at.start)
             return
         }
