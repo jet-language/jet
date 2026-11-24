@@ -8,11 +8,20 @@ use {
         BuildSessionValue,
         build_plan_graph,
         build_plan_selected_generated,
+        build_session_add_library,
         build_session_call,
         build_session_compiler_node,
+        build_session_contribute,
         build_session_finish,
+        build_session_found,
+        build_session_generate,
         build_session_graph,
         build_session_new,
+        build_session_plan,
+        build_session_probe,
+        build_session_run,
+        build_session_step_input,
+        build_session_step_output,
     ]
 }
 
@@ -21,40 +30,40 @@ build_session_declarations_fixture: fn() -> Bool Never! {
     session := build_session_new(71, "fixture", "fixture-compiler", policy)
     other := build_session_new(72, "other", "fixture-compiler", policy)
     empty: BuildSessionValue.List{values: [BuildSessionValue]{}}
-    probe_reply: build_session_call(session, "probe", [BuildSessionValue]{.Text{value: "schema-compiler"}, .Text{value: "find_program"}, .Text{value: "schema-compiler"}}, None, true, 1, 9)
+    probe_reply: build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "schema-compiler"}, .Text{value: "find_program"}, .Text{value: "schema-compiler"}}, None, true, 1, 9)
     probe: if probe_reply == {
         .Value(value) -> value
         .Failure(_) | .HostRequest(_, _) -> {
             return false
         }
     }
-    found_reply: build_session_call(session, "found", [BuildSessionValue]{probe}, None, false, 1, 9)
+    found_reply: build_session_call(session, build_session_found, [BuildSessionValue]{probe}, None, false, 1, 9)
     found: if found_reply == {
         .Value(value) -> value
         .Failure(_) | .HostRequest(_, _) -> {
             return false
         }
     }
-    action_reply: build_session_call(session, "run", [BuildSessionValue]{.Text{value: "schema"}, found, empty}, None, false, 10, 20)
+    action_reply: build_session_call(session, build_session_run, [BuildSessionValue]{.Text{value: "schema"}, found, empty}, None, false, 10, 20)
     action: if action_reply == {
         .Value(value) -> value
         .Failure(_) | .HostRequest(_, _) -> {
             return false
         }
     }
-    if build_session_call(session, "action.input", [BuildSessionValue]{action, .Text(value: "schema.txt")}, None, false, 10, 20) != .Value(value: .Unit) {
+    if build_session_call(session, build_session_step_input, [BuildSessionValue]{action, .Text(value: "schema.txt")}, None, false, 10, 20) != .Value(value: .Unit) {
         return false
     }
-    if build_session_call(session, "action.output", [BuildSessionValue]{action, .Text{value: "generated/schema.bin"}}, None, false, 10, 20) == {
+    if build_session_call(session, build_session_step_output, [BuildSessionValue]{action, .Text{value: "generated/schema.bin"}}, None, false, 10, 20) == {
         .Failure(_) -> { return false }
         .Value(_) | .HostRequest(_, _) -> {}
     }
-    foreign: build_session_call(other, "add_library", [BuildSessionValue]{.Text{value: "foreign"}, empty, .List{values: [BuildSessionValue]{action}}}, None, false, 21, 30)
+    foreign: build_session_call(other, build_session_add_library, [BuildSessionValue]{.Text{value: "foreign"}, empty, .List{values: [BuildSessionValue]{action}}}, None, false, 21, 30)
     if foreign == {
         .Failure(_) -> {}
         .Value(_) | .HostRequest(_, _) -> return false
     }
-    target_reply: build_session_call(session, "add_library", [BuildSessionValue]{.Text{value: "schema"}, .List{values: [BuildSessionValue]{.Text{value: ".jet/generated/fixture/schema.jet"}}}, .List{values: [BuildSessionValue]{action}}}, None, false, 31, 40)
+    target_reply: build_session_call(session, build_session_add_library, [BuildSessionValue]{.Text{value: "schema"}, .List{values: [BuildSessionValue]{.Text{value: ".jet/generated/fixture/schema.jet"}}}, .List{values: [BuildSessionValue]{action}}}, None, false, 31, 40)
     target: if target_reply == {
         .Value(value) -> value
         .Failure(_) | .HostRequest(_, _) -> {
@@ -62,30 +71,30 @@ build_session_declarations_fixture: fn() -> Bool Never! {
         }
     }
     source: "package: {{ name: \"fixture.schema\" }}\nVALUE: 7\n"
-    generated: build_session_call(session, "generate", [BuildSessionValue]{.Text{value: "schema"}}, Val(source), false, 41, 50)
+    generated: build_session_call(session, build_session_generate, [BuildSessionValue]{.Text{value: "schema"}}, Val(source), false, 41, 50)
     if generated != .Value(value: .Unit) -> return false
-    wrong_generate: build_session_call(session, "generate", [BuildSessionValue]{.Text{value: "retired"}, .Text{value: source}}, None, false, 51, 60)
+    wrong_generate: build_session_call(session, build_session_generate, [BuildSessionValue]{.Text{value: "retired"}, .Text{value: source}}, None, false, 51, 60)
     if wrong_generate == {
         .Failure(_) -> {}
         .Value(_) | .HostRequest(_, _) -> return false
     }
-    if build_session_call(session, "run", [BuildSessionValue]{.Text{value: "short"}, found}, None, false, 61, 70) == {
+    if build_session_call(session, build_session_run, [BuildSessionValue]{.Text{value: "short"}, found}, None, false, 61, 70) == {
         .Failure(_) -> {}
         .Value(_) | .HostRequest(_, _) -> return false
     }
-    contribution: build_session_call(session, "contribute", [BuildSessionValue]{.Text{value: "cache_slots"}, .Int{value: 8}}, None, false, 71, 80)
+    contribution: build_session_call(session, build_session_contribute, [BuildSessionValue]{.Text{value: "cache_slots"}, .Int{value: 8}}, None, false, 71, 80)
     if contribution != .Value(value: .Unit) -> return false
     // A dependency's setting is named by its package, `tool.loud`; any other dotted name is refused.
-    qualified: build_session_call(session, "contribute", [BuildSessionValue]{.Text{value: "tool.loud"}, .Bool{value: false}}, None, false, 71, 80)
+    qualified: build_session_call(session, build_session_contribute, [BuildSessionValue]{.Text{value: "tool.loud"}, .Bool{value: false}}, None, false, 71, 80)
     if qualified != .Value(value: .Unit) -> return false
     malformed_names: [String]{"a.b.c", "tool.", ".loud"}
     loop malformed in malformed_names {
-        if build_session_call(session, "contribute", [BuildSessionValue]{.Text{value: malformed}, .Int{value: 1}}, None, false, 71, 80) == {
+        if build_session_call(session, build_session_contribute, [BuildSessionValue]{.Text{value: malformed}, .Int{value: 1}}, None, false, 71, 80) == {
             .Failure(_) -> {}
             .Value(_) | .HostRequest(_, _) -> return false
         }
     }
-    plan: build_session_call(session, "plan", [BuildSessionValue]{target}, None, false, 81, 90)
+    plan: build_session_call(session, build_session_plan, [BuildSessionValue]{target}, None, false, 81, 90)
     if plan != .Value(value: .Handle(type_name: "BuildPlan", session: 71, id: 0)) -> return false
     // Source is retained in memory; its digest is content-derived, and no
     // generated file or declared command has been materialized or executed.
@@ -119,7 +128,7 @@ build_session_declarations_fixture: fn() -> Bool Never! {
     if build_session_graph(session, .Handle(type_name: "BuildPlan", session: 71, id: 0)).diagnostic == None {
         return false
     }
-    if build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 91, 100) == {
+    if build_session_call(session, build_session_plan, [BuildSessionValue]{}, None, false, 91, 100) == {
         .Failure(_) -> {}
         .Value(_) | .HostRequest(_, _) -> return false
     }

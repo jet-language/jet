@@ -636,280 +636,358 @@ build_session_cap_name: fn(flag: String) -> String Never! {
     }
 }
 
-build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessionValue], generated_source: String?, in_impure_gate: Bool, start: Int, end: Int) -> BuildSessionReply Never! {
+// One call a build makes on its session: its arguments, the generated
+// source it carries (`b.generate`, `meta.add`, `meta.rewrite_body`),
+// whether an `#Impure` gate holds it, and its span.
+BuildSessionCall: struct {
+    args: [BuildSessionValue],
+    generated: String?{None},
+    impure: Bool{false},
+    start: Int{0},
+    end: Int{0},
+}
+
+// The answer of `operation`, the session's operation for one service of
+// core.build (build_session_run, build_session_found, ...), to a call on
+// `args` (and the generated source `generated`) at `start..<end`. A session
+// whose build returned refuses every call.
+build_session_call: fn(session: &BuildSession, operation: fn(&BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, args: [BuildSessionValue], generated: String?, in_impure_gate: Bool, start: Int, end: Int) -> BuildSessionReply Never! {
     permit := session.storage.guard_edit()
     state := &permit.value
     state.start = start
     state.end = end
     if !state.active -> return build_session_fail(state, "build context expired")
-    if method == "run" {
-        caps: build_session_strings(args, 2) ?? return build_session_fail(state, "a step's effects must be a list of strings")
-        if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
-        return build_session_add_run(state, args, start, end)
-    }
-    if method == "action" {
-        caps: build_session_strings(args, 4) ?? return build_session_fail(state, "a step's effects must be a list of strings")
-        if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
-        return build_session_add_action(state, args, start, end)
-    }
-    if method == "found" -> return build_session_found(state, args)
-    if method == "host" -> return build_session_host(state, args, false)
-    if method == "image" -> return build_session_host(state, args, true)
-    if method == "jet" -> return build_session_jet(state, args)
-    if method == "jet_built_from" -> return build_session_jet_built_from(state, args)
-    if method == "source_key" -> return build_session_source_key(state, args)
-    if method == "dependency" -> return build_session_dependency(state, args)
-    if method == "folder" -> return build_session_folder(state, args)
-    if method.starts_with("action.") {
-        return build_session_step_call(state, method.removeprefix("action."), args)
-    }
-    if method == "file.path" -> return build_session_file_path(state, args)
-    if method == "file.file" -> return build_session_file_file(state, args, false)
-    if method == "file.folder" -> return build_session_file_file(state, args, true)
-    if method.starts_with("add_") -> return build_session_add_target(state, method, args)
-    if method == "toolchain" -> return build_session_add_toolchain(state, args)
-    if method == "signing" -> return build_session_add_signing(state, args)
-    if method == "probe" -> return build_session_add_probe(state, args, in_impure_gate)
-    if method == "pin" -> return build_session_set_option(state, args, true, start, end)
-    if method == "option" -> return build_session_set_option(state, args, false, start, end)
-    if method == "generate" {
-        if args.len() != 1 && args.len() != 2 {
-            return build_session_fail(state, "`b.generate` requires a name and typed item block")
-        }
-        name: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
-        // A `Code` value's place follows the name (JetDriver BuildAdapter).
-        code_site: if args.len() == 2 -> build_session_text(args, 1) ?? "" else -> ""
-        source: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
-        path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
-        site: build_session_site(state, start)
-        return build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, site: site, code_site: code_site})
-    }
-    if method == "default" {
-        if args.len() != 1 -> return build_session_fail(state, "`b.default` takes one target")
-        state.default_target = build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
-        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
-    }
-    // Sema admits the call only in the root package's own build source
-    // (sema_build_compiler_site); the session binds the value to one of this
-    // build's targets, and it expires with the build like every handle. A
-    // second compile (a workspace) is another value from this same call, and
-    // none is made over an option that weakens checking
-    // (build_session_unchecked_option).
-    if method == "compiler" {
-        if args.len() != 1 -> return build_session_fail(state, "`b.compiler` takes one target")
-        target: build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "compiler target does not belong to this build")
-        loop option in state.options {
-            if build_session_unchecked_option(option.name, option.value, option.pinned, start, end) == .Val(refused) {
-                return refused
-            }
-        }
-        state.compilers.push(BuildSessionCompiler{target: target, start: start, end: end})
-        return BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "Compiler", session: state.id, id: state.compilers.len() - 1}}
-    }
-    // `meta.add(code, scope: name)` on a `Compiler` value: the code's
-    // formatted items, or its source text, become the generated module
-    // `name` of this package, as a `b.generate` module does, and a source of
-    // the value's target. The Meta effects the add performed (`Meta.Generate`,
-    // with `Meta.Code.Types` and `Meta.Code.Raw` for text) are its recorded
-    // authority.
-    // `meta.add_struct` also sends the name of the struct it declares.
-    if method == "compiler.add" {
-        if args.len() != 4 && args.len() != 5 {
-            return build_session_fail(state, "`meta.add` takes one `Code` value or source text and `scope:`")
-        }
-        compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
-        name: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.add`'s scope must be a string")
-        source: generated_source ?? return build_session_fail(state, "`meta.add` requires a `#code` item block or source text")
-        authority: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.add` lost its Meta effects")
-        path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, producer: build_session_text(args, 2), authority: Val(authority), declares: build_session_text(args, 4), handoffs: state.compilers[compiler].handoffs.copy()})
-        if added == .Value(_) {
-            target: state.compilers[compiler].target
-            if !build_session_contains_string(state.targets[target].sources, path) {
-                state.targets[target].sources.push(path)
-            }
-        }
-        return added
-    }
-    // `meta.allow_rewrite(package: name)` on a `Compiler` value: the root's
-    // consent that the value rewrites the functions of the dependency `name`.
-    // A handed value's consent is its root's, which every handoff shares.
-    if method == "compiler.allow_rewrite" {
-        if args.len() != 2 {
-            return build_session_fail(state, "`meta.allow_rewrite` takes one `package:` name")
-        }
-        compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
-        name: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.allow_rewrite`'s package must be a string")
-        root: build_session_compiler_root(state, compiler)
-        if !build_session_contains_string(state.compilers[root].rewritable, name) {
-            state.compilers[root].rewritable.push(name)
-        }
-        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
-    }
-    // A `Compiler` value passed to a function: sema sends the pass ("`build`
-    // handed it to `install` at main.jet:9"), and the callee gets a new value
-    // of this build whose chain ends with it, so what the callee makes names
-    // every handoff. The new value expires with the build like the root's.
-    if method == "compiler.handoff" {
-        if args.len() != 2 {
-            return build_session_fail(state, "a `Compiler` handoff takes one value and its place")
-        }
-        compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
-        step: build_session_text(args, 1) ?? return build_session_fail(state, "a `Compiler` handoff lost its place")
-        chain := state.compilers[compiler].handoffs.copy()
-        chain.push(step)
-        target: state.compilers[compiler].target
-        root: build_session_compiler_root(state, compiler)
-        state.compilers.push(BuildSessionCompiler{target: target, start: start, end: end, root: root, handoffs: chain.move()})
-        return BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "Compiler", session: state.id, id: state.compilers.len() - 1}}
-    }
-    // The check `meta.events` makes before it reads a `Compiler` value's
-    // checked program: the value belongs to this build, which still runs.
-    if method == "compiler.live" {
-        if args.len() != 1 {
-            return build_session_fail(state, "a `Compiler` value check takes one value")
-        }
-        _: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
-        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
-    }
-    // `meta.rewrite_body(f, code)` on a `Compiler` value: the code's formatted
-    // statements become the body of the function `f` of the package that
-    // declares it, carried as the generated module
-    // `.jet/generated/<package>/rewrite_body/<f>.jet`, a source of the value's
-    // target, which loads it in place of `f`. A dependency's function is
-    // rewritten only when the value allows that package, and only in this
-    // build's copy of it. A line `#{w.body}`, where `w` is the name the call
-    // wrote `f` with, is `f`'s body before this rewrite. Rewrites of one
-    // function compose in the order they run: a later rewrite's paste line is
-    // the body the earlier rewrites made.
-    if method == "compiler.rewrite_body" {
-        if args.len() != 5 {
-            return build_session_fail(state, "`meta.rewrite_body` takes a function and one `Code` value")
-        }
-        compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
-        function: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.rewrite_body` lost its function's name")
-        written: generated_source ?? return build_session_fail(state, "`meta.rewrite_body` requires a `#code` block")
-        // The identity of the function's package: this build's own, or a
-        // dependency's.
-        owner: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.rewrite_body` lost its function's package")
-        pasted: build_session_text(args, 4) ?? return build_session_fail(state, "`meta.rewrite_body` lost the name its paste line uses")
-        own: owner == state.identity
-        package_name: build_session_package_dir(if own -> state.package else -> owner)
-        if !own && !build_session_contains_string(state.compilers[build_session_compiler_root(state, compiler)].rewritable, package_name) {
-            return BuildSessionReply.Failure{error: {code: "E3514", what: "`meta.rewrite_body` would rewrite `{function}` of package `{package_name}`, which this build has not allowed", why: "Rewriting a dependency's code needs the root's consent, one line a reviewer reads", fix: "Add `meta.allow_rewrite(package: \"{package_name}\")` after the root's `b.compiler` call", start: start, end: end}}
-        }
-        paste: "#{{{function}.body}}"
-        source: if pasted == "" || pasted == function -> written.copy() else -> build_session_replace_paste(written, "#{{{pasted}.body}}", paste)
-        producer: build_session_text(args, 2)
-        earlier := -1
-        loop (index, old) in state.generated {
-            if old.rewrites == .Val(rewritten) && rewritten == function && (old.package ?? state.identity) == owner {
-                earlier = index
-            }
-        }
-        if earlier >= 0 {
-            composed: build_session_replace_paste(source, paste, state.generated[earlier].source)
-            state.generated[earlier].source = composed
-            state.generated[earlier].source_digest = "sha256:{build_crypto.sha256(composed.bytes()).hex()}"
-            if state.generated[earlier].producer == .Val(first) && producer == .Val(later) {
-                state.generated[earlier].producer = Val("{first}, then {later}")
-            }
-            return BuildSessionReply.Value{value: BuildSessionValue.Unit}
-        }
-        path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
-        name: if own -> "{function} body" else -> "{function} body of {package_name}"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Code.Rewrite"), consent: if own -> None else -> Val(package_name), handoffs: state.compilers[compiler].handoffs.copy()})
-        if added == .Value(_) {
-            target: state.compilers[compiler].target
-            if !build_session_contains_string(state.targets[target].sources, path) {
-                state.targets[target].sources.push(path)
-            }
-        }
-        return added
-    }
-    // `meta.report(finding, at: c)`: the finding is kept with the build and
-    // reported once it returns, with the replacement its `syntax.rewrite`
-    // fix calls at `c` ("" for none).
-    if method == "compiler.report" {
-        if args.len() != 9 {
-            return build_session_fail(state, "`meta.report` takes a compiler value, a finding's code, tier and texts, the call it names and its rewrite")
-        }
-        _: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
-        texts := [String]{}
-        loop index in 1..<7 {
-            text: build_session_text(args, index) ?? return build_session_fail(state, "`meta.report` lost a finding's text")
-            texts.push(text)
-        }
-        at_start := -1
-        at_end := -1
-        if args[7] == .Span(from, to, _) {
-            at_start = from
-            at_end = to
-        }
-        if at_start < 0 || at_end < at_start {
-            return build_session_fail(state, "`meta.report` lost the place of its call")
-        }
-        rewrite: build_session_text(args, 8) ?? return build_session_fail(state, "`meta.report` lost its rewrite")
-        if texts[1] != "Error" && texts[1] != "Tidy" && texts[1] != "Report" {
-            return build_session_fail(state, "`meta.report` takes a finding of tier `Error`, `Tidy` or `Report`")
-        }
-        state.findings.push(BuildSessionFinding{code: texts[0], tier: texts[1], what: texts[2], why: texts[3], fix: texts[4], file: texts[5], at_start: at_start, at_end: at_end, rewrite: rewrite})
-        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
-    }
-    if method == "args" {
-        if args.len() != 0 -> return build_session_fail(state, "`b.args` takes no arguments")
-        return BuildSessionReply.Value{value: BuildSessionValue.List{values: loop word in state.args -> BuildSessionValue.Text{value: word.copy()}}}
-    }
-    if method == "plan" {
-        if args.len() > 1 {
-            return build_session_fail(state, "`b.plan` accepts zero or one default target")
-        }
-        default := -1
-        if args.len() == 1 && args[0] != .Unit {
-            default = build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
-        }
-        return BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildPlan", session: state.id, id: default}}
-    }
-    if method == "contribute" {
-        if args.len() != 2 {
-            return build_session_fail(state, "`b.contribute` requires a fact name and one value")
-        }
-        name: build_session_text(args, 0) ?? return build_session_fail(state, "build fact name must be a string")
-        // `cache_slots` names the package's own setting; `tool.loud`, one its
-        // dependency `tool` declares.
-        parts: name.split(".").to_list()
-        malformed := name.trim() == "" || parts.len() > 2
-        loop part in parts {
-            if part == "" -> malformed = true
-        }
-        if malformed {
-            return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots` or a dependency's `tool.loud`")
-        }
-        if args[1] == {
-            .Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {}
-            .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _, _) -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")
-        }
-        // The writer is spelled by the package's name, as `jet explain` and the lock show it.
-        state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}.build", start: start, end: end})
-        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
-    }
-    if method == "error" -> return build_session_project_error(state, args)
-    if method == "plugin" {
-        if args.len() != 2 || build_session_text(args, 0) == None || build_session_text(args, 1) == None {
-            return build_session_fail(state, "`b.plugin` requires manifest and component paths")
-        }
-        if !in_impure_gate -> return build_session_impure(state, method)
-        if state.policy.plugins_denied != None {
-            return build_session_fail(state, "wasm build plugin denied: {state.policy.plugins_denied ?? ""}")
-        }
-        return BuildSessionReply.HostRequest{method: method, args: args}
-    }
-    build_session_fail(state, "unknown build method `{method}`")
+    operation(state, BuildSessionCall{args: args, generated: generated, impure: in_impure_gate, start: start, end: end})
 }
 
-// `b.optimize(.O2)` (method "option"; args: the row name, the value) or
-// `b.pin(...)`: the last call's value holds; a pinned value can't change in
-// the same fn build. An absent `b.plan` default arrives as Unit.
+// `b.run(name, tool, effects)`.
+build_session_run: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    caps: build_session_strings(call.args, 2) ?? return build_session_fail(state, "a step's effects must be a list of strings")
+    if caps.len() > 0 && !call.impure -> return build_session_impure(state, "run")
+    build_session_add_run(state, call.args, call.start, call.end)
+}
+
+// `b.action(step)`, the step's five values.
+build_session_action: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    caps: build_session_strings(call.args, 4) ?? return build_session_fail(state, "a step's effects must be a list of strings")
+    if caps.len() > 0 && !call.impure -> return build_session_impure(state, "action")
+    build_session_add_action(state, call.args, call.start, call.end)
+}
+
+build_session_add_executable: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_target(state, "add_executable", "executable", call.args)
+}
+
+build_session_add_library: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_target(state, "add_library", "library", call.args)
+}
+
+build_session_add_test: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_target(state, "add_test", "test", call.args)
+}
+
+build_session_add_asset_bundle: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_target(state, "add_asset_bundle", "asset-bundle", call.args)
+}
+
+build_session_add_doc: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_target(state, "add_doc", "doc", call.args)
+}
+
+build_session_add_install: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_target(state, "add_install", "install", call.args)
+}
+
+build_session_add_package: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_target(state, "add_package", "package", call.args)
+}
+
+build_session_add_publish: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_target(state, "add_publish", "publish", call.args)
+}
+
+build_session_toolchain: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_toolchain(state, call.args)
+}
+
+build_session_signing: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_signing(state, call.args)
+}
+
+build_session_probe: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_add_probe(state, call.args, call.impure)
+}
+
+// `b.optimize(.O2)` (args: the option's row name, the value).
+build_session_option: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_set_option(state, call.args, false, call.start, call.end)
+}
+
+// `b.pin(.optimize, .O2)`.
+build_session_pin: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    build_session_set_option(state, call.args, true, call.start, call.end)
+}
+
+// `b.generate(name) { items }`: the name, then the place of the `Code`
+// value that carried the items, if one did; the items are the call's
+// generated source.
+build_session_generate: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    args: call.args
+    if args.len() != 1 && args.len() != 2 {
+        return build_session_fail(state, "`b.generate` requires a name and typed item block")
+    }
+    name: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
+    // A `Code` value's place follows the name (JetDriver BuildAdapter).
+    code_site: if args.len() == 2 -> build_session_text(args, 1) ?? "" else -> ""
+    source: call.generated ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
+    path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
+    site: build_session_site(state, call.start)
+    build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: call.start, end: call.end, site: site, code_site: code_site})
+}
+
+build_session_default: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    if call.args.len() != 1 -> return build_session_fail(state, "`b.default` takes one target")
+    state.default_target = build_session_handle(state, call.args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
+    BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+// `b.compiler(target)`. Sema admits the call only in the root package's
+// own build source (sema_build_compiler_site); the session binds the value
+// to one of this build's targets, and it expires with the build like every
+// handle. A second compile (a workspace) is another value from this same
+// call, and none is made over an option that weakens checking
+// (build_session_unchecked_option).
+build_session_compiler: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    if call.args.len() != 1 -> return build_session_fail(state, "`b.compiler` takes one target")
+    target: build_session_handle(state, call.args[0], "BuildTarget") ?? return build_session_fail(state, "compiler target does not belong to this build")
+    loop option in state.options {
+        if build_session_unchecked_option(option.name, option.value, option.pinned, call.start, call.end) == .Val(refused) {
+            return refused
+        }
+    }
+    state.compilers.push(BuildSessionCompiler{target: target, start: call.start, end: call.end})
+    BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "Compiler", session: state.id, id: state.compilers.len() - 1}}
+}
+
+// `meta.add(code, scope: name)` on a `Compiler` value: the code's
+// formatted items, or its source text, become the generated module `name`
+// of this package, as a `b.generate` module does, and a source of the
+// value's target. The Meta effects the add performed (`Meta.Generate`,
+// with `Meta.Code.Types` and `Meta.Code.Raw` for text) are its recorded
+// authority. `meta.add_struct` also sends the name of the struct it
+// declares.
+build_session_compiler_add: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    args: call.args
+    if args.len() != 4 && args.len() != 5 {
+        return build_session_fail(state, "`meta.add` takes one `Code` value or source text and `scope:`")
+    }
+    compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+    name: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.add`'s scope must be a string")
+    source: call.generated ?? return build_session_fail(state, "`meta.add` requires a `#code` item block or source text")
+    authority: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.add` lost its Meta effects")
+    path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
+    added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: call.start, end: call.end, producer: build_session_text(args, 2), authority: Val(authority), declares: build_session_text(args, 4), handoffs: state.compilers[compiler].handoffs.copy()})
+    if added == .Value(_) {
+        target: state.compilers[compiler].target
+        if !build_session_contains_string(state.targets[target].sources, path) {
+            state.targets[target].sources.push(path)
+        }
+    }
+    added
+}
+
+// `meta.allow_rewrite(package: name)` on a `Compiler` value: the root's
+// consent that the value rewrites the functions of the dependency `name`.
+// A handed value's consent is its root's, which every handoff shares.
+build_session_compiler_allow_rewrite: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    if call.args.len() != 2 {
+        return build_session_fail(state, "`meta.allow_rewrite` takes one `package:` name")
+    }
+    compiler: build_session_handle(state, call.args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+    name: build_session_text(call.args, 1) ?? return build_session_fail(state, "`meta.allow_rewrite`'s package must be a string")
+    root: build_session_compiler_root(state, compiler)
+    if !build_session_contains_string(state.compilers[root].rewritable, name) {
+        state.compilers[root].rewritable.push(name)
+    }
+    BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+// A `Compiler` value passed to a function: sema sends the pass ("`build`
+// handed it to `install` at main.jet:9"), and the callee gets a new value
+// of this build whose chain ends with it, so what the callee makes names
+// every handoff. The new value expires with the build like the root's.
+build_session_compiler_handoff: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    if call.args.len() != 2 {
+        return build_session_fail(state, "a `Compiler` handoff takes one value and its place")
+    }
+    compiler: build_session_handle(state, call.args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+    step: build_session_text(call.args, 1) ?? return build_session_fail(state, "a `Compiler` handoff lost its place")
+    chain := state.compilers[compiler].handoffs.copy()
+    chain.push(step)
+    target: state.compilers[compiler].target
+    root: build_session_compiler_root(state, compiler)
+    state.compilers.push(BuildSessionCompiler{target: target, start: call.start, end: call.end, root: root, handoffs: chain.move()})
+    BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "Compiler", session: state.id, id: state.compilers.len() - 1}}
+}
+
+// The check `meta.events` makes before it reads a `Compiler` value's
+// checked program: the value belongs to this build, which still runs.
+build_session_compiler_live: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    if call.args.len() != 1 {
+        return build_session_fail(state, "a `Compiler` value check takes one value")
+    }
+    _: build_session_handle(state, call.args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+    BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+// `meta.rewrite_body(f, code)` on a `Compiler` value: the code's formatted
+// statements become the body of the function `f` of the package that
+// declares it, carried as the generated module
+// `.jet/generated/<package>/rewrite_body/<f>.jet`, a source of the value's
+// target, which loads it in place of `f`. A dependency's function is
+// rewritten only when the value allows that package, and only in this
+// build's copy of it. A line `#{w.body}`, where `w` is the name the call
+// wrote `f` with, is `f`'s body before this rewrite. Rewrites of one
+// function compose in the order they run: a later rewrite's paste line is
+// the body the earlier rewrites made.
+build_session_compiler_rewrite_body: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    args: call.args
+    start: call.start
+    end: call.end
+    if args.len() != 5 {
+        return build_session_fail(state, "`meta.rewrite_body` takes a function and one `Code` value")
+    }
+    compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+    function: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.rewrite_body` lost its function's name")
+    written: call.generated ?? return build_session_fail(state, "`meta.rewrite_body` requires a `#code` block")
+    // The identity of the function's package: this build's own, or a
+    // dependency's.
+    owner: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.rewrite_body` lost its function's package")
+    pasted: build_session_text(args, 4) ?? return build_session_fail(state, "`meta.rewrite_body` lost the name its paste line uses")
+    own: owner == state.identity
+    package_name: build_session_package_dir(if own -> state.package else -> owner)
+    if !own && !build_session_contains_string(state.compilers[build_session_compiler_root(state, compiler)].rewritable, package_name) {
+        return BuildSessionReply.Failure{error: {code: "E3514", what: "`meta.rewrite_body` would rewrite `{function}` of package `{package_name}`, which this build has not allowed", why: "Rewriting a dependency's code needs the root's consent, one line a reviewer reads", fix: "Add `meta.allow_rewrite(package: \"{package_name}\")` after the root's `b.compiler` call", start: start, end: end}}
+    }
+    paste: "#{{{function}.body}}"
+    source: if pasted == "" || pasted == function -> written.copy() else -> build_session_replace_paste(written, "#{{{pasted}.body}}", paste)
+    producer: build_session_text(args, 2)
+    earlier := -1
+    loop (index, old) in state.generated {
+        if old.rewrites == .Val(rewritten) && rewritten == function && (old.package ?? state.identity) == owner {
+            earlier = index
+        }
+    }
+    if earlier >= 0 {
+        composed: build_session_replace_paste(source, paste, state.generated[earlier].source)
+        state.generated[earlier].source = composed
+        state.generated[earlier].source_digest = "sha256:{build_crypto.sha256(composed.bytes()).hex()}"
+        if state.generated[earlier].producer == .Val(first) && producer == .Val(later) {
+            state.generated[earlier].producer = Val("{first}, then {later}")
+        }
+        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+    }
+    path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
+    name: if own -> "{function} body" else -> "{function} body of {package_name}"
+    added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Code.Rewrite"), consent: if own -> None else -> Val(package_name), handoffs: state.compilers[compiler].handoffs.copy()})
+    if added == .Value(_) {
+        target: state.compilers[compiler].target
+        if !build_session_contains_string(state.targets[target].sources, path) {
+            state.targets[target].sources.push(path)
+        }
+    }
+    added
+}
+
+// `meta.report(finding, at: c)`: the finding is kept with the build and
+// reported once it returns, with the replacement its `syntax.rewrite` fix
+// calls at `c` ("" for none).
+build_session_compiler_report: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    args: call.args
+    if args.len() != 9 {
+        return build_session_fail(state, "`meta.report` takes a compiler value, a finding's code, tier and texts, the call it names and its rewrite")
+    }
+    _: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+    texts := [String]{}
+    loop index in 1..<7 {
+        text: build_session_text(args, index) ?? return build_session_fail(state, "`meta.report` lost a finding's text")
+        texts.push(text)
+    }
+    at_start := -1
+    at_end := -1
+    if args[7] == .Span(from, to, _) {
+        at_start = from
+        at_end = to
+    }
+    if at_start < 0 || at_end < at_start {
+        return build_session_fail(state, "`meta.report` lost the place of its call")
+    }
+    rewrite: build_session_text(args, 8) ?? return build_session_fail(state, "`meta.report` lost its rewrite")
+    if texts[1] != "Error" && texts[1] != "Tidy" && texts[1] != "Report" {
+        return build_session_fail(state, "`meta.report` takes a finding of tier `Error`, `Tidy` or `Report`")
+    }
+    state.findings.push(BuildSessionFinding{code: texts[0], tier: texts[1], what: texts[2], why: texts[3], fix: texts[4], file: texts[5], at_start: at_start, at_end: at_end, rewrite: rewrite})
+    BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+build_session_args: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    if call.args.len() != 0 -> return build_session_fail(state, "`b.args` takes no arguments")
+    BuildSessionReply.Value{value: BuildSessionValue.List{values: loop word in state.args -> BuildSessionValue.Text{value: word.copy()}}}
+}
+
+// `b.plan(default)`: an absent default arrives as Unit.
+build_session_plan: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    if call.args.len() > 1 {
+        return build_session_fail(state, "`b.plan` accepts zero or one default target")
+    }
+    default := -1
+    if call.args.len() == 1 && call.args[0] != .Unit {
+        default = build_session_handle(state, call.args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
+    }
+    BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildPlan", session: state.id, id: default}}
+}
+
+build_session_contribute: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    args: call.args
+    if args.len() != 2 {
+        return build_session_fail(state, "`b.contribute` requires a fact name and one value")
+    }
+    name: build_session_text(args, 0) ?? return build_session_fail(state, "build fact name must be a string")
+    // `cache_slots` names the package's own setting; `tool.loud`, one its
+    // dependency `tool` declares.
+    parts: name.split(".").to_list()
+    malformed := name.trim() == "" || parts.len() > 2
+    loop part in parts {
+        if part == "" -> malformed = true
+    }
+    if malformed {
+        return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots` or a dependency's `tool.loud`")
+    }
+    if args[1] == {
+        .Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {}
+        .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _, _) -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")
+    }
+    // The writer is spelled by the package's name, as `jet explain` and the lock show it.
+    state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}.build", start: call.start, end: call.end})
+    BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+// `b.plugin(manifest, component)`: the host loads the plugin
+// (HostRequest).
+build_session_plugin: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    if call.args.len() != 2 || build_session_text(call.args, 0) == None || build_session_text(call.args, 1) == None {
+        return build_session_fail(state, "`b.plugin` requires manifest and component paths")
+    }
+    if !call.impure -> return build_session_impure(state, "plugin")
+    if state.policy.plugins_denied != None {
+        return build_session_fail(state, "wasm build plugin denied: {state.policy.plugins_denied ?? ""}")
+    }
+    BuildSessionReply.HostRequest{method: "plugin", args: call.args}
+}
+
+// `b.optimize(.O2)` (args: the row name, the value) or `b.pin(...)`: the
+// last call's value holds; a pinned value can't change in the same fn
+// build.
 build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue], pinned: Bool, start: Int, end: Int) -> BuildSessionReply {
     if args.len() != 2 {
         return build_session_fail(state, "a build option call takes an option and a value")
@@ -1187,7 +1265,10 @@ build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue]
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildProbe", session: state.id, id: id}}
 }
 
-build_session_project_error: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+// `b.error(span, code, what, why, fix)`: a project rule's report, kept
+// with the build.
+build_session_project_error: fn(state: &BuildSessionState, call: BuildSessionCall) -> BuildSessionReply Never! {
+    args: call.args
     if args.len() != 5 {
         return build_session_fail(state, "`b.error` requires SourceSpan, code, what, why, and fix")
     }

@@ -21,7 +21,7 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     jet_backend.[LINK_BASE, x64_executable_whole, x64_link_executable]
-    jet_build_session.[BuildSessionPolicy, BuildSessionValue, build_plan_execution, build_session_call, build_session_finish, build_session_new, build_session_path]
+    jet_build_session.[BuildSessionPolicy, BuildSessionValue, build_plan_execution, build_session_action, build_session_call, build_session_finish, build_session_new, build_session_path]
     jet_driver.[
         JetDriverSourceDocument,
         JetDriverAuthorizedSourceSnapshot,
@@ -206,7 +206,7 @@ jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverBuildAction, ma
         return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` doesn't make `{made}`", None, "list `{step.makes}` in the `outputs` of the `BuildAction` the hook returns"))
     }
     session := build_session_new(1, cli_files.basename(step.binary), "", BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}})
-    declared: build_session_call(session, "action", jet_driver_build_action_session_args(action), None, true, 0, 0)
+    declared: build_session_call(session, build_session_action, jet_driver_build_action_session_args(action), None, true, 0, 0)
     if declared == .Failure(error) {
         return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` is refused: {error.what}", None, error.fix))
     }

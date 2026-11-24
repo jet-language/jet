@@ -9,20 +9,26 @@ use {
     jet_sema.[SemaGraphResult, SemaSourceOrigin, sema_gate_host_reads]
     jet_build_session.[
         BuildSession,
+        BuildSessionCall,
         BuildSessionDiagnostic,
         BuildSessionFinding,
         BuildSessionGeneratedModule,
         BuildSessionPlan,
         BuildSessionPolicy,
+        BuildSessionReply,
+        BuildSessionState,
         BuildSessionValue,
         build_plan_findings,
         build_plan_graph,
         build_plan_selection,
         build_plan_selected_generated,
         build_session_abort,
+        build_session_add_executable,
         build_session_add_source,
         build_session_append_unique,
         build_session_call,
+        build_session_compiler,
+        build_session_compiler_allow_rewrite,
         build_session_package_dir,
         build_session_made_by,
         build_session_promised,
@@ -1255,10 +1261,10 @@ jet_driver_marker_is_profiled: fn(marker: Marker) -> Bool Never! {
     marker.name == "Profiled" || marker.name.ends_with(".Profiled")
 }
 
-// The value of a call the build makes on its own session, or None when the
-// session refused it.
-jet_driver_build_profiled_value: fn(session: &BuildSession, method: String, args: [BuildSessionValue]) -> BuildSessionValue? Never! {
-    reply: build_session_call(session, method, args, None, false, 0, 0)
+// The value of the session's `operation` on `args`, a call the build makes
+// on its own session, or None when the session refused it.
+jet_driver_build_profiled_value: fn(session: &BuildSession, operation: fn(&BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, args: [BuildSessionValue]) -> BuildSessionValue? Never! {
+    reply: build_session_call(session, operation, args, None, false, 0, 0)
     if reply.move() == .Value(value) -> return Val(value)
     None
 }
@@ -1326,8 +1332,8 @@ jet_driver_build_profiled: fn(request: &JetDriverCompileRequest, scope: &JetDriv
     build_session_set_identity(session, package)
     entry: jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path)
     sources_value: BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: entry}}}
-    target: jet_driver_build_profiled_value(session, "add_executable", [BuildSessionValue]{BuildSessionValue.Text{value: build_session_package_dir(session_package)}, sources_value, BuildSessionValue.List{values: [BuildSessionValue]{}}}) ?? return {generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: Val("the `#Perf.Profiled` build refused its executable")}
-    handle: jet_driver_build_profiled_value(session, "compiler", [BuildSessionValue]{target}) ?? return {generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: Val("the `#Perf.Profiled` build refused its `Compiler` value")}
+    target: jet_driver_build_profiled_value(session, build_session_add_executable, [BuildSessionValue]{BuildSessionValue.Text{value: build_session_package_dir(session_package)}, sources_value, BuildSessionValue.List{values: [BuildSessionValue]{}}}) ?? return {generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: Val("the `#Perf.Profiled` build refused its executable")}
+    handle: jet_driver_build_profiled_value(session, build_session_compiler, [BuildSessionValue]{target}) ?? return {generated: [JetDriverGeneratedModule]{}, diagnostics: [Diagnostic]{}, problem: Val("the `#Perf.Profiled` build refused its `Compiler` value")}
     // Each dependency once: its modules are adjacent rows (`last`), and the
     // session keeps a name it already allows once.
     last := -1
@@ -1336,7 +1342,7 @@ jet_driver_build_profiled: fn(request: &JetDriverCompileRequest, scope: &JetDriv
             next
         }
         last = at
-        _: jet_driver_build_profiled_value(session, "compiler.allow_rewrite", [BuildSessionValue]{jet_driver_build_profiled_handle(handle), BuildSessionValue.Text{value: build_session_package_dir(loaded.package_identity)}})
+        _: jet_driver_build_profiled_value(session, build_session_compiler_allow_rewrite, [BuildSessionValue]{jet_driver_build_profiled_handle(handle), BuildSessionValue.Text{value: build_session_package_dir(loaded.package_identity)}})
     }
     config: jet_driver_build_run_config(request, session, sources.host_held, request.authorized_sources.entry_path)
     meta: jet_driver_build_compiler_value(jet_eval_build_session_output(handle), jet_eval_build_context_value(session_id, program))
