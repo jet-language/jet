@@ -40221,7 +40221,7 @@ Fraction: struct {
     }
 }
 
-priv __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
+#Builtin.Role(.FractionNew) priv __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
     if denominator == 0 -> return None
     top := numerator
     bottom := denominator
@@ -40240,21 +40240,21 @@ priv __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
     __fraction_new(numerator, denominator) ?? core.math.__numeric_stop("divided by zero")
 }
 
-priv __fraction_from_owned_parts: fn(numerator: Int, denominator: Int) -> Fraction Never! {
+#Builtin.Role(.FractionFromOwnedParts) priv __fraction_from_owned_parts: fn(numerator: Int, denominator: Int) -> Fraction Never! {
     __fraction_from_parts(numerator, denominator)
 }
 
-priv __fraction_from_int: fn(value: Int) -> Fraction Never! { Fraction{num_value: value, den_value: 1} }
+#Builtin.Role(.FractionFromInt) priv __fraction_from_int: fn(value: Int) -> Fraction Never! { Fraction{num_value: value, den_value: 1} }
 
-priv __fraction_add: fn(left: Fraction, right: Fraction) -> Fraction Never! {
+#Builtin.Role(.FractionAdd) priv __fraction_add: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.den_value + right.num_value * left.den_value, left.den_value * right.den_value)
 }
 
-priv __fraction_sub: fn(left: Fraction, right: Fraction) -> Fraction Never! {
+#Builtin.Role(.FractionSub) priv __fraction_sub: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.den_value - right.num_value * left.den_value, left.den_value * right.den_value)
 }
 
-priv __fraction_mul: fn(left: Fraction, right: Fraction) -> Fraction Never! {
+#Builtin.Role(.FractionMul) priv __fraction_mul: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.num_value, left.den_value * right.den_value)
 }
 
@@ -40263,9 +40263,9 @@ priv __fraction_mul: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.den_value, left.den_value * right.num_value)
 }
 
-priv __fraction_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
+#Builtin.Role(.FractionNumerator) priv __fraction_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
 
-priv __fraction_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
+#Builtin.Role(.FractionDenominator) priv __fraction_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
 
 // `value` rounded in `mode` to a whole Fraction (denominator 1), exactly. The
 // denominator is positive, so the numerator carries the sign.
@@ -40421,28 +40421,28 @@ priv decimal_try_fraction: fn(value: Fraction) -> Decimal? Never! {
     Val(__decimal_normalized(digits, places))
 }
 
-priv __fraction_owned_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
+#Builtin.Role(.FractionOwnedNumerator) priv __fraction_owned_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
 
-priv __fraction_owned_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
+#Builtin.Role(.FractionOwnedDenominator) priv __fraction_owned_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
 
-priv __fraction_equal: fn(left: Fraction, right: Fraction) -> Bool Never! {
+#Builtin.Role(.FractionEqual) priv __fraction_equal: fn(left: Fraction, right: Fraction) -> Bool Never! {
     left.num_value == right.num_value && left.den_value == right.den_value
 }
 
 #Builtin.Role(.FractionIsZero) priv __fraction_is_zero: fn(value: Fraction) -> Bool Never! { value.num_value == 0 }
 
-priv __fraction_to_float: fn(value: Fraction) -> Float Never! {
+#Builtin.Role(.FractionToFloat) priv __fraction_to_float: fn(value: Fraction) -> Float Never! {
     Float{value.num_value} / Float{value.den_value}
 }
 
 // `Int{x}` of a Fraction (and `Int.from_fraction`): a whole value converts
 // exactly; any other stops naming the roundings. `checked(Int{x})` is the
 // `try_int` form, None instead of the stop.
-priv __fraction_to_int: fn(value: Fraction) -> Int Never! {
+#Builtin.Role(.FractionToInt) priv __fraction_to_int: fn(value: Fraction) -> Int Never! {
     __fraction_try_int(value) ?? core.math.__numeric_stop(int_exact_stop_text("Fraction"))
 }
 
-priv __fraction_try_int: fn(value: Fraction) -> Int? Never! {
+#Builtin.Role(.FractionTryInt) priv __fraction_try_int: fn(value: Fraction) -> Int? Never! {
     if value.den_value != 1 -> return None
     Val(value.num_value.copy())
 }
@@ -40453,11 +40453,11 @@ priv int_exact_stop_text: fn(source: String) -> String Never! {
     "Int{{x}} needs a whole {source}; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even"
 }
 
-priv __fraction_to_decimal: fn(value: Fraction) -> Decimal Never! {
+#Builtin.Role(.FractionToDecimal) priv __fraction_to_decimal: fn(value: Fraction) -> Decimal Never! {
     decimal_try_fraction(value) ?? panic("Fraction has a repeating expansion")
 }
 
-priv __fraction_from_float: fn(value: Float) -> Fraction Never! {
+#Builtin.Role(.FractionFromFloat) priv __fraction_from_float: fn(value: Float) -> Fraction Never! {
     if !is_finite(value) -> panic("Float has no word-sized exact Fraction")
     if value == 0.0 -> return __fraction_from_int(0)
     bits: to_bits(value)
@@ -40475,11 +40475,11 @@ priv __fraction_from_float: fn(value: Float) -> Fraction Never! {
     __fraction_from_parts(top, bottom)
 }
 
-priv __decimal_from_int: fn(value: Int) -> Decimal Never! {
+#Builtin.Role(.DecimalFromInt) priv __decimal_from_int: fn(value: Int) -> Decimal Never! {
     Decimal{negative: value < 0, magnitude: abs(value), scale: 0}
 }
 
-priv __decimal_from_float: fn(value: Float) -> Decimal Never! {
+#Builtin.Role(.DecimalFromFloat) priv __decimal_from_float: fn(value: Float) -> Decimal Never! {
     if !is_finite(value) -> panic("Float is not finite")
     decimal_try_fraction(__fraction_from_float(value)) ?? panic("Float is not finite")
 }
@@ -40709,7 +40709,7 @@ priv decimal_signed: fn(value: Decimal) -> Int Never! {
     if value.negative -> -value.magnitude else -> value.magnitude.copy()
 }
 
-priv __decimal_from_str: fn(text: String) -> Decimal Never! {
+#Builtin.Role(.DecimalFromStr) priv __decimal_from_str: fn(text: String) -> Decimal Never! {
     decimal_parse(text) ?? panic("invalid Decimal string")
 }
 
@@ -40791,19 +40791,19 @@ priv decimal_parse: fn(text: String) -> Decimal? Never! {
     Val(Decimal{negative: negative && magnitude != 0, magnitude: magnitude, scale: places})
 }
 
-priv __decimal_add: fn(left: Decimal, right: Decimal) -> Decimal Never! {
+#Builtin.Role(.DecimalAdd) priv __decimal_add: fn(left: Decimal, right: Decimal) -> Decimal Never! {
     places: max(left.scale, right.scale)
     coefficient: decimal_signed(left) * exact_power(10, places - left.scale) + decimal_signed(right) * exact_power(10, places - right.scale)
     Decimal{negative: coefficient < 0, magnitude: abs(coefficient), scale: places}
 }
 
-priv __decimal_sub: fn(left: Decimal, right: Decimal) -> Decimal Never! {
+#Builtin.Role(.DecimalSub) priv __decimal_sub: fn(left: Decimal, right: Decimal) -> Decimal Never! {
     places: max(left.scale, right.scale)
     coefficient: decimal_signed(left) * exact_power(10, places - left.scale) - decimal_signed(right) * exact_power(10, places - right.scale)
     Decimal{negative: coefficient < 0, magnitude: abs(coefficient), scale: places}
 }
 
-priv __decimal_mul: fn(left: Decimal, right: Decimal) -> Decimal Never! {
+#Builtin.Role(.DecimalMul) priv __decimal_mul: fn(left: Decimal, right: Decimal) -> Decimal Never! {
     magnitude := left.magnitude * right.magnitude
     places := left.scale + right.scale
     minimum: max(left.scale, right.scale)
@@ -40815,12 +40815,12 @@ priv __decimal_mul: fn(left: Decimal, right: Decimal) -> Decimal Never! {
     Decimal{negative: (left.negative != right.negative) && magnitude != 0, magnitude: magnitude, scale: places}
 }
 
-priv __decimal_div: fn(left: Decimal, right: Decimal) -> Fraction Never! {
+#Builtin.Role(.DecimalDiv) priv __decimal_div: fn(left: Decimal, right: Decimal) -> Fraction Never! {
     if right.magnitude == 0 -> panic("Decimal quotient does not fit Fraction, or divided by zero")
     __fraction_from_parts(decimal_signed(left) * exact_power(10, right.scale), decimal_signed(right) * exact_power(10, left.scale))
 }
 
-priv __decimal_compare: fn(left: Decimal, right: Decimal) -> Ordering Never! {
+#Builtin.Role(.DecimalCompare) priv __decimal_compare: fn(left: Decimal, right: Decimal) -> Ordering Never! {
     places: max(left.scale, right.scale)
     a: decimal_signed(left) * exact_power(10, places - left.scale)
     b: decimal_signed(right) * exact_power(10, places - right.scale)
@@ -40829,7 +40829,7 @@ priv __decimal_compare: fn(left: Decimal, right: Decimal) -> Ordering Never! {
     Ordering.Equal
 }
 
-priv __decimal_equal: fn(left: Decimal, right: Decimal) -> Bool Never! {
+#Builtin.Role(.DecimalEqual) priv __decimal_equal: fn(left: Decimal, right: Decimal) -> Bool Never! {
     __decimal_compare(left, right) == Ordering.Equal
 }
 
@@ -40889,20 +40889,20 @@ priv decimal_rounded: fn(value: Decimal, mode: Rounding) -> Decimal Never! {
     }
 }
 
-priv __decimal_from_fraction: fn(value: Fraction) -> Decimal Never! {
+#Builtin.Role(.DecimalFromFraction) priv __decimal_from_fraction: fn(value: Fraction) -> Decimal Never! {
     decimal_try_fraction(value) ?? panic("Fraction has a repeating expansion")
 }
 
-priv __decimal_to_fraction: fn(value: Decimal) -> Fraction Never! {
+#Builtin.Role(.DecimalToFraction) priv __decimal_to_fraction: fn(value: Decimal) -> Fraction Never! {
     __fraction_from_parts(decimal_signed(value), exact_power(10, value.scale))
 }
 
 // `Int{x}` of a Decimal (and `Int.from_decimal`), as for a Fraction.
-priv __decimal_to_int: fn(value: Decimal) -> Int Never! {
+#Builtin.Role(.DecimalToInt) priv __decimal_to_int: fn(value: Decimal) -> Int Never! {
     __decimal_try_int(value) ?? core.math.__numeric_stop(int_exact_stop_text("Decimal"))
 }
 
-priv __decimal_try_int: fn(value: Decimal) -> Int? Never! {
+#Builtin.Role(.DecimalTryInt) priv __decimal_try_int: fn(value: Decimal) -> Int? Never! {
     denominator: exact_power(10, value.scale)
     if value.magnitude %% denominator != 0 -> return None
     Val(decimal_signed(value) /% denominator)
@@ -40918,7 +40918,7 @@ exact_bit_length: fn(value: Int) -> Int Never! {
     length
 }
 
-priv __decimal_to_float: fn(value: Decimal) -> Float Never! {
+#Builtin.Role(.DecimalToFloat) priv __decimal_to_float: fn(value: Decimal) -> Float Never! {
     if value.magnitude == 0 -> return 0.0
     // The one Decimal-to-Float conversion (math functions, `to_float`): the
     // nearest Float, ties to even. A magnitude and power of ten that are both
@@ -41241,7 +41241,7 @@ impl F32.Div(Complex32) {
     }
 }
 
-priv __complex_abs: fn(value: Complex) -> Float Never! { complex_core_abs(complex_to_core(value)) }
+#Builtin.Role(.ComplexAbs) priv __complex_abs: fn(value: Complex) -> Float Never! { complex_core_abs(complex_to_core(value)) }
 
 // How a SIMD lane reduction combines a vector's lanes into one value.
 ReduceOp: enum {
@@ -44776,7 +44776,7 @@ Transform2: struct<T, From, To> {
     assert_eq(to_bits(Float.from_f32(F32{-0.0})), to_bits(-0.0))
 }
 
-priv __decimal_to_string: fn(value: Decimal) -> String Never! {
+#Builtin.Role(.DecimalToString) priv __decimal_to_string: fn(value: Decimal) -> String Never! {
     digits: "{value.magnitude}".bytes()
     bytes := [U8]{}
     if value.negative -> bytes.push(U8{45})
@@ -44795,7 +44795,7 @@ priv __decimal_to_string: fn(value: Decimal) -> String Never! {
     String.from_bytes(bytes) ?? panic("Decimal digits are not UTF-8")
 }
 
-priv __fraction_to_string: fn(value: Fraction) -> String Never! {
+#Builtin.Role(.FractionToString) priv __fraction_to_string: fn(value: Fraction) -> String Never! {
     if decimal_try_fraction(value) == .Val(decimal) -> return __decimal_to_string(decimal)
     "{value.num_value}/{value.den_value}"
 }
@@ -45290,27 +45290,27 @@ priv complex_core_atan: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T
     ComplexCore<T>{real: w.imaginary, imaginary: w.real.cx_neg()}
 }
 
-priv __complex_from_parts: fn(real: Float, imaginary: Float) -> Complex Never! {
+#Builtin.Role(.ComplexFromParts) priv __complex_from_parts: fn(real: Float, imaginary: Float) -> Complex Never! {
     Complex{real: real, imaginary: imaginary}
 }
 
-priv __complex_add: fn(left: Complex, right: Complex) -> Complex Never! {
+#Builtin.Role(.ComplexAdd) priv __complex_add: fn(left: Complex, right: Complex) -> Complex Never! {
     complex_from_core(complex_core_add(complex_to_core(left), complex_to_core(right)))
 }
 
-priv __complex_sub: fn(left: Complex, right: Complex) -> Complex Never! {
+#Builtin.Role(.ComplexSub) priv __complex_sub: fn(left: Complex, right: Complex) -> Complex Never! {
     complex_from_core(complex_core_sub(complex_to_core(left), complex_to_core(right)))
 }
 
-priv __complex_mul: fn(left: Complex, right: Complex) -> Complex Never! {
+#Builtin.Role(.ComplexMul) priv __complex_mul: fn(left: Complex, right: Complex) -> Complex Never! {
     complex_from_core(complex_core_mul(complex_to_core(left), complex_to_core(right)))
 }
 
-priv __complex_div: fn(left: Complex, right: Complex) -> Complex Never! {
+#Builtin.Role(.ComplexDiv) priv __complex_div: fn(left: Complex, right: Complex) -> Complex Never! {
     complex_from_core(complex_core_div(complex_to_core(left), complex_to_core(right)))
 }
 
-priv __complex_to_string: fn(value: Complex) -> String Never! {
+#Builtin.Role(.ComplexToString) priv __complex_to_string: fn(value: Complex) -> String Never! {
     complex_core_to_string(complex_to_core(value))
 }
 

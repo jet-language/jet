@@ -549,20 +549,25 @@ reach_test_load_pair: fn(source: String, math: String, text: String) -> JetDrive
 }
 
 #Test("a routed module's precise family loads with its type, and an imaginary literal reaches Complex") {
-    text: "plain: fn() -> Int Never! {{ 1 }}\n\nFraction: struct {{\n    n: Int,\n}}\n\n__fraction_add: fn(a: Fraction) -> Fraction Never! {{ a }}\n\nComplex: struct {{\n    re: Float,\n}}\n\n__complex_add: fn(a: Complex) -> Complex Never! {{ a }}\n"
-    // The two family members are core.math registry members this text owns.
-    owned: [String]{"__fraction_add", "__complex_add"}
-    plain: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", owned, text)
+    // A family member is a function filling a precise operation's role.
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\nFraction: struct {{\n    n: Int,\n}}\n\n#Builtin.Role(.FractionAdd) fraction_sum: fn(a: Fraction) -> Fraction Never! {{ a }}\n\nComplex: struct {{\n    re: Float,\n}}\n\n#Builtin.Role(.ComplexAdd) complex_sum: fn(a: Complex) -> Complex Never! {{ a }}\n"
+    plain: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_types(plain, "core.math"), [String]{})
     assert_eq(reach_test_functions(plain, "core.math"), [String]{"plain"})
     // Any Fraction value runs the Fraction family.
-    fraction: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\nkeep: fn(f: m.Fraction) -> m.Fraction {{ f }}\n", "core.math", owned, text)
+    fraction: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\nkeep: fn(f: m.Fraction) -> m.Fraction {{ f }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_types(fraction, "core.math"), [String]{"Fraction"})
-    assert_eq(reach_test_functions(fraction, "core.math"), [String]{"plain", "__fraction_add"})
+    assert_eq(reach_test_functions(fraction, "core.math"), [String]{"plain", "fraction_sum"})
     // `4i` is a Complex, as Sema types it.
-    imaginary: reach_test_load_module("use m: core.math\nrun: fn() {{ print(4i) }}\n", "core.math", owned, text)
+    imaginary: reach_test_load_module("use m: core.math\nrun: fn() {{ print(4i) }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_types(imaginary, "core.math"), [String]{"Complex"})
-    assert_eq(reach_test_functions(imaginary, "core.math"), [String]{"__complex_add"})
+    assert_eq(reach_test_functions(imaginary, "core.math"), [String]{"complex_sum"})
+}
+
+#Test("a routed module's role the IR runs itself stays loaded") {
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\nFraction: struct {{\n    n: Int,\n}}\n\n#Builtin.Role(.FractionFromParts) fraction_parts: fn(a: Int) -> Fraction Never! {{ Fraction{{n: a}} }}\n"
+    plain: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_functions(plain, "core.math"), [String]{"plain", "fraction_parts"})
 }
 
 #Test("what a Core module's dropped tests spell reaches nothing") {

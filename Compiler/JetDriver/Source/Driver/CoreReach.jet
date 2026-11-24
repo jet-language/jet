@@ -10,8 +10,9 @@
 // same rule, so a program that only measures UTF-8 never loads the case
 // tables. In a routed module (JET_DRIVER_ROUTED_MODULES) types are reached by
 // name too, and so is each inherent method once its type is; an F32-width
-// source is reached by its member's name, and a precise family member by its
-// type's name as well. Every other declaration (traits, marked functions, the
+// source is reached by its member's name, and a precise family member (the
+// function that fills a Decimal, Fraction or Complex operation's role) by
+// its type's name as well. Every other declaration (traits, marked functions, the
 // functions the compiler calls by a name no program spells, and the whole of
 // a module the compiler demands) is reached with its module. What a Core
 // module's source demands of another (a `.abs` receiver of core.math, a
@@ -80,8 +81,9 @@ use {
         lex_generated_threads,
         token_synthetic,
     ]
+    jet_ir.[ir_precise_source_role]
     jet_parser.[parse_lexed_with_source_threads]
-    jet_sema.[sema_call_core_f32_source, sema_precise_family_owner, sema_source_word_byte]
+    jet_sema.[SEMA_CORE_ROLE_MARKER, sema_call_core_f32_source, sema_precise_role_operation, sema_source_word_byte]
 }
 
 // What one parsed unit's source spells (jet_driver_unit_words). `words`
@@ -366,7 +368,7 @@ jet_driver_reach_hold: fn(lexed: ^Lexed, cutover_module: String, owned_members: 
         dropped: function && core_module_has_member(cutover_module, name) && !owned_members.contains(name)
         holds: if {
             dropped || part_members.contains(name) -> false
-            function -> !(jet_driver_core_route(routes, name) && jet_driver_core_family_owner(routes, name) == None)
+            function -> !jet_driver_core_route(routes, name)
             constant -> !jet_driver_core_route(routes, name)
             else -> false
         }
@@ -400,21 +402,25 @@ jet_driver_reach_hold: fn(lexed: ^Lexed, cutover_module: String, owned_members: 
 // A top-level function a program may leave unreached, or a method of a lazy
 // type: no marker, metadata or compiler role.
 jet_driver_reach_lazy_func: fn(value: Func) -> Bool Never! {
-    value.markers.len() == 0 && value.meta == None && value.external_type == None && value.head_pattern == None && !value.is_job && value.every == None && value.kernel == None && value.web_marker == None && value.inline_foreign == None && !value.compiler_generated
+    value.markers.len() == 0 && jet_driver_reach_lazy_shape(value)
+}
+
+// Whether a function has no metadata or compiler role apart from its markers.
+jet_driver_reach_lazy_shape: fn(value: Func) -> Bool Never! {
+    value.meta == None && value.external_type == None && value.head_pattern == None && !value.is_job && value.every == None && value.kernel == None && value.web_marker == None && value.inline_foreign == None && !value.compiler_generated
 }
 
 // The span of a top-level function or constant that a program may leave
-// unreached: one with no marker, metadata or compiler role. A compiler route
-// (jet_driver_core_route) other than a precise family member
-// (jet_driver_core_family_owner) and a private part's owned member, reached
-// through its owner's name, are always reached.
+// unreached: one with no marker, metadata or compiler role, or a precise
+// family member (jet_driver_core_family_owner). A compiler route
+// (jet_driver_core_route) and a private part's owned member, reached through
+// its owner's name, are always reached.
 jet_driver_reach_lazy_span: fn(item: Item, part_members: [String], routes: JetDriverCoreRoutes) -> Span? Never! {
     if item == {
         .Func(value) -> {
-            if !jet_driver_reach_lazy_func(value) -> return None
-            if (jet_driver_core_route(routes, value.name) && jet_driver_core_family_owner(routes, value.name) == None) || part_members.contains(value.name) {
-                return None
-            }
+            if !jet_driver_reach_lazy_shape(value) || part_members.contains(value.name) -> return None
+            if jet_driver_core_family_owner(routes, value) != None -> return Val(value.span)
+            if value.markers.len() > 0 || jet_driver_core_route(routes, value.name) -> return None
             Val(value.span)
         }
         .Const(value) -> {
@@ -552,7 +558,7 @@ jet_driver_reach_lazy_type: fn(item: Item) -> Span? Never! {
 // A unit's lazy declarations, one row each, in the shape of
 // JetDriverUnitWords. In a routed module an F32-width source (`__sin_f32`)
 // is reached by its member's name (`sin`), a precise family member
-// (`__fraction_add`) by its type's name or its own (two rows with one span),
+// (jet_driver_core_family_owner) by its type's name or its own (two rows with one span),
 // a lazy type by its name, each of its inherent methods outside
 // JET_DRIVER_MEMBER_ROUTES by its name once the type is, and a top-level
 // `impl` for one of its lazy types (`impl Float.Mul(Vec2)`) with that type.
@@ -632,17 +638,13 @@ jet_driver_reach_type_rows: fn(rows: ^JetDriverReachRows, types: ^[String:Bool],
     jet_driver_reach_block_rows(rows, position, owner, name, blocks)
 }
 
-// The rows of a top-level declaration reached by name: a precise family
-// member is reached by its type's name and its own, an F32-width source by
-// its member's, and any other declaration by its own name.
+// The rows of a top-level declaration reached by name: an F32-width source
+// is reached by its member's name and any other declaration by its own.
 jet_driver_reach_name_rows: fn(rows: ^JetDriverReachRows, declaration: JetDriverReachDeclaration, routes: JetDriverCoreRoutes) Never! {
     name: declaration.name
     position: declaration.position
     span: declaration.span
-    if jet_driver_core_family_owner(routes, name) == .Val(owner) {
-        jet_driver_reach_row(rows, position, "", -1, owner, false, span)
-        jet_driver_reach_row(rows, position, "", -1, name, false, span)
-    } else if jet_driver_core_f32_member(routes, name) == .Val(member) {
+    if jet_driver_core_f32_member(routes, name) == .Val(member) {
         jet_driver_reach_row(rows, position, "", -1, member, false, span)
     } else {
         jet_driver_reach_row(rows, position, "", -1, name, true, span)
@@ -667,6 +669,14 @@ jet_driver_reach_rows: fn(items: [Item], held: [JetDriverReachDeclaration], part
             next
         }
         span: jet_driver_reach_lazy_span(item, part_members, routes) ?? next
+        if item == .Func(value) {
+            // A precise family member is reached by its type's name and its own.
+            if jet_driver_core_family_owner(routes, value) == .Val(owner) {
+                jet_driver_reach_row(rows, position, "", -1, owner, false, span)
+                jet_driver_reach_row(rows, position, "", -1, value.name, false, span)
+                next
+            }
+        }
         jet_driver_reach_name_rows(rows, JetDriverReachDeclaration{position: position, name: jet_driver_reach_item_name(item), name_start: span.start, span: span, constant: item == .Const(_)}, routes)
     }
     types := [String:Bool]{}
@@ -721,7 +731,7 @@ jet_driver_reach_rows: fn(items: [Item], held: [JetDriverReachDeclaration], part
 // `__measurement_sqrt`). The CoreReach tests hold each `"__…"` literal the
 // compiler spells right after one of these module names to a route. Only a
 // routed module's types and methods are lazy, and only its F32-width
-// sources and precise families are reached by another name.
+// sources and precise family members are reached by another name.
 JET_DRIVER_ROUTED_MODULES: [String]{"core.math"}
 
 // What the compiler calls in one Core module without the program spelling it.
@@ -734,7 +744,8 @@ JET_DRIVER_ROUTED_MODULES: [String]{"core.math"}
 // routed, every `__` name. A routed module's F32-width source is called by
 // its member's spelling (jet_driver_core_f32_member). A builder intrinsic or
 // a BUILTIN_METHOD_ROWS CoreSource helper needs no route: the role marker it
-// carries keeps it (jet_driver_reach_lazy_func).
+// carries keeps it (jet_driver_reach_lazy_func). A precise family member's
+// role marker leaves it lazy (jet_driver_core_family_owner).
 JetDriverCoreRoutes: struct {
     module_name: String,
     routed: Bool,
@@ -787,12 +798,26 @@ jet_driver_core_f32_member: fn(routes: JetDriverCoreRoutes, name: String) -> Str
     Val(member)
 }
 
-// The type whose precise family (sema_precise_family_owner) holds `name` in
-// a routed module: `Fraction` for `__fraction_try_int`, which a checked
-// Fraction operation calls (sema_precise_bind).
-jet_driver_core_family_owner: fn(routes: JetDriverCoreRoutes, name: String) -> String? Never! {
-    if !routes.routed -> return None
-    sema_precise_family_owner(name)
+// The precise type whose operation function `value` of a routed module runs:
+// its one marker is the jet_builtins role (sema_precise_role_operation) of
+// that operation, which a checked operation on a value of the type runs
+// (sema_precise_bind), so it is reached by the type's name (`Fraction` for
+// the filler of FractionTryInt). None for any other function, and for the
+// role of an operation JetIR runs itself (ir_precise_source_role), which an
+// Int `/` reaches with no Fraction spelled.
+jet_driver_core_family_owner: fn(routes: JetDriverCoreRoutes, value: Func) -> String? Never! {
+    if !routes.routed || value.markers.len() != 1 -> return None
+    marker: value.markers[0]
+    if marker.negated || marker.args.len() != 1 -> return None
+    if marker.name != SEMA_CORE_ROLE_MARKER && !marker.name.ends_with(".{SEMA_CORE_ROLE_MARKER}") -> return None
+    if marker.args[0] == .Expr(expression) {
+        if expression == .EnumLit(_, variant, _, _, _, _, _) {
+            role: sema_precise_role_operation("{variant}") ?? return None
+            if ir_precise_source_role(role.owner, role.operation) != None -> return None
+            return Val(role.owner)
+        }
+    }
+    None
 }
 
 jet_driver_reach_item_name: fn(item: Item) -> String Never! {
