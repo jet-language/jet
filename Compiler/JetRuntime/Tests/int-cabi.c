@@ -171,8 +171,8 @@ static void hazard_fixture(void) {
 #include "int-corpus.inc"
 
 int main(int argc, char **argv) {
-    // Independent stopped processes allow byte-for-byte Rust/native report
-    // and exit-status comparisons without narrowing the success corpus.
+    // Independent stopped processes allow byte-for-byte report and
+    // exit-status comparisons without narrowing the success corpus.
     const unsigned char *file = (const unsigned char *)"int-cabi.jet";
     if (argc == 2) {
         if (!strcmp(argv[1], "zero")) jet_int_div(1, 0, file, 12, 7);

@@ -1,6 +1,6 @@
 // Link real composed Jet runtime exports; checked-heap alloc and free
-// observers see every allocation. Events.jet against the Rust meaning
-// (JetEventScope/JetSubscription/JetEvent): registration order, priority, once,
+// observers see every allocation. Events.jet's scopes, subscriptions and
+// events: registration order, priority, once,
 // cancellation, scope teardown, nested emit, the last Event handle dropped
 // mid-emit, and every provider allocation freed exactly once.
 #include <assert.h>

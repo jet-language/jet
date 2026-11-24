@@ -1,5 +1,5 @@
 // Link this witness against the composed native Jet runtime object, never a C
-// replacement for its hooks. The Rust original is the reference contract.
+// replacement for its hooks.
 #define _GNU_SOURCE
 #include <assert.h>
 #include <pthread.h>

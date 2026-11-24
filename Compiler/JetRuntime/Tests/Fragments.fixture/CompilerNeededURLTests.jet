@@ -1,5 +1,5 @@
-// Native E4 route fixtures, derived directly. No Rust oracle execution. The
-// driver calls this export once; return zero means all fixtures passed.
+// Native E4 route fixtures, derived directly. The driver calls this export
+// once; return zero means all fixtures passed.
 compiler_url_fixture_success: fn(input: I64, scheme: I64, host: I64, path: I64, query: I64, raw: I64, port: I64, explicit: Bool) -> Bool {
     slots: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(slots, I64{771})
@@ -79,7 +79,7 @@ compiler_url_fixture_error: fn(input: I64, expected: I64) -> Bool {
     if !compiler_url_fixture_success(rt_static_text("http://:@HOST:0/#"), rt_static_text("http"), rt_static_text("host"), rt_static_text("/"), rt_static_text(""), rt_static_text("http://:@host:0/#"), I64{0}, true) {
         return I64{8}
     }
-    // Rust does not reject a nonnumeric unbracketed :suffix as a port.
+    // A nonnumeric unbracketed :suffix is not rejected as a port.
     if !compiler_url_fixture_success(rt_static_text("x://host:abc/p"), rt_static_text("x"), rt_static_text("host:abc"), rt_static_text("/p"), rt_static_text(""), rt_static_text("x://host:abc/p"), I64{-1}, false) {
         return I64{9}
     }
