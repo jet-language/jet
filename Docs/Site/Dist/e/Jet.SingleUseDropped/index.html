@@ -43,7 +43,7 @@
   3 |     loop h in hs -&gt; total += h.join() ?? 0
     |               ^^
  Why: Each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list
- Fix: Take the list: `hs: &amp;&amp;[Task&lt;Int&gt;]`, or collect the work in a canonical `task.all` or `task.group` block
+ Fix: Take the list: `hs: ^^[Task&lt;Int&gt;]`, or collect the work in a canonical `task.all` or `task.group` block
 More: jet-lang.dev/e/Jet.ReadOnlyValueNotOwned
 
 Error: Jet.SingleUseLent: `handles` still owes `consume`, so it can&#39;t be shared
@@ -52,7 +52,7 @@ Error: Jet.SingleUseLent: `handles` still owes `consume`, so it can&#39;t be sha
   9 |     print(drain(handles))
     |                 ^^^^^^^
  Why: This value&#39;s type is `#SingleUse`, so it can only be moved (handed over for good); `drain` would borrow or copy it, and a `#SingleUse` value has no second use to give
- Fix: Give it away with `handles.move()`, or rework `drain` so it takes ownership with a `&amp;&amp;` parameter
+ Fix: Give it away with `handles.move()`, or rework `drain` so it takes ownership with a `^^` parameter
 More: jet-lang.dev/e/Jet.SingleUseLent
 
 Error: Jet.SingleUseDropped: `handles` still owes `consume`
@@ -61,7 +61,7 @@ Error: Jet.SingleUseDropped: `handles` still owes `consume`
   8 |     handles: [task 1, task 2]
     |     ^^^^^^^
  Why: This value&#39;s type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: pass it to a `&amp;&amp;` parameter, or `return` it — or write `#Unsafe(&quot;reason&quot;) { consume(handles) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `^^` parameter, or `return` it — or write `#Unsafe(&quot;reason&quot;) { consume(handles) }` to discard it deliberately
 More: jet-lang.dev/e/Jet.SingleUseDropped
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
