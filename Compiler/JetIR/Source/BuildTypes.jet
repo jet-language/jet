@@ -546,6 +546,10 @@ ir_value_type_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, tid: TypeID, laying
     if args.len() == 0 || name == "Plugin" {
         if ir_handle_row(m, p, ty, name) == .Val(handle) -> return Val(handle)
     }
+    // Compile-time code holds a TypeId as its handle (ir_type_handle).
+    if ir_type_handle(p, ty) {
+        return Val(ir_intern_type(m, "typeid:handle", ir_layout(IRTypeKind.Word, tid, 8, 8, IRClass.Integer, false, 64, "")))
+    }
     row: ir_type_def(p, name) ?? {
         if args.len() == 0 && ir_host_value_name(name) {
             return Val(ir_intern_type(m, "host:{name}", ir_layout(IRTypeKind.Word, tid, 8, 8, IRClass.Integer, false, 64, "")))
@@ -818,10 +822,11 @@ ir_handle_row_laid: fn(m: ^IRModule, p: IRProgram, ty: Type, name: String) -> In
 }
 
 // Whether a value of `ty` holds a compiler value host word (ir_host_value_name)
-// anywhere: itself, or an element, payload or member of it.
+// or a TypeId handle (ir_type_handle) anywhere: itself, or an element, payload
+// or member of it.
 ir_host_value_held: fn(p: IRProgram, ty: Type) -> Bool Never! {
     if ir_untag(ty) == {
-        .Named(name) -> return ir_host_value_name(name) && ir_type_def(p, name) == None
+        .Named(name) -> return (ir_host_value_name(name) && ir_type_def(p, name) == None) || ir_type_handle(p, ty)
         .List(element) -> return ir_host_value_held(p, element)
         .Option(inner) -> return ir_host_value_held(p, inner)
         .Result(ok, err) -> return ir_host_value_held(p, ok) || ir_host_value_held(p, err)
@@ -842,6 +847,39 @@ ir_host_value_row: fn(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
         if ir_host_value_name(name) && ir_type_def(p, name) == None -> return Val(name.copy())
     }
     None
+}
+
+// Whether `ty` is a TypeId that compile-time code (IRProgram.comptime_values,
+// IRProgram.invocation) holds as a handle: a word, the address of the type's
+// row in the call's type table, which the compiler writes into the child
+// (JetEval Host.jet) once per distinct TypeId. A field read projects that
+// row (ir_type_handle_row), so a TypeId passes, copies and is held as one
+// word, however many types its bindings and signature name. The running
+// program keeps the TypeId record. A program's own `TypeId` is spelled by its
+// key, never the bare name the compiler-owned row holds.
+ir_type_handle: fn(p: IRProgram, ty: Type) -> Bool Never! {
+    if !p.comptime_values && !p.invocation -> return false
+    if ir_untag(ty) == .Named(name) {
+        if name != "TypeId" -> return false
+        row: ir_type_def(p, name) ?? return false
+        return p.types[row].key == name
+    }
+    false
+}
+
+// Whether type row `row` is a TypeId handle (ir_type_handle): its members are
+// laid out at the address its word holds, as an aggregate's are at its
+// storage, and the row there is never written.
+ir_type_handle_row: fn(m: IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if m.types[row].kind != .Word || (!p.comptime_values && !p.invocation) -> return false
+    ir_type_handle(p, ir_row_ty(m, p, row))
+}
+
+// Whether the members of the value in `slot` are laid out at its word: an
+// aggregate's storage, or the row a TypeId handle names (ir_type_handle_row).
+ir_members_at: fn(m: IRModule, p: IRProgram, b: IRBuilder, slot: Int) -> Bool Never! {
+    row: b.f.slot_type[slot]
+    m.types[row].kind == .Aggregate || ir_type_handle_row(m, p, row)
 }
 
 // Method `member` (`Owner.method`) of a compiler value, or `compiler.query`
@@ -901,7 +939,8 @@ ir_host_constant: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, key: S
 }
 
 // Compile-time literal `value` of compiler value type row `row`
-// (ir_host_value_row), such as a prepared local's read: the module keeps it
+// (ir_host_value_row) or TypeId handle row (ir_type_handle_row), such as a
+// prepared local's read or a written `TypeId{Point}`: the module keeps it
 // (IRModule.host_literals) under its function and the slot of its key text,
 // which no other literal of the function shares, and the compiler answers it
 // from there (ir_host_route kind 6).
@@ -2570,8 +2609,9 @@ ir_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: TBinaryOp, overflow
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     site: if line > 0 -> line else -> b.line
     if ir_compare_op(op) {
-        // An inline Option compares as an Option (ir_equal, ir_order_sign).
-        scalar: kind == .Int || (kind == .Word && !ir_option_inline(m, b.f.slot_type[left])) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String
+        // An inline Option compares as an Option (ir_equal, ir_order_sign),
+        // and a TypeId handle as a TypeId (ir_equal_into).
+        scalar: kind == .Int || (kind == .Word && !ir_option_inline(m, b.f.slot_type[left]) && !ir_type_handle_row(m, p, b.f.slot_type[left])) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String
         if !scalar {
             if op == .Eq || op == .Ne {
                 same: ir_equal(m, p, b, left, right, span)
@@ -3229,8 +3269,8 @@ ir_equal_into: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, left: Int
     ty: ir_untag(ir_row_ty(m, p, row))
     if left < 0 || right < 0 -> return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
     // An inline Option compares its Int payloads (the Option arm): two big
-    // Ints of one value are two words.
-    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
+    // Ints of one value are two words. A TypeId handle compares as a TypeId.
+    if kind == .Int || (kind == .Word && !ir_option_inline(m, row) && !ir_type_handle(p, ty)) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
         equal: ir_bool_op(m, b, IROp.Eq, left, right)
         return ir_exit_unless(m, b, equal, differ)
     }
@@ -3317,7 +3357,7 @@ ir_equal_into: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, left: Int
         ir_exit_unless(m, b, same_length, differ)
         left_data: ir_list_data(m, b, left)
         right_data: ir_list_data(m, b, right)
-        if ir_bytes_equal_row(m, element_row, stride) {
+        if ir_bytes_equal_row(m, element_row, stride) && !ir_type_handle_row(m, p, element_row) {
             word_row: ir_word_row(m)
             width: ir_word_const(m, b, stride)
             bytes: ir_word_op(m, b, IROp.Mul, length, width)
@@ -3379,6 +3419,20 @@ ir_equal_into: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, left: Int
         ir_emit(b.f, IROp.Call, equal, helper, start, 2, b.line)
         ir_stop_check(m, b)
         return ir_exit_unless(m, b, equal, differ)
+    }
+    // Two TypeId handles (ir_type_handle) of one table are one row exactly
+    // when the TypeIds are equal (JetEval Host.jet writes each distinct one
+    // once); rows of two calls' tables compare member by member, as the
+    // record does.
+    if kind == .Word && ir_type_handle(p, ty) {
+        members: ir_struct_members(m, p, definition_row, [Type]{}) ?? return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
+        same: ir_bool_op(m, b, IROp.Eq, left, right)
+        apart: ir_temp_like(m, b, same)
+        ir_emit(b.f, IROp.Not, apart, same, -1, -1, b.line)
+        ir_open_if(b.f, apart, b.line)
+        ir_equal_members(m, p, b, members, left, right, differ, false, span)
+        ir_end(b.f, b.line)
+        return
     }
     if p.types[definition_row].kind == .Struct(_, _) {
         members: ir_struct_members(m, p, definition_row, ir_type_args(ty)) ?? return ir_fail(b, span, "comparison of {ir_type_name(ty)}")

@@ -1556,7 +1556,7 @@ ir_field_destructure: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, init: Int, b
     if ir_failed(b) {
         return
     }
-    if subject < 0 || ir_kind_of(m, b, subject) != .Aggregate {
+    if subject < 0 || !ir_members_at(m, p, b, subject) {
         return ir_fail(b, span, "destructure of {ir_type_name(init_ty)}")
     }
     subject_row: b.f.slot_type[subject]
@@ -2498,7 +2498,7 @@ ir_expr_slot_in: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, expression: Int, 
             if base >= 0 && ir_host_value_row(m, p, b.f.slot_type[base]) != None {
                 return ir_host_field(m, p, b, expression_ty, base, field.name, span)
             }
-            if base < 0 || ir_kind_of(m, b, base) != .Aggregate {
+            if base < 0 || !ir_members_at(m, p, b, base) {
                 return ir_fail_slot(b, span, "field of {ir_type_name(receiver_type)}")
             }
             member: ir_member_of(m, p, b, base, field.name) ?? return ir_fail_slot(b, span, "field {field.name} of {ir_type_name(receiver_type)}")
@@ -5615,7 +5615,7 @@ ir_pattern_test: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: Int, sha
         }
         .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) -> return ir_carrier_shape_test(m, p, b, subject, shape, span)
         .Struct(fields, _) -> {
-            if ir_kind_of(m, b, subject) != .Aggregate {
+            if !ir_members_at(m, p, b, subject) {
                 shown: ir_row_ty(m, p, b.f.slot_type[subject])
                 return ir_fail_slot(b, span, "struct pattern on {shown}")
             }
@@ -7588,7 +7588,7 @@ ir_optional_field: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, base:
     present: ir_option_is_some(m, b, subject)
     ir_open_if(b.f, present, b.line)
     unwrapped: ir_option_payload(m, b, subject, inner_row)
-    if unwrapped < 0 || ir_kind_of(m, b, unwrapped) != .Aggregate {
+    if unwrapped < 0 || !ir_members_at(m, p, b, unwrapped) {
         return ir_fail_slot(b, span, "optional field {member} of {ir_type_name(inner_ty)}")
     }
     field: ir_member_of(m, p, b, unwrapped, member) ?? return ir_fail_slot(b, span, "optional field {member} of {ir_type_name(inner_ty)}")
@@ -9153,7 +9153,9 @@ ir_function_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, key: 
 ir_comptime: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: TComptimeValue, span: Span) -> Int Never! {
     if value == .Unit -> return -1
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    if ir_host_value_row(m, p, row) != None -> return ir_host_literal(m, b, row, value)
+    if ir_host_value_row(m, p, row) != None || ir_type_handle_row(m, p, row) {
+        return ir_host_literal(m, b, row, value)
+    }
     if value == {
         .Int(number) -> return ir_int_constant(m, b, row, number)
         .Bool(flag) -> return ir_int_constant(m, b, row, if flag -> 1 else -> 0)
