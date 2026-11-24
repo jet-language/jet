@@ -11,8 +11,9 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
     range: lsp_range_from_json(lsp_param(params, "range") ?? return lsp_response(id, "null")) ?? return lsp_error_response(id, -32602, "range is malformed")
     bytes: view.doc.text.bytes()
     table: lsp_line_table_bytes(bytes)
-    start: lsp_checked_offset_bytes(table, bytes, range.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
-    end: lsp_checked_offset_bytes(table, bytes, range.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
+    // A range past the document's end covers the rest of the document.
+    start: lsp_clamped_offset_bytes(table, bytes, range.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
+    end: lsp_clamped_offset_bytes(table, bytes, range.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
     diagnostics := [Diagnostic]{}
     loop diagnostic in lsp_retain_document_diagnostics(view.checked.diagnostics, view.doc.path, view.doc.text) {
         span: diagnostic.span ?? next
