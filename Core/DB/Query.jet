@@ -188,7 +188,7 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
 #Test("SQL row queries bind after parsing and keep typed rows") {
     rows: __query_test_sales()
     selected: __query_sql<QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE cents > ? ORDER BY item", values: [DBValue]{.Int(50)}}) ?? panic("sql")
-    assert_eq(core.data.__query_plan<QueryTestSale>(selected), [String]{"scan", "sql"})
+    assert_eq(selected.plan(), [String]{"scan", "sql"})
     got: core.data.__query_collect<QueryTestSale>(selected) ?? panic("collect")
     assert_eq(got.len(), 3)
     assert_eq(got[0].item, "apps")
