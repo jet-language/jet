@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113400,
+    "rev": 113425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50,7 +50,7 @@
         "radar:G2"
       ]
     },
-    "completionCursor": "2026-11-22T21:05:37.335Z",
+    "completionCursor": "2026-11-24T00:29:26.132Z",
     "dayStart": {
       "date": "2026-11-24",
       "openCards": 290,
@@ -33279,6 +33279,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "D-BUILD-TARGETFACTS1=A implementation ruling: the ballot example's `.{ settings: .{ … } }` is not a registered Jet spelling (not in Spellings.jet; the parser rejects it), so it was a mistake in the ballot text, not a ratified surface. c7-c9 are built with Jet's existing inferred literal `options: { settings: { max_particles: 2000 } }`, with no new syntax."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Owner ratified D-BUILD-TARGETFACTS1=A, D-DERIV-READ1=A and D-DEBUG-PREP1=A (2026-11-24). Assigned: #5007 c7-c9 and #6848 c8 to G1Facts; #5007 c10-c11 and #6772 c15 to G1Generation-2 after the #6846 c12 family-Self fix."
+        },
+        {
           "at": "2026-11-23",
           "by": "Orchestrator",
           "text": "D-BUILD-TARGETFACTS1 posted for the owner after Main's adversarial review (Docs/Audits/2026-11-23-d-build-targetfacts1-review.md) and a second pass on the revision: A = per-output options: settings (root package only; options: itself built under c7) and two fact families, #build.target.* the triple baseline and #build.cpu.* the selected CPU defaulting to it (Apple arm64 cache line 64 to 128 named as a cost); B the merge; C a setter; D today. c6-c9 wait on it."
@@ -33323,56 +33333,57 @@
         {
           "n": 1,
           "text": "A prep block and a build action can each read the host OS and architecture separately from the target facts ($build), through one registered surface tied to a decision ID.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-16T00:50:20.018Z"
+          "evidence": "cases build_host_facts_sit_beside_the_target_facts: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (prep and a bwrap build action read host OS and arch apart from $build).",
+          "at": "2026-11-24T00:21:12.524Z"
         },
         {
           "n": 2,
           "text": "A cross-compiling example shows the host and target facts differing, and the rule for per-OS Core calls during preparation is stated and tested.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-16T00:50:22.867Z"
+          "evidence": "cases build_host_facts_sit_beside_the_target_facts: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (a web cross build on a Linux host prints target Web and host Linux; the per-OS Core rule in prep is stated in the spec and follows the host).",
+          "at": "2026-11-24T00:21:13.594Z"
         },
         {
           "n": 3,
           "text": "Host facts read during preparation are part of the cache key.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-16T00:50:25.522Z"
+          "evidence": "dev 4529a137b8: jet test Compiler/JetCLI/Tests/HostFacts.jet on the batch 12 compiler, host_facts_enter_the_package_key PASS (259 passed; the 2 failures are fmt_is_lossless_*, unrelated); cases host_fact_reads_are_recorded_gates_a_policy_can_forbid PASS.",
+          "at": "2026-11-24T00:25:38.812Z"
         },
         {
           "n": 4,
           "text": "Registered host facts sit beside $build for prep and build-time code, and a per-OS Core call made during prep follows the host; proved by a golden example that cross-compiles and prints both host and target facts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T18:55:48.537Z"
+          "evidence": "golden Examples/Metaprogramming/BuildTime/HostAndTargetFacts: PASS on o0, o1 and o2 on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
+          "at": "2026-11-24T00:21:14.711Z"
         },
         {
           "n": 5,
           "text": "A project or package policy can reject host facts: any read of them then fails the build with a registered diagnostic (what/why/fix and a UI snapshot) naming the reading line, so a hermetic build can be enforced; every host-fact read is recorded in the build record for audit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T18:55:49.350Z"
+          "evidence": "cases host_fact_reads_are_recorded_gates_a_policy_can_forbid: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (the host_facts policy refuses each read with E3415 GateDeniedByPolicy naming the reading line; each read is in the build record). E3415 is registered with what/why/fix and UI snapshots (Tests/UI/check_removal_gate_forbidden_by_package.stderr and CheckRemovalGateForbiddenByOrganization).",
+          "at": "2026-11-24T00:21:15.775Z"
         },
         {
           "n": 6,
           "text": "(was #6126) An owner ballot on the surface is ratified: how fn build sets a settings value per target, and the names of the target hardware facts (word size, pointer size, cache-line size, CPU features).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:16:11.087Z"
+          "evidence": "D-BUILD-TARGETFACTS1 ratified A by the owner on 2026-11-24.",
+          "at": "2026-11-24T00:25:05.099Z",
+          "closure": "decision"
         },
         {
           "n": 7,
@@ -33432,8 +33443,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:30.927Z",
-      "updated": "2026-11-24T00:20:33.885Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-24T00:27:57.913Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c0gmf0y4",
@@ -40438,7 +40449,7 @@
       "track": "epoch",
       "epoch": "G1",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Audit: write a table of every Odin array, matrix, quaternion, simd and soa feature (cite the Odin docs/spec) against Jet today, with each row PASS, PARTIAL or MISSING and a probe program. Send the table to Main before implementing; any new spelling needs an owner ballot (I7).\n2. Implement every MISSING and PARTIAL row whose spelling is already ratified or needs no new syntax: element-wise operators on [T#N] numeric fixed arrays (array op array, array op scalar), swizzles on [T#N] with N<=4 plus rgba on every swizzleable type, driven by a type fact instead of hard-coded Core names.\n3. One runtime meaning on all tiers (I9), with lowering to SIMD where the backend has it.\n4. Examples/features/lowlevel goldens; UI snapshots for length mismatch, a non-numeric element and an invalid lane.\n5. Pair each new performance-relevant surface with a two-program perf cell against the plain loop (AGENTS.md performance gate).",
       "checkSteps": null,
@@ -40608,11 +40619,12 @@
         {
           "n": 17,
           "text": "D-ARRAY-ZIPCOLUMNS1 is posted only after a built Columns<T> candidate (owning from_columns/into_columns and a borrowed view_columns, built as a scratch prototype) strictly beats the plain spelling it replaces in the paired two-program cell, on both wall time and peak memory and with identical output (AGENTS.md performance gate: ratifying a performance surface waits until it strictly beats the plain form). The plain baseline is the best hand-written form measured by the 2026-11-18 review (a record built in place with .move(): 0.488 s, 254 MB), and the comparison runs after #6923 c11 removes the general returned-record penalty. Proof: the paired cell in the canonical perf manifest reports Jet-candidate/plain below 1.00 on both metrics, and the ballot cites the numbers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T03:15:07.480Z"
+          "evidence": "The owner rejected D-ARRAY-ZIPCOLUMNS1 on the board. c17 only governed when that ballot could be posted (after a Columns<T> prototype beat the plain form), so nothing is left to gate. Any future Columns join/split surface needs a new ballot with its own paired cell.",
+          "at": "2026-11-24T00:26:33.224Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [],
@@ -40620,9 +40632,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-22T21:07:47.162Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 17
+      "updated": "2026-11-24T00:26:41.603Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 17,
+      "completedAt": "2026-11-24T00:26:41.603Z"
     },
     {
       "id": "c05l3kpi",
@@ -52213,6 +52226,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Owner ratified D-BUILD-TARGETFACTS1=A, D-DERIV-READ1=A and D-DEBUG-PREP1=A (2026-11-24). Assigned: #5007 c7-c9 and #6848 c8 to G1Facts; #5007 c10-c11 and #6772 c15 to G1Generation-2 after the #6846 c12 family-Self fix."
+        },
+        {
           "at": "2026-11-21",
           "by": "Main",
           "text": "Correction to the c13 evidence: across the 50 runs the 1-minute load ran from 25.4 to 246.4, with a median of 138.4, not 138 to 246. Every run was still during the p435 full suite."
@@ -52370,7 +52388,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-23T23:20:28.628Z",
+      "updated": "2026-11-24T00:24:57.172Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -54791,11 +54809,11 @@
         {
           "n": 31,
           "text": "A trait method with its own type parameter either works or gets one registered refusal at its declaration; today the call site gets E0119 and the declaration a misleading \"There's no type called T\" (x9, D-PRIM-ANY1 review 3, p203, $JET_SCRATCH_ROOT/lanes/AnyReview3/probes). Proof: a UI snapshot of the declaration and the call.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T04:40:52.748Z"
+          "evidence": "cases trait_method_with_its_own_type_parameter_runs_on_every_tier: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8) (landed as 6839-c31 on dev 4529a137b8).",
+          "at": "2026-11-24T00:21:17.953Z"
         },
         {
           "n": 32,
@@ -54827,11 +54845,15 @@
         {
           "n": 35,
           "text": "A qualified dotted member arm (.geo.Point(p)) and a nested one (.outer.inner.Point(p)) each get a diagnostic that names what they looked for, or work if D-PRIM-ANY1 adopts that spelling. Today .geo.Point(p) is E0107 'Nothing named  exists here' with an empty name (p204, probe n03b_qualified_member_dotted_arm.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes), and .outer.inner.Point(p) is a parse error, E0003 at '->' (p206, probe v11_nested_module_arm.jet in $JET_SCRATCH_ROOT/lanes/AnyReview5/probes); O0/O1/O2 alike. Proof: a UI snapshot per form.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T05:55:09.568Z"
+          "evidence": "dev c6e19ff135: cases qualified_member_arms_match_on_every_tier PASS on the batch 12 compiler (.geo.Point, .outer.inner.Point and .geo2.Point arms work; the feature works, so the proof is a works-case).",
+          "at": "2026-11-24T00:28:45.248Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "qualified_member_arms_match_on_every_tier"
+          }
         },
         {
           "n": 36,
@@ -55084,11 +55106,11 @@
         {
           "n": 63,
           "text": "Every commit ratchet passes on dev: each tool `jet Tools/Agent/Land.jet ratchets` lists runs clean with --check. On dev 34026ae5ff eight fail: SyntaxDictionaryRows (SyntaxDictionaryData.jet differs), LexicalLedger, SurfaceBudget (markers 79 over the ceiling 73, keywords and lexical-forms under it), UnsafeRatchet (stale baseline: Host.jet, WsRoutes.jet, Client.jet rows), HotText (33 rows of hot-text.list name no function), CoreCoverage, TestShards (Compiler/package.jet declares no suite profiles) and CollationTable (SHA256SUMS does not pin allkeys_CLDR.txt). Proof: all 24 checks exit 0 on dev.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-23T22:18:39.329Z"
+          "evidence": "jet Tools/Agent/Land.jet ratchets: all 24 ratchets pass --check on dev 4529a137b8 with the batch 12 compiler (CoreCoverage via core-coverage-a, math, rest2 and rest2-fix).",
+          "at": "2026-11-24T00:21:16.846Z"
         }
       ],
       "refs": [],
@@ -55096,7 +55118,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-23T22:18:39.329Z",
+      "updated": "2026-11-24T00:28:45.248Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 63
     },
@@ -56966,7 +56988,7 @@
       "track": "epoch",
       "epoch": "G1",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -57163,11 +57185,11 @@
         {
           "n": 12,
           "text": "Each number family has one generic definition that compile-time code expands to the needed widths (D-CORE-NUMFAMILY1=A), replacing one hand-written type per size. Proof: `jet test Compiler --profile golden --filter Basics/` on O0, O1 and O2, and `git grep` shows one family definition per number kind in Core. The frozen #4570 holds the original item.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:03:29.264Z"
+          "evidence": "dev d5f753f52c (number families landed in batch 12, 00815005b8): jet test Compiler --profile golden --filter Basics/ on the batch 12 compiler gives PASS 165 / FAIL 0, 55 on each of o0, o1 and o2. git grep -nE '^(Signed|Unsigned|IEEE)' -- Core gives one family definition per kind (Core/Prelude/Prelude.jet:21, 25, 29), with I8..F64 as alias lines at :37-46.",
+          "at": "2026-11-24T00:39:49.455Z"
         },
         {
           "n": 13,
@@ -57201,9 +57223,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-23T23:02:23.106Z",
+      "updated": "2026-11-24T00:39:52.213Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 14
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-24T00:39:52.213Z"
     },
     {
       "id": "c0n7zpy3",
@@ -57223,6 +57246,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Owner ratified D-BUILD-TARGETFACTS1=A, D-DERIV-READ1=A and D-DEBUG-PREP1=A (2026-11-24). Assigned: #5007 c7-c9 and #6848 c8 to G1Facts; #5007 c10-c11 and #6772 c15 to G1Generation-2 after the #6846 c12 family-Self fix."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -57303,11 +57331,11 @@
         {
           "n": 6,
           "text": "The borrow checker stays a prover, never a fact plane: the registry has no ownership plane row, and the ownership sigil surface stays as ratified (D-FACT-OWN1=A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:43.897Z",
+          "evidence": "jet test Compiler --profile cases --filter fact_registry_no_ownership_plane: PASS on the batch 12 compiler (landed on dev, 40 commits ending 00815005b8; dev 4529a137b8).",
+          "at": "2026-11-24T00:21:11.460Z",
           "proof": {
             "profile": "cases",
             "filter": "fact_registry_no_ownership_plane"
@@ -57316,11 +57344,11 @@
         {
           "n": 7,
           "text": "One current version and fact-shape reference links its history, and `compiler-proof checking` reads the version from emitted output, not from a hard-coded number. Proof: `jet test Tests/Guards --filter fact_shape_version_from_output`. (was #3186 c11)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:40.805Z"
+          "evidence": "dev 4529a137b8: jet test Tests/Guards on the batch 12 compiler, fact_shape_version_from_output PASS (fact_registry_one_table and fact_flow_one_store also PASS).",
+          "at": "2026-11-24T00:28:28.958Z"
         },
         {
           "n": 8,
@@ -57341,7 +57369,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:43.897Z",
-      "updated": "2026-11-24T00:21:09.843Z",
+      "updated": "2026-11-24T00:28:28.958Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     },
@@ -57458,6 +57486,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Owner, on D-RULE-TYPEARGS1 (q0xapii2 and a follow-up instruction): the redraft must be a systemic feature, not a fix for E2521. TypeId becomes a struct holding a handle into one interned type table, the only store of type facts, made by one interning function. TypeInfo, FieldInfo/ParamInfo types, CallableSignature, generic_bindings, associated, setting and capture types all read through it. It serves check time, check rules and marker bodies in the comptime child, fn build, the retained runtime type catalog and Dyn/Any identity, and the CLI/LSP the same way; other type-descriptor tables are folded in or justified with numbers. The sibling compiler-issued handles (SnapshotId, DeclarationHandle, ScopeId, NodeId, ValueHandle) follow the same pattern. The redraft needs an exact cutover list and a measured per-call cost. TypeIDSlice3 is redrafting; DerivReadReview reviews it again. The rule is now in AGENTS.md (Adversarial design review) and orchestration/references/ballot-review.md."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -57770,7 +57803,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T00:15:09.625Z",
+      "updated": "2026-11-24T00:33:41.496Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 21
     },
@@ -133887,12 +133920,12 @@
       "explainer": "Think of a train ticket that only prints the route name, such as \"Screen to World\". The inspector can read it, but can't check that your connecting ticket starts where this one ends without reading the printed words. The recommendation prints the start and end stations as their own fields on every ticket. The inspector compares two fields, and nobody has to phone the office.",
       "story": "Mia writes a units library and wants `meters.add(seconds)` refused while building, with her own error. Her rule gets both argument types as TypeIds. It can print `Quantity<Meters>`, but it can't ask which unit `Quantity` was given without cutting the printed name apart, so she gives up and checks at run time.",
       "inWild": "// C++26 (P2996): template_arguments_of(^^Transform<Screen, World>)[1] reflects World.\n// C#: a Roslyn analyzer reads INamedTypeSymbol.TypeArguments on each argument's type.\n// Scala 3: a macro reads TypeRepr.typeArgs and compares types with =:=.\n// Zig: @typeInfo lists a generic struct's fields and declarations, not its arguments.\n// Rust and Swift: macros see syntax; Rust checks type arguments with trait bounds.",
-      "detail": "What a rule holds today. CheckRules.jet builds each heard call's `CompilerCall` record in the compiler. Each argument's `type` is a TypeId made by sema_comptime_reflection_type_id_in (Reflection.jet:1519-1576, CheckRules.jet:275). A specialization's TypeId already names its arguments as text (`Pair<Int, String>`). The compiler holds the specialization as a structured type, and the parameter names come from the declaration, as TypeInfo's bindings do (Reflection.jet:2379-2389, 3066-3072).\n\nWhere rules run. A rule batch is compiled to x86-64 and run in the comptime child (JetEval IR/Native.jet). The driver runs every staged call of one rule in one batch, so the calls travel as one prepared list (CheckRules.jet:1-10). D-CORE-CHECK1=A set a budget of 1 µs per rule call, to be proved by rerunning that ballot's probe. It is not measured yet.\n\nWhat reflection can do today. `T.reflect()` is resolved by sema for a name it can see while checking, and becomes a constant. Nothing maps a TypeId value to a TypeInfo: fn build's `b.program.types()` lists declarations, not specializations.\n\nThe channel the child already has. Compile-time code reaches the compiler through host routes (JetIR BuildTypes.jet:919-960). Kind 1 answers compiler value methods and `core.compiler` queries (JetEval IR/Host.jet:204-225). This review timed kind 1 routes in a `#run` loop: 43 µs per call with a FieldInfo receiver, and 229 µs when a TypeInfo crosses. The comptime child audit's 5.49 to 10.63 µs is a synthetic two-process benchmark, so it is a floor.\n\nWhat the declaration already says. Core writes `then: fn<Next>(self, next: Transform<To, Next>)`, so a chain whose middle spaces differ already fails to type-check. The Geometry checker only words that failure as E2521 before inference runs (Expressions.jet:5001-5008).\n\nThe program each option is judged by. Core's `Transform.then` and `Transform2.then` refuse a chain whose middle spaces differ. They raise E2521 at `then`, keeping the UI snapshot `Tests/UI/coordinate_transform_mismatch.stderr` byte for byte. Options A to C differ only in the line that reads the spaces.",
+      "detail": "Revised 2026-11-24 after the owner's question q0xapii2. Option A is now the interned-table design the owner proposed. Three things are still in progress before this ballot is final. They are the exact file:symbol cutover list with the copies it deletes, and the measured table size and per-call cost in the comptime child. The third is a fresh adversarial review of the revision; the review recorded below covers the earlier draft.\n\nWhat a rule holds today. CheckRules.jet builds each heard call's `CompilerCall` record in the compiler. Each argument's `type` is a TypeId made by sema_comptime_reflection_type_id_in (Reflection.jet:1519-1576, CheckRules.jet:275). A specialization's TypeId already names its arguments as text (`Pair<Int, String>`). The compiler holds the specialization as a structured type, and the parameter names come from the declaration, as TypeInfo's bindings do (Reflection.jet:2379-2389, 3066-3072).\n\nWhere rules run. A rule batch is compiled to x86-64 and run in the comptime child (JetEval IR/Native.jet). The driver runs every staged call of one rule in one batch, so the calls travel as one prepared list (CheckRules.jet:1-10). D-CORE-CHECK1=A set a budget of 1 µs per rule call, to be proved by rerunning that ballot's probe. It is not measured yet.\n\nWhat reflection can do today. `T.reflect()` is resolved by sema for a name it can see while checking, and becomes a constant. Nothing maps a TypeId value to a TypeInfo: fn build's `b.program.types()` lists declarations, not specializations.\n\nThe channel the child already has. Compile-time code reaches the compiler through host routes (JetIR BuildTypes.jet:919-960). Kind 1 answers compiler value methods and `core.compiler` queries (JetEval IR/Host.jet:204-225). This review timed kind 1 routes in a `#run` loop: 43 µs per call with a FieldInfo receiver, and 229 µs when a TypeInfo crosses. The comptime child audit's 5.49 to 10.63 µs is a synthetic two-process benchmark, so it is a floor.\n\nWhat the declaration already says. Core writes `then: fn<Next>(self, next: Transform<To, Next>)`, so a chain whose middle spaces differ already fails to type-check. The Geometry checker only words that failure as E2521 before inference runs (Expressions.jet:5001-5008).\n\nThe program each option is judged by. Core's `Transform.then` and `Transform2.then` refuse a chain whose middle spaces differ. They raise E2521 at `then`, keeping the UI snapshot `Tests/UI/coordinate_transform_mismatch.stderr` byte for byte. Options A to C differ only in the line that reads the spaces.",
       "options": [
         {
           "key": "A",
-          "name": "A TypeId carries its `generic_bindings`",
-          "detail": "TypeId gains `generic_bindings: [GenericBindingInfo]`, the record TypeInfo already lists: each type parameter's `name` and the `type` written for it, itself a TypeId. It is filled when the TypeId names a specialization of a declared generic struct or enum, and empty otherwise. A rule reads a type argument by walking the list, with no call out of the rule.\n\nThe fact moves rather than doubles. TypeInfo drops its own `generic_bindings` field, and `T.reflect().identity.generic_bindings` reads it. A function's `signature.generic_bindings` stays, since it binds the function's own parameters.\n\nOne meaning everywhere. A TypeId is the same record in rules, marker bodies, fn build, `#run` values and running code, so each reads the arguments the same way. Built-in shapes list nothing. `[T]`, `T?`, maps, tuples and results declare no parameter names, so a list's element type stays unread.\n\nBeginner path: `first.type.generic_bindings` on a receiver `first`. Expert path: the same list, nested through declared generic types.",
+          "name": "A TypeId is a handle into one interned type table",
+          "detail": "TypeId becomes a small struct holding a handle into one interned type table. That table is the only store of type facts in a compile. One interning function in sema makes every entry. The written-type builders, type_id_of, the derive templates and fn build's add_struct and find_type all call it. So two TypeIds of one type are the same handle within a compile, and their `identity` is equal across compiles and modules.\n\nEach entry holds a type's facts once: `identity`, the printed `name`, its kind, `generic_bindings` and a function type's `signature`. Each binding gives a parameter's `name` and the TypeId written for it. Every constructed type lists its arguments this way: declared generics, List, Option, Map, tuples, Result, function types and number-family sizes. Arguments are handles to other entries, so nothing is copied and recursion stops at the written type.\n\nEvery record that holds a type holds a TypeId into this table instead of a copy. That covers TypeInfo, FieldInfo, ParamInfo, CallableSignature, AssociatedTypeInfo, SettingInfo, CaptureInfo and the error-domain facts. TypeInfo reads its `generic_bindings` through its `identity` entry, so the fact has one home.\n\nEvery reader uses the same table. That covers `T.reflect()` at check time, check rules and marker bodies in the comptime child, and fn build's `b.program.types()`. It also covers the retained runtime type catalog, Dyn and Any type identity, `jet inspect` and the LSP. The comptime child receives the rows each batch reaches as static data, with no call back to the compiler. \n\nThe other compiler-issued handles follow the same pattern: SnapshotId, DeclarationHandle, ScopeId, NodeId and ValueHandle. Each is a struct holding a handle into one interned table per kind.",
           "technical": "Makers. Every place that makes a TypeId fills the list. That is sema_comptime_reflection_type_id and its siblings (Reflection.jet:1519-1576), the derive templates' partial records (Derives.jet:2198-2203), and fn build's `add_struct` and `find_type` (JetDriver BuildAdapter.jet). Names come from the declaration's type parameters, as sema_comptime_reflection_binding_infos does (Reflection.jet:2379-2389).\n\nReaders, in the same cutover. TypeInfo's row and field go (CoreRecordRows.jet:353, JetIR CompilerOwned.jet:134, Reflection.jet:2814 and 3099, FactReads.jet:275). TypeId's row, record and field table gain them (CoreRecordRows.jet:601-603, CompilerOwned.jet:186, FactReads.jet:655-660). Two examples, one fact-read case and the reference move to `identity.generic_bindings` (metaprogramming.md:686-695, 888-897).\n\nSize. A TypeId lists only its own arguments, never their fields, so its tree is the written type and is finite. Each nested record repeats its identity text, so a type nested d deep costs about d² characters.\n\nIn this review's probe, a TypeInfo shaped like Transform2 held 28 TypeIds, and A adds 21 binding records under them. Each heard `then` call ships 2 TypeIds today and about 8 records under A, as static data. No round trips.",
           "code": "ChainsSpaces: struct {\n    impl Marker {\n        sites: [.Method],\n\n        check: fn(self, call: CompilerCall) {\n            first: call.receiver ?? return\n            if call.args.len() != 1 -> return\n            next: call.args[0]\n            to: bound(first.type.generic_bindings, \"To\") ?? return\n            from: bound(next.type.generic_bindings, \"From\") ?? return\n            if to.identity != from.identity {\n                reject(SpacesDoNotChain{first: first.type.name, next: next.type.name, to: to.name, from: from.name}, at: call.name)\n            }\n        }\n    }\n}\n\nbound: fn(bindings: [GenericBindingInfo], name: String) -> TypeId? {\n    loop binding in bindings {\n        if binding.name == name -> return Val(binding.type)\n    }\n    None\n}"
         },
@@ -133952,11 +133985,12 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A specialization's arguments are part of the type a TypeId names, and the compiler finds them through the declaration it already reads for TypeInfo. Carrying them costs static data in each batch, not a round trip measured at 43 µs or more. It reads the same wherever a TypeId appears, as in C#, Scala and C++26.",
+        "why": "A type's arguments are part of the type, so they belong in the one record that names it. Interning stores each distinct type once, and every reader reads the same entry. That removes the first draft's duplication, uneven coverage and risk of divergent makers. The cost is static data per batch instead of a round trip measured at 43 µs or more.",
         "gains": [
           "A rule compares type arguments directly, so E2521 and any package's own type-argument checks move to Core and packages.",
-          "Every TypeId reads its arguments the same way in rules, marker bodies, fn build and running code, nested ones included.",
-          "No call leaves the rule, so a heard call's cost stays static data in its batch."
+          "One store and one maker: no copied type records, and TypeIds of one type can't disagree.",
+          "Every constructed type, built-in or declared, reads its arguments through the same field.",
+          "Every tier and tool reads the same entry, and the sibling handles share the same mechanism."
         ],
         "losses": [
           {
@@ -135622,6 +135656,19 @@
       "created": "2026-11-21T20:24:57.677Z",
       "answeredAt": "2026-11-21",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q0xapii2",
+      "cardId": "c0e6znz4",
+      "decisionId": "D-RULE-TYPEARGS1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Way too many downsides, engineer them away. Maybe typeid should be a strict that holds metadata about the types and includes a map that holds the other data like this",
+      "status": "answered",
+      "answer": "Agreed. The ballot is being redrafted to that design. TypeId becomes a small struct holding a handle into one interned type table (the map) that the compiler builds once per batch. Each entry holds a type's facts: identity, printed name, kind, its type arguments (as TypeIds), its signature for a function type, and the declaration's parameter names. That removes the review's downsides. (1) No duplication: each distinct type is stored once, and arguments are handles, so a heard call ships its TypeIds plus only the table rows it reaches. (2) Every constructed type lists its arguments the same way, so List, Option, Map, tuples and Result get them too, not just declared generics. (3) One interning function makes every TypeId, so the three makers can't disagree; parity holds by construction, not by a test. (4) TypeInfo.generic_bindings reads through the same table, so there is one home for the fact. The redraft gets a fresh adversarial review and a measured per-call cost before it comes back to you.",
+      "created": "2026-11-24T00:23:50.169Z",
+      "answeredAt": "2026-11-24",
+      "answeredBy": "Orchestrator"
     }
   ],
   "ideas": [
@@ -136454,6 +136501,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T00:39:52.213Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-24T00:39:49.455Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-24T00:33:41.496Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-RULE-TYPEARGS1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T00:30:53.592Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T00:29:26.132Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-24T00:29:26.132Z"
+    },
+    {
+      "at": "2026-11-24T00:28:45.248Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-24T00:28:44.349Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#35: proof: jet test Compiler --profile cases --filter qualified_member_arms_match_on_every_tier"
+    },
+    {
+      "at": "2026-11-24T00:28:28.958Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T00:27:57.913Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0rc40yf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T00:26:41.603Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c05gn07n",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-24T00:26:33.224Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c05gn07n",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-24T00:25:38.812Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-24T00:25:28.799Z",
+      "by": "Orchestrator",
+      "action": "question.answer",
+      "ref": "q0xapii2",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T00:25:05.099Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-24T00:24:57.172Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0gy2j07",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T00:24:56.279Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0n7zpy3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T00:24:55.370Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0rc40yf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T00:23:50.169Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0xapii2",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T00:21:17.953Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-24T00:21:16.846Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-24T00:21:15.775Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-24T00:21:14.711Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-24T00:21:13.594Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-24T00:21:12.524Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rc40yf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-24T00:21:11.460Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#6"
+    },
     {
       "at": "2026-11-24T00:21:09.843Z",
       "by": "Orchestrator",
