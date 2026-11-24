@@ -4408,12 +4408,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     if checked_result == None {
         checked_result = sema_core_body_loaded(program, host_hooks, module_index, owner_id, scopes.type_delta, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
     }
-    if input == None {
-        memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
-        input = Val(sema_check_method_input(job, module_index, memory_plan, memory_position, environment, program))
-    }
-    owned_input := input.move() ?? panic("a method body has no canonical preparation")
-    input = None
+    owned_input := input.move() ?? sema_check_method_input(job, module_index, memory_plan, sema_check_registered_memory_position(job, module_index, memory_plan, environment, program), environment, program)
     // Prepared diagnostics already include preparation, in the same order.
     if checked_result == None {
         loop diagnostic in owned_input.diagnostics -> diagnostics.push(diagnostic)
@@ -4428,13 +4423,8 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     // overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location: scopes.location_function.copy()
     sema_function_check_registered_location(job, module_index, memory_plan, owned_input.memory_position, environment, program, scopes)
-    if checked_result == None {
-        checked_result = Val(sema_function_check_registered(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, function_call_facts, function_comptime_requests, function_name_references))
-    } else {
-        sema_function_check_registered_name(job, module_index, memory_plan, owned_input.memory_position, environment, program)
-    }
-    checked := checked_result.move() ?? panic("a method body has no checked result")
-    checked_result = None
+    if checked_result != None -> sema_function_check_registered_name(job, module_index, memory_plan, owned_input.memory_position, environment, program)
+    checked := checked_result.move() ?? sema_function_check_registered(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
     // A captured method packet's diagnostics hold its preparation's, as a
     // prepared one's do.
     if capturing {

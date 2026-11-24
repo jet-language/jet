@@ -1541,9 +1541,8 @@ sema_comptime_walk_next_step: fn(walk: SemaComptimeWalk, preferred_slot: Int) ->
 }
 
 sema_comptime_walk_install_slot: fn(walk: SemaComptimeWalk, slot: Int, prepared: ^^SemaComptimeModuleScope?) {
-    ready := prepared.move()
-    if ready != None {
-        cell: Shared{ready.move() ?? panic("a prepared comptime walk scope vanished")}
+    if prepared.move() == .Val(scope) {
+        cell: Shared{scope}
         permit: walk.queue.guard_edit()
         permit.value.slots[slot] = Val(cell)
         permit.value.slot_state[slot] = 2

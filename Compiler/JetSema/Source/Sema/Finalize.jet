@@ -1492,11 +1492,10 @@ sema_finalize_side_checks: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGra
             }
             job += 1
         }
-        if whole == None {
+        if whole.move() == .Val(usage) -> cores.push(usage) else {
             module_context: context.move() ?? sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
-            whole = Val(sema_core_module_usage_assemble(owned.modules[module_index], module_context, modules[module_index].exact_int_reachable, collected))
+            cores.push(sema_core_module_usage_assemble(owned.modules[module_index], module_context, modules[module_index].exact_int_reachable, collected))
         }
-        cores.push(whole.move() ?? panic("a Core usage module left no usage"))
     }
     owned
 }

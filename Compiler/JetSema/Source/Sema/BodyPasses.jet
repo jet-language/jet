@@ -132,10 +132,7 @@ sema_check_body_demand_replay: fn(program: SemaProgramTables, body: SemaParallel
 }
 
 sema_check_module_function: fn(ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], count_work: Bool, functions_checked: ^Int) -> SemaFunctionResult {
-    prepared := sema_check_take_body(ready, ready_deltas, job_index, scopes.type_delta)
-    if prepared != None {
-        body := prepared.move() ?? panic("a prepared function packet disappeared")
-        prepared = None
+    if sema_check_take_body(ready, ready_deltas, job_index, scopes.type_delta) == .Val(body) {
         if !scopes_changed && !body.wanted_hooks {
             // Preserve the original method side effect.
             if function_kind != TFuncKind.TopLevel {
