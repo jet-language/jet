@@ -31,8 +31,7 @@
 //   shares            the trait whose impl on the same type binds the
 //                     associated types these methods use
 //   declared_in       the Core module whose declaration of the trait gives
-//                     its methods; the facts stay here. Until that module
-//                     declares the trait, the methods written here stand in
+//                     its methods; the facts stay here
 //
 // A `#Builtin.Role(.Add)` line right above a trait gives it a role, a case
 // of jet_builtins' RoleKind: `a + b` calls the trait that fills `Add`,
@@ -149,7 +148,7 @@ KeyBy: trait {
     key: fn(self) -> Key Never!,
 }
 
-// The value as its dynamic encoding tree.
+// The value as its dynamic encoding tree, declared in Core/Encoding/Encoding.jet.
 Encode: trait {
     local: Bool{true},
     bare_bound: Bool{true},
@@ -158,10 +157,10 @@ Encode: trait {
     auto_derive_family: String{"Codable"},
     through_elements: Bool{true},
     declared_in: String{"core.encoding"},
-    encode: fn(self) -> Dyn Never!,
 }
 
-// A value read back from its dynamic encoding tree.
+// A value read back from its dynamic encoding tree, declared in
+// Core/Encoding/Encoding.jet.
 Decode: trait {
     local: Bool{true},
     bare_bound: Bool{true},
@@ -170,7 +169,6 @@ Decode: trait {
     auto_derive_family: String{"Codable"},
     through_elements: Bool{true},
     declared_in: String{"core.encoding"},
-    decode: fn(tree: Dyn) -> Self [FieldError]!,
 }
 
 // `Target{value}` and `Target.from(value)`: a `Target` made from a `Source`.

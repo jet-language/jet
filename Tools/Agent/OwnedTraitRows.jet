@@ -14,14 +14,12 @@
 // `declared_in: String{"core.encoding"}` fact is declared by that Core
 // module: the stub here holds its facts, and its members are read from the
 // module's `Name: trait {` block (its source per Compiler/Prelude/Core.rows),
-// in the same shape. Until the module declares the trait, the members the
-// stub writes stand in; once it does, the stub may write none. A
-// `#Builtin.Role(.Add)` line right above a trait gives it a role: what `+`
-// or `[ ]` calls is the trait that fills the role. A role fills at most one
-// trait. The roles are the generated RoleKind block of jet_builtins
-// (Core/Builtins/Builtins.jet): one case per `#Builtin.Role(.X)` marker,
-// first those that start a Core function's declaration line (by path, then
-// line), then the traits' here. A role two markers give is refused.
+// in the same shape. A `#Builtin.Role(.Add)` line right above a trait gives
+// it a role: what `+` or `[ ]` calls is the trait that fills the role. A role
+// fills at most one trait. The roles are the generated RoleKind block of
+// jet_builtins (Core/Builtins/Builtins.jet): one case per `#Builtin.Role(.X)`
+// marker, first those that start a Core function's declaration line (by path,
+// then line), then the traits' here. A role two markers give is refused.
 // Usage: jet Tools/Agent/OwnedTraitRows.jet [--check|--write]
 // --check fails when a copy differs from what the declarations give it;
 // --write rewrites the copies.
@@ -634,24 +632,20 @@ check_table: fn(traits: [TraitSource]) OwnedTraitRowsError! {
 }
 
 // `source` with the members its Core module's declaration gives it
-// (`declared_in`), as read into `homes`; any other trait as it is, and so is
-// a `declared_in` trait its module does not declare yet whose stub writes the
-// members.
+// (`declared_in`), as read into `homes`; any other trait as it is.
 homed: fn(source: TraitSource, homes: [TraitSource]) -> TraitSource OwnedTraitRowsError! {
     module_name: fact(source, DECLARED_IN_COLUMN) ?? return Ok(source)
     context: "line {source.line}: trait {source.name}"
-    stub_members: source.methods.len() > 0 || source.associated.len() > 0 || source.laws.len() > 0
+    if source.methods.len() > 0 || source.associated.len() > 0 || source.laws.len() > 0 {
+        return Err(rows_fail("{context}: `declared_in` takes its members from the declaration in {module_name}"))
+    }
     loop home in homes {
         if home.name != source.name -> next
-        if stub_members {
-            return Err(rows_fail("{context}: `declared_in` takes its members from the declaration in {module_name}"))
-        }
         if home.facts.len() > 0 {
             return Err(rows_fail("{context}: the declaration in {module_name} writes a fact column; facts stay in {SOURCE_PATH}"))
         }
         return Ok(TraitSource{name: source.name, line: source.line, literal: source.literal, role: source.role, facts: source.facts, associated: home.associated, methods: home.methods, laws: home.laws})
     }
-    if stub_members -> return Ok(source)
     Err(rows_fail("{context}: {module_name} declares no `{source.name}: trait`"))
 }
 
@@ -777,8 +771,7 @@ core_source_path: fn(core_rows: String, module_name: String) -> String OwnedTrai
 }
 
 // The declaration of each trait of `source_text` with a `declared_in`, read
-// from that Core module's source. A trait the module does not declare yet
-// has none when its stub writes the members (homed).
+// from that Core module's source.
 home_traits: fn(source_text: String) -[FS]> [TraitSource] OwnedTraitRowsError! {
     traits: read_traits(source_text) ?? return Err(err)
     homes := [TraitSource]{}
@@ -790,9 +783,6 @@ home_traits: fn(source_text: String) -[FS]> [TraitSource] OwnedTraitRowsError! {
         module_text: read_text(path) ?? return Err(err)
         block: trait_block(module_text, source.name)
         if block == "" {
-            if source.methods.len() > 0 || source.associated.len() > 0 || source.laws.len() > 0 {
-                next
-            }
             return Err(rows_fail("trait {source.name}: {path} declares no `{source.name}: trait`"))
         }
         homes.push(home_trait(source, block, path) ?? return Err(err))
@@ -948,8 +938,6 @@ HOME_SOURCE: "// A value read back.\nDecode: trait {{\n    decode: fn(tree: Dyn)
     assert(rendered.contains("through_elements: false, declared_in: \"core.encoding\"}},"))
     assert(rows_error(HOMED_TRAIT).contains("core.encoding declares no `Decode: trait`"))
     assert(rows_error(HOMED_TRAIT.replace("}}\n", "    decode: fn(tree: Dyn) -> Self [FieldError]!,\n}}\n"), homes).contains("takes its members from the declaration in core.encoding"))
-    // Until core.encoding declares it, the stub's own members stand in.
-    assert_eq(rows_error(HOMED_TRAIT.replace("}}\n", "    decode: fn(tree: Dyn) -> Self [FieldError]!,\n}}\n")), "")
     assert(rows_error(HOMED_TRAIT, read_traits(block.replace("    decode", "    codec: Bool{{true}},\n    decode")) ?? panic(err.message)).contains("facts stay in"))
     assert_eq(trait_block(HOME_SOURCE, "Encode"), "")
     assert_eq(core_source_path("module core.encoding exports {{ Dyn }}\nsource_module core.encoding path Core/Encoding/Encoding.jet alias core_encoding\n", "core.encoding") ?? panic(err.message), "Core/Encoding/Encoding.jet")

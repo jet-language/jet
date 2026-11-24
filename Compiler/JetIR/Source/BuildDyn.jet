@@ -535,10 +535,11 @@ ir_dyn_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: 
     removed
 }
 
-// `tree.decode<T>()`: T's own Decode implementation, called with the tree; a
-// container, F32 or Dyn target's Core/Encoding/Encoding.jet decode helper
-// (ir_codec_decode_helper, ir_dyn_fixed_decode); else the runtime's canonical
-// scalar adapter jet_rt_codec_decode_<scalar>, which borrows the tree.
+// `tree.decode<T>()`: T's own Decode implementation, called with the tree
+// (F32 and Dyn have theirs in Core/Encoding/Encoding.jet); a container
+// target's Core/Encoding/Encoding.jet decode helper (ir_codec_decode_helper,
+// ir_dyn_fixed_decode); else the runtime's canonical scalar adapter
+// jet_rt_codec_decode_<scalar>, which borrows the tree.
 // `tree.decode_stored<T>()` (`stored`) calls T's derived `decode_stored`
 // when T has one, a struct with a `#Secret` field; any other target decodes
 // as `decode<T>()` does.
@@ -551,7 +552,7 @@ ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     if ir_codec_impl(p, concrete, "Decode", method) == .Val(found) {
         return ir_call(m, p, b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
-    if ir_codec_decode_helper(p, concrete) == .Val(helper) {
+    if ir_codec_decode_helper(concrete) == .Val(helper) {
         helper_key: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
         return ir_call(m, p, b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
@@ -703,9 +704,8 @@ ir_codec_arg: fn(value: Int) -> BodyCallArg Never! {
 
 // The Core decode helper for a target with no Decode implementation of its
 // own, and its type arguments: a List (a byte List also takes Bytes and
-// base64 Text), an Option, a String-keyed Map, an F32 and Dyn itself.
-ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> {name: String, type_args: [Type]}? Never! {
-    if ir_dyn_def(p, target) != None -> return Val({name: "__decode_dyn", type_args: [Type]{}})
+// base64 Text), an Option and a String-keyed Map.
+ir_codec_decode_helper: fn(target: Type) -> {name: String, type_args: [Type]}? Never! {
     if ir_untag(target) == {
         .List(element) -> {
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
@@ -718,8 +718,7 @@ ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> {name: String, type_ar
             if ir_untag(key) != Type.String -> return None
             Val({name: "__decode_map", type_args: [Type]{value.copy()}})
         }
-        .Float32 -> Val({name: "__decode_f32", type_args: [Type]{}})
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 

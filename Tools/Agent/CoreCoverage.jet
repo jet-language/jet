@@ -59,7 +59,8 @@ SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
 LITERAL_KINDS: [String]{"core.regex.Regex", "core.process.Sh", "core.db.SQL", "core.text.html.HTML"}
 
 // The built-in scalar types. A user names each unqualified, and a Core module's
-// `impl Float.Roundable` gives it methods in that module (core.math.Float).
+// `impl Float.Roundable` gives it methods in that module (core.math.Float). A
+// scalar that several modules give methods has them all (with_scalar_owners).
 BUILTIN_SCALARS: [String]{"Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Float", "F32", "Bool", "String", "Char"}
 
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
@@ -914,6 +915,34 @@ with_family_sizes: fn(table: Table, prelude: String) -> Table Never! {
 
 first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() }
 
+// `table` with each method a module gives a built-in scalar also the method of
+// that scalar in every other module that gives it methods. A user names the
+// scalar unqualified, so `F32{2.5}.rounded(mode)` calls core.math.F32.rounded
+// even when the scalar's alias is core.encoding.F32, which `impl F32.Decode`
+// gives `decode`.
+with_scalar_owners: fn(table: Table) -> Table Never! {
+    owners := [String:[String]]{}
+    loop (owner, _) in table.types {
+        scalar: owner.rpartition(".").tail
+        if !BUILTIN_SCALARS.contains(scalar) -> next
+        known := owners.get(scalar) ?? [String]{}
+        known.push(owner.copy())
+        owners[scalar.copy()] = known
+    }
+    out := table.copy()
+    loop (id, index) in table.by_id {
+        split: id.rpartition(".")
+        known: owners.get(split.head.rpartition(".").tail) ?? [String]{}
+        if !known.contains(split.head) -> next
+        loop owner in known {
+            if !out.by_id.has_key("{owner}.{split.tail}") {
+                out.by_id["{owner}.{split.tail}"] = index
+            }
+        }
+    }
+    out
+}
+
 // The aliases a program starts with: `core`, `app`, every prelude function and
 // type, every typed-literal kind and every built-in scalar a Core module gives
 // methods (a user names them unqualified) and, for a doctest, the names of its
@@ -1593,7 +1622,7 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     loop index in 0..<paths.len() {
         if paths[index] == "Core/Prelude/Prelude.jet" -> prelude = sources[index].copy()
     }
-    table: with_family_sizes(inventory, prelude)
+    table: with_scalar_owners(with_family_sizes(inventory, prelude))
     bare: bare_spellings(root)
     seen := [String:Bool]{}
     loop index in 0..<paths.len() {
@@ -2176,6 +2205,17 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 
 #Test("a built-in scalar that a Core impl gives methods is named unqualified") {
     assert_eq(ids("run: fn(x: Float) {{\n      Float{{2.5}}.rounded()\n      x.rounded()\n      Int{{2}}.rounded()\n    }}", ""), [String]{"core.math.Float.rounded", "core.math.Float.rounded"})
+}
+
+#Test("a built-in scalar that two modules give methods has the methods of both") {
+    rows := public_functions("Core/Encoding/Encoding.jet", "impl F32.Decode {{ decode: fn(tree: Dyn) -> F32 Never! {{ F32{{0.0}} }} }}")
+    rows.extend(public_functions("Core/Math/Math.jet", "impl F32.Roundable {{ rounded: fn(self) -> F32 Never! {{ self }} }}"))
+    table: with_scalar_owners(table_of(rows))
+    found := [String]{}
+    loop call in call_sites("run: fn(x: F32) {{\n      F32{{2.5}}.rounded()\n      x.rounded()\n      F32.decode(tree)\n    }}", table, initial_aliases(table, "")) {
+        found.push(table.ids[call.index].copy())
+    }
+    assert_eq(found, [String]{"core.math.F32.rounded", "core.encoding.F32.decode", "core.math.F32.rounded"})
 }
 
 #Test("a named argument binds nothing, so it cannot shadow a module alias") {
