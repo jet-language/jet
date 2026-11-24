@@ -2,7 +2,8 @@
 // tokens, completion and code actions.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[foundation_json_integer]
+    jet_foundation.[Span, TextEdit, foundation_json_integer]
+    jet_parser.[parser_marker_placement_edits]
     jet_lsp.[LSPServer, lsp_member]
 }
 
@@ -214,5 +215,65 @@ Pixel: struct {
         edit: lsp_test_field(action, "edit")
         assert(lsp_member(edit, "documentChanges") == None, "no documentChanges without the capability")
         assert(lsp_test_rows(lsp_test_field(lsp_test_field(edit, "changes"), uri)).len() == 1, "each action is one edit")
+    }
+}
+
+// The byte offset of an LSP position in ASCII `text`.
+lsp_test_offset: fn(text: String, position: Dyn) -> Int Never! {
+    wanted: lsp_test_int(position, "line")
+    offset := 0
+    row := 0
+    loop line in text.split("\n") {
+        if row == wanted -> break
+        offset += line.count_bytes() + 1
+        row += 1
+    }
+    offset + lsp_test_int(position, "character")
+}
+
+// `text` after `edits`, which are in source order and do not overlap.
+lsp_test_apply_edits: fn(text: String, edits: [TextEdit]) -> String Never! {
+    result := text
+    loop index in 0..<edits.len() {
+        edit: edits[edits.len() - 1 - index]
+        result = "{result.slice(0..<edit.span.start)}{edit.new_text}{result.slice(edit.span.end..<result.count_bytes())}"
+    }
+    result
+}
+
+#Test("marker_move_code_actions on a struct and a function write what jet fix --markers writes") {
+    server := lsp_test_server()
+    sources: [String]{
+        `#Codable
+Pixel: struct {
+    r: Int,
+    #Layout: c
+}
+`,
+        `#MustUse
+area: fn() -> Int {
+    1
+    #Inline: true
+}
+`,
+    }
+    loop index in 0..<sources.len() {
+        source: sources[index]
+        uri: "file:///w/split{index}.jet"
+        lsp_test_open(server, uri, source)
+        moves := [String:String]{}
+        loop action in lsp_test_action_rows(server, uri, 1) {
+            if lsp_test_text(action, "kind") != "refactor.rewrite" -> next
+            edits: lsp_test_rows(lsp_test_field(lsp_test_field(lsp_test_field(action, "edit"), "changes"), uri))
+            assert_eq(edits.len(), 1)
+            range: lsp_test_field(edits[0], "range")
+            span: Span{start: lsp_test_offset(source, lsp_test_field(range, "start")), end: lsp_test_offset(source, lsp_test_field(range, "end"))}
+            moves[lsp_test_text(action, "title")] = lsp_test_apply_edits(source, [TextEdit]{TextEdit{span: span, new_text: lsp_test_text(edits[0], "newText")}})
+        }
+        // `jet fix --markers above|inside` applies the parser's placements for
+        // every declaration; each source holds one.
+        assert_eq(moves.len(), 2)
+        assert_eq(moves["Write the markers above the declaration"], lsp_test_apply_edits(source, parser_marker_placement_edits(source.bytes(), false)))
+        assert_eq(moves["Write the markers inside the declaration's body"], lsp_test_apply_edits(source, parser_marker_placement_edits(source.bytes(), true)))
     }
 }
