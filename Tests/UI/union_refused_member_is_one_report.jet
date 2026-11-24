@@ -1,0 +1,19 @@
+// `fn(Int) -> Int` can't be a union member: E0363 at each signature, and
+// neither table over the refused union adds E0641 or E0307.
+with_else: fn(value: Int | fn(Int) -> Int) -> Int {
+    if value == {
+        .Int(n) -> n
+        else -> 0
+    }
+}
+
+without_else: fn(value: Int | fn(Int) -> Int) -> Int {
+    if value == {
+        .Int(n) -> n
+    }
+}
+
+run: fn() {
+    print(with_else(1))
+    print(without_else(1))
+}

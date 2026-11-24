@@ -61,6 +61,7 @@ use jet_foundation.[
     core_source_owns_type,
     type_name,
     type_union_member_tag,
+    type_unqualified_name,
     type_unqualified_nominals,
     name_text_hash,
     core_identity_in_module,
@@ -1477,8 +1478,9 @@ sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, t
 }
 
 // E0363 for a named case of the union `members` whose name another member
-// takes: a member type with that name, or an earlier case of that name with
-// another payload type. A case repeated with its payload is one case.
+// takes: a member type with that name or that last name segment (`Point`,
+// `geo.Point`), or an earlier case of that name with another payload type.
+// A case repeated with its payload is one case.
 sema_type_union_case_conflicts: fn(members: [Type], span: Span, diagnostics: &[Diagnostic]) {
     loop index in 0..<members.len() {
         if members[index] == .Case(name, payload) {
@@ -1488,7 +1490,7 @@ sema_type_union_case_conflicts: fn(members: [Type], span: Span, diagnostics: &[D
                     if other_index < index && other_name == name && !type_identity_equal(other_payload, payload) {
                         diagnostics.push(sema_error("E0363", span, "`{type_name(members[index])}` can't be a union member", "the named case `{name}` already carries `{type_name(other_payload)}` in this union", "give each named case one payload type"))
                     }
-                } else if type_union_member_tag(other) == name {
+                } else if type_union_member_tag(other) == name || type_unqualified_name(sema_pattern_base_name(other) ?? "") == name {
                     diagnostics.push(sema_error("E0363", span, "`{type_name(members[index])}` can't be a union member", "the named case `{name}` reuses the name of a member type of this union", "rename the case so no member type of the union has its name"))
                 }
             }

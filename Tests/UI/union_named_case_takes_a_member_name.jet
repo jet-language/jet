@@ -1,0 +1,31 @@
+// A named case may not take a member type's name, whether the member is
+// this module's `Point` or another module's `geo.Point`: E0363 once per
+// union, and the tables over it add no E0641 or E0305.
+geo: module {
+    Point: struct {
+        x: Int,
+    }
+}
+
+Point: struct {
+    x: Int,
+}
+
+local: fn(v: Point(Int) | Point) -> Int {
+    if v == {
+        .Point(n) -> n
+        else -> 0
+    }
+}
+
+qualified: fn(v: Point(Int) | geo.Point) -> Int {
+    if v == {
+        .Point(n) -> n
+        else -> 0
+    }
+}
+
+run: fn() {
+    print(local(Point{x: 1}))
+    print(qualified(geo.Point{x: 2}))
+}
