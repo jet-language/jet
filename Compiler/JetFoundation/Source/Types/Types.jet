@@ -1013,8 +1013,8 @@ symbol_builtin_types_checked: fn(view: [String], vocabulary: [String]) -> Int {
 // of every table, in this order, so a builtin's id is one constant in every
 // run and a reader with no table names it (symbol_builtin,
 // symbol_builtin_method). An owned trait a Core module declares
-// (OwnedTrait.declared_in) is keyed in that module, as its declaration would
-// mint it, and that declaration takes this id (sema_registration_named_symbol).
+// (OwnedTrait.declared_in) is keyed by that module's name, and that
+// declaration takes this id (sema_registration_trait_symbol).
 symbol_builtin_keys_build: fn() -> SymbolKeys Never! {
     keys := symbol_keys(0, SYMBOL_LOCAL_BOUND)
     loop index in 0..<OWNED_TRAITS.len() {
@@ -1058,13 +1058,13 @@ symbol_builtin: fn(kind: SymbolKind, name: String) -> SymbolID? Never! {
     None
 }
 
-// The id a declaration of `name` in the module `module_identity` takes when
+// The id a declaration of `name` in the module named `module_name` takes when
 // it is an owned trait that module declares (OwnedTrait.declared_in): the
-// builtin's, whose key is the one the declaration would mint.
-symbol_builtin_declared: fn(kind: SymbolKind, module_identity: String, name: String) -> SymbolID? Never! {
-    if kind != SymbolKind.Trait || module_identity == "" -> return None
+// builtin's, keyed by that module name.
+symbol_builtin_declared: fn(kind: SymbolKind, module_name: String, name: String) -> SymbolID? Never! {
+    if kind != SymbolKind.Trait || module_name == "" -> return None
     loop index in 0..<OWNED_TRAITS.len() {
-        if OWNED_TRAITS[index].name == name && OWNED_TRAITS[index].declared_in == module_identity {
+        if OWNED_TRAITS[index].name == name && OWNED_TRAITS[index].declared_in == module_name {
             return Val(SymbolID{id: checked(U32{1 + index}) ?? return None})
         }
     }
