@@ -1,0 +1,18 @@
+# `now()` and the Unix timestamps share one identity: `unix_ms(now())` is the
+# epoch milliseconds of the same instant, on O0, O1 and O2. `-A` acknowledges
+# the clock read, so stderr stays empty.
+fixture: TimeNowIdentity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run -A -O0 main.jet
+exit: 0
+stdout: = "unix_ms(now()) is the epoch milliseconds of the same instant\n"
+stderr: empty
+step o1: jet run -A -O1 main.jet
+exit: 0
+stdout: = "unix_ms(now()) is the epoch milliseconds of the same instant\n"
+stderr: empty
+step o2: jet run -A -O2 main.jet
+exit: 0
+stdout: = "unix_ms(now()) is the epoch milliseconds of the same instant\n"
+stderr: empty
