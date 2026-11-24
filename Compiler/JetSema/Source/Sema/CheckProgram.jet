@@ -11015,6 +11015,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
         comptime_scopes.slots[at].table.failure_carrier = Val(sema_failure_carrier(None))
         context := sema_check_context_init()
         context.host_hooks = comptime_scopes.host_hooks
+        context.compiler_records = sema_call_rule_batch_item(source)
         state := sema_ownership_state_init()
         tail_store := sema_statement_tail_store_init()
         // A module value's checks run inside its own owner frame, so its
