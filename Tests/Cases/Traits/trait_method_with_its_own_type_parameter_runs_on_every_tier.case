@@ -1,0 +1,16 @@
+# A trait method with its own type parameter (`tag: fn<T: Printable>(self,
+# extra: T)`) declares clean in the trait and in each implementation, and a
+# call on each implementing type infers T from its argument on every tier.
+fixture: TraitMethodWithItsOwnTypeParameterRunsOnEveryTier.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "point 1 with 3\npoint 1 with true\nlabel a with seven\nlabel a with -4\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "point 1 with 3\npoint 1 with true\nlabel a with seven\nlabel a with -4\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "point 1 with 3\npoint 1 with true\nlabel a with seven\nlabel a with -4\n"
