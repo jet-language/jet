@@ -56,9 +56,12 @@ lsp_read_waiting: fn(input: ^LSPInput) -[IO, Time.Wait]> {
 // Frames the input that has already arrived, without waiting for more.
 lsp_read_more: fn(input: ^LSPInput) -[IO, Time.Wait]> {
     loop !input.ended {
-        got: lsp_loop_term.take_within(LSP_READ_BYTES, 0ms) ?? return lsp_read_failed(input, err)
-        bytes: got ?? return
-        lsp_take_in(input, bytes)
+        if lsp_loop_term.take_within(LSP_READ_BYTES, 0ms) == {
+            .Ok(got) -> {
+                if got == .Val(bytes) -> lsp_take_in(input, bytes) else -> return
+            }
+            .Err(failure) -> return lsp_read_failed(input, failure)
+        }
     }
 }
 
