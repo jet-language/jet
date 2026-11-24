@@ -1,9 +1,11 @@
 // core-conformance: core.web.forms.WebFormTyped.set
 use api: core.web.forms
 
-filled: fn(form: ^api.WebFormTyped) -> Bool Never! { form.set("jet", "jet") == .Ok(_) }
+JetForm: struct { jet: String }
+
+filled: fn(form: ^api.WebFormTyped<JetForm>) -> Bool Never! { form.set(.jet, "jet") == .Ok(_) }
 
 run: fn() {
-    form := api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form := api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(filled(form))
 }

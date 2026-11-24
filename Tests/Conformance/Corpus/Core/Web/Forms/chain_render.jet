@@ -1,9 +1,11 @@
 // core-conformance: core.web.forms.WebFormValidationChain.render
 use api: core.web.forms
 
-shown: fn(chain: api.WebFormValidationChain) -> String Never! { chain.render() }
+JetForm: struct { jet: String }
+
+shown: fn(chain: api.WebFormValidationChain<JetForm>) -> String Never! { chain.render() }
 
 run: fn() {
-    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
-    print(shown(api.typed_validate_field(form, "jet", .Change, fn(value) {})))
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    print(shown(api.typed_validate_field(form, "jet", .Change, fn(value) {}) ?? panic("validate")))
 }

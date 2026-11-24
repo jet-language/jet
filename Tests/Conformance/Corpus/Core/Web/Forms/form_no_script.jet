@@ -1,9 +1,11 @@
 // core-conformance: core.web.forms.WebFormTyped.no_script
 use api: core.web.forms
 
-markup: fn(form: ^api.WebFormTyped) -> String Never! { form.no_script() ?? "refused" }
+JetForm: struct { jet: String }
+
+markup: fn(form: ^api.WebFormTyped<JetForm>) -> String Never! { form.no_script() ?? "refused" }
 
 run: fn() {
-    form := api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form := api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(markup(form))
 }

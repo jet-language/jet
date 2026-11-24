@@ -93,13 +93,16 @@ WebFormInput: struct {
     fields: [WebFormFieldSpec],
 }
 
-WebFormTyped: struct {
+// A form for the fields of `Model`, a `#Web.Form` struct: `web.form(Model,
+// action: …)` builds one. A method that names a field takes it as
+// `.name`, which the build checks against `Model`'s fields.
+WebFormTyped: struct<Model> {
     form: WebForm,
     action: String,
     input: WebFormInput,
 
-    // Sets field `name` to `value`, as the browser would.
-    set: fn(^self, name: String, value: String) WebFormError! { typed_set(self, name, value) }
+    // Sets `field` to `value`, as the browser would.
+    set: fn<T>(^self, field: FieldRef<Model, T>, value: String) WebFormError! { typed_set(self, field.name(), value) }
 
     // Runs `validator` on field `name`'s value and marks the field's result;
     // `timing` and `delay_ms` name when a browser would run it.
@@ -112,11 +115,17 @@ WebFormTyped: struct {
         typed_set_action(self, handler)
     }
 
-    // Leaves field `name`, which validates it.
-    blur: fn(^self, name: String) WebFormError! { typed_blur(self, name) }
+    // Runs `with` on `field`'s value and marks the field's result; `on`
+    // names when a browser would run it.
+    validate: fn<T, E>(self, field: FieldRef<Model, T>, on: WebFormValidationTiming, with: fn(String) E!) -> WebFormValidationChain<Model> (E | WebFormError)! {
+        typed_validate_field(self, field.name(), on, with)
+    }
 
-    // Moves the focus to field `name`.
-    focus: fn(^self, name: String) WebFormError! { typed_focus(self, name) }
+    // Leaves `field`, which validates it.
+    blur: fn<T>(^self, field: FieldRef<Model, T>) WebFormError! { typed_blur(self, field.name()) }
+
+    // Moves the focus to `field`.
+    focus: fn<T>(^self, field: FieldRef<Model, T>) WebFormError! { typed_focus(self, field.name()) }
 
     // Decodes a script-free POST body against the model and encodes it back.
     post: fn(self, body: String) -> String WebFormError! { typed_post(self, body) }
@@ -153,8 +162,8 @@ WebFormDecodedInput: struct {
     wire_values: [String:String],
 }
 
-WebFormValidationChain: struct {
-    form: WebFormTyped,
+WebFormValidationChain: struct<Model> {
+    form: WebFormTyped<Model>,
     field: String,
     valid: Bool,
 
@@ -162,13 +171,13 @@ WebFormValidationChain: struct {
     render: fn(self) -> String Never! { typed_validation_render(self) }
 }
 
-WebFormValidation: struct {
-    form: WebFormTyped,
+WebFormValidation: struct<Model> {
+    form: WebFormTyped<Model>,
     pending: Bool,
 }
 
-WebFormTypedSubmission: struct {
-    form: WebFormTyped,
+WebFormTypedSubmission: struct<Model> {
+    form: WebFormTyped<Model>,
     pending: Bool,
 }
 
@@ -344,19 +353,21 @@ input_replace: fn(input: WebFormInput, name: String, replacement: WebFormFieldSp
     Ok(out.copy())
 }
 
-typed: fn(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
+// A form for `Model`'s fields, which `input` describes. `web.form(Model,
+// action: …)` derives the input and calls this.
+typed: fn<Model>(input: WebFormInput, action: String) -> WebFormTyped<Model> WebFormError! {
     if action.len() == 0 || action.len() > C_MAX_FORM_TEXT || !fields_valid(input.fields) {
         return Err(WebFormError.Invalid)
     }
     states := states_from_specs(input.fields)
-    Ok(WebFormTyped{form: WebForm{action: action.copy(), method: "POST", fields: states, status: WebFormStatus.Idle, form_error: "", focused: ""}, action: action, input: input})
+    Ok(WebFormTyped<Model>{form: WebForm{action: action.copy(), method: "POST", fields: states, status: WebFormStatus.Idle, form_error: "", focused: ""}, action: action, input: input})
 }
 
-typed_set: fn(form: ^WebFormTyped, name: String, value: String) WebFormError! {
+typed_set: fn<Model>(form: ^WebFormTyped<Model>, name: String, value: String) WebFormError! {
     set(form.form, name, value)
 }
 
-typed_set_async_validator: fn<E>(form: ^WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (E | WebFormError)! {
+typed_set_async_validator: fn<Model, E>(form: ^WebFormTyped<Model>, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (E | WebFormError)! {
     _: timing.copy()
     _: delay_ms
     if name.len() == 0 -> return Err(WebFormError.Missing)
@@ -377,7 +388,7 @@ typed_set_async_validator: fn<E>(form: ^WebFormTyped, name: String, timing: WebF
     return Err(WebFormError.Missing)
 }
 
-typed_set_action: fn<E>(form: WebFormTyped, handler: fn(WebFormDecodedInput) -> String E!) E! {
+typed_set_action: fn<Model, E>(form: WebFormTyped<Model>, handler: fn(WebFormDecodedInput) -> String E!) E! {
     decoded: decoded_from_input(form)
     _: handler(decoded)
 }
@@ -408,22 +419,26 @@ action_form_error: fn(error: WebFormActionError, message: String) -> WebFormActi
     out
 }
 
-typed_blur: fn(form: ^WebFormTyped, name: String) WebFormError! { blur(form.form, name) }
+typed_blur: fn<Model>(form: ^WebFormTyped<Model>, name: String) WebFormError! { blur(form.form, name) }
 
-typed_validate: fn(form: ^WebFormTyped) WebFormError! { validate(form.form) }
+typed_validate: fn<Model>(form: ^WebFormTyped<Model>) WebFormError! { validate(form.form) }
 
-typed_validate_async: fn(form: WebFormTyped) -> WebFormValidation Never! {
+typed_validate_async: fn<Model>(form: WebFormTyped<Model>) -> WebFormValidation<Model> Never! {
     out := form.copy()
     out.form.status = WebFormStatus.Validating
-    WebFormValidation{form: out, pending: true}
+    WebFormValidation<Model>{form: out, pending: true}
 }
 
-typed_validate_field: fn<E>(form: WebFormTyped, name: String, timing: WebFormValidationTiming, validator: fn(String) E!) -> WebFormValidationChain E! {
+// Runs `validator` on field `name`'s value and marks the field's result. A
+// name the form has no field for is WebFormError.Missing.
+typed_validate_field: fn<Model, E>(form: WebFormTyped<Model>, name: String, timing: WebFormValidationTiming, validator: fn(String) E!) -> WebFormValidationChain<Model> (E | WebFormError)! {
     _: timing.copy()
     out := form.copy()
+    found := false
     valid := false
     loop i in 0..<out.form.fields.len() {
         if out.form.fields[i].name == name {
+            found = true
             out.form.fields[i].validating = true
             out.form.status = WebFormStatus.Validating
             validator(out.form.fields[i].value.copy())
@@ -435,48 +450,49 @@ typed_validate_field: fn<E>(form: WebFormTyped, name: String, timing: WebFormVal
             break
         }
     }
-    WebFormValidationChain{form: out, field: name, valid: valid}
+    if !found -> return Err(WebFormError.Missing)
+    WebFormValidationChain<Model>{form: out, field: name, valid: valid}
 }
 
-typed_validation_render: fn(chain: WebFormValidationChain) -> String Never! {
+typed_validation_render: fn<Model>(chain: WebFormValidationChain<Model>) -> String Never! {
     if chain.valid -> return "{chain.field}:valid"
     "{chain.field}:invalid"
 }
 
-typed_submit: fn(form: ^WebFormTyped) -> String WebFormError! {
+typed_submit: fn<Model>(form: ^WebFormTyped<Model>) -> String WebFormError! {
     if !apply_validation(form.form) -> return Err(WebFormError.Validation)
     form.form.status = WebFormStatus.Submitted
     typed_html(form)
 }
 
-typed_no_script: fn(form: ^WebFormTyped) -> String WebFormError! { typed_html(form) }
+typed_no_script: fn<Model>(form: ^WebFormTyped<Model>) -> String WebFormError! { typed_html(form) }
 
-typed_submit_async: fn(form: WebFormTyped) -> WebFormTypedSubmission Never! {
+typed_submit_async: fn<Model>(form: WebFormTyped<Model>) -> WebFormTypedSubmission<Model> Never! {
     out := form.copy()
     out.form.status = WebFormStatus.Submitting
-    WebFormTypedSubmission{form: out, pending: true}
+    WebFormTypedSubmission<Model>{form: out, pending: true}
 }
 
-typed_post: fn(form: WebFormTyped, body: String) -> String WebFormError! {
+typed_post: fn<Model>(form: WebFormTyped<Model>, body: String) -> String WebFormError! {
     if body.len() > C_MAX_FORM_BYTES || !valid_encoding(body) -> return Err(WebFormError.Invalid)
     decoded: decode_typed_input(form.input, body) ?? return Err(WebFormError.Invalid)
     encode_typed_input(form.input, decoded)
 }
 
-typed_decode_post: fn(form: WebFormTyped, body: String) -> WebFormDecodedInput WebFormError! {
+typed_decode_post: fn<Model>(form: WebFormTyped<Model>, body: String) -> WebFormDecodedInput WebFormError! {
     if body.len() > C_MAX_FORM_BYTES || !valid_encoding(body) -> return Err(WebFormError.Invalid)
     decode_typed_input(form.input, body) ?? return Err(WebFormError.Invalid)
 }
 
-typed_html: fn(form: WebFormTyped) -> String Never! { render_typed_html(form) }
+typed_html: fn<Model>(form: WebFormTyped<Model>) -> String Never! { render_typed_html(form) }
 
-typed_show: fn(form: WebFormTyped) -> String Never! { render_typed_html(form) }
+typed_show: fn<Model>(form: WebFormTyped<Model>) -> String Never! { render_typed_html(form) }
 
-typed_state: fn(form: WebFormTyped) -> String Never! { status_name(form.form.status) }
+typed_state: fn<Model>(form: WebFormTyped<Model>) -> String Never! { status_name(form.form.status) }
 
-typed_lifecycle: fn(form: WebFormTyped) -> WebFormLifecycle Never! { lifecycle(form.form.status) }
+typed_lifecycle: fn<Model>(form: WebFormTyped<Model>) -> WebFormLifecycle Never! { lifecycle(form.form.status) }
 
-typed_errors: fn(form: WebFormTyped) -> WebFormErrorState Never! {
+typed_errors: fn<Model>(form: WebFormTyped<Model>) -> WebFormErrorState Never! {
     names := [String:[String]]{}
     loop field in form.form.fields {
         if field.errors.len() > 0 -> _: names.add(field.name.copy(), field.errors.copy())
@@ -486,7 +502,7 @@ typed_errors: fn(form: WebFormTyped) -> WebFormErrorState Never! {
     WebFormErrorState{fields: names, form: form_errors}
 }
 
-typed_focus: fn(form: ^WebFormTyped, name: String) WebFormError! {
+typed_focus: fn<Model>(form: ^WebFormTyped<Model>, name: String) WebFormError! {
     if name.len() == 0 -> return Err(WebFormError.Missing)
     loop item in form.form.fields {
         if item.name == name {
@@ -497,41 +513,41 @@ typed_focus: fn(form: ^WebFormTyped, name: String) WebFormError! {
     return Err(WebFormError.Missing)
 }
 
-typed_cancel: fn(form: ^WebFormTyped) Never! {
+typed_cancel: fn<Model>(form: ^WebFormTyped<Model>) Never! {
     form.form.status = WebFormStatus.Idle
     form.form.form_error = ""
 }
 
-typed_select_field: fn(form: WebFormTyped, name: String) -> WebFormFieldState WebFormError! {
+typed_select_field: fn<Model>(form: WebFormTyped<Model>, name: String) -> WebFormFieldState WebFormError! {
     loop field in form.form.fields {
         if field.name == name -> return Ok(field.copy())
     }
     return Err(WebFormError.Missing)
 }
 
-typed_validation_wait: fn(validation: ^WebFormValidation) WebFormError! {
+typed_validation_wait: fn<Model>(validation: ^WebFormValidation<Model>) WebFormError! {
     result: validate(validation.form.form)
     validation.pending = false
     result
 }
 
-typed_validation_cancel: fn(validation: ^WebFormValidation) Never! {
+typed_validation_cancel: fn<Model>(validation: ^WebFormValidation<Model>) Never! {
     validation.pending = false
     validation.form.form.status = WebFormStatus.Idle
 }
 
-typed_submission_wait: fn(submission: ^WebFormTypedSubmission) -> String WebFormError! {
+typed_submission_wait: fn<Model>(submission: ^WebFormTypedSubmission<Model>) -> String WebFormError! {
     result: typed_submit(submission.form)
     submission.pending = false
     result
 }
 
-typed_submission_cancel: fn(submission: ^WebFormTypedSubmission) Never! {
+typed_submission_cancel: fn<Model>(submission: ^WebFormTypedSubmission<Model>) Never! {
     submission.pending = false
     submission.form.form.status = WebFormStatus.Idle
 }
 
-render_typed_html: fn(form: WebFormTyped) -> String Never! {
+render_typed_html: fn<Model>(form: WebFormTyped<Model>) -> String Never! {
     out := "<form action=\"{esc(form.form.action)}\" method=\"{esc(form.form.method)}\">"
     loop spec in form.input.fields {
         value := ""
@@ -679,7 +695,7 @@ states_from_specs: fn(fields: [WebFormFieldSpec]) -> [WebFormFieldState] Never! 
     out
 }
 
-decoded_from_input: fn(form: WebFormTyped) -> WebFormDecodedInput {
+decoded_from_input: fn<Model>(form: WebFormTyped<Model>) -> WebFormDecodedInput {
     values := [String:String]{}
     wire_values := [String:String]{}
     loop spec in form.input.fields {

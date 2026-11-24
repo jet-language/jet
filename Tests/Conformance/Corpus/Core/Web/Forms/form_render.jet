@@ -1,9 +1,11 @@
 // core-conformance: core.web.forms.WebFormTyped.render
 use api: core.web.forms
 
-markup: fn(form: api.WebFormTyped) -> String Never! { form.render() }
+JetForm: struct { jet: String }
+
+markup: fn(form: api.WebFormTyped<JetForm>) -> String Never! { form.render() }
 
 run: fn() {
-    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(markup(form))
 }

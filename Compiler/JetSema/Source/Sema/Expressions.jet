@@ -4572,8 +4572,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
         route := sema_call_try_http_router(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if route.handled -> return route
     }
-    web_form := sema_call_try_web_form_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if web_form.handled -> return web_form
     layout := sema_call_try_layout_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if layout.handled -> return layout
     stream := sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -8311,6 +8309,12 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
         if sema_expr_type_id_written(expr, environment, program) == .Val(found) {
             return sema_check_expression_recorded(expr, sema_expr_expected(found, expected, environment, program, diagnostics), program, context)
         }
+    }
+    // A field selector (`.carrier`) where a `FieldRef<M, T>` is expected
+    // names `M`'s field (sema_field_ref_check).
+    if expected == .Val(.Apply(wanted, _)) && wanted.ends_with("FieldRef") {
+        field_ref: sema_field_ref_check(expr, expected, environment, program, scopes, context, diagnostics)
+        if field_ref.handled -> return sema_check_expression_recorded(expr, field_ref.value, program, context)
     }
     // Only a bare member chain can be handled there; testing that here keeps
     // the chain check's frame off every other expression level.

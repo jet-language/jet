@@ -4117,6 +4117,22 @@ as `t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type,
 write `Type{Rock}` for the type itself, or read a compile-time fact of it such
 as `Rock.reflect().fields`.
 
+A field of a struct is a value only where a `FieldRef` is expected. The
+prelude's `FieldRef<Model, T>` names one stored field of `Model` whose type is
+`T`: where a `FieldRef<M, T>` parameter, field or result is expected, a bare
+`.name` names `M`'s stored field `name`, visible where the dot is written, and
+settles `T` as that field's type (D-FORM-FIELD1=A). A library reads the
+field's declared name with `field.name()`, so `form.validate(.carrier, on:
+.Blur, with: check)` names `ShipForm`'s `carrier` field. A name `M` doesn't
+declare reports **E0302** at the selector and lists `M`'s fields; a computed
+field, a chain (`.carrier.text`), a call (`.carrier()`) or an upper-case
+selector (`.Carrier`) names no field and reports **E0302** too. `M` must be a
+struct the call names, not a type parameter. Inside a loop with no binding a
+bare `.name` reads the loop's item first (`it.name`), so there a selector
+where a `FieldRef` is expected reports **E-SUBJECT-CALL**; name the loop's
+binding (`loop ship in ships`). Only the compiler builds a `FieldRef`: no
+text becomes one.
+
 An `impl` head that names a declaration through a module alias binds the alias
 to the segment after it: `impl types.Span { ... }` extends `types.Span`, and
 `impl Local.types.Named { ... }` implements `types.Named` for `Local`

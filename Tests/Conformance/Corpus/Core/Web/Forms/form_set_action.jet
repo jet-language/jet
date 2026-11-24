@@ -1,12 +1,14 @@
 // core-conformance: core.web.forms.WebFormTyped.set_action
 use api: core.web.forms
 
-acted: fn(form: api.WebFormTyped) -> String Never! {
+JetForm: struct { jet: String }
+
+acted: fn(form: api.WebFormTyped<JetForm>) -> String Never! {
     form.set_action(fn(value) { "" })
     "action set"
 }
 
 run: fn() {
-    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(acted(form))
 }

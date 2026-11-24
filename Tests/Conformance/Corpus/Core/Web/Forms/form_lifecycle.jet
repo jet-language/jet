@@ -1,9 +1,11 @@
 // core-conformance: core.web.forms.WebFormTyped.lifecycle
 use api: core.web.forms
 
-stage: fn(form: api.WebFormTyped) -> WebFormLifecycle Never! { form.lifecycle() }
+JetForm: struct { jet: String }
+
+stage: fn(form: api.WebFormTyped<JetForm>) -> WebFormLifecycle Never! { form.lifecycle() }
 
 run: fn() {
-    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(stage(form))
 }

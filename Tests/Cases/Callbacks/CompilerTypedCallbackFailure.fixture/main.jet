@@ -17,6 +17,10 @@ KeyError: enum {
     Blank,
 }
 
+Profile: struct {
+    name: String,
+}
+
 page: fn(navigation: WebNavigation) -> String KeyError! {
     if navigation.path == "/blank" -> return Err(KeyError.Blank)
     Ok("page {navigation.path}")
@@ -59,7 +63,7 @@ validates: fn(value: String) -> String (KeyError | WebFormError)! {
         wire_name: "name",
     }
     input: forms.input("Profile", [field])
-    typed := forms.typed(input, "save")
+    typed := forms.typed<Profile>(input, "save")
     forms.typed_set(typed, "name", value)
     chain: forms.typed_validate_field(typed, "name", .Blur, named)
     forms.typed_validation_render(chain)

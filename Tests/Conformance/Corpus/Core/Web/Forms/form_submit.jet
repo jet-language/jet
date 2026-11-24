@@ -1,9 +1,11 @@
 // core-conformance: core.web.forms.WebFormTyped.submit
 use api: core.web.forms
 
-submitted: fn(form: ^api.WebFormTyped) -> String Never! { form.submit() ?? "refused" }
+JetForm: struct { jet: String }
+
+submitted: fn(form: ^api.WebFormTyped<JetForm>) -> String Never! { form.submit() ?? "refused" }
 
 run: fn() {
-    form := api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form := api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(submitted(form))
 }

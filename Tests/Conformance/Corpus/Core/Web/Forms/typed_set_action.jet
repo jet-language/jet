@@ -1,8 +1,10 @@
 // core-conformance: core.web.forms.typed_set_action
 use api: core.web.forms
 
+JetForm: struct { jet: String }
+
 run: fn() {
-    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     api.typed_set_action(form, fn(value) { "" })
     print("action set")
 }

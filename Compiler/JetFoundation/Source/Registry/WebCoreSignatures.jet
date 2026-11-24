@@ -12,7 +12,7 @@ core_web_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCa
     core.browser.storage local|session - WebStorage
     core.browser.storage kind_local|kind_session - String
     core.web openapi HTTPRouter Result<String,OpenAPIError>
-    core.web form WebFormInput,String WebFormTyped
+    core.web form WebFormInput,String WebFormTyped<Model> Model
     core.web.router route WebRouter,String,[WebRouterField],[WebRouterField],fn(WebNavigation;Result<String,E>) Result<WebRouter,Union<WebRouterError,E>> E
     core.web.router route_with_search_codec WebRouter,String,[WebRouterField],[WebRouterField],WebRouterSearchCodec,fn(WebNavigation;Result<String,E>) Result<WebRouter,Union<WebRouterError,E>> E
     core.web.router not_found WebRouter,fn(String;Result<String,E>) Result<WebRouter,Union<WebRouterError,E>> E
@@ -57,32 +57,32 @@ core_web_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCa
     core.web.forms input_exclude WebFormInput,String Result<WebFormInput,WebFormError>
     core.web.forms input_group WebFormInput,String,String Result<WebFormInput,WebFormError>
     core.web.forms input_replace WebFormInput,String,WebFormFieldSpec Result<WebFormInput,WebFormError>
-    core.web.forms typed WebFormInput,String Result<WebFormTyped,WebFormError>
-    core.web.forms typed_set WebFormTyped,String,String Result<Unit,WebFormError>
-    core.web.forms typed_set_async_validator WebFormTyped,String,WebFormValidationTiming,Int,fn(String;Result<Unit,E>) Result<Unit,Union<WebFormError,E>> E
-    core.web.forms typed_set_action WebFormTyped,fn(WebFormDecodedInput;String) Unit
+    core.web.forms typed WebFormInput,String Result<WebFormTyped<Model>,WebFormError> Model
+    core.web.forms typed_set WebFormTyped<Model>,String,String Result<Unit,WebFormError> Model
+    core.web.forms typed_set_async_validator WebFormTyped<Model>,String,WebFormValidationTiming,Int,fn(String;Result<Unit,E>) Result<Unit,Union<WebFormError,E>> Model|E
+    core.web.forms typed_set_action WebFormTyped<Model>,fn(WebFormDecodedInput;String) Unit Model
     core.web.forms action_error - WebFormActionError
     core.web.forms action_field_error WebFormActionError,String,String WebFormActionError
     core.web.forms action_form_error WebFormActionError,String WebFormActionError
-    core.web.forms typed_blur WebFormTyped,String Result<Unit,WebFormError>
-    core.web.forms typed_validate WebFormTyped Result<Unit,WebFormError>
-    core.web.forms typed_validate_async WebFormTyped WebFormValidation
-    core.web.forms typed_validate_field WebFormTyped,String,WebFormValidationTiming,fn(String;Result<Unit,E>) Result<WebFormValidationChain,E> E
-    core.web.forms typed_validation_render WebFormValidationChain String
-    core.web.forms typed_submit|typed_no_script WebFormTyped Result<String,WebFormError>
-    core.web.forms typed_submit_async WebFormTyped WebFormTypedSubmission
-    core.web.forms typed_post WebFormTyped,String Result<String,WebFormError>
-    core.web.forms typed_decode_post WebFormTyped,String Result<WebFormDecodedInput,WebFormError>
-    core.web.forms typed_html|typed_show|typed_state WebFormTyped String
-    core.web.forms typed_lifecycle WebFormTyped WebFormLifecycle
-    core.web.forms typed_errors WebFormTyped WebFormErrorState
-    core.web.forms typed_focus WebFormTyped,String Result<Unit,WebFormError>
-    core.web.forms typed_cancel WebFormTyped Unit
-    core.web.forms typed_select_field WebFormTyped,String Result<WebFormFieldState,WebFormError>
-    core.web.forms typed_validation_wait ^^WebFormValidation Result<Unit,WebFormError>
-    core.web.forms typed_validation_cancel WebFormValidation Unit
-    core.web.forms typed_submission_wait ^^WebFormTypedSubmission Result<String,WebFormError>
-    core.web.forms typed_submission_cancel WebFormTypedSubmission Unit
+    core.web.forms typed_blur WebFormTyped<Model>,String Result<Unit,WebFormError> Model
+    core.web.forms typed_validate WebFormTyped<Model> Result<Unit,WebFormError> Model
+    core.web.forms typed_validate_async WebFormTyped<Model> WebFormValidation<Model> Model
+    core.web.forms typed_validate_field WebFormTyped<Model>,String,WebFormValidationTiming,fn(String;Result<Unit,E>) Result<WebFormValidationChain<Model>,Union<WebFormError,E>> Model|E
+    core.web.forms typed_validation_render WebFormValidationChain<Model> String Model
+    core.web.forms typed_submit|typed_no_script WebFormTyped<Model> Result<String,WebFormError> Model
+    core.web.forms typed_submit_async WebFormTyped<Model> WebFormTypedSubmission<Model> Model
+    core.web.forms typed_post WebFormTyped<Model>,String Result<String,WebFormError> Model
+    core.web.forms typed_decode_post WebFormTyped<Model>,String Result<WebFormDecodedInput,WebFormError> Model
+    core.web.forms typed_html|typed_show|typed_state WebFormTyped<Model> String Model
+    core.web.forms typed_lifecycle WebFormTyped<Model> WebFormLifecycle Model
+    core.web.forms typed_errors WebFormTyped<Model> WebFormErrorState Model
+    core.web.forms typed_focus WebFormTyped<Model>,String Result<Unit,WebFormError> Model
+    core.web.forms typed_cancel WebFormTyped<Model> Unit Model
+    core.web.forms typed_select_field WebFormTyped<Model>,String Result<WebFormFieldState,WebFormError> Model
+    core.web.forms typed_validation_wait ^^WebFormValidation<Model> Result<Unit,WebFormError> Model
+    core.web.forms typed_validation_cancel WebFormValidation<Model> Unit Model
+    core.web.forms typed_submission_wait ^^WebFormTypedSubmission<Model> Result<String,WebFormError> Model
+    core.web.forms typed_submission_cancel WebFormTypedSubmission<Model> Unit Model
     core.web.table new String,[T] WebTable<T> T
     core.web.table state WebTable<T> WebTableState T
     core.web.table facts WebTable<T> String T

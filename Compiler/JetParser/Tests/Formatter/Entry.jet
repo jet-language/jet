@@ -397,7 +397,7 @@ SUM: #run { count() + 1 }
 #Test("a one-line empty lambda body stays on its line, and a second pass changes nothing") {
     source: `run: fn() {
     hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
-    print(api.typed_validate_field(form, "jet", .Change, fn(value) {}).valid)
+    print(api.typed_validate_field(form, "jet", .Change, fn(value) {}) == .Ok(_))
     print(api.subscribe_selector<String, String, Never>(store, fn(value) { value }, fn(value) {}).active)
     open := fn() {
     }
@@ -406,7 +406,7 @@ SUM: #run { count() + 1 }
     // fmt_core_stable asserts that a second pass changes nothing. The two
     // over-width rows may wrap, but each empty body stays `{}`.
     formatted: fmt_core_stable(source)
-    assert(formatted.contains("    print(api.typed_validate_field(form, \"jet\", .Change, fn(value) {{}}).valid)\n"), formatted)
+    assert(formatted.contains("    print(api.typed_validate_field(form, \"jet\", .Change, fn(value) {{}}) == .Ok(_))\n"), formatted)
     assert(formatted.contains("react: fn(path: String, stage: EnvelopeWalkStage) {{}}"), formatted)
     assert_eq(formatted.split("fn(value) {{}}").to_list().len(), 3)
     assert(!formatted.contains("open := fn() {{}}"), "a body written open stays open")

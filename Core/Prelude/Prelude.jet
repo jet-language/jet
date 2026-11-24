@@ -173,6 +173,18 @@ Type: struct {
     }
 }
 
+// One stored field of `Model`, whose type is `T`. Where a `FieldRef<M, T>` is
+// expected, a bare `.name` is one: `form.validate(.carrier, …)` names
+// `M`'s field `carrier`, a name `M` doesn't declare is a build error at the
+// dot, and `T` is that field's type. Only the compiler builds one: no text
+// becomes a `FieldRef`. A library reads the field's name with `name()`.
+FieldRef: struct<Model, T> {
+    priv name: String,
+
+    // The field's name, as `Model` declares it.
+    name: fn(self) -> String Never! { self.name }
+}
+
 // A send the channel refused: its receiving end is gone, or the sending task
 // was canceled while it waited. `value` is the payload, handed back unsent,
 // so `tx.send(job) ?? retry(err.value)` keeps the job. A program never has to

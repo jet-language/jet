@@ -1,9 +1,11 @@
 // core-conformance: core.web.forms.WebFormTyped.state
 use api: core.web.forms
 
-status: fn(form: api.WebFormTyped) -> String Never! { form.state() }
+JetForm: struct { jet: String }
+
+status: fn(form: api.WebFormTyped<JetForm>) -> String Never! { form.state() }
 
 run: fn() {
-    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(status(form))
 }

@@ -430,146 +430,22 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
             sema_call_http_core_synthetic_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: action_name}}, span: span, id: AST_NODE_GENERATED}, span),
         }
         _ := sema_call_core_bind_arguments(typed_record, typed_signature_type, typed_args, span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        typed_result: typed_signature.return_type ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        // `typed<Model>` is generic in the model only: the form it returns is
+        // a `WebFormTyped<Model>`, whose field-naming methods take
+        // `FieldRef<Model, T>`.
+        model_type: sema_expr_expected_type(Type.Named{name: model_name}, environment, program)
+        typed_type_args: [Type]{model_type.copy()}
+        typed_parameters: loop parameter in typed_signature.type_parameters -> parameter.name
+        typed_declared: typed_signature.return_type ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        typed_result: sema_expr_core_row_type(sema_inference_substitute_type(typed_declared, typed_parameters, typed_type_args), environment, program)
         typed_fallibility := sema_call_failure_carrier(Val(typed_result))
-        if !sema_call_core_record_effects(typed_record, span, [Type]{}, typed_result, typed_fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
+        if !sema_call_core_record_effects(typed_record, span, typed_type_args, typed_result, typed_fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
-        typed_call: sema_call_core_tree(typed_record, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, [Type]{}, [Bool]{false, false}, typed_result, typed_fallibility, None, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        result := sema_call_http_core_unwrap_result(typed_call, Type.Named{name: "WebFormTyped"}, "web.form could not register its typed action", span, environment, program, scopes)
+        typed_call: sema_call_core_tree(typed_record, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, typed_type_args, [Bool]{false, false}, typed_result, typed_fallibility, None, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        form_type: Type.Apply{name: sema_core_source_type_name(program, "core.web.forms", "WebFormTyped"), args: [Type]{model_type}}
+        result := sema_call_http_core_unwrap_result(typed_call, form_type, "web.form could not register its typed action", span, environment, program, scopes)
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, diagnostics)}
     } else { return SemaDirectSpecialCheck{handled: true, value: None} }
 }
 
-// The typed form's `validate` methods, which Core can't declare as methods:
-// one name at two arities, and a leading-dot field selector. Its other
-// methods are WebFormTyped's own, in Core/Web/Forms.jet.
-sema_web_form_method_member: fn(method: String, arity: Int) -> String? Never! {
-    if method != "validate" -> return None
-    if arity == {
-        0 -> Val("typed_validate")
-        3 -> Val("typed_validate_field")
-        else -> None
-    }
-}
-
-// Only the native typed-model identity is routed here. Canonical source
-// forms records continue through ordinary source method/function checking.
-sema_call_try_web_form_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    if receiver_value.ty != (Type.Named{name: "WebFormTyped"}) {
-        return SemaMethodSpecialCheck{handled: false, value: None}
-    }
-    member: sema_web_form_method_member(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    updated_args := args
-    // `form.validate(.field, on: timing, with: check)` binds its
-    // two labels; the leading-dot field selector lowers to the ABI field name.
-    if member == "typed_validate_field" {
-        if !sema_services_bind_labels("WebFormTyped.validate", updated_args, [String]{"", "on", "with"}, span, diagnostics) {
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        loop index in 0..<updated_args.len() -> updated_args[index].label = None
-        if sema_web_form_field_selector(updated_args[0], diagnostics) == .Val(selector) {
-            updated_args[0] = selector
-        }
-    }
-    record: sema_call_core_record("core.web.forms", member, updated_args.len() + 1, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    signature: core_call_typed_signature("core.web.forms", member, updated_args.len() + 1) ?? {
-        diagnostics.push(sema_error("E0904", span, "`core.web.forms.{member}` has no typed call contract", "the opaque form method uses its canonical native route", "provide the registered Core typed signature"))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    // A form method whose callback may fail is generic in the callback's
-    // failure; its arguments infer it, and a callback that can't fail leaves
-    // a result that can't fail either.
-    type_args := [Type]{}
-    if signature.type_parameters.len() > 0 {
-        shape: sema_call_core_parameter_records(signature, [Type]{}, span, false)
-        shape_params := [SemaCallParam]{}
-        loop (index, parameter) in shape {
-            if index > 0 -> shape_params.push(parameter)
-        }
-        binding: sema_call_bind_args(method, shape_params, updated_args, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        type_args = sema_call_core_infer_type_args(signature, shape_params, binding, updated_args, [Type]{}, expected, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    all_params: sema_call_core_parameter_records(signature, type_args, span, false)
-    params := [SemaCallParam]{}
-    loop (index, parameter) in all_params {
-        if index > 0 -> params.push(parameter)
-    }
-    checked: sema_web_form_checked_args(method, params, updated_args, receiver, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    values := [TExpr]{receiver_value}
-    implicit_clones := [Bool]{false}
-    loop argument in checked {
-        values.push(argument)
-        implicit_clones.push(false)
-    }
-    declared: signature.return_type ?? Type.Named{name: "Unit"}
-    names: loop parameter in signature.type_parameters -> parameter.name
-    result: sema_owned_infallible(sema_inference_substitute_type(declared, names, type_args))
-    fallibility: sema_call_failure_carrier(Val(result))
-    if !sema_call_core_record_effects(record, span, type_args, result, fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    value: sema_call_core_tree(record, values, span, type_args, implicit_clones, result, fallibility, expected, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    SemaMethodSpecialCheck{handled: true, value: Val(value)}
-}
-
-// The arguments of the form method call `receiver.method(args)` in `params`
-// order, once they bind, type-check and pass the ownership check of a read
-// receiver; None after a diagnostic. Arguments that do not bind are still
-// checked, for their own diagnostics.
-sema_web_form_checked_args: fn(method: String, params: [SemaCallParam], args: [CallArg], receiver: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> [TExpr]? {
-    checked_args := args
-    binding: sema_call_bind_args(method, params, checked_args, span, diagnostics) ?? {
-        loop argument in args {
-            _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
-        }
-        return None
-    }
-    typed: sema_call_typecheck_bound_arguments(method, params, None, false, binding, checked_args, environment, program, scopes, state, tail_store, context, span, diagnostics, true) ?? return None
-    ownership: sema_ownership_check_method_call(state, method, receiver, AccessConvention.Read, params, checked_args, scopes, span, diagnostics)
-    if !ownership.accepted || !ownership.complete -> return None
-    values := [TExpr]{}
-    loop slot in 0..<params.len() {
-        found := false
-        loop index in 0..<typed.values.len() {
-            if typed.slots[index] == slot {
-                values.push(typed.values[index])
-                found = true
-                break
-            }
-        }
-        if !found -> return None
-    }
-    Val(values)
-}
-
-// A leading-dot form field selector (`.carrier`) names one model field; the
-// typed-form runtime checks the name against its derived schema, so the
-// selector lowers to the ABI field-name String. A lower-case selector parses
-// as a bare member chain, an upper-case one as a leading-dot enum literal.
-// None for any other argument.
-sema_web_form_field_selector: fn(argument: CallArg, diagnostics: ^[Diagnostic]) -> CallArg? {
-    if argument.expr == .Field(base, member, member_span, _) {
-        if !sema_expr_is_bare_subject(base) -> return None
-        return Val(sema_web_form_selector_name(member, member_span, argument))
-    }
-    if argument.expr == .EnumLit(type_name, variant, _, payload, leading_dot, literal_span, _) {
-        if !leading_dot || type_name != "" -> return None
-        if payload.len() > 0 {
-            diagnostics.push(sema_error("E0112", literal_span, "form field selector `.{variant}` cannot carry payload arguments", "a leading-dot form selector names one field and does not construct an enum variant", "write `.{variant}` without parentheses"))
-        }
-        return Val(sema_web_form_selector_name(variant, literal_span, argument))
-    }
-    None
-}
-
-sema_web_form_selector_name: fn(field: String, selector_span: Span, argument: CallArg) -> CallArg {
-    CallArg{
-        convention: AccessConvention.Read,
-        expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: field}}, span: selector_span, id: AST_NODE_GENERATED},
-        span: argument.span,
-        flags: AST_EMPTY_CALL_ARG_FLAGS,
-        label: None,
-        spread: false,
-    }
-}

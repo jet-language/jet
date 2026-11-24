@@ -5293,6 +5293,23 @@ A file that no `name: module` declaration reaches sits at the package root.
 The compiler fills `module` at every `#here` and `#caller` site; its `""`
 default only covers a record built by hand. `core.log` filters records by it.
 
+`FieldRef<Model, T>` is one stored field of `Model` whose type is `T`, read
+with `name: fn(self) -> String`, the field's declared name. A library takes a
+field of a caller's struct through it: where a `FieldRef<M, T>` is expected a
+bare `.name` is one, checked against `M`'s stored fields, so a misspelled
+field is E0302 at the dot. Only the compiler builds one; no text becomes a
+`FieldRef`.
+
+```jet
+Point: struct { x: Int, y: Int }
+
+named: fn(field: FieldRef<Point, Int>) -> String Never! { field.name() }
+
+run: fn() {
+    print(named(.y))   // y
+}
+```
+
 `DebugView` is the trait a type implements to choose what `jet debug` shows
 for its values: `debug_view: fn(self) -> [DebugItem] Never!`, one `DebugItem`
 (a `label` and a `value`, both text) a row. The view can't fail: the debugger
@@ -7106,7 +7123,7 @@ route list.
 | `image(src: String, alt: String) -> String` | markup | Place the PNG or JPEG at `src` on a page; an app page serves it as a `<picture>` of resized variants. |
 | `serve<Settings: Decode>(prefix: String, build: fn(Settings) -> App, port: Int?)` | never returns | Decode the typed settings, then serve the app `build` makes on the port `App.serve`'s rule chooses; a decode failure stops with E2416, exit 78. |
 | `bind<Settings: Decode>(address: String, prefix: String, build: fn(Settings) -> App, tls:, deadline:) -> HTTPServer HTTPError!` | server | Decode the typed settings, then bind the app `build` makes on `address`. |
-| `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
+| `form(Model, action: handler) -> WebFormTyped<Model>` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `openapi(routes: App or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
 | `requests: DecisionHook<HTTPRequest, HTTPResponse>` | point | The decision point every request an app serves passes before its routes; see below. |
 | `under(prefix: String, handler: fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse>) -> fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse>` | handler | Scope a `web.requests` handler to the paths under `prefix`. |
@@ -7254,15 +7271,21 @@ runs, so a setting computed by a call or read from a name is E2811.
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
 `web.form(Model, action: handler)` derives the model's typed inputs at compile
-time and returns a `WebFormTyped`, whose methods core.web.forms declares. The
-ones that change the form (`set`, `set_async_validator`, `blur`, `focus`,
-`cancel`, `submit` and `no_script`) take `^self`, so a form that is filled in
-is bound with `:=`. `form.validate(.field, on:, with:)` names a model field
-with a leading-dot selector and returns a `WebFormValidationChain`, whose
-`render()` reports that field's result. Its model is a struct marked with the web
-module's `#Form` (`#Web.Form Checkout: struct { … }`); an unmarked model is
-E2474. The source `core.web.forms.typed` API remains
-separate for callers that explicitly supply `WebFormInput` and an action name.
+time and returns a `WebFormTyped<Model>`, whose methods core.web.forms
+declares. The ones that change the form (`set`, `set_async_validator`,
+`blur`, `focus`, `cancel`, `submit` and `no_script`) take `^self`, so a form
+that is filled in is bound with `:=`. `set`, `blur`, `focus` and
+`validate` name a model field with a `FieldRef<Model, T>`, written as a
+leading-dot selector: `form.set(.carrier, "Parcel")` and
+`form.validate(.carrier, on: .Blur, with: check)`, where a name the model
+lacks is E0302 at the dot (D-FORM-FIELD1=A). `validate` returns a
+`WebFormValidationChain<Model>`, whose `render()` reports that field's
+result, and fails with the validator's error or a `WebFormError`. Its model
+is a struct marked with the web module's `#Form` (`#Web.Form Checkout: struct
+{ … }`); an unmarked model is E2474. The source `core.web.forms.typed<Model>`
+API remains separate for callers that explicitly supply `WebFormInput` and an
+action name; its `typed_*` functions take the field's name as text, and one the
+input lacks fails with `WebFormError.Missing`.
 The source query carrier exposes the same receiver state/mutation operations as
 its module functions. Mutating source query, form, table, virtual viewport, and
 store calls take explicit write access. Source table pages keep typed row values
