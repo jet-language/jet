@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6998,
-    "rev": 113850,
+    "rev": 113855,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58568,6 +58568,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-24T12:25:22.608Z"
+        },
+        {
+          "n": 39,
+          "text": "A user marker template cannot paste a reserved `__` name. Fresh review (G1Generation-2, 2026-11-24) found that on tip23 a user template can declare and call `#{hook}` with hook `__hidden_hook` (prints `reached the hook`), and can call Core's `args.#{hook}(\"42\")` with hook `__cli_is_int` (prints `true`): Items.jet:1443-1449 gives Core `__` items visibility 2 for any generated code. The `#code` paste already refuses `__pasted_hook`. Pasted names are user-written, so E0067 applies to them: one diagnostic for both paste doors; only Core's own templates may paste a `__` name; and a non-Core impl may not define a Core trait's `__` member. Proof: UI snapshots for both refusals, from the probes in the review (d1_template_dunder.jet, d3b.jet), at O0, on a batch compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:22:58.856Z"
         }
       ],
       "refs": [],
@@ -58578,9 +58587,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T12:55:38.892Z",
+      "updated": "2026-11-24T13:22:58.856Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 38
+      "criteriaLastN": 39
     },
     {
       "id": "c0sdz4q0",
@@ -58855,7 +58864,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T12:55:37.080Z",
+      "updated": "2026-11-24T13:26:43.721Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -135777,215 +135786,256 @@
       "cardId": "c0sdz4q0",
       "group": "language",
       "title": "Where an impl for a built-in shape writes the bounds on its item types",
-      "situation": "An impl is the block that gives a type the methods a trait asks for. Jet is adding impls for built-in shapes: every list `[T]`, every fixed array `[T#N]`, every optional `T?` and every map `[K: V]`. Some of these impls only make sense when the items qualify. A list can describe itself only when each of its items can. For a struct, Jet already writes this condition as `impl Pair<T: Describe>.Describe`. For a list, the obvious copy `impl [T: Describe].Describe` already means something else: a map from `T` keys to Describe values. You are asked where a built-in shape's impl writes what its item types must support. We recommend a short list right after the shape, `impl [T]<T: Describe>.Describe`, in the same place a struct's impl puts it.",
-      "gist": "How does an impl for every list, array, optional or map say what its item types must support?",
-      "lesson": "A trait names an ability, such as Describe. An impl gives one type that ability. A bound is a requirement on a type parameter, written `T: Describe`: only types with Describe meet it. A number parameter is written `N: Int`. A conditional impl applies only where its bounds hold, so `Pair<Int>` can describe itself while `Pair<String>` is refused.",
-      "explainer": "Think of a shop sign: \"gift wrapping for any box, if what is inside is not fragile\". Struct impls already put that condition right after the name of the box. The recommendation puts it in the same place for lists, arrays, optionals and maps. A reader never has to guess whether `T: Describe` is a condition or the inside of a map.",
-      "story": "Ana writes a Describe trait for her report tool and implements it for Int. She wants `[1, 2].describe()` to print `[#1, #2]`, and `[\"x\"].describe()` to be refused because String has no Describe. She writes `impl [T].Describe` and calls `item.describe()` inside it. The checker refuses the call with Jet.MissingGenericBound and names the head with its list, `impl [T]<T: Describe>.Describe`. Later she adds maps the same way: `impl [K: V]<K, V: Describe>.Describe`.",
-      "inWild": "// Rust: a list after `impl`, or a `where` clause; const N declares its kind.\nimpl<T: Describe> Describe for Vec<T> { … }\nimpl<T, const N: usize> Describe for [T; N] where T: Describe { … }\n// Swift: a `where` clause over the library's declared names.\nextension Array: Describe where Element: Describe { … }\n// Haskell: a context before the head; lower-case variables are fresh.\ninstance Describe a => Describe [a] where …\n// Scala 3: a given with a context bound.\ngiven [T: Describe]: Describe[List[T]] with …",
-      "detail": "Today. Checked on the batch compiler jet a0.0.46-dev built from dev ce3b8e7f59 with the probes p1-p5 in this directory and the reviewer's q-probes. `impl [T].Describe` stops at the parser with \"Expected a name after `impl`, found `[`\" (p1). `impl<T: Describe> [T].Describe` stops the same way at `<` (p2). A trailing `where` is refused with \"Expected `{` to open the `impl` body\" (p3). Each of the three also cascades a second error at the closing `}`.\n\n`[String: Describe]{\"a\": 1}` is a valid map of Describe values today and prints `#1` (p4). So `[T: Describe]` is already a type spelling. `impl Pair<T: Describe>.Describe` works (p5). `Pair<String>{a: \"x\"}.describe()` is refused with Jet.TraitNotImplemented: \"`describe` comes from a conditional impl that applies only where `T` is `Describe`, and here `T` is `String`\".\n\nScope. The ratified D-BUILTIN-METHOD1 lets an impl name a structural head: `[T]`, `[T#N]`, `T?` and `[K: V]`. Each head binds its parameters in its family's order, as a nominal conditional impl binds its type's declared parameters. PROPOSED: the unbounded heads are in an unlanded patch, land/6852-c8-structural-heads.patch (base ce3b8e7f59); no batch compiler prints its texts yet. That patch proposes three rules that every option below inherits.\n\nRule 1, binding. Every head position is a parameter. A head name that resolves to a type in scope makes a concrete head. It is refused with Jet.InvalidStatement: \"`impl [Point].Describe` names the type `Point` in its head\". The cost: declaring or importing a type named `T` turns `impl [T].X` into that error. The error is loud; it never becomes a silent blanket impl.\n\nRule 2, lexing. In `impl T?.Describe` the lexer reads `?.` as one optional-chain token. The impl-head parser splits it into the head's `?` and the trait's `.`.\n\nRule 3, shapes. Nested, repeated or concrete heads are refused with Jet.InvalidStatement: \"`impl [[T]].Describe` is not a structural head\". Its fix reads \"write the head over distinct names: `[T]`, `[T#N]`, `T?` or `[K: V]`\". Edits owed beyond the patch: `[T#4]` and `[T#T]` become `[T#N]`, and `[T: T]` becomes `[K: V]`. `[[T]]`, `[T]?` and `[K: [V]]` get no edit; the fix teaches the bounded head on the outer shape. Concrete heads (`[Int]`) and overlapping impls stay illegal.\n\nNot here. `Set<E>`, `Shared<T>`, `Task<T>`, `Receiver<T>`, `Sender<T>` and `Result<T, E>` keep nominal heads under D-BUILTIN-METHOD1. In every option their bounded form is today's argument form, `impl Set<E: Describe>.Describe`. Today q05 is refused only by Jet.ImplOnBuiltinType. `Option<T>` is the same type as `T?` (q18), so `impl Option<T: Describe>.Describe` is already the argument form for optionals. Each option says how it treats that spelling.\n\nNew work under every option (a): map keys. No generic `K` is a map key today; q09 and q09b give Jet.InvalidMapKeyType whatever its bound. Inside a `[K: V]` impl, `K` gets an implied key rule, as Swift implies `Key: Hashable`. Every receiver is already a map, so `K` is key-eligible. It supports what a key supports: equality, ordering, `self.keys()` and lookup in `self`. The same implied rule extends to `fn<K, V>(m: [K: V])`, so generic map functions and impls accept the same bodies.\n\nNew work (b): fix edits. Today's Jet.MissingGenericBound fix (\"Add `<T: Describe>` to the generic parameter list\", q06) carries no edit. Each option's refusal must carry an edit that writes that option's bounded head. The no-bound refusal in q07 has a title that drops `.Describe` (\"Write `impl Pair {`\"). Its header also contradicts conditional impls. Its structural copy must name the full head.\n\nNew work (c): the hardcoded conformance table `sema_type_builtin_bound_satisfied`. In it List, Option and FixedList recurse, and Map is Equatable when its key and value are. Once bounded heads land, its list, fixed-array, optional and map rows move to Core source impls in the chosen spelling. Under A the list Equatable row becomes `impl [T]<T: Equatable>.Equatable`, and the rows are deleted. Tuple rows stay in the kernel: tuples have no family head to write an impl on. Result moves with its nominal head.\n\nNew work (d): tooling. The tree-sitter `impl_block` (`_head_name`) accepts only a name. It, the VS Code tmLanguage, the Zed grammar and the editor-grammar guard case take the chosen head. `sema_type_conditional_impl_head` prints heads from the head text, and `sema_type_impl_conditions_met` matches only applied types; both read the structural head. The formatter's impl-head printer, LSP hover and definition, and the Spellings ledger row change too.\n\nKnown defects, owed criteria on their own cards whatever this ballot decides. With a type named `T` in scope, `impl Pair<T: Describe>.Describe` is accepted silently, and neither `Pair<Int>` nor `Pair<T>` gets `describe` (q15b).\n\nThe trait-value path fails today for the nominal analogue too. `Pair<Describe>{a: 1}.describe()` printed `pair #1` on batch14, but on batch16 it fails: \"`q10_trait_value_arg.Describe` isn't `Describe`\" (q10, a regression). `[Describe]{1, 2}` passed to `fn<T: Describe>(xs: [T])` fails with \"`q13_nested_trait_in_list.Describe` isn't `Describe`\" (q13). So the trait-value path through a bounded impl, nominal or structural, needs a criterion on the build card.\n\n`T` is not inferred from a `[Int#2]` argument to `fn<T, N: Int>(xs: [T#N])` (q02b). A generic caller of a fixed-array impl passes type arguments today.\n\nFixed arrays and lists. A `[Int#2]` passes where `[Int]` is wanted and has `.len()` (q12). Under every option, a user's `[T]` impl methods still do not reach a fixed array. Mitigation: a call that misses on a `[T#N]` while a `[T]` impl has the method gets a fix naming that impl and offering `impl [T#N]` beside it. Passing the array to a function that takes `[T]` keeps working as today.\n\nEvery option shows the same program: a Describe trait, an Int impl and bounded impls for all four shapes. Five calls follow, with the same results in each option. A sixth, refused call is a comment.",
+      "situation": "An impl gives a type the methods a trait asks for. Jet now has impls for built-in shapes: every list `[T]`, every fixed array `[T#N]`, every optional `T?` and every map `[K: V]`, all of them unbounded today. Some of these impls only make sense when the items qualify: a list can describe itself only when each of its items can. For a struct, Jet writes this condition in place, `impl Pair<T: Describe>.Describe`. The last draft recommended `impl [T]<T: Describe>.Describe`. You asked why that looks so odd and repetitive, and whether there is a better way. There is: write each name once, with its bound where the name stands. Under today's map syntax the bound needs angle brackets, `impl [<T: Describe>].Describe`, because `[T: Describe]` is a map. If D-MAP-ENTRY1 moves maps to `=>`, the brackets go and the head is `impl [T: Describe].Describe`.",
+      "gist": "How does an impl for every list, array, optional or map say what its item types must support, writing each name once?",
+      "lesson": "A trait names an ability, such as Describe. An impl gives one type that ability. A bound is a requirement on a type parameter, written `T: Describe`: only types with Describe meet it. A conditional impl applies only where its bounds hold, so `Pair<Int>` can describe itself while `Pair<String>` is refused. Every Jet bound is written where its name is declared: `fn<T: Describe>`, `impl Pair<T: Describe>`.",
+      "explainer": "Think of a shop sign: \"gift wrapping for any box, if what is inside is not fragile\". The condition belongs next to the thing it is about. For a struct, Jet writes it inside the struct's own brackets, `Pair<T: Describe>`. For a list, the recommendation writes it inside the list's brackets, in its own small brackets so it is never mistaken for a map: `[<T: Describe>]`. If maps stop using `:`, those small brackets can go: `[T: Describe]`.",
+      "story": "Ana writes a Describe trait for her report tool and implements it for Int. She wants `[1, 2].describe()` to print `[#1, #2]`, and `[\"x\"].describe()` to be refused because String has no Describe. She writes `impl [T].Describe` and calls `item.describe()` inside it. The checker refuses the call with Jet.MissingGenericBound, and its edit rewrites the head to `impl [<T: Describe>].Describe`. Later she adds maps the same way: `impl [K: <V: Describe>].Describe`.",
+      "inWild": "// Rust: a list after `impl`; const N declares its kind.\nimpl<T: Describe> Describe for Vec<T> { … }\nimpl<T: Describe, const N: usize> Describe for [T; N] { … }\n// Swift: a `where` clause over the library's declared names; `some` bounds a slot anonymously.\nextension Array: Describe where Element: Describe { … }\nfunc describeAll(_ items: [some Describe]) -> String { … }\n// Haskell: a context before the head; lower-case variables are fresh.\ninstance Describe a => Describe [a] where …\n// Scala 3: a given with a context bound on the declared name.\ngiven [T: Describe]: Describe[List[T]] with …\n// Kotlin: an extension declares its parameter before the receiver.\nfun <T : Describe> List<T>.describe(): String = …",
+      "detail": "Today. Checked on the tip23 compiler (jet a0.0.46-dev, dev 45bbcdbd34). The probes are in `$JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/owner-r1-probes` (p1-p5, q01-q21, r01-r13), with outputs in `outputs-tip23.txt`. The unbounded heads have landed. The spec documents them (\"The head carries no bounds\"), and r01 prints `list of 2`, `array of 2`, `some` and `map of 1`.\n\nA body that calls the trait on an item is refused with Jet.MissingGenericBound (r02). Its fix says \"Add `<T: Describe>` to the generic parameter list\". A structural head has no such list, and the fix carries no edit.\n\nWhat each spelling does today:\n\n- `impl [T]<T: Describe>.Describe`, the last draft's A, stops at `<` with \"Expected `.` and the trait after a structural `impl` head\" (r09).\n\n- `impl<T: Describe> [T].Describe` stops at `<` with \"Expected a name after `impl`\" (p2).\n\n- `impl [T: Describe].Describe` is read as a map head whose value names a type. It is refused with \"`impl [T: Describe]` names the type `Describe` in its head\" (r10). As a type, `[String: Describe]{\"a\": 1}` is a valid map of trait values (p4).\n\n- `[<T: Describe>]` is refused at `<` as a head and as a type: \"Expected a type, found `<`\" (r03, r04). `impl <T: Describe>?.Describe` and `impl [K: <V: Describe>].Describe` stop at the same `<` (r12, r13). So the slot form means nothing today.\n\n- `(T: Int)` in a type position is not a named tuple. It is refused with \"Expected `,` between tuple type members\" (r08), so `(T: Describe)?` is free too.\n\n- `impl Option<T: Describe>.Describe` is Jet.ImplOnBuiltinType (q19), though `Option<Int>` is the same type as `Int?` (q18). `List<Int>` is not a type (r05). `Map<String, Int>` is not the map type either (r05).\n\nWhat changed since the last draft. The trait-value path now works: `Pair<Describe>{a: 1}.describe()` prints `pair #1` (q10). `[Describe]{1, 2}` passed to `fn<T: Describe>(xs: [T])` prints `[#1, #2]` (q13). A struct named `T` in scope no longer captures `impl Pair<T: Describe>`; both calls print (q15b).\n\nRule 1 is live: a head name that resolves to a type is refused with \"`impl [T]` names the type `T` in its head\" (r06). Its fix, \"Rename the parameter, as in `T` or `Item`\", suggests the very name it refused.\n\nThe one rule. Every bound in Jet is `Name: Bound`, written where the name is declared: `fn<T: Describe>`, `x: Int` and `impl Pair<T: Priced>`. In the last one, the bracket list belongs to Pair. A built-in shape has no bracket list of its own, so its slot needs one while `:` also spells a map. Once D-MAP-ENTRY1 takes `:` out of maps, `:` inside `[…]` is never a map, and the slot takes the bound bare. Options A and B are this one rule, before and after that change.\n\nDependency on D-MAP-ENTRY1 (open). B needs an outcome there that takes `:` out of the map type: its A (`=>`), B (`to`) or D (`->`). Then B is clean, A's brackets are noise, and `jet fix` rewrites every A head to B. Under its C, E or F, `[T: Describe]` stays a map type (p4, r10), B is impossible, and A is the clean form.\n\nNew work under every option:\n\n(a) Map keys. No generic `K` is a map key today: q09 and q09b give Jet.InvalidMapKeyType whatever its bound. Inside a `[K: V]` impl, `K` gets an implied key rule, as Swift implies `Key: Hashable`. The same rule extends to `fn<K, V>(m: [K: V])`.\n\n(b) Fix edits. The MissingGenericBound fix (r02) carries an edit that writes the chosen bounded head. Rule 1's fix (r06) proposes a name that is not a type in scope. The r10 refusal of `[T: Describe]`, when `Describe` is a trait, offers the bounded head.\n\n(c) The conformance table `sema_type_builtin_bound_satisfied` (TypeRelations.jet:2720). Its List, Option, FixedList and Map rows make `[1, 2]` Printable and `[[1]]` Equatable with no written bound (r11). They move to Core source impls in the chosen spelling, and the rows are deleted. Tuple rows stay; Result moves with its nominal head.\n\n(d) Tooling. The chosen head reaches the tree-sitter `impl_block`, the VS Code and Zed grammars, the editor-grammar guard case and the formatter's head printer. It also reaches LSP hover and definition, `sema_type_conditional_impl_head` and the Spellings ledger.\n\nStill open, owed on their own cards: `T` is not inferred from a `[Int#2]` argument to `fn<T, N: Int>(xs: [T#N])` (q02b). A `[T]` impl's methods do not reach a `[T#N]` value.\n\nConsidered and not offered:\n\n- Nominal family names (`impl List<T: Describe>`) would add a second written name for every shape (r05). D-BUILTIN-METHOD1 chose the sigil heads.\n\n- A trailing `where` clause is the shape you rejected for struct impls in D-IMPL-COND1.\n\n- An anonymous slot bound, as in Swift's `[some Describe]`, leaves the body no name for the item type and adds a keyword.\n\nEvery option shows the same program: a Describe trait, an Int impl and bounded impls for all four shapes. Five calls follow, with the same results in each option. A sixth, refused call is a comment.",
       "options": [
         {
           "key": "A",
-          "name": "A bound list right after the shape, as struct impls write it",
-          "detail": "The impl names the shape, then lists its parameters with their bounds where `impl Pair<T: Describe>` puts them: `impl [T]<T: Describe>.Describe`. A fixed array lists `<T: Describe, N: Int>`. Unbounded heads stay `impl [T].Describe`. The names appear twice, once in the shape and once in the list.",
-          "technical": "Grammar: `impl` Head List? `.` Trait. Head is `[P]`, `[P#Q]`, `P?` or `[P: Q]` over distinct names. List is today's generic parameter list `<…>`, read by the reader `fn<…>` uses. It names every head parameter in head order: T for `[T]` and `T?`, T then `N: Int` for `[T#N]`, K then V for `[K: V]`.\n\nThe head declares the names and the list repeats them, as `Pair` declares `<A, B>` and `impl Pair<A: …, B>` repeats them. Each type name may carry bounds as in a function's list, including several (`T: [Describe, Encode]`). N is written `N: Int`, Jet's one number-parameter spelling.\n\nRefusals. Each is one Jet.InvalidStatement with an edit and no cascade. A list naming other parameters or a different order gets the head's names in order. A bare `N` gets `N: Int`. A list with no bound at all is removed, with the title \"Write `impl [T].Describe`\".\n\nOther options' habits get one refusal each. `impl<T: Describe> [T].Describe` gets the edit `impl [T]<T: Describe>.Describe`. A trailing `where T: Describe` gets an edit moving the bound into the list. A reads `impl [T: Describe].Describe` as a map head whose value names a trait. It refuses it with \"`[T: Describe]` is a map head; bound the items with `impl [T]<T: Describe>.Describe`\", with that edit.\n\n`impl Option<T: Describe>.Describe` is accepted as an alternate input for the same impl, and `jet fmt` prints it as `impl T?<T: Describe>.Describe`. That makes it a second accepted spelling for one impl, normalized on format.\n\nA body that calls a trait method on an unbounded parameter is Jet.MissingGenericBound, with an edit that writes the list. A call where the condition fails is Jet.TraitNotImplemented, worded for the shape (\"here `T` is `String`\"). `impl [T].Describe` beside `impl [T]<T: Describe>.Describe` is Jet.DuplicateTraitImpl, conditions or not. The structural copy reports it once; the nominal case today adds a cascade Jet.DuplicateDefinition (Tests/UI/conditional_impl_overlap.jet), which the same change removes.\n\nMechanism. The parser stores the list in ImplDef.type_params, as it does for `Pair<T: …>`. Registration checks it against the head's names and copies the bounds onto each method's impl conditions. The checker binds the head's parameters by matching the receiver's shape, then reads the conditions as it reads nominal ones. Nothing new runs at run time. Each element type gets its own instance.\n\nEdge cases. Nested shapes qualify through the same impl: `[[7]]` meets `T: Describe` because `[Int]` has Describe (q08 is the nominal analogue). Inside `fn<U: Describe>(items: [U])`, `items.describe()` meets the condition through U's declared bound. An empty value still calls the impl, because the bound is checked on the type (q03b).\n\nBeginner path: write `impl [T].Describe`, call `item.describe()`, accept the edit. Expert path: several bounds, bounds on K and V and generic callers. Trait values depend on the trait-value fix named in the detail (q10, q13).",
-          "code": "// PROPOSED (A): the bound list follows the shape, where `impl Pair<T: Describe>` puts it today.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T]<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N]<T: Describe, N: Int>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: V]<K, V: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+          "name": "Bound in the slot, in angle brackets",
+          "detail": "Each name is written once. A bounded parameter is declared in its own slot, in angle brackets: `impl [<T: Describe>].Describe`. A parameter without a bound stays bare, so `impl [T].Describe` is unchanged, and so is `impl Pair<T: Priced>.Describe`.\n\nThe rule is the one every Jet bound already follows: `Name: Bound` inside `<…>`, where the name is declared. A struct's slot is already inside `Pair<…>`. A list's slot is inside `[…]`, where `[T: Describe]` is a map, so the slot gets its own brackets. Nothing in the head can be read as a map, because `<` cannot start a type (r03, r04).",
+          "technical": "Grammar. Inside a structural head, a slot is a bare name or a bounded slot `<Name: Bounds>`. Bounds are read by the reader `fn<…>` uses. Several bounds are `<T: [Describe, Encode]>`, and a parameterized trait closes with the existing `>>` splitter (`<T: Holds<Int>>`).\n\nOn an optional, a parameterized bound closes with `>>?.`, as in `impl <T: Holds<Int>>?.Describe`. The head parser splits it as it splits `?.` in the unbounded `impl T?.X` (r01). The four heads are `[<T: B>]`, `[<T: B>#N]`, `<T: B>?` and `[<K: B>: <V: B>]`, with either map slot bare. N is never bounded; it is a number by its `#` position, as in the unbounded head.\n\nThe optional's `<T: B>?.Describe` lexes as `>` followed by the optional-chain token `?.`, which the head parser already splits (Rule 2). It begins with `impl <`, the start of Rust's leading list. So the parser reads the token after the closing `>`: `?` makes it this slot form, and anything else is the D habit, refused with an edit.\n\nBinding. A bounded slot declares its name, as `fn<T: …>` does. So a type named `T` in scope never turns `[<T: Describe>]` into a concrete head; inside the impl the parameter shadows it (q15b is the nominal analogue). Bare slots keep Rule 1.\n\nMechanism. The parser stores each slot's bounds in ImplDef.type_params, in head order, as it does for `Pair<T: …>`. Registration copies them onto the impl's conditions, and the checker reads them as it reads nominal conditions. Nothing new runs at run time, and each element type gets its own instance.\n\nRefusals, each one error with an edit and no cascade:\n\n- `[<T: Describe>]` outside an impl head gets the generic-function form `fn<T: Describe>(xs: [T])`.\n\n- `impl [T]<T: Describe>.Describe` (E) and `impl<T: Describe> [T].Describe` (D) get `impl [<T: Describe>].Describe`.\n\n- `impl Option<T: Describe>.Describe` gets `impl <T: Describe>?.Describe`.\n\n- `impl [T: Describe].Describe`, when Describe is a trait, gets `impl [<T: Describe>].Describe` in place of r10's rename fix.\n\n- A body that calls a trait method on a bare parameter is Jet.MissingGenericBound, whose edit rewrites that slot.\n\n- `impl [T].Describe` beside `impl [<T: Describe>].Describe` is Jet.DuplicateTraitImpl, conditions or not.\n\n- A nested head is Rule 3's refusal. `[[<T: Describe>]]` gets `[<T: Describe>]`, because the inner list then qualifies through the same impl.\n\nEdge cases. `[[7]]` meets `T: Describe` because `[Int]` has Describe. Inside `fn<U: Describe>(items: [U])`, `items.describe()` meets the condition through U's declared bound. `[Describe]{1, 2}.describe()` qualifies, because a trait value has its trait (q13 is the generic-function analogue). An empty value still calls the impl, because the bound is checked on the type.\n\nBeginner path: write `impl [T].Describe`, call `item.describe()` and accept the edit, which writes `[<T: Describe>]`. Expert path: several bounds, bounds on K and V, generic callers, and `[<T: Holds<Int>>#N]`.",
+          "code": "// PROPOSED (A): each bounded name is declared once, in its own slot, in angle brackets.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [<T: Describe>].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [<T: Describe>#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl <T: Describe>?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: <V: Describe>].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}"
         },
         {
           "key": "B",
-          "name": "A bound list right after `impl`",
-          "detail": "The list moves in front of the shape and declares the names once: `impl<T: Describe> [T].Describe`. It is familiar from Rust and Scala. But struct impls keep their list after the name, so Jet would have two places for the same thing unless the struct decision is reopened.",
-          "technical": "Grammar: `impl` List? Head `.` Trait. The list sits between `impl` and the head, as `fn<T>` puts its list after `fn`. The list declares the head's parameters with their bounds, `N: Int` included, and the head then uses them. A declared name is never mistaken for a type in scope. So the binding rule's collision cost disappears for bounded impls; unbounded heads keep the rule.\n\nStruct heads keep `impl Pair<T: Describe>.Describe`, and `Set`, `Shared`, `Task`, `Receiver`, `Sender` and `Result` keep the argument form. A bounded impl then has two places for its list, chosen by the head. Making the prefix the only place would reopen the ratified D-IMPL-COND1. It would rewrite that decision's seven test sites and its spec paragraph.\n\nRefusals, each one error with an edit and no cascade. `impl [T]<T: Describe>.Describe` gets `impl<T: Describe> [T].Describe`. A trailing `where` and `impl [T: Describe].Describe` both get the prefix list. The tree-sitter impl block already admits a prefix type-parameter list.",
-          "code": "// PROPOSED (B): the bound list follows `impl`, as `fn<T: Describe>` follows `fn`.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl<T: Describe> [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl<T: Describe, N: Int> [T#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl<T: Describe> T?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl<K, V: Describe> [K: V].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+          "name": "Bare bound in the slot, after D-MAP-ENTRY1 frees `:`",
+          "detail": "This is A's rule without the brackets, and it only becomes possible once D-MAP-ENTRY1 takes `:` out of maps (its A, B or D). Shown with `=>`. The bound is written bare where the name stands, `impl [T: Describe].Describe`, exactly as `fn<T: Describe>`, `x: Int` and `impl Pair<T: Priced>` write theirs. A fixed array writes `[T: Describe#N]`, an optional `(T: Describe)?`, and a map `[K => V: Describe]`. Under today's map syntax `[T: Describe]` is a map type (p4), so B cannot be chosen alone.",
+          "technical": "B needs D-MAP-ENTRY1 ratified with `=>`, `to` or `->` for maps; the text shows `=>`. After that, `:` always has a name on its left, and a bracket with `Name:` inside is never a map. Without it, a head's meaning would depend on whether the name after `:` is a trait.\n\nGrammar. A slot is `Name` or `Name: Bounds`. The fixed array's `#N` follows the bounds (`[T: Describe#N]`); a bound never takes `#`, so the bound reader stops there. The optional needs parentheses, `(T: Describe)?`, because `T: Describe?` would read `Describe?` as the bound. `(T: Int)` is no type today (r08), so the parentheses are free.\n\nThey reuse the existing type grouping, as in `(Int | String)?` (q20), rather than a new form. The map value is `[K => V: Describe]`, and the key `[K: Describe => V]`. The bound reader stops at `=>`, as it stops at `#`.\n\nBinding and mechanism are as in A: a bounded slot declares its name, bare slots keep Rule 1, and the bounds go to ImplDef.type_params.\n\nMigration from A, if A ships first, is a `jet fix` rewrite that only moves brackets. It turns `[<T: B>]` into `[T: B]` and `[<T: B>#N]` into `[T: B#N]`. It turns `<T: B>?` into `(T: B)?` and `[K: <V: B>]` into `[K => V: B]`. A bounded key moves the same way: `[<K: B>: V]` becomes `[K: B => V]`, and `[<K: B1>: <V: B2>]` becomes `[K: B1 => V: B2]`.\n\nRefusals. `[T: Describe]` outside an impl head gets `fn<T: Describe>(xs: [T])`.\n\nOne token separates `[T: Describe]`, a list whose items need Describe, from `[T => Describe]`, a map to Describe values. In an impl head the map reading is Rule 1's refusal, as r10 refuses it today, and its edit offers `[T: Describe]`. So a slip is an error at the slip, never a silent second meaning.\n\nIn a head, a bound that names no trait, such as a stale `impl [K: V]`, is refused as a map written the old way, with the edit `[K => V]`. D-MAP-ENTRY1's `jet fix` rewrites every `impl [K: V]` head before B reads heads this way. The D and E habits and `impl Option<T: Describe>` get the B head as their edit. The rest are as in A.\n\nCosts. Several bounds read `[T: [Describe, Encode]]`, which looks like a list of traits, and `[T: [Describe, Encode]#N]` like a fixed list of them. The optional is the one shape that needs parentheses.\n\nBeginner path: as in A, and the head reads like a function parameter. Expert path: as in A.",
+          "code": "// PROPOSED (B), only after D-MAP-ENTRY1 frees `:`, shown with its `=>`: the bound is bare where the name stands.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T: Describe].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T: Describe#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl (T: Describe)?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K => V: Describe].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                  // [#1, #2]\n    print([Int#2]{3, 4}.describe())           // 2 items: #3, #4\n    print(Int?{5}.describe())                 // some #5\n    print([String => Int]{\"a\" => 6}.describe()) // {#6}\n    print([[7]].describe())                   // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}"
         },
         {
           "key": "C",
-          "name": "Bounds inside the shape when the name is a trait",
-          "detail": "The bound is written inside the shape, `impl [T: Describe].Describe`. It is short, but it is the spelling of a map type today, and optionals and maps need a bound inside parentheses.",
-          "technical": "Grammar: inside a structural head, `Name: Bound` is a bound when Bound names a trait. A fixed array writes `[T: Describe#N]`, with N a number by position, as in the unbounded head. An optional writes `(T: Describe)?`, and a map bounds its value as `[K: (V: Describe)]`. Parentheses already group types (`(Int | String)?`, `Int (A | B)!`); what is new is a bound inside them.\n\n`[T: Describe]` is already a valid map type of Describe values (p4). So the head's meaning depends on whether the name after `:` is a trait. `[T: Describe#N]` and `[K: (V: Describe)]` also nest a map-like spelling inside the head. Refusals: the A, B and D spellings each get one error whose edit writes the bound inside the shape.",
-          "code": "// PROPOSED (C): the bound sits inside the shape when the name after `:` is a trait.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T: Describe].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T: Describe#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl (T: Describe)?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: (V: Describe)].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+          "name": "Bounds inferred from the impl bodies",
+          "detail": "Nothing is written: `impl [T].Describe` whose body calls `item.describe()` applies only to lists whose items have Describe. The checker reads the bounds off the bodies. It is the shortest form, but whether a list type has a trait then depends on what the impl's code happens to call, and Jet does not infer bounds anywhere else (r02).",
+          "technical": "Mechanism. Checking an impl's bodies collects every trait member called on a head parameter, including through generic helpers the body calls, and makes those traits the impl's conditions. A call site then checks them as it checks written conditions.\n\nCosts that a redesign cannot remove:\n- A body edit changes public conformance. Deleting the last `item.describe()` widens the impl to every list. Adding a call to `item.encode()` narrows it. Then code far away that passed a `[Opaque]` stops compiling, at a head that names no condition.\n\n- Signatures depend on bodies. A module's interface (which list types have Describe) is known only after its impl bodies are checked. Every reader of interfaces needs them first: the semantic index, LSP hover, incremental rebuilds and separately checked packages.\n\n- It reverses the ratified unbounded heads. The spec says \"The head carries no bounds, so the methods ask nothing of `T` that every type does not offer\". Under C, `impl [T].SequenceTools` would silently gain conditions from its bodies.\n\n- Two rules. A generic function never infers its bounds: q06 and r02 refuse the call with Jet.MissingGenericBound. Under C, an impl infers and a function does not.\n\n- Inference through helpers is transitive. A bound reached through `helper(item)` needs the helper's bounds, so a change to a helper in another module changes this impl's conformance.\n\nMitigation, kept under every other option: the refusal of `item.describe()` in an unbounded impl carries an edit that writes the bound. The edit gives C's convenience at writing time, and the head still states the condition.\n\nPrior art. Haskell infers a function's context but requires an instance's context to be written, except `deriving`. Jet's derive rule (\"derive when every field qualifies\") is that exception, and it stays. Before C++20, a template's requirements were implicit in its body. Its errors surfaced deep inside instantiations, and C++20 added concepts so that a condition could be written in the head.\n\nBeginner path: write the body and nothing else. Expert path: none, since conditions cannot be stated or narrowed beyond what the body calls.",
+          "code": "// PROPOSED (C): no bound is written; each impl's conditions are read off its bodies.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe, because the body calls item.describe().\nimpl [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing, since no body touches them.\nimpl [K: V].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so the list impl's inferred condition fails.\n}"
         },
         {
           "key": "D",
-          "name": "A `where` clause after the head",
-          "detail": "A new word lists the conditions after the head, `impl [T].Describe where T: Describe`. It reads like Swift, but it adds a keyword and is the trailing clause the owner already rejected for struct impls.",
-          "technical": "Grammar: `impl` Head `.` Trait `where` Conditions `{`, with Conditions a comma list of `Name: Bounds`. `where` becomes a contextual keyword in impl heads only. N stays a number by its `#` position and takes no condition.\n\nThe owner rejected the same trailing shape (`impl Pair.Describe when T: Priced`) in D-IMPL-COND1 as \"a second way to write a bound\". Struct heads keep `impl Pair<T: Describe>.Describe`, so a bounded impl has two spellings. `using field` delegation never meets `where`: structural heads have no fields to delegate through. Refusals: the A, B and C spellings each get one error whose edit writes the `where` clause.",
-          "code": "// PROPOSED (D): a new `where` clause after the head.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T].Describe where T: Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N].Describe where T: Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?.Describe where T: Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: V].Describe where V: Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+          "name": "A bound list right after `impl`",
+          "detail": "The parameters are declared with their bounds right after `impl`, as Rust and Scala do: `impl<T: Describe> [T].Describe`. The bound is written once, but the name still appears twice, in the list and in the shape. Struct impls keep `impl Pair<T: Priced>` unless D-IMPL-COND1 is reopened, and reopening it turns them into `impl<T: Priced> Pair<T>.Describe`, which repeats the name too.",
+          "technical": "Grammar: `impl` List? Head `.` Trait, with the list read by the `fn<…>` reader (N written `N: Int`). The list declares the head's parameters, so a type named `T` in scope never collides with a bounded head.\n\nTwo ways to resolve the clash with struct impls, and the cost of each:\n- Keep `impl Pair<T: Priced>.Describe` for structs. A bounded impl then has two places for its list, chosen by the head's kind.\n- Make the prefix the only place. That reopens the ratified D-IMPL-COND1 and rewrites its seven test sites and spec paragraph. Every struct impl then reads `impl<T: Priced> Pair<T>.Describe`, naming T twice where it names it once today.\n\nEither way, the repetition the owner asked about remains: the list names T, and the shape names it again.\n\nRefusals: `impl [T]<T: Describe>.Describe`, `impl [<T: Describe>].Describe` and `impl [T: Describe].Describe` (when Describe is a trait) each get the prefix list as their edit. The tree-sitter impl block already admits a prefix type-parameter list.\n\nBeginner path: as in A, with the edit writing the prefix. Expert path: as in A.",
+          "code": "// PROPOSED (D): the bound list follows `impl`, as `fn<T: Describe>` follows `fn`.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl<T: Describe> [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl<T: Describe, N: Int> [T#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl<T: Describe> T?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl<K, V: Describe> [K: V].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}"
+        },
+        {
+          "key": "E",
+          "name": "A bound list after the shape (the last draft)",
+          "detail": "The last draft's recommendation, kept for comparison. The shape declares the names, then a list repeats them with their bounds, where `impl Pair<T: Priced>` puts its list: `impl [T]<T: Describe>.Describe`. Every name appears twice, and no other language does this. Today it stops at the `<` (r09).",
+          "technical": "Grammar: `impl` Head List? `.` Trait. The list names every head parameter in head order, T then `N: Int` for `[T#N]` and K then V for `[K: V]`, and each may carry bounds. Head and list are checked against each other, with an edit for a wrong name, order or count.\n\nWhy it was drafted: it puts the list after the type, where struct impls put theirs. But for `Pair` that list is the type's own argument list, so each name appears once. For a shape, the list is an extra list after the shape, so each name appears twice. A's slot form keeps the struct rule (the bound sits where the name is) without the repeat.\n\nRefusals: the D habit and `impl Option<T: Describe>` get the E head as their edit. Beginner and expert paths are as in A, with longer heads.",
+          "code": "// PROPOSED (E), the last draft's A: a bound list follows the shape and repeats its names.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T]<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N]<T: Describe, N: Int>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: V]<K, V: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "Parameters are declared in a list after `impl` before use, so a head name is never a type in scope; `const N: usize` declares a number's kind. Rust has two places for bounds, the list and `where`, and `where` can bound non-parameter types. Jet has neither const-kind syntax beyond `N: Int` nor non-parameter `where`. Source: Rust Reference, Implementations and Generics (doc.rust-lang.org/reference/items/implementations.html, /items/generics.html).",
-          "code": "impl<T: Describe> Describe for Vec<T> { … }\nimpl<T, const N: usize> Describe for [T; N] where T: Describe { … }"
+          "note": "Parameters are declared in a list after `impl`, before use, so a head name is never a type in scope; `const N: usize` declares a number's kind. Each name appears twice, in the list and in the type, as in D. Rust also has `where`. Source: Rust Reference, Implementations and Generics (doc.rust-lang.org/reference/items/implementations.html).",
+          "code": "impl<T: Describe> Describe for Vec<T> { … }\nimpl<T: Describe, const N: usize> Describe for [T; N] { … }"
         },
         {
           "lang": "Swift",
-          "note": "The head is the family's nominal name and its parameter names (Element, Wrapped, Key, Value) are declared once by the library, so nothing repeats. Requirements the type states (`Key: Hashable`) are implied in the extension, the rule this ballot adopts for map keys. Swift also has same-type constraints (`where Element == Int`), which Jet does not. Source: SE-0143 Conditional conformances; The Swift Programming Language, Generics.",
-          "code": "extension Array: Describe where Element: Describe { … }"
+          "note": "Extensions name the library's declared parameters (Element, Wrapped, Key, Value) in a `where` clause, so nothing repeats, but the names are fixed by the library. Requirements the type states (`Key: Hashable`) are implied, the rule this ballot adopts for map keys. SE-0341 lets a parameter bound its slot anonymously, `[some Describe]`: the bound at the slot, as in A and B, but with no name for the body. Sources: SE-0143 Conditional conformances; SE-0341 Opaque parameter declarations.",
+          "code": "extension Array: Describe where Element: Describe { … }\nfunc describeAll(_ items: [some Describe]) -> String { … }"
         },
         {
           "lang": "Haskell",
-          "note": "Head variables are fresh because they are lower-case, and Haskell 2010 requires an instance head to be a constructor over distinct variables: the rule the unbounded heads adopt. Jet types and parameters are both PascalCase, so Jet refuses a name that resolves to a type instead. Extensions add flexible and overlapping instances. Source: Haskell 2010 Report, section 4.3.2.",
+          "note": "Head variables are fresh because they are lower-case, and the context before `=>` repeats them. Haskell 2010 requires an instance head to be a constructor over distinct variables, the rule the unbounded heads adopt. Instance contexts are always written, never inferred, except by `deriving`. Source: Haskell 2010 Report, section 4.3.2.",
           "code": "instance Describe a => Describe [a] where …"
         },
         {
           "lang": "Scala 3",
-          "note": "Parameters are declared before the head as in Rust, with a context bound as the short form and `using` as the long one; givens are scoped by import and can be prioritized. Source: Scala 3 Reference, Given Instances and Using Clauses (docs.scala-lang.org/scala3/reference/contextual/givens.html).",
+          "note": "A context bound sits on the declared name, `[T: Describe]`, once, the shape B takes; Scala's maps never use `:`, so no clash arises. Source: Scala 3 Reference, Context Bounds (docs.scala-lang.org/scala3/reference/contextual/context-bounds.html).",
           "code": "given [T: Describe]: Describe[List[T]] with …"
+        },
+        {
+          "lang": "C++20",
+          "note": "Before concepts, a template's requirements were implicit in its body, close to C's model, and errors surfaced deep inside instantiations; concepts let the head state them. A constrained placeholder bounds a parameter at its slot (`Describe auto x`). Source: cppreference, Constraints and concepts.",
+          "code": "template <Describe T> std::string describe(const std::vector<T>& items);\nstd::string one(Describe auto x);"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A keeps the position Jet already uses for conditional impls: name the head, then list its parameters with their bounds. The owner chose that position over a trailing clause for structs, nothing in A's head can be read as a map, and no keyword is added. B's declared names are its real strength, but B makes the prefix a second place for impl bounds next to `Pair<T: …>`. No other language repeats the names after the shape; A does so to match Jet's own struct form.",
+        "why": "A writes each name once, with its bound where the name is declared, the rule `fn<T: Describe>` and `impl Pair<T: Priced>` already follow. The small brackets are what today's map syntax costs: `[T: Describe]` is a map, and `<` cannot start a type. If D-MAP-ENTRY1 is ratified with `=>`, `to` or `->` for maps, choose B: the same rule without the brackets, reached from A by `jet fix`. C would let a body edit change which types qualify. D and E still name each parameter twice.",
+        "tradeoff": "Each name once and one bound rule for every impl, for a pair of brackets in each bounded slot while maps keep `:`.",
         "gains": [
-          "The same position for impl bounds as struct impls: after the head.",
-          "No reading of `[T: Describe]` as a map, and no new keyword."
+          "Each parameter name is written once, at its place in the shape.",
+          "One rule for every bound: `Name: Bound` inside `<…>` where the name is declared, as in `fn<T: …>` and `Pair<T: …>`.",
+          "No reading as a map: `<` cannot start a type, so the slot form means nothing else today (r03, r04, r12, r13).",
+          "A bounded slot declares its name, so a type named `T` in scope never turns the head into a concrete one.",
+          "If D-MAP-ENTRY1 takes `:` out of maps (its A, B or D), B is the same rule, and `jet fix` drops the brackets."
         ],
         "losses": [
           {
-            "loss": "The names appear twice, as in `[T]<T: Describe>` and `[T#N]<T: Describe, N: Int>`; no other language repeats them.",
-            "mitigation": "The refusal of an unbounded call writes the list with an edit, and the head and list are checked against each other with an edit."
+            "loss": "Brackets inside brackets: `[<T: Describe>]` and `[K: <V: Describe>]` look busy.",
+            "mitigation": "Only bounded slots carry them, and unbounded heads stay `[T]`. Once D-MAP-ENTRY1 frees `:` they go entirely (option B)."
           },
           {
-            "loss": "Two forms remain: sigil heads take a trailing list, and `Pair`, `Set`, `Shared`, `Task`, `Receiver`, `Sender` and `Result` take the list as their arguments. `Option<T: …>` is accepted as an alternate input, a second spelling for one impl.",
-            "mitigation": "`jet fmt` prints `Option<T: …>` heads as `T?<T: …>`, so each family has one printed form."
+            "loss": "A bracketed slot is legal only in an impl head; `fn(xs: [<T: Describe>])` stays refused.",
+            "mitigation": "That refusal's edit writes the generic-function form `fn<T: Describe>(xs: [T])`."
           },
           {
-            "loss": "A type in scope named like a head parameter turns an impl into an error.",
-            "mitigation": "The refusal names the type and is loud; B would remove this only for bounded impls."
+            "loss": "`impl <T: Describe>?.Describe` starts like Rust's leading list.",
+            "mitigation": "The token after the closing `>` decides: `?` is the slot form; anything else is refused, with an edit to the slot form."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "A second place for impl bounds beside `Pair<T: …>`, or reopening D-IMPL-COND1 to move every struct impl."
+            "reason": "Only possible once D-MAP-ENTRY1 takes `:` out of maps (its A, B or D); until then `[T: Describe]` is a map type (p4, r10). Choose it if that ballot does."
           },
           {
             "key": "C",
-            "reason": "`[T: Describe]` already spells a map type, and optionals and maps need a bound inside parentheses."
+            "reason": "Conformance would follow body edits, interfaces would need bodies, and it reverses the ratified unbounded heads; Jet infers no bounds anywhere else."
           },
           {
             "key": "D",
-            "reason": "A new keyword for the trailing-clause shape the owner rejected in D-IMPL-COND1 as a second way to write a bound."
+            "reason": "The name still appears twice, and one rule needs D-IMPL-COND1 reopened, which makes struct impls repeat too."
+          },
+          {
+            "key": "E",
+            "reason": "The repetition you asked about: every name appears twice."
           }
-        ],
-        "tradeoff": "One bound position for every conditional impl, for writing the parameter names twice."
+        ]
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: StructBoundReview. Probes p1-p5 and q01-q21 reproduce on batch16, and every finding (F1-F18, R1-R4, U5) is fixed or named in the ballot; the concrete-head [U8] question moved to its own ballot."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G1Generation-2. Not the author, TypeIDSlice3-3. Sent back for text only: the near pair, the stale-head refusal, every D-MAP-ENTRY1 option, a neutral key example and migration rows, all added in r2."
       },
-      "checkInstructions": "Run the probes p1-p5 in this directory and review-probes/q*.jet with the current batch compiler; the ballot's detail quotes their output. Attack A's edge cases first: the binding rule, `N: Int` in the list and the implied map-key rule. Then try nested shapes, generic callers with declared bounds, and overlap with an unbounded impl.",
+      "checkInstructions": "Run the probes in $JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/owner-r1-probes with the current batch compiler; the detail quotes their output (outputs-tip23.txt). Attack A first: the `impl <T: …>?` start that Rust's leading list shares, `>>` and `>?.` lexing, bounded slots declaring names over a type in scope, and nested heads. Then check B's dependency on D-MAP-ENTRY1 and C's cost list against the spec's unbounded-head paragraph.",
       "surface": {
-        "gist": "How does an impl for every list, array, optional or map say what its items must support?",
-        "lesson": "A bound like `T: Describe` lets only types with Describe in. Struct impls write it after the name: `impl Pair<T: Describe>.Describe`. Built-in shapes need the same, but `[T: Describe]` already means a map.",
+        "gist": "How does an impl for every list, array, optional or map say what its items must support, writing each name once?",
+        "lesson": "A bound like `T: Describe` lets only types with Describe in. Jet writes it where the name is declared: `fn<T: Describe>`, `impl Pair<T: Describe>`. In a list head the same place is the slot, but `[T: Describe]` means a map while maps use `:`.",
         "trio": {
           "current": {
-            "note": "Today struct impls can be conditional, and built-in shapes cannot have impls at all.",
-            "code": "impl Pair<T: Describe>.Describe { … }   // works\nimpl [T].Describe { … }                 // refused at `[`"
+            "note": "Struct impls can be conditional; built-in shapes have only unbounded impls.",
+            "code": "impl Pair<T: Describe>.Describe { … }   // works\nimpl [T].Describe { … }                 // works, no bound\nimpl [T]<T: Describe>.Describe { … }    // last draft: refused at `<`"
           },
           "wild": {
             "lang": "Rust",
-            "note": "Rust declares the parameters after `impl`, before the type.",
+            "note": "Rust declares the parameters after `impl`, then names them again in the type.",
             "code": "impl<T: Describe> Describe for Vec<T> { … }"
           }
         },
-        "options": [
-          {
-            "key": "A",
-            "name": "Bound list after the shape",
-            "gist": "List the shape's parameters with bounds, where struct impls put them.",
-            "gains": [
-              "Same position as struct impls.",
-              "Never mistaken for a map."
-            ],
-            "losses": [
-              "The names appear twice."
-            ],
-            "proposed": {
-              "code": "impl [T]<T: Describe>.Describe { … }\nimpl [T#N]<T: Describe, N: Int>.Describe { … }\nimpl T?<T: Describe>.Describe { … }\nimpl [K: V]<K, V: Describe>.Describe { … }"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Bound list after `impl`",
-            "gist": "Declare the parameters in front of the shape, as Rust does.",
-            "gains": [
-              "Each name is declared once.",
-              "Familiar from Rust and Scala."
-            ],
-            "losses": [
-              "Struct impls keep the other place."
-            ],
-            "proposed": {
-              "code": "impl<T: Describe> [T].Describe { … }\nimpl<T: Describe, N: Int> [T#N].Describe { … }\nimpl<T: Describe> T?.Describe { … }\nimpl<K, V: Describe> [K: V].Describe { … }"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Bound inside the shape",
-            "gist": "Write the bound where the parameter appears.",
-            "gains": [
-              "Shortest for lists."
-            ],
-            "losses": [
-              "`[T: Describe]` already spells a map.",
-              "Optionals and maps need a bound inside parentheses."
-            ],
-            "proposed": {
-              "code": "impl [T: Describe].Describe { … }\nimpl [T: Describe#N].Describe { … }\nimpl (T: Describe)?.Describe { … }\nimpl [K: (V: Describe)].Describe { … }"
-            }
-          },
-          {
-            "key": "D",
-            "name": "A `where` clause",
-            "gist": "List conditions after the head with a new word.",
-            "gains": [
-              "Reads like Swift."
-            ],
-            "losses": [
-              "A new keyword.",
-              "The trailing shape already rejected for struct impls."
-            ],
-            "proposed": {
-              "code": "impl [T].Describe where T: Describe { … }\nimpl [T#N].Describe where T: Describe { … }\nimpl T?.Describe where T: Describe { … }\nimpl [K: V].Describe where V: Describe { … }"
-            }
-          }
-        ],
         "recommendation": {
           "rec": "A",
-          "why": "The bound list sits where struct impls already put it. Nothing reads as a map, and no keyword is added.",
+          "why": "Each name once, with its bound where the name stands, as `Pair<T: Describe>` does. The small brackets keep it from reading as a map; if maps move to `=>`, choose B and they go.",
           "gains": [
-            "One bound position for every conditional impl.",
-            "No map look-alike and no new keyword."
+            "Each name written once.",
+            "One bound rule for structs, functions and shapes.",
+            "Never read as a map."
           ],
           "losses": [
             {
-              "loss": "The names appear twice: `[T]<T: Describe>`.",
-              "mitigation": "The refusal's edit writes the list, and head and list are checked against each other."
+              "loss": "Brackets inside brackets: `[<T: Describe>]`.",
+              "mitigation": "Only bounded slots; gone under B once maps leave `:`."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "A second place for impl bounds."
+              "reason": "Needs maps to leave `:` first."
             },
             {
               "key": "C",
-              "reason": "Reads as a map type."
+              "reason": "Body edits would change which types qualify."
             },
             {
               "key": "D",
-              "reason": "A new keyword for a shape already rejected."
+              "reason": "Names each parameter twice."
+            },
+            {
+              "key": "E",
+              "reason": "Names each parameter twice."
             }
           ],
-          "tradeoff": "One bound position everywhere, for writing the names twice."
-        }
+          "tradeoff": "Each name once, for a pair of brackets while maps keep `:`."
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Bound in the slot, in angle brackets",
+            "gist": "Declare a bounded parameter where it stands: `[<T: Describe>]`.",
+            "gains": [
+              "Each name once.",
+              "Same rule as `Pair<T: Describe>`.",
+              "Never a map."
+            ],
+            "losses": [
+              "Brackets inside brackets."
+            ],
+            "proposed": {
+              "code": "impl [<T: Describe>].Describe { … }\nimpl [<T: Describe>#N].Describe { … }\nimpl <T: Describe>?.Describe { … }\nimpl [K: <V: Describe>].Describe { … }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Bare bound in the slot (needs maps off `:`)",
+            "gist": "Once maps leave `:` (shown with `=>`), write the bound bare: `[T: Describe]`.",
+            "gains": [
+              "Each name once, no extra brackets.",
+              "Reads like a function parameter."
+            ],
+            "losses": [
+              "Possible only if maps leave `:`.",
+              "Optionals need parentheses.",
+              "One token apart: `[T: Describe]` vs `[T => Describe]`."
+            ],
+            "proposed": {
+              "code": "impl [T: Describe].Describe { … }\nimpl [T: Describe#N].Describe { … }\nimpl (T: Describe)?.Describe { … }\nimpl [K => V: Describe].Describe { … }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Bounds inferred from the bodies",
+            "gist": "Write nothing; the body's calls decide.",
+            "gains": [
+              "Shortest."
+            ],
+            "losses": [
+              "A body edit changes which types qualify.",
+              "Interfaces need bodies; Jet infers no bounds elsewhere."
+            ],
+            "proposed": {
+              "code": "impl [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()   // makes T: Describe\n        \"[{parts.join(\", \")}]\"\n    }\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Bound list after `impl`",
+            "gist": "Declare the parameters in front of the shape, as Rust does.",
+            "gains": [
+              "Familiar from Rust and Scala."
+            ],
+            "losses": [
+              "Names each parameter twice.",
+              "Struct impls keep the other place, or repeat too."
+            ],
+            "proposed": {
+              "code": "impl<T: Describe> [T].Describe { … }\nimpl<K, V: Describe> [K: V].Describe { … }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Bound list after the shape (last draft)",
+            "gist": "Repeat the shape's parameters in a list after it.",
+            "gains": [
+              "Never a map."
+            ],
+            "losses": [
+              "Names each parameter twice."
+            ],
+            "proposed": {
+              "code": "impl [T]<T: Describe>.Describe { … }\nimpl [K: V]<K, V: Describe>.Describe { … }"
+            }
+          }
+        ]
       },
       "draftedBy": "Orchestrator",
       "reviewedBy": "StructBoundReview",
@@ -135998,41 +136048,41 @@
       "cardId": "c0sdz4q0",
       "group": "language",
       "title": "How a byte list keeps its own encoding once list codecs are ordinary impls",
-      "situation": "Core decodes a byte list (`[U8]`) differently from other lists. It takes `Dyn.Bytes` as is, reads text as base64, and encodes back to `Dyn.Bytes`. The encoding spec requires this: a Codable `[U8]` is never an integer array. Today the compiler picks that route by type tests and by helper name. Card #6852 c8 asks that decode bind through public traits, with no Core helper named in CoreReach.jet. Its c9 asks that a user type implementing those traits works at O0, O1 and O2. So list, option and map decode must become ordinary impls such as `impl [T].Decode`. D-BUILTIN-METHOD1 keeps concrete-head specialization and overlapping impls illegal. An `impl [U8].Decode` beside `impl [T].Decode` would be both. This ballot decides how the byte rule survives the move.",
+      "situation": "Core encodes a byte list (`[U8]`) as a byte string, never as a list of numbers. Decode takes `Dyn.Bytes` as is and reads text as base64; encode writes `Dyn.Bytes`. Today the compiler picks that route by type tests and by helper name. Card #6852 c8 asks that decode bind through public traits, with no Core helper named in CoreReach.jet. Its c9 asks that a user type implementing those traits works at O0, O1 and O2. So list, option and map codecs become ordinary impls such as `impl [T].Decode`, and impls may not overlap. This ballot decides how the byte rule survives the move. You asked that every downside be engineered away. This rework removes five of the last draft's seven costs by redesign and names the two that remain, with their mitigations.",
       "gist": "How should a byte list keep its own encoding once list codecs are ordinary impls, with no hidden compiler route?",
-      "lesson": "The usual way is for the general impl to ask the element type how a list of it looks. Haskell's `Show` and the aeson JSON library work this way. The other way is specialization: a more specific impl wins. Rust has kept that unstable for public use since 2016 and uses it only inside its standard library. Jet's generic instances should each know their exact types, but today a `[T]` instance and a `[T#N]` instance of one function collide, so no option can lean on that yet.",
-      "explainer": "Think of a post office that ships any box of items as a list of parcels. Letters are special: a stack of letters travels in one envelope. The office can keep a special counter just for letter stacks. Or it can ask each item how it ships in bulk, and letters answer 'one envelope'. Or letters can become their own product, a letter pack.",
+      "lesson": "The usual way is for the general impl to ask the element type how a list of it looks. Haskell's `Show` and the aeson JSON library work this way. The other way is specialization: a more specific impl wins. Rust has kept that unstable for public use since 2016 and uses it only inside its standard library. Jet can keep such a hook private to Core, because a `__` name is reserved for Jet.",
+      "explainer": "Think of a post office that ships any box of items as a list of parcels. Letters are special: a stack of letters travels in one envelope. The office can ask each item how it ships in bulk, and letters answer 'one envelope'; only the post office can print that answer on the form. Or it can keep a special counter just for letter stacks. Or letters can become their own product, a letter pack.",
       "story": "Ana keeps a thumbnail as `[U8]` in a `#Codable` struct. Its JSON holds base64 text and its CBOR holds a byte string. That works today because the compiler tests for U8 and names `__decode_bytes`. Once list decoding is `impl [T].Decode` in Core, nothing in the language says `[U8]` still decodes that way. Her generic `load<T: Decode>` must also reach the byte rule when `T` is `[U8]`.",
       "inWild": "// Haskell 2010 Report 6.3.3: `showList` exists for Char, so a String shows in quotes.\n// aeson: ToJSON/FromJSON carry toJSONList/parseJSONList with defaults; ToJSONKey/FromJSONKey handle map keys.\n// binary: `class Binary t` carries `putList` with a default.\n// Go encoding/json: `[]byte` is base64 by a kind test; json v2 also writes `[N]byte` as base64.\n// Rust: std uses min_specialization internally; serde writes Vec<u8> as a sequence unless serde_bytes wraps it.\n// Swift: Data is its own type and JSONEncoder writes it as base64; [UInt8] is a number array; SE-0320 adds a key protocol.\n// C++: partial template specialization; `std::vector<bool>` is the cautionary case.",
-      "detail": "State of #6852 c8. The codec move is unlanded. For the seed it is split into `land/6852-c8-codec-seed-a.patch`, the compiler half on e6e448e550, and `land/6852-c8-codec-seed-b.patch`, the Core half, which lands once a seed carries (a). (b) PROPOSES `Encode` and `Decode` as core.encoding declarations, with `impl F32.Decode` and `impl Dyn.Decode` there. On dev, `__decode_f32` and `__decode_dyn` are still live. Option A's `Decode: trait` presupposes the pair.\n\n`land/6852-c8-decode-lines-r2.patch`, stacked on (b), marks the six remaining decode helpers with jet_builtins roles. That is option D′ below.\n\nSites that carry the byte rule or its container siblings (dev lines). Decode, tree: BuildDyn.jet `ir_dyn_decode` 545-573, `ir_codec_decode_helper` 707-724 (the U8 test at 711), `ir_dyn_fixed_decode` 578, `ir_dyn_union_decode`, `ir_decode_under` 687. Decode, streaming: BuildDyn.jet `ir_decoding_read` 1063-1114, with its own byte exclusion at 1084-1093.\n\nEncode: BuildDyn.jet `ir_serde_encode` 783-850, with the byte test at 804 and an `ir_list_operand` copy for an inline `[U8#N]`. It calls `ir_dyn_array_encode`, `ir_dyn_option_encode`, `ir_dyn_union_encode` and BuildExpr.jet `ir_dyn_object_encode`.\n\nReach: CoreReach.jet `ir_codec_decode_helpers` 106-107, `ir_decoding_reads` 212-213 and `ir_core_decoding_read`. The comptime tier has JetDriver Pipeline.jet `jet_driver_comptime_codec_refs` 1423-1446, and hot-text.list names these functions.\n\nSema: TypeRelations.jet `sema_type_codec_structural_bound` 2807-2848 and Serde.jet `sema_serde_type_is_admissible_in` 278-319. Both say a list is Codable when its element is. They disagree on `[U8: V]`: the first asks that the key be Decode, the second asks for a String key. The trait rows carry `through_elements` (Prelude Traits.jet, OwnedTraitRows.jet).\n\nRuntime: `jet_rt_codec_decode_u8` (DynCodec.jet:530) is one of ten integer adapters over `codec_decode_integer` (452-508), routed by RuntimeRoutes.jet:1175 and RuntimeCExports.jet.\n\nFate per option. Under A, every container decode helper and all three IR byte tests go (BuildDyn.jet 711, 804 and 1084-1093). The list, fixed list, option and map routes become impls, and the streaming list read becomes a hook. The two Sema tables shrink to the impls' bounds, and `through_elements` goes for these heads.\n\nUnder B, the same sites go, and the byte rule is `impl [U8].Decode` plus `impl [U8#N].Decode`. Under C, the byte tests go and `Bytes` gets impls. Under D and D′, the byte tests stay and the other sites follow A. Every option keeps the U8 runtime adapter.\n\nUnder every option, `FieldError.under` keeps its Core helper, found through the role DecodeUnder as decode-lines-r2 does it, so CoreReach.jet names no `__decode_` helper. The union route, `Shared` and the named Dyn, DateTime and format types are outside this ballot. They stay with #6852 c8, which owns the routes this ballot does not settle.\n\nPrerequisites every option shares. Probes p4, p5 and p9 show that one generic function instantiated at both `[U8]` and `[U8#2]` collides today. At O0 it prints `[2, 0]` for `[1, 2]` and then faults with SIGSEGV. At O1 and O2 it is an internal compiler error: an `[U8#2]` argument reaches an `[U8]` parameter. A struct with both field kinds fails in its derived `__read`, also with I16. Every claim below about `[U8#N]` holds only once that collision is fixed. The review reported it to Main.\n\nMap keys. `__decode_map` takes String keys only. D-IMPL-STRUCTBOUND1 Rule 1 refuses a head that names a type, so `impl [String: T].Decode` is not legal in any option. Every option uses a key trait instead, as Swift SE-0320 and aeson's key classes do. PROPOSED: core.encoding declares `MapKey: trait { key_text: fn(self) -> String, from_key_text: fn(text: String) -> Self [FieldError]! }` and `impl String.MapKey`. `from_key_text` needs the same `-> Self` substitution as A's prerequisite two.\n\nThe map impls are `impl [K: V]<K: MapKey, V: Decode>.Decode` and `impl [K: V]<K: MapKey, V: Encode>.Encode`, in D-IMPL-STRUCTBOUND1's spelling. A bound on K is the map-key rule that review's F3 named as new work: today no generic K is a valid map key. That ends the Sema disagreement on `[U8: V]`, and later key types need no overlap. q7's Fix line becomes \"Fix: Decode a map whose key type is `MapKey` (String is), or decode `[String: String]` and convert its keys\".\n\nEach option answers four questions. Which impl does a generic `fn<T: Decode>` reach when `T` is `[U8]`? Must a more specific impl meet the general impl's bounds? Do `[U8#N]` and `U8?` follow? What does the Encode side do?\n\nCases each option must pin at O0, O1 and O2: `[U8]`, `[U8#N]`, and both in one struct and in one generic function (p4, p9). Also `[[U8]]`, `[U8]?`, `[String: [U8]]`, `U8?` and `[I8]`, whose outputs p1 and p3 record today. Also `[Level]` with `Level: distinct U8` (q9), and generic `load<[U8]>` and `load<[U8#2]>`. Also the streaming JSON field path, CBOR major type 2, a CSV text cell for `U8` and for `[U8]`, comptime decode, and every error text.\n\nTooling, owed under every option. q7's Fix line suggests `impl [Int:String].Decode`, a head every option refuses; it takes the text above. q5 answers an overlap attempt with \"`impl Many` takes no type parameters\" and should say that impls may not overlap. q9's Fix names `Level.from_U8`, which does not exist; `from_int` does. q6 reports \"No trait named `Encode` is in scope\" for a type that is simply not Codable.\n\nAny hook the chosen option adds shows in `jet inspect expand --facts derive`, in LSP hover and in the Core docs.",
+      "detail": "What changed since the last draft. Checked on the tip23 compiler (jet a0.0.46-dev, dev 45bbcdbd34). The probes are in `$JET_SCRATCH_ROOT/tmp/orch/ballot/concretehead/owner-r1-probes`, with outputs at O0, O1 and O2.\n\n- The shared prerequisite is gone. One generic function at both `[U8]` and `[U8#2]` no longer collides. p4 prints `{\"pixels\":\"AQI=\",\"fixed\":\"AwQ=\"}`, then `[1, 2]` and `[3, 4]`, at O0, O1 and O2. p5, p6, p8 and p9 print correctly at every level too.\n\n- Hooks can be Core-only by an existing rule plus #6851 c39. A source-written `__name` is lexer error E0067, Jet.ReservedDunderName: \"`__dec_list` is reserved for Jet\" (c02). Core source units are lexed with reserved names allowed (Loader.jet `jet_driver_core_source_unit`). \n\n- Template paste. A user marker template still pastes `__` names on tip23 (review probes d1, d3b), while the `#code` paste refuses them. #6851 c39 makes both paste doors refuse a `__` name outside Core's own templates. With that rule, a trait member named `__decode_list` can be declared and overridden only by Core, and user code cannot call it.\n\n- A `priv` trait member is not a feature: c01 stops with \"Expected a trait method, associated type or trait constant\".\n\n- The trait's module can already write the concrete type where a trait says `Self` or `[Self]`. c03 declares `dec: fn(tree: Dyn) -> Self` and `dec_list: fn(tree: Dyn) -> [Self]`. It implements them on U8 with `-> U8` and `-> [U8]`, and a generic call prints `[1, 2]` and `7` at O0 and O2. The last draft's prerequisite two is not needed.\n\n- The streaming list read needs no generic trait member. `__Decoding.read_list` (Encoding.jet:462-482) reads an Array item by item. It decodes any other value through `reader.capture().decode<[Item]>()`, the tree route, which reaches the list impl. A byte string is never an Array, and an Array of numbers read item by item is exactly `__decode_bytes`' own Array fallback, `__decode_list<U8>`. So the byte exclusion at BuildDyn.jet:1084-1093 can be deleted with no hook, and the last draft's prerequisite four is not needed.\n\nStill true. A default body that names `Self` is refused: q1 gives Jet.UnknownName for `Self`. q2 gives \"`Self` does not implement `Decode`\" and leaves `[Self]` unsubstituted. A `[T#N]` cannot be built from a `[T]` in generic code: c04's `[T#N].filled(…)` gives \"`[T#N].filled` needs a known length\". The spec has no other fixed-list builder.\n\nDispatch through an element hook works today (q3, `2 3 4` at every level). A static default that does not name `Self` is inherited and overridden correctly (q4). Core's auto-derived structs keep base64 bytes (q10, q13). A `distinct U8` list stays a number list (q9).\n\nState of #6852 c8. The codec move is unlanded. `land/6852-c8-codec-seed-a.patch` is the compiler half. `land/6852-c8-codec-seed-b.patch` is the Core half, which declares `Encode` and `Decode` in core.encoding with `impl F32.Decode` and `impl Dyn.Decode`. On dev, `__decode_f32` and `__decode_dyn` are still live. Every option presupposes the pair.\n\nSites that carry the byte rule (dev lines). Decode, tree: BuildDyn.jet `ir_dyn_decode` 545-573 and `ir_codec_decode_helper` 707-724, with the U8 test at 711. Decode, streaming: `ir_decoding_read` 1063-1114, with its byte exclusion at 1084-1093. Encode: `ir_serde_encode` 783-850, with the byte test at 804.\n\nReach and Sema: CoreReach.jet `ir_codec_decode_helpers` 106-107 and `ir_decoding_reads` 212-213, and JetDriver Pipeline.jet `jet_driver_comptime_codec_refs` 1423-1446. TypeRelations.jet `sema_type_codec_structural_bound` 2807-2848 and Serde.jet `sema_serde_type_is_admissible_in` 278-319 disagree on `[U8: V]`. Runtime: `jet_rt_codec_decode_u8` (DynCodec.jet:530) is one of ten integer adapters over `codec_decode_integer`.\n\nMap keys, under every option. `__decode_map` takes String keys only, and STRUCTBOUND Rule 1 refuses a head that names a type. So every option uses a key trait, as Swift SE-0320 and aeson's key classes do. PROPOSED: core.encoding declares `KeyText: trait { key_text: fn(self) -> String, from_key_text: fn(text: String) -> Self [FieldError]! }` and `impl String.KeyText`, writing `-> String` as c03 allows. A generic map key then needs the implied key rule that D-IMPL-STRUCTBOUND1 names as new work (q09).\n\nBound spelling. The code follows D-IMPL-STRUCTBOUND1's recommendation, `impl [<T: Decode>].Decode`. If that ballot picks B, read `impl [T: Decode].Decode`. Map types are written as D-MAP-ENTRY1 decides. Under its A they read `[String => [U8]]`, and the bounded head `impl [<K: KeyText> => <V: Decode>]`, or `[K: KeyText => V: Decode]` under STRUCTBOUND1's B. The key codec trait is named KeyText so it never reads as STRUCTBOUND1's key-eligibility bound.\n\nCases each option must pin at O0, O1 and O2: `[U8]`, `[U8#N]` and both in one struct and one generic function (p4, p9). Also `[[U8]]`, `[U8]?`, `[String: [U8]]`, `U8?` and `[I8]` (p1, p3), `[Level]` with `Level: distinct U8` (q9), and `load<[U8]>` and `load<[U8#2]>`. Also streaming JSON `\"AQI=\"` and `[1,2]`, CBOR major type 2, CSV cells for `U8` and `[U8]`, comptime decode, and every error text with its framing.\n\nTooling, owed under every option. The q7 and q8 fixes say \"only a map keyed by `String` has `Encode`\"; they take the KeyText text. q5's overlap refusal now says \"`impl Many<Small>.Name` singles out one instance of `Many`\", which is right. It then cascades into Jet.DuplicateDefinition and a second Jet.DuplicateTraitImpl, which should go. q6's fix for `Bytes` says \"no impl can add it\", which changes under C.\n\nConsidered and not offered:\n\n- One list impl that tests its element type in Core source, as `if T is U8` inside `impl [<T: Decode>].Decode`. It would avoid A's two remaining costs and keep impls from overlapping. Jet has no compile-time branch on a type parameter's identity in ordinary code; `#if` is template-only. Adding one is specialization under another name, and it puts back the per-type test that D removes from IR.",
       "options": [
         {
           "key": "A",
-          "name": "The general impl asks the element: list hooks with defaults",
-          "detail": "Decode gains a list hook with a default body, `decode_list(tree) -> [Self]`. The default decodes an Array item by item, as `__decode_list` does today. `impl [T].Decode` calls `T.decode_list`. `impl [T#N].Decode` calls it, checks the length and builds the fixed list. U8's impl overrides the hook to take `Dyn.Bytes` and base64 text. Encode gains `encode_list: fn(items: [Self]) -> Dyn` the same way, which U8 answers with `Dyn.Bytes`. No two impls overlap, so the ratified clause stands.",
-          "technical": "Dispatch already works. Probe q3 has an element hook and a conditional `impl Many<T: Dec>.Dec` that calls `T.dec_list`, nested. It prints `2 3 4` at O0, O1 and O2. A static default body that does not name `Self` is inherited and overridden correctly (q4).\n\nA needs four things first. One: a default trait body that names `Self` and `[Self]`. Today q1 gives `Jet.UnknownName` for `Self`. q2 gives \"`Self` does not implement `Decode`\" and leaves `[Self]` unsubstituted. Two: `-> Self` substituted in an impl on a builtin, which the codec move notes is missing (its impls write `-> F32` and `-> Dyn`). Three: a source spelling that builds `[T#N]` from a checked `[T]`; the spec has only `[T#N].filled(value)`.\n\nFour: a trait member with its own type parameters, called through a bound. The streaming hook needs it. Today q11 refuses a default body on `dec_many: fn<Source: Src>(source: Source) -> Int` with `Jet.UnknownType`: \"There's no type called `Source`\". Without a default the member is accepted, but q12's `T.dec_many(Text{…})` through a bound is refused: \"`dec_many` wants `Source` for argument 1, but this is `Text`\".\n\nNo card owns these yet. Main files one card for all four on ratification. The work is Sema's `Self` scope in default bodies, method type parameters on trait members and their substitution at bound calls, plus one Core conversion, about two days [INFERENCE].\n\nU8's own decode does not move into source. `impl U8.Decode`'s `decode` is `builtin.codec_decode_u8(tree)`, a jet_builtins host operation. PROPOSED: its Core.rows row is `dispatcher_row adapter jet_builtins codec_decode_u8`, whose CoreCallRecord names `jet_rt_codec_decode_u8`, plus its typed signature in the host signature table. The IR scalar arm (BuildDyn.jet:572) keeps the other nine integer adapters, so both call sites end in the same `codec_decode_integer`.\n\nSo U8 keeps the same Number lexemes and the CSV and environment text-cell scope. It keeps the error text \"expected U8, found out-of-range Int\", as I8 through U64 do. Only `decode_list` and `encode_list` are new source.\n\nStreaming: Decode gains a private, compiler-known member `__read_list<Source: __DecodeSource>`, like the derived `__read`; it waits on prerequisite four. Its default is today's `read_list`. U8 overrides it to capture the value and decode bytes. `impl [T].Decode`'s `__read` calls `T.__read_list`, so no type test remains, and BuildDyn.jet:1084-1093 is deleted.\n\nEncode: `impl [T].Encode` is `T.encode_list(self)`. `impl [T#N].Encode` passes `[T]` from its value, one copy for an inline `[U8#N]`, the same `ir_list_operand` copy as today. `ir_dyn_array_encode`, `ir_dyn_option_encode` and `ir_dyn_object_encode` become the bodies of `impl [T]`, `impl T?` and `impl [K: V]`. `ir_dyn_union_encode` stays with the union route.\n\nOnly a type's owner writes its hooks. `impl U8.Decode` lives in core.encoding, and a user's `impl U8.Decode` gets ImplOnBuiltinType. A distinct type's forwarded codec (D-CODABLE-DISTINCT1) does not forward the hooks. So `[Level]` with `Level: distinct U8` keeps today's `[1,2]` and refuses base64, as q9 shows at every level. Derives never generate the hooks, and hand-written impls inherit the defaults.",
-          "code": "// PROPOSED; the bound spelling on `[T]` follows D-IMPL-STRUCTBOUND1.\nDecode: trait {\n    decode: fn(tree: Dyn) -> Self [FieldError]!,\n    decode_list: fn(tree: Dyn) -> [Self] [FieldError]! { … each Array item as Self … }\n}\nEncode: trait {\n    encode: fn(self) -> Dyn,\n    encode_list: fn(items: [Self]) -> Dyn { … an Array of each item's encode() … }\n}\nimpl [T]<T: Decode>.Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { T.decode_list(tree) }\n}\nimpl [T]<T: Encode>.Encode {\n    encode: fn(self) -> Dyn { T.encode_list(self) }\n}\nimpl U8.Decode {\n    decode: fn(tree: Dyn) -> U8 [FieldError]! { builtin.codec_decode_u8(tree) }\n    decode_list: fn(tree: Dyn) -> [U8] [FieldError]! { … Bytes, base64 text or an Array … }\n}"
+          "name": "The list impl asks its element, through Core-only hooks",
+          "detail": "The general list impl asks its element how a list of it decodes and encodes. Decode gains a hook `__decode_list` and Encode gains `__encode_list`, each with a default body that reads or writes an Array item by item. U8's impl, in Core, overrides both: bytes in, bytes out. No two impls overlap, so the ratified no-overlap rule stands, and a generic call reaches the byte rule because it asks the same impl.\n\nThe hooks are Jet-reserved `__` names, so only Core can declare, override or call them (c02, plus the template-paste rule of #6851 c39). To a user, Decode and Encode look as they do today. A user type that implements them gets the default list form and works at every level.",
+          "technical": "Mechanism. `impl [<T: Decode>].Decode` is `T.__decode_list(tree)`. `impl [<T: Decode>#N].Decode` calls the same hook, checks the length and builds the fixed list. `impl [<T: Encode>].Encode` is `T.__encode_list(self)`. The fixed list passes `loop item in self -> item`, one copy, the copy `ir_list_operand` makes today. `impl <T: Decode>?.Decode` and the KeyText map impls take over `__decode_option` and `__decode_map`. Dispatch through an element hook already works at O0, O1 and O2 (q3).\n\nHow each of the last draft's costs is removed:\n\n- \"A public hook member on each trait.\" The hooks are reserved names. A user-written `__decode_list` is lexer error E0067 whether declared, overridden or called (c02), and Core is lexed with reserved names allowed.\n\nA user marker template can still paste a `__` name today (review probes d1, d3b). It can declare and call a hidden hook, or call Core's `__cli_is_int`. #6851 c39 closes that door, so the guarantee is c02 plus the template-paste rule. As defense in depth, sema also refuses a non-Core impl that defines a Core trait's `__` member. Docs, hover and completion list no `__` member, which the Core doc pass must check.\n\n- \"A type's owner can change how lists of it encode.\" Only Core can write the hook (c02, plus the template-paste rule), and a user impl on a built-in is Jet.ImplOnBuiltinType. q9 pins today's IR route only. A' requires that the distinct codec derive writes `decode` and `encode` only. The hooks take the trait default, so a distinct element is never a byte string. `[Level]` stays `[1,2]` in the O0, O1 and O2 cases.\n\n- \"`-> Self` on builtin impls first.\" Not needed: the trait's module writes `-> U8` and `-> [U8]` for `Self` and `[Self]`, and generic calls reach them (c03).\n\n- \"Trait members with their own type parameters first.\" Not needed. The list impl's streaming `__read` calls the free generic `__Decoding.read_list<T, Source>`, as derived `__read` does today. Its non-Array branch tree-decodes `[T]`, which reaches `T.__decode_list`. So BuildDyn.jet:1084-1093 is deleted, and no generic trait member is called through a bound.\n\n- \"Fixed byte lists depend on the instance collision.\" Fixed on tip23 (p4, p5, p9 at every level).\n\nWhat remains, each with its cost and mitigation:\n\n- The template-paste rule (#6851 c39). Cost: one check where a template pastes a name, shared by both paste doors, and one UI test. Mitigation: it closes every reserved name, not just the codec hooks, and a pinned O0 probe shows that a user template declaring and calling `__decode_list` on a user type is refused.\n\n- A default body that names `Self` and `[Self]`. Today q1 gives Jet.UnknownName and q2 leaves `[Self]` unsubstituted. Cost: Sema gives default bodies the `Self` scope that bound calls already have (spec: \"`Self` reads as `T`\"), about a day [INFERENCE]. Mitigation: it is general trait work, not codec work. If it slips, registration can write the missing hook into each impl with its concrete type, as c03 does by hand.\n\n- Building `[T#N]` from a checked `[T]` in generic code. c04 refuses `[T#N].filled` without a known length. Cost: one fixed-list static, PROPOSED `[T#N].from_list(items) -> [T#N]?`, None on a length mismatch. Mitigation: the IR already makes this conversion for `__decode_fixed_list`. Options B and C need the same static; only D avoids it.\n\nU8's scalar decode stays a host operation, `builtin.codec_decode_u8(tree)`, a jet_builtins row naming `jet_rt_codec_decode_u8`. So U8 keeps its Number lexemes, the CSV and environment text cells, and the error \"expected U8, found out-of-range Int\". Only the two hooks are new source.\n\nRemoved: the three IR byte tests (BuildDyn.jet 711, 804 and 1084-1093), every container decode helper, the CoreReach.jet helper names, and `through_elements` for these heads. The two Sema tables shrink to the impls' bounds, which ends their `[U8: V]` disagreement.\n\nEdge cases. `[[U8]]` is a list of byte strings, because the outer list asks `[U8]`, whose hook is the default. `[U8]?` is an optional byte string. `U8?` is an optional number. `[String: [U8]]` maps to byte strings. `[I8]` stays numbers. `load<[U8]>` and a struct field reach the same impl, so generic and direct calls agree.\n\nBeginner path: nothing changes; `[U8]` is a byte string and other lists are arrays. Expert path: a user who wants a packed list form wraps it in a struct with its own Decode and Encode impls.",
+          "code": "// PROPOSED (A′), in core.encoding. `__` names are reserved: only Core declares, overrides or calls them.\nDecode: trait {\n    decode: fn(tree: Dyn) -> Self [FieldError]!,\n    __decode_list: fn(tree: Dyn) -> [Self] [FieldError]! { … each Array item through Self.decode … }\n}\nEncode: trait {\n    encode: fn(self) -> Dyn,\n    __encode_list: fn(items: [Self]) -> Dyn { … an Array of each item's encode() … }\n}\n\nimpl [<T: Decode>].Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { T.__decode_list(tree) }\n}\nimpl [<T: Decode>#N].Decode {\n    decode: fn(tree: Dyn) -> [T#N] [FieldError]! {\n        items: T.__decode_list(tree) ?? return Err(err)\n        [T#N].from_list(items) ?? Err(fail(\"expected a fixed list of length {N}, found {items.len()}\"))\n    }\n}\nimpl [<T: Encode>].Encode {\n    encode: fn(self) -> Dyn { T.__encode_list(self) }\n}\n\nimpl U8.Decode {\n    decode: fn(tree: Dyn) -> U8 [FieldError]! { builtin.codec_decode_u8(tree) }\n    __decode_list: fn(tree: Dyn) -> [U8] [FieldError]! { … Bytes as is, base64 text, or an Array … }\n}\nimpl U8.Encode {\n    encode: fn(self) -> Dyn { Dyn.Int(Int{self}) }\n    __encode_list: fn(items: [U8]) -> Dyn { Dyn.Bytes(items.copy()) }\n}\n\n// A user type: writes neither hook and gets the default list form.\n#Codable\nPixel: struct {\n    level: U8,\n}\n// `[Pixel]` encodes as [{\"level\":1}]; `[U8]{1, 2}` as \"AQI=\"; `[[U8]]` as [\"AQI=\"]."
         },
         {
           "key": "B",
-          "name": "The most specific impl wins, only in the trait's own module",
-          "detail": "Core writes `impl [U8].Decode` beside `impl [T].Decode`. Two impls may overlap only when both sit in the module that declares the trait and one head is strictly more specific. Each instance of generic code picks the most specific impl for its exact types, so `fn<T: Decode>` at `[U8]` reaches the byte impl. A module that does not declare the trait cannot specialize it. This is Rust std's own model: `min_specialization` is used inside std and closed to other crates.",
-          "technical": "B's gains are real. Decode and Encode gain no public hook members. It needs no `Self` work in default bodies. The byte rule reads as one impl. The specific impl must hold wherever the general one holds for those types (U8 is Decode), so deleting it never makes `[U8]` stop being Decode. A needs only the generic `impl [T#N].Decode` for fixed lists; B needs it and `impl [U8#N].Decode` too. `U8?` could get its own impl; the rule allows it, though Core would not write it.\n\nB also needs the instance collision fixed, since picking per instance is its whole mechanism. Heads match after tags are stripped: the IR's byte tests use `ir_untag` today, so a tagged U8 list takes the byte route [INFERENCE, from BuildDyn.jet]. B would keep that by matching `[U8]` against the untagged element.\n\nThe checker gains a specificity order on heads and an overlap check that admits strict nesting only. Rust's soundness trouble came from lifetimes erased before code generation, which Jet types lack, but the rule still needs its own review. Every trait owner gets the same power over its own traits, so U8 would have both hooks on scalars and specialization on lists.",
-          "code": "// PROPOSED\nimpl [T]<T: Decode>.Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { … each Array item … }\n}\nimpl [U8].Decode {\n    decode: fn(tree: Dyn) -> [U8] [FieldError]! { … Bytes, base64 text or an Array … }\n}"
+          "name": "A concrete Core impl narrows the list impl",
+          "detail": "Core writes `impl [U8].Decode` and `impl [U8].Encode` beside the general list impls, and the narrower impl wins for `[U8]`. Overlap is allowed only in a narrow case: both impls sit in the Core module that declares the trait, and the narrow head names no parameter at all. Every other overlap stays refused, so no user and no other trait owner gains the power. Each generic instance knows its exact types, so `load<[U8]>` reaches the byte impl.",
+          "technical": "Rule. An impl may overlap a general impl only when three things hold. The trait is declared in Core, both impls are in that module, and the narrow head is fully concrete (`[U8]`, never `[U8#N]` or `[T]?`). The narrow impl must hold wherever the general one does (U8 is Decode), so deleting it never makes `[U8]` lose the trait. Instance selection prefers a matching concrete head.\n\nHow the last draft's costs are removed:\n\n- \"A specificity order on heads.\" Not needed. Concrete-beats-generic is the only comparison, so there is no partial order to define or review.\n\n- \"Every trait owner gains overlap.\" Only Core's traits, in their own modules, and only for concrete heads.\n\n- \"`[U8#N]` needs its own impl.\" Not needed. `impl [<T: Decode>#N].Decode` decodes through `[T].decode` and builds the fixed list, so its U8 instance reaches `impl [U8].Decode`. The encode side passes `loop item in self -> item` to `[T].encode`.\n\n- \"No `Self` work, no hooks.\" Kept: B′ adds no trait member and needs no `Self` in default bodies, which is its real advantage over A′.\n\nWhat remains:\n\n- It amends the ratified rule. D-BUILTIN-METHOD1 bans overlapping impls and concrete-head specialization. B′ makes a Core-only exception to both. Cost: a ratified clause gains a carve-out, and the overlap check, instance selection and trait-value tables learn a second impl per head. Mitigation: the carve-out is mechanical to check (same module, Core trait, no parameters).\n\n- A generic and a direct call agree only if every route picks per instance. That covers the monomorphized code, the trait-value table for a `[U8]` held as `Decode`, comptime decode and the streaming read. Cost: each is a place to get wrong. Mitigation: pin all four at O0, O1 and O2 (p4 and p9 cases).\n\n- Distinct element types. Today `[Level]` with `Level: distinct U8` encodes as `[1,2]` (q9), so the byte route does not see through the tag. B′ must match `[U8]` against the element exactly, never after stripping tags, to keep that.\n\n- The fixed-list builder from a checked `[T]`, as in A′ (c04).\n\nEdge cases follow A′: `[[U8]]` is a list of byte strings and `U8?` an optional number.\n\nBeginner path: as in A′. Expert path: a user cannot specialize; a user who wants a packed list form wraps it in a struct.",
+          "code": "// PROPOSED (B′), in core.encoding: a fully concrete head may narrow a general impl in the trait's own Core module.\nimpl [<T: Decode>].Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { … each Array item through T.decode … }\n}\nimpl [U8].Decode {\n    decode: fn(tree: Dyn) -> [U8] [FieldError]! { … Bytes as is, base64 text, or an Array … }\n}\nimpl [<T: Decode>#N].Decode {\n    decode: fn(tree: Dyn) -> [T#N] [FieldError]! {\n        items: [T].decode(tree) ?? return Err(err)   // the U8 instance reaches impl [U8].Decode\n        [T#N].from_list(items) ?? Err(fail(\"expected a fixed list of length {N}, found {items.len()}\"))\n    }\n}\nimpl [<T: Encode>].Encode {\n    encode: fn(self) -> Dyn { … an Array of each item's encode() … }\n}\nimpl [U8].Encode {\n    encode: fn(self) -> Dyn { Dyn.Bytes(self.copy()) }\n}\n\n// In any other module, overlap stays refused:\n// impl [Pixel].Encode { … }   // Jet.DuplicateTraitImpl"
         },
         {
           "key": "C",
-          "name": "Bytes get their own Codable type",
-          "detail": "`[U8]` becomes an ordinary list in codecs and encodes as an integer array. The existing `Bytes` type carries the byte rule through its own impls. A program that wants a byte string writes `Bytes`. This reverses the encoding spec's rule that a Codable `[U8]` is never an integer array.",
-          "technical": "`Bytes` already exists (spec.md:4936-4965): a growable byte builder with a read cursor. It is not Codable today (q6). C makes that type Codable. Its bytes are the wire value, and its cursor is not encoded; a decoded `Bytes` starts with its cursor at 0. This keeps D-BUILTIN-METHOD1's \"Bytes retains its own type identity\": `Bytes` stays its own type and never becomes a list alias.\n\nNo overlap and no hooks: `impl [T].Decode` covers every list, and `impl Bytes.Decode` takes `Dyn.Bytes` and base64 text. Every Codable `[U8]` field changes on the wire, in Core and in programs. CBOR major type 2 becomes major type 4, and JSON base64 text becomes an array of numbers.\n\nCore declares no `#Codable` struct with a `[U8]` field, but Encode and Decode auto-derive when every field qualifies (spec.md:1063-1065), and Core does not deny `auto_derive`. At least 28 exported Core structs auto-derive both over a `[U8]` field. Examples are core.crypto's Digest256, Digest512, Signature, VerifyKey and X25519PublicKey, core.crypto.vault's WrappedVaultKey, core.net's UDPPacket, core.net.tls's TLSCertificate, core.image's Image and core.jobs' JobPayload.\n\nThe count of 28 comes from `$JET_SCRATCH_ROOT/tmp/g1gen2/r1-u8_core_u8_autoderive.jet`, checked by `$JET_SCRATCH_ROOT/tmp/orch/batch17-chain/s1/jet` with its own Core. It bounds each of the 29 exported structs with a `[U8]` field by `Encode` and by `Decode`. Only Secret, which is `#!Codable`, was refused, and only for Encode. Review probe q13 confirms five on batch16, and q10 shows Digest256 round-tripping as base64 at O0, O1 and O2.\n\nUnder C, each of these 28 changes its JSON from base64 to a number array. Core must rewrite their fields to `Bytes` or keep the old wire by hand-written impls. A migration rewrites program fields to `Bytes`. Swift makes this choice with `Data`.",
-          "code": "// PROPOSED\n#Codable\nThumbnail: struct {\n    pixels: Bytes,\n}"
+          "name": "Bytes get their own Codable type, with a migration",
+          "detail": "`[U8]` becomes an ordinary list in codecs and encodes as numbers. The existing `Bytes` type becomes Codable and carries the byte rule through its own impls. A program that wants a byte string writes `Bytes`. A `jet fix` migration rewrites Codable `[U8]` fields to `Bytes`, and `Bytes` decode still accepts an Array of numbers, so data written before the change reads after it. This reverses the encoding spec's rule that a Codable `[U8]` is never an integer array.",
+          "technical": "Mechanism. `impl [<T: Decode>].Decode` covers every list with no overlap and no hook. `impl Bytes.Decode` takes `Dyn.Bytes`, base64 text and an Array of numbers. `impl Bytes.Encode` writes `Dyn.Bytes`. `Bytes` (spec.md:4936-4965) is a growable byte builder with a read cursor; its bytes are the wire value, and a decoded `Bytes` starts with its cursor at 0. It stays its own type, as D-BUILTIN-METHOD1 requires, and is not Codable today (q6).\n\nHow the last draft's costs are reduced:\n\n- \"Every Codable byte list changes on the wire.\" Programs: `jet fix` rewrites each `[U8]` field of a Codable struct to `Bytes`, so their wire form is unchanged. Core: its 28 auto-derived exported structs with a `[U8]` field (Digest256, Signature, UDPPacket, TLSCertificate, Image, JobPayload and others) switch their fields to `Bytes` in the same change. q10 and q13 pin Digest256's base64 round trip.\n\n- \"Old data no longer reads.\" `Bytes` decode accepts an Array of numbers too, so stored base64 and stored number arrays both read.\n\nWhat remains:\n\n- API churn. A field rewritten to `Bytes` loses list operations: indexing, `len()` on the list, `loop … in`, slicing, and every `[U8]` argument it was passed to. Cost: the migration must also rewrite those uses or add conversions. Every caller of the 28 Core structs sees the type change. Mitigation: `Bytes` gains list-like reads, but it then duplicates the list API.\n\n- Generic and unmigrated code. `load<[U8]>`, a `[U8]` local encoded directly, and a `[U8]` inside a generic struct still change to numbers. `jet fix` cannot see intent there. Cost: silent wire changes in code the migration does not touch. Mitigation: a lint on encoding a `[U8]`, until programs settle.\n\n- Fixed byte lists. `[U8#N]` (Go json v2's base64 case) becomes numbers too, unless `Bytes` gains a fixed form.\n\n- The fixed-list builder from a checked `[T]`, as in A′ (c04).\n\nBeginner path: write `Bytes` for binary data, `[U8]` for small numbers. Expert path: choose per field.",
+          "code": "// PROPOSED (C′): byte strings are `Bytes`; `[U8]` is a number list on the wire.\n#Codable\nThumbnail: struct {\n    pixels: Bytes,     // \"AQI=\" in JSON, CBOR major type 2; `jet fix` rewrote `[U8]`\n    levels: [U8],      // [1,2] in JSON\n}\n\nimpl Bytes.Decode {\n    decode: fn(tree: Dyn) -> Bytes [FieldError]! { … Bytes as is, base64 text, or an Array of numbers … }\n}\nimpl Bytes.Encode {\n    encode: fn(self) -> Dyn { … Dyn.Bytes of the written bytes … }\n}"
         },
         {
           "key": "D",
-          "name": "Keep the byte route in the compiler, as a written exception",
-          "detail": "The list, option and map helpers become ordinary impls, but `[U8]` keeps its helper and the hardcoded encode. The exception is written down as a carve-out of D-BUILTIN-METHOD1. D′ is its strongest form, from `land/6852-c8-decode-lines-r2.patch`. Core declares `#Builtin.Role(.DecodeBytes) __decode_bytes`, a visible declaration found through the ratified role door. CoreReach.jet then names no helper or Core path, so the card's proof grep passes.",
-          "technical": "The smallest change. Generic code at `[U8]` reaches the byte rule because IR picks the helper before any impl. `[U8#N]` follows `[U8]` as today. Go's encoding/json does this: a kind test makes `[]byte` base64.\n\nThe cost is not visibility, since D′ shows the role in Core. The IR keeps three type tests on U8: BuildDyn.jet:711 (decode), 804 (encode) and 1086-1090 (streaming). The encode stays hardcoded. And D does not meet #6852 c8's \"bind through public traits\" or c9's \"a user type implements each of those traits\": no trait member says how a list of a type encodes.",
-          "code": "// D′, from land/6852-c8-decode-lines-r2.patch\n#Builtin.Role(.DecodeBytes) __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {\n    …\n}"
+          "name": "Keep the byte route in the compiler, behind a role",
+          "detail": "The list, option and map helpers become ordinary impls, but `[U8]` keeps a compiler route. In its strongest form, from `land/6852-c8-decode-lines-r2.patch`, Core declares `#Builtin.Role(.DecodeBytes) __decode_bytes`, a visible declaration found through the ratified role door. CoreReach.jet then names no helper or Core path, so the card's proof grep passes. The exception is written down as a carve-out of D-BUILTIN-METHOD1.",
+          "technical": "Mechanism. Generic code at `[U8]` reaches the byte rule because IR picks the role-marked helper before any impl. `[U8#N]` follows `[U8]` as today. Go's encoding/json does this with a kind test. It needs no `Self` work and no fixed-list builder, because the IR keeps building fixed lists.\n\nHow the last draft's costs are reduced:\n\n- \"Hidden route.\" The role is declared in Core and shows in `jet inspect`, so the route is visible.\n\n- \"Hardcoded encode.\" An `EncodeBytes` role on a Core `__encode_bytes` moves the encode body into Core source.\n\nWhat remains, and cannot be removed without becoming A′ or B′:\n\n- The IR keeps three U8 type tests: BuildDyn.jet 711 (decode), 804 (encode) and 1086-1090 (streaming). They decide which role to call. Removing them means asking a trait (A′) or picking an impl (B′).\n\n- #6852 c8 asks that decode \"bind through public traits\", and c9 that a user type implementing those traits works. Under D, no trait says how a list of a type encodes. c8's grep passes literally, and c9 holds for user types only because they never reach the byte route. Mitigation: none within D; the card text would need amending.\n\nBeginner and expert paths are unchanged from today.",
+          "code": "// D′, from land/6852-c8-decode-lines-r2.patch, plus an encode role\n#Builtin.Role(.DecodeBytes) __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {\n    …\n}\n#Builtin.Role(.EncodeBytes) __encode_bytes: fn(items: [U8]) -> Dyn {\n    Dyn.Bytes(items.copy())\n}"
         }
       ],
       "comparisons": [
@@ -136064,55 +136114,56 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A keeps the ratified rule that impls never overlap, and every generic instance still gets the byte rule. aeson has shipped this mechanism in a JSON codec for over a decade, and Haskell's `Show` before it. Its dispatch already works at every level (q3). It needs no specificity order, and the wire format stays as the spec says.",
+        "why": "A′ keeps the ratified rule that impls never overlap, and every generic instance still gets the byte rule because it asks the same impl. Its hooks are Jet-reserved names, so users see Decode and Encode unchanged. With #6851's paste rule, users cannot alter how a list of a type encodes. Five of the last draft's seven costs are gone (c02, c03, the streaming capture path, the fixed collision). Two remain, and both are general work: `Self` in default bodies, and a fixed-list builder that B′ and C′ need too.",
+        "tradeoff": "No overlap, no compiler byte route and no public hook, for `Self` in default trait bodies and one fixed-list static first.",
         "gains": [
           "One impl per type, so a generic call and a direct call always agree.",
-          "`[U8]`, `[U8#N]`, streaming and the Encode side follow one hook, so all three IR byte tests go.",
-          "Decode binds through public traits for list, fixed list, option, map and bytes, which is A's part of #6852 c8 and c9.",
-          "Map keys use the same idea, a key trait, with no overlap."
+          "`[U8]`, `[U8#N]`, streaming and encode follow one hook, so all three IR byte tests go.",
+          "The hooks are reserved names: users can neither override nor call them (c02, plus the template-paste rule of #6851 c39), and Decode and Encode look unchanged.",
+          "Decode binds through public traits for lists, fixed lists, options, maps and bytes, A′'s part of #6852 c8 and c9.",
+          "No `-> Self` work on builtin impls (c03) and no generic trait members (the streaming capture path)."
         ],
         "losses": [
           {
-            "loss": "Decode and Encode each gain a public hook member.",
-            "mitigation": "Defaults mean no hand-written impl changes, and the docs present each hook as the list form of its type."
+            "loss": "Default trait bodies must name `Self` and `[Self]` (q1, q2).",
+            "mitigation": "General trait work the spec's `Self` rule already implies; if it slips, registration writes the hook into each impl with its concrete type, as c03 does by hand."
           },
           {
-            "loss": "A needs `Self` in default trait bodies, `-> Self` on builtin impls, a `[T]` to `[T#N]` conversion and trait members with their own type parameters (q11, q12) first.",
-            "mitigation": "One card holds all four, about two days of work; q3 shows the dispatch itself already works."
+            "loss": "A `[T#N]` must be built from a checked `[T]` in generic code (c04).",
+            "mitigation": "One static, `[T#N].from_list(items) -> [T#N]?`, over a conversion the IR already makes; B′ and C′ need it too."
           },
           {
-            "loss": "Fixed byte lists depend on fixing today's `[T]` and `[T#N]` instance collision.",
-            "mitigation": "Every option has the same dependency, and the defect is reported."
+            "loss": "No user type can choose a non-default list form.",
+            "mitigation": "Deliberate: a packed form is a wrapper struct with its own impls, so the wire form of `[T]` never depends on who wrote T."
           },
           {
-            "loss": "A type's owner can change how lists of it encode.",
-            "mitigation": "Only the owner writes hooks, a user impl on a builtin is refused, and distinct types do not inherit them."
+            "loss": "The reserved-name guarantee needs a template-paste rule first: a user template can paste a `__` name today.",
+            "mitigation": "#6851 c39 adds one check at the paste site for both paste doors, with a pinned O0 probe and a UI test."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "It adds a specificity order, an overlap soundness review, and a new power for every trait owner, so U8 would carry both hooks and specialization."
+            "reason": "It needs no `Self` work, but it carves an exception into the ratified no-overlap rule, and every dispatch route must pick per instance to keep generic and direct calls agreeing."
           },
           {
             "key": "C",
-            "reason": "It changes the wire format of every Codable byte list, in Core and in programs."
+            "reason": "Even with `jet fix`, generic and unmigrated `[U8]` code silently changes wire form, and fields rewritten to `Bytes` lose the list API."
           },
           {
             "key": "D",
-            "reason": "Even as D′ it keeps three IR type tests and a hardcoded encode, and it fails c8's \"bind through public traits\"."
+            "reason": "The IR keeps three U8 type tests, and no trait says how a list encodes, so #6852 c8's \"bind through public traits\" fails."
           }
-        ],
-        "tradeoff": "Two hook members on public traits and a named language prerequisite, in exchange for no overlap and no compiler byte route."
+        ]
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ConcreteHeadReview. The adversarial review attacked the recommendation. Probes p1-p9 and q1-q13 ran on batch16; findings F1-F16, R1-R8 and R9 are fixed or named, and A holds within its named prerequisites (q1, q2, q11, q12; p4, p5, p9)."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G1Generation-2. Not the author, TypeIDSlice3-3. Sent back once: A's reserved-hook claim failed on template paste (d1, d3b); r2 adds that rule (#6851 c39), the distinct-codec requirement, KeyText and the type-test alternative."
       },
-      "checkInstructions": "Check the routes in Compiler/JetIR/Source/BuildDyn.jet: `ir_dyn_decode`, `ir_codec_decode_helper`, `ir_serde_encode` and its byte test, and `ir_decoding_read` with its byte exclusion. Check JetIR CoreReach.jet `ir_codec_decode_helpers` and `ir_decoding_reads`, and JetDriver Pipeline.jet `jet_driver_comptime_codec_refs`. Check JetSema TypeRelations.jet `sema_type_codec_structural_bound` and Serde.jet `sema_serde_type_is_admissible_in`.\n\nCheck Core/Encoding/Encoding.jet `__decode_bytes`, `__decode_list`, `__decode_option` and `__decode_map`, and JetRuntime DynCodec.jet `codec_decode_integer`. Check the byte rule in Docs/Spec/encoding-decisions.md, `Bytes` in Docs/Spec/spec.md, and the D-BUILTIN-METHOD1 option A technical text. Probe outputs are in the review's review-probes directory.",
+      "checkInstructions": "Run the probes in $JET_SCRATCH_ROOT/tmp/orch/ballot/concretehead/owner-r1-probes with the current batch compiler at O0, O1 and O2; the detail quotes their outputs. Check the reserved-name rule in JetLexer Payload.jet `identifier_respelling` and Loader.jet `jet_driver_core_source_unit`.\n\nCheck `__Decoding.read_list` in Core/Encoding/Encoding.jet against `__decode_bytes`, and the routes in BuildDyn.jet `ir_codec_decode_helper`, `ir_serde_encode` and `ir_decoding_read`. Attack A′ first: can user code reach a `__` hook through any door, and does the streaming read keep every error frame without a hook?",
       "surface": {
         "gist": "How should a byte list keep its own encoding once list codecs are ordinary impls?",
         "lesson": "A Codable byte list is a byte string, never a list of numbers. Today the compiler picks that rule by type tests. Ordinary impls must now carry it, and impls may not overlap.",
@@ -136127,34 +136178,71 @@
             "code": "class FromJSON a where\n  parseJSONList :: Value -> Parser [a]"
           }
         },
+        "recommendation": {
+          "rec": "A",
+          "why": "No overlap, and every generic call gets the byte rule, as aeson does. The hooks are reserved names, so only Core sees them, once templates may not paste them. The wire format stays.",
+          "gains": [
+            "Generic and direct calls always agree.",
+            "No public hook; users see Decode unchanged.",
+            "All three IR byte tests go."
+          ],
+          "losses": [
+            {
+              "loss": "Needs `Self` in default trait bodies first.",
+              "mitigation": "General trait work, with a registration fallback."
+            },
+            {
+              "loss": "Needs a fixed-list builder.",
+              "mitigation": "One static; B and C need it too."
+            },
+            {
+              "loss": "Templates must stop pasting reserved names.",
+              "mitigation": "One check, already owed by #6851."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Carves an exception into the no-overlap rule."
+            },
+            {
+              "key": "C",
+              "reason": "Unmigrated byte lists change on the wire."
+            },
+            {
+              "key": "D",
+              "reason": "Keeps the IR type tests; decode does not bind through traits."
+            }
+          ],
+          "tradeoff": "No overlap and no hidden route, for two pieces of general work first."
+        },
         "options": [
           {
             "key": "A",
-            "name": "List hooks with defaults",
-            "gist": "The list impl asks its element how a list of it decodes; U8 answers bytes.",
+            "name": "List impl asks its element",
+            "gist": "The list impl asks its element how a list of it decodes; only Core's U8 answers bytes.",
             "gains": [
               "No overlap; generic and direct calls agree.",
-              "Fixed byte lists, streaming and encode follow too."
+              "Hooks are reserved: no public surface."
             ],
             "losses": [
-              "Two public hook members.",
-              "Needs `Self` in default bodies and generic trait members first."
+              "Needs `Self` in default bodies first."
             ],
             "proposed": {
-              "code": "impl [T]<T: Decode>.Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { T.decode_list(tree) }\n}\nimpl U8.Decode {\n    decode_list: fn(tree: Dyn) -> [U8] [FieldError]! { … bytes … }\n}"
+              "code": "impl [<T: Decode>].Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { T.__decode_list(tree) }\n}\nimpl U8.Decode {\n    __decode_list: fn(tree: Dyn) -> [U8] [FieldError]! { … bytes … }\n}"
             }
           },
           {
             "key": "B",
-            "name": "Most specific impl wins",
-            "gist": "A trait's own module may overlap impls; the narrower one wins.",
+            "name": "Concrete Core impl wins",
+            "gist": "In a Core trait's module, a fully concrete head may narrow the list impl.",
             "gains": [
-              "The byte rule reads as its own impl.",
-              "No public hooks."
+              "No hooks and no `Self` work.",
+              "No user gains overlap."
             ],
             "losses": [
-              "A specificity order and a soundness review.",
-              "Every trait owner gains overlap."
+              "An exception to the no-overlap rule.",
+              "Every route must pick per instance."
             ],
             "proposed": {
               "code": "impl [U8].Decode {\n    decode: fn(tree: Dyn) -> [U8] [FieldError]! { … bytes … }\n}"
@@ -136162,13 +136250,14 @@
           },
           {
             "key": "C",
-            "name": "Codable Bytes type",
-            "gist": "Byte lists become number lists; byte strings use the existing `Bytes`.",
+            "name": "Codable Bytes, migrated",
+            "gist": "Byte lists become number lists; `jet fix` moves fields to `Bytes`.",
             "gains": [
               "No overlap and no hooks."
             ],
             "losses": [
-              "Every Codable byte list in Core and in programs changes on the wire."
+              "Unmigrated byte lists change on the wire.",
+              "`Bytes` fields lose the list API."
             ],
             "proposed": {
               "code": "Thumbnail: struct {\n    pixels: Bytes,\n}"
@@ -136176,8 +136265,8 @@
           },
           {
             "key": "D",
-            "name": "Keep the compiler route",
-            "gist": "Byte lists keep a helper, at best through a visible role.",
+            "name": "Compiler route behind a role",
+            "gist": "Byte lists keep a helper, found through a visible role.",
             "gains": [
               "Smallest change."
             ],
@@ -136189,40 +136278,7 @@
               "code": "#Builtin.Role(.DecodeBytes) __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! { … }"
             }
           }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A keeps impls from overlapping and gives every generic call the byte rule, as aeson does. The wire format stays.",
-          "gains": [
-            "One impl per type.",
-            "Byte lists, streaming and encode share one hook."
-          ],
-          "losses": [
-            {
-              "loss": "Two public hook members.",
-              "mitigation": "Defaults mean no existing impl changes."
-            },
-            {
-              "loss": "Needs `Self` in default bodies and generic trait members first.",
-              "mitigation": "One card; dispatch already works."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Adds overlap, a specificity order and a soundness review."
-            },
-            {
-              "key": "C",
-              "reason": "Changes every byte list on the wire, in Core and in programs."
-            },
-            {
-              "key": "D",
-              "reason": "Keeps three IR byte tests."
-            }
-          ],
-          "tradeoff": "Two hook members and a named prerequisite, for no overlap and no compiler byte route."
-        }
+        ]
       },
       "draftedBy": "Orchestrator",
       "reviewedBy": "ConcreteHeadReview",
@@ -139857,9 +139913,11 @@
       "by": "owner",
       "kind": "question",
       "text": "Engineer away downsides",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-24T12:22:05.502Z"
+      "status": "answered",
+      "answer": "Five of the last draft's seven downsides are engineered away in A′. There is no public hook: the hooks are Jet-reserved `__` names only Core can write. The review found that a user's marker template could still paste `__` names, so that door is closing too (#6851 c39). No `-> Self` work on builtin impls is needed, no generic trait members are needed, and the fixed-list collision is fixed on tip23. Two remain, both general work every option needs or benefits from: `Self` in default trait bodies, and a fixed-list builder. The other options each keep a downside that cannot be removed: B carves an exception into the no-overlap rule, C changes the wire format of unmigrated byte lists, and D keeps the compiler's U8 type tests. A fresh review (G1Generation-2) passed r2.",
+      "created": "2026-11-24T12:22:05.502Z",
+      "answeredAt": "2026-11-24",
+      "answeredBy": "Orchestrator"
     },
     {
       "id": "q3agycng",
@@ -139868,9 +139926,11 @@
       "by": "owner",
       "kind": "question",
       "text": "Why does this syntax look so odd and repetitive? Is there a better way to do this?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-24T12:22:39.554Z"
+      "status": "answered",
+      "answer": "The old draft wrote each name twice: `impl [T]<T: Describe>`. The rework writes each name once, with its bound where the name is declared, the rule `fn<T: Describe>` and `Pair<T: Describe>` already follow: `impl [<T: Describe>].Describe`. The small angle brackets are there only because `[T: Describe]` means a map type today. If D-MAP-ENTRY1 moves maps to `=>`, option B drops them, `impl [T: Describe].Describe`, and `jet fix` rewrites every A head. Inferred bounds (C) were weighed and rejected: a body edit would change which types qualify. A Rust-style list after `impl` (D) still names each parameter twice. A fresh review (G1Generation-2) passed r2.",
+      "created": "2026-11-24T12:22:39.554Z",
+      "answeredAt": "2026-11-24",
+      "answeredBy": "Orchestrator"
     }
   ],
   "ideas": [
@@ -140703,6 +140763,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T13:26:43.721Z",
+      "by": "Orchestrator",
+      "action": "question.answer",
+      "ref": "q2nay2he",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T13:26:42.761Z",
+      "by": "Orchestrator",
+      "action": "question.answer",
+      "ref": "q3agycng",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T13:26:13.758Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-IMPL-CONCRETEHEAD1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T13:26:12.280Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-IMPL-STRUCTBOUND1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T13:22:58.856Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "38 criteria, soft limit 6: Core-privilege leak found by the CONCRETEHEAD1 review; this card owns Core privilege"
+    },
+    {
+      "at": "2026-11-24T13:22:58.856Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#39 A user marker template cannot paste a reserved `__` name. Fr"
+    },
     {
       "at": "2026-11-24T13:18:50.428Z",
       "by": "Orchestrator",
