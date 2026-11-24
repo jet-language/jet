@@ -801,15 +801,6 @@ sema_comptime_reflection_callable_signature: fn(graph: SemaRegistrationGraph, ca
     sema_comptime_reflection_signature_of(function, types, returned, inferred, file)
 }
 
-// The CallableSignature of a function no registered module declares (the
-// function list of a failed compiler query): each type is named as written,
-// with no module to qualify it.
-sema_comptime_reflection_written_signature: fn(function: Func, file: String) -> TComptimeValue {
-    types: loop parameter in function.params -> sema_comptime_reflection_written_type_id(parameter.ty)
-    returned: if sema_comptime_reflection_success_type(function.return_type) == .Val(success) -> sema_comptime_reflection_some(sema_comptime_reflection_written_type_id(success)) else -> sema_comptime_reflection_none(Type.Named{name: "TypeId"})
-    sema_comptime_reflection_signature_of(function, types, returned, None, file)
-}
-
 // The CallableSignature of `function` given each parameter's TypeId `types`,
 // in order, and its `return_type` value `returned`.
 sema_comptime_reflection_signature_of: fn(function: Func, types: [TComptimeValue], returned: TComptimeValue, inferred: [String]?, file: String) -> TComptimeValue Never! {
@@ -853,10 +844,9 @@ sema_comptime_reflection_signature_record: fn(params: [TComptimeValue], returned
 // closure's parameters are positional and it writes no effect row; its body
 // row is solved after the check, so a read folded inside the check has no
 // `inferred` row, as on a function. Its types are named from the module
-// `module_identity` that writes it; with no registration `graph` they are
-// named as written.
-sema_comptime_reflection_closure_info: fn(graph: SemaRegistrationGraph?, module_identity: ModuleID, name: String, span: Span, lambda: TLambda, location: TComptimeValue, file: String) -> TComptimeValue {
-    caller: if graph == .Val(known) -> sema_type_module_row(known, module_identity) else -> -1
+// `module_identity` that writes it.
+sema_comptime_reflection_closure_info: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, name: String, span: Span, lambda: TLambda, location: TComptimeValue, file: String) -> TComptimeValue {
+    caller: sema_type_module_row(graph, module_identity)
     params := [TComptimeValue]{}
     index := 0
     loop index < lambda.source_params.len() && index < lambda.param_types.len() {
@@ -866,15 +856,15 @@ sema_comptime_reflection_closure_info: fn(graph: SemaRegistrationGraph?, module_
                 access = sema_comptime_reflection_access_name(conventions[index])
             }
         }
-        params.push(sema_comptime_reflection_param_record(lambda.source_params[index], lambda.source_params[index], "PositionalOnly", sema_comptime_reflection_type_id_in(graph, caller, lambda.param_types[index]), access, None, file))
+        params.push(sema_comptime_reflection_param_record(lambda.source_params[index], lambda.source_params[index], "PositionalOnly", sema_comptime_reflection_type_id(graph, caller, lambda.param_types[index]), access, None, file))
         index += 1
     }
-    returned: if sema_comptime_reflection_success_type(lambda.ret) == .Val(success) -> sema_comptime_reflection_some(sema_comptime_reflection_type_id_in(graph, caller, success)) else -> sema_comptime_reflection_none(Type.Named{name: "TypeId"})
+    returned: if sema_comptime_reflection_success_type(lambda.ret) == .Val(success) -> sema_comptime_reflection_some(sema_comptime_reflection_type_id(graph, caller, success)) else -> sema_comptime_reflection_none(Type.Named{name: "TypeId"})
     captures := loop capture in lambda.captures -> sema_comptime_reflection_struct(
         "CaptureInfo",
         [SemaComptimeReflectionField]{
             SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: capture.source}},
-            SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id_in(graph, caller, capture.ty)},
+            SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id(graph, caller, capture.ty)},
             SemaComptimeReflectionField{name: "mode", value: TComptimeValue.Enum{type_name: "CaptureMode", variant: sema_comptime_reflection_capture_mode(capture.source, lambda.capture_facts), args: [TComptimeEnumArg]{}}},
             SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(capture.local.span, file)},
         },
@@ -1622,19 +1612,6 @@ sema_comptime_reflection_binding_info: fn(name: String, ty: TComptimeValue, size
             SemaComptimeReflectionField{name: "size", value: size},
         },
     )
-}
-
-// A type's TypeId when a registration `graph` may be absent: with none, the
-// type is named as written (sema_comptime_reflection_written_type_id).
-sema_comptime_reflection_type_id_in: fn(graph: SemaRegistrationGraph?, caller: Int, ty: Type) -> TComptimeValue {
-    if graph == .Val(known) -> return sema_comptime_reflection_type_id(known, caller, ty)
-    sema_comptime_reflection_written_type_id(ty)
-}
-
-// The TypeId of a type no registered module declares: its identity is its
-// name as written, with no module to qualify it.
-sema_comptime_reflection_written_type_id: fn(ty: Type) -> TComptimeValue {
-    sema_comptime_reflection_type_id_of(ty, ty)
 }
 
 // The TypeId of one type spelled twice with no registration to qualify it:

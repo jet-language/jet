@@ -163,7 +163,10 @@ sema_call_rules_hear: fn(
         waiting.push(index)
     }
     if waiting.len() == 0 -> return hearing
-    call: sema_rule_call_value(callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, owner, environment, program, scopes, state, tail_store, context)
+    // A check without the registration graph (a compile-time run's own
+    // program) hears no rule; the compile's own check of the same call does.
+    graph: program.registration_graph ?? return hearing
+    call: sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, owner, environment, program, scopes, state, tail_store, context)
     loop index in waiting {
         sema_call_rule_stage(context, environment, owner, rules[index], call, name_span)
     }
@@ -220,6 +223,7 @@ sema_call_rule_stage: fn(context: &SemaCheckContext, environment: SemaScopeEnvir
 // (sema_rule_probe). The `function` an argument names is its FunctionInfo
 // (sema_rule_function_named).
 sema_rule_call_value: fn(
+    graph: SemaRegistrationGraph,
     callee: SymbolID?,
     name: String,
     name_span: Span,
@@ -237,14 +241,11 @@ sema_rule_call_value: fn(
     context: &SemaCheckContext,
 ) -> SemaCallRuleHeard {
     file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
-    caller := "{owner}"
+    caller: sema_rule_identity(graph, owner, context.rule_identities)
     callee_identity := "{name}"
-    if program.registration_graph == .Val(graph) {
-        caller = sema_rule_identity(graph, owner, context.rule_identities)
-        if callee == .Val(id) {
-            callee_key: sema_symbol_key(program, context, id)
-            callee_identity = sema_rule_identity(graph, callee_key, context.rule_identities)
-        }
+    if callee == .Val(id) {
+        callee_key: sema_symbol_key(program, context, id)
+        callee_identity = sema_rule_identity(graph, callee_key, context.rule_identities)
     }
     heard := SemaCallRuleHeard{
         words: [Int]{0, 0, 1, 2, 3, span.start, span.end, 4, name_span.start, name_span.end, args.len(), 0},
@@ -256,7 +257,7 @@ sema_rule_call_value: fn(
     if {
         receiver_type == .Val(ty) -> {
             heard.words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] = 1
-            sema_rule_call_arg(heard, None, ty, receiver_known, None, receiver_span, environment, program)
+            sema_rule_call_arg(heard, None, ty, receiver_known, None, receiver_span, graph, environment)
         }
         else -> heard.words.extend([Int]{0, 0, 0, 0, 0, 0})
     }
@@ -269,7 +270,7 @@ sema_rule_call_value: fn(
         }
         label := String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
-        sema_rule_call_arg(heard, label, ty, known, sema_rule_function_named(argument.expr, argument.span, environment, program, scopes), argument.span, environment, program)
+        sema_rule_call_arg(heard, label, ty, known, sema_rule_function_named(argument.expr, argument.span, environment, program, scopes), argument.span, graph, environment)
     }
     heard
 }
@@ -330,8 +331,9 @@ sema_rule_function_named: fn(expression: Expr, span: Span, environment: SemaScop
 
 // Appends the words of one CompilerArg of a heard call, whose value the
 // build knows as `known` and which names the function `function` (a
-// FunctionInfo), to `heard`.
-sema_rule_call_arg: fn(heard: &SemaCallRuleHeard, label: &&String?, ty: Type, known: TComptimeValue?, function: &&TComptimeValue?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) Never! {
+// FunctionInfo), to `heard`; its type is the TypeId the one maker makes in
+// `graph`.
+sema_rule_call_arg: fn(heard: &SemaCallRuleHeard, label: &&String?, ty: Type, known: TComptimeValue?, function: &&TComptimeValue?, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) Never! {
     written := 0
     if label.move() == .Val(text) {
         heard.texts.push(text.move())
@@ -343,14 +345,14 @@ sema_rule_call_arg: fn(heard: &SemaCallRuleHeard, label: &&String?, ty: Type, kn
         named = heard.functions.len()
     }
     value := 0
-    if known == .Val(computed) && program.registration_graph == .Val(graph) {
+    if known == .Val(computed) {
         dyn: sema_rule_value_dyn(graph, environment.module_row, ty, computed, 0)
         if dyn.move() == .Val(tree) {
             heard.values.push(tree.move())
             value = heard.values.len()
         }
     }
-    heard.types.push(sema_comptime_reflection_type_id_in(program.registration_graph, environment.module_row, ty))
+    heard.types.push(sema_comptime_reflection_type_id(graph, environment.module_row, ty))
     heard.words.extend([Int]{written, heard.types.len() - 1, value, named, span.start, span.end})
 }
 
