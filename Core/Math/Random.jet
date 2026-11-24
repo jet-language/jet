@@ -10,6 +10,7 @@
 use {
     math: core.math
     core: core
+    rt: jet.runtime.random
 }
 
 nonfinite: fn(value: Float) -> Bool Never! {
@@ -174,12 +175,12 @@ RNG: struct {
 // compare/exchange keeps concurrent draws on that same serialized stream.
 __word: fn() -[Rand]> Int Never! {
     loop {
-        previous: core.math.random.__rng_state()
+        previous: rt.rng_state()
         word := Int{previous}
         word = (word ~ (word << 7)) & 18446744073709551615
         word ~= (word >> 9)
         word = (word * 11400714819323198485) & 18446744073709551615
-        if core.math.random.__rng_try_update(previous, U64{word}) -> return word
+        if rt.rng_try_update(previous, U64{word}) -> return word
     }
 }
 

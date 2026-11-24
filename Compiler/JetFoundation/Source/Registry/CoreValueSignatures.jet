@@ -32,9 +32,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
     }
 
     if module_name == "core.files.data" {
-        if member == "__host_path_is_file" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_u8, read)}, Val(core_sig_result(Type.Bool, core_sig_named("EncodingCause")))))
-        }
         if member == "status" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.List{element: core_sig_named("DataStatus")})))
         }
@@ -115,10 +112,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
                 Val(core_sig_result(Type.String, core_sig_named("DataError"))),
             ))
         }
-    }
-
-    if module_name == "core.compute" && member == "__simd_lanes" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
     }
 
     if module_name == "core.service" {

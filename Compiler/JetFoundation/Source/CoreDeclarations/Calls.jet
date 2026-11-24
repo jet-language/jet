@@ -499,11 +499,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "__openapi_inputs" | "__openapi_render" -> None
             else -> Val("Browser")
         }
-        "core.mod" -> if member == {
-            "__read_context" | "__stage_context" -> Val("FS")
-            "__supported" | "__os" | "__parse_context" | "__check_context" | "__context_name" | "__context_digest" | "__exports_count" | "__export_info" | "__finish_context" -> None
-            else -> Val("Exec")
-        }
         "core.process" -> if member == {
             "__keep_open_raw" -> Val("FS")
             "status_ok" -> None
@@ -517,7 +512,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         "core.rt" -> if member == "callback" -> Val("Time") else -> None
         "core.math" -> if member == "random" -> Val("Rand") else -> None
         "core.math.random" -> if member == "rng" -> None else -> Val("Rand")
-        "core.crypto.random" -> Val("Rand")
         "core.term" -> if member == {
             "style_force" -> None
             else -> Val("IO")
@@ -544,11 +538,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         }
         // The CSV query reads its file.
         "core.db.query" -> if member == "query" -> Val("FS") else -> None
-        // The host's f32 SIMD dispatch is a fixed CPU fact read without a
-        // system call; comptime refuses it (BuildRoutes.jet
-        // ir_comptime_ambient_refusal).
-        "core.compute" -> if member == "__simd_lanes" || member == "device_cpu" -> None else -> Val("GPU")
-        "core.files.data" -> if member == "__host_path_is_file" -> Val("FS") else -> None
+        "core.compute" -> if member == "device_cpu" -> None else -> Val("GPU")
         // A service file leaf names the one leaf it needs, as core.files
         // does; the lock and workflow sleeps name Time. A service's record
         // stamps read the wall clock, its authority tokens draw from the OS
@@ -562,9 +552,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "__host_wall_sample" | "__host_sleep_ns" | "__host_sleep_wait_ns" -> Val("Time")
             else -> None
         }
-        // The terminal-capability variables (COLUMNS, TERM, NO_COLOR, …)
-        // change what a TUI draws, so reading them is Env.
-        "core.tui" -> if member == "__cap_env_bytes" -> Val("Env") else -> None
         "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.
@@ -678,11 +665,6 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         }
         "core.http" -> if member == "get" -> Val("Time.Wait") else -> None
         "core.db.query" -> if member == "query" -> Val("Time.Wait") else -> None
-        "core.db" -> if member == {
-            "transaction" | "__transaction" | "migrate" | "__migrate" -> Val("Time.Wait")
-            else -> None
-        }
-        "core.jobs" -> if member == "wait" || member == "poll" -> Val("Time.Wait") else -> None
         else -> None
     }
 }
