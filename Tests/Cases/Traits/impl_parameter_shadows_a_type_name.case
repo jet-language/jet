@@ -1,0 +1,14 @@
+# A type parameter shadows a same-named type in scope: with a struct `T`
+# declared, `impl Pair<T: Describe>.Describe` and `impl Box` still give
+# `Pair<T>`, `Pair<Int>` and `Box<Int>` their methods on every tier.
+fixture: ImplParameterShadowsATypeName.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = impl_parameter_shadows_a_type_name.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = impl_parameter_shadows_a_type_name.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = impl_parameter_shadows_a_type_name.out

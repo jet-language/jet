@@ -1,0 +1,40 @@
+// A struct named `T` does not capture the `T` of `Pair: struct<T>`: the
+// conditional impl `impl Pair<T: Describe>` and the plain `impl Box` bind
+// their own parameter, so each instance gets its methods.
+Describe: trait {
+    describe: fn(self) -> String,
+}
+
+impl Int.Describe {
+    describe: fn(self) -> String { "#{self}" }
+}
+
+T: struct {
+    x: Int,
+}
+
+impl T.Describe {
+    describe: fn(self) -> String { "T{self.x}" }
+}
+
+Pair: struct<T> {
+    a: T,
+}
+
+impl Pair<T: Describe>.Describe {
+    describe: fn(self) -> String { "pair {self.a.describe()}" }
+}
+
+Box: struct<T> {
+    a: T,
+}
+
+impl Box {
+    tag: fn(self) -> String { "box" }
+}
+
+run: fn() {
+    print(Pair<T>{a: T{x: 3}}.describe())
+    print(Pair<Int>{a: 1}.describe())
+    print(Box<Int>{a: 2}.tag())
+}
