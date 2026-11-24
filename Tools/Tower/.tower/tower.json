@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 113947,
+    "rev": 113950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76434,6 +76434,21 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "CoreCoverage's 6 dev rows have one root: the census does not resolve the receiver. Examples/Systems/Files/FilesMapViews.jet calls mapped.window(start, end) on a parameter typed 'mapped: MappedFile' and the row still reads untested. Tests/Run/Foundations/Distributed/run.jet calls .key_by(...) and .window(...) through a .with_event_time chain, also uncounted. The fix is in Tools/Agent/CoreCoverage.jet's receiver typing (parameter types, the prelude's bare spellings, and chained results of declared return types), not more tests. Tail item; it goes after the G and B sweeps."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Correction to the batch 33 entry: UnsafeRatchet is green on dev bca4bfdf26, because the refreshed baseline landed. The red rows left are CoreCoverage (6) and HotText, which is regenerated with the batch 33 compiler in batch 34."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Batch 32 landed (dev e739f43bb0): D collapses THandleOp, TBinaryOp and TCEnumTag into one home each, and the binop codec copy is gone; G-sema-r2 and G-ir-rows bring panic_ratchet to 1,063. Batch 33 landed (dev bca4bfdf26, s1 sha b0314a96069945ce): F-copy-regressions-r2 (copy_ratchet green again; its one panic-for-copy swap was replaced with a None fallback), D-compiler-data (CompilerData green), B dead-row-sweep-r2 (derived host-leaf names count as live; the missing ProcessSpec leaf is a keep-going E0003), E-keys-module-pairs (30 joined-text keys become typed key sets), dev-drift (5 guards, and the LexicalLedger, HotText, BatteryLocks and core-door ceiling, now 69), the CLIRoles test compiles, and the unsafe baseline is refreshed. Batch 33 preflight: guards 224/224, ratchets 21/24; still red: CoreCoverage with 6 rows, UnsafeRatchet and HotText, which move with the tree. Queued for batch 34: G-sweep-r1 (panic_ratchet 1,063 -> 872). Agreed: worker-join re-raises go into one Foundation helper, since they are ICE paths, not input assumptions. F: 'jet fix' (safe class) gives the compiler-wide := -> : and branch-table sweep; it runs at a drain point, because it touches every in-flight patch."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "F (==.Val chains): a bare 'x == .Val(v)' binding is the canonical pattern test (8,365 uses) and stays. The target is if/else-if chains over one subject: 85 in Compiler/, 30 of them with 3 or more arms. A closed-set match takes no else (E0641), so a chain that covers only some cases becomes a match naming every remaining case, which reads worse. Only chains that cover the whole set, or nearly all of it, convert. That needs each enum's case list, so it is a type-aware codemod, not a text sweep; it is queued after F copies and methods. H (one Jet Roots tool): a loose tool's source root is its own folder unless a package.jet sits above it (jet_cli_source_root, Request.jet:1544), and Tools/Agent/Cache/Lanes.jet importing '../Roots' gets Jet.UsePathEscapesProject. A Tools/Agent package.jet would merge every tool into one package, and their top-level run functions would collide. Widening the import root for tool scripts changes import authority, so it is an owner ballot, not an agent choice. The copies stay byte-identical under tool_roots.jet until then; every other H item is met."
         },
         {
@@ -76604,7 +76619,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-24T19:07:57.589Z",
+      "updated": "2026-11-24T19:31:02.533Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     }
@@ -141089,6 +141104,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T19:31:02.533Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T19:28:47.144Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T19:28:38.063Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-24T19:07:57.589Z",
       "by": "Orchestrator",
