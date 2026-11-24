@@ -329,12 +329,22 @@ the same way.
 
 The orchestrator works the open epochs in the owner's epoch order, which Tower
 records as each epoch's `order`, until every criterion is met. This is a
-standing owner order: three of the four agents always work the first unfinished
-epoch in that order and the fourth works the epoch after it, and when an epoch
-is done the staffing moves one epoch along. Work the owner puts ahead of the
-epoch order takes the agents the owner gives it until it is done. Implementers
-write the code, land it on LaneCheck and report the commit; the orchestrator
-tests it in batches and sends every failure back to its implementer to fix.
+standing owner order (2026-11-24): two of the four agents always work the first
+unfinished epoch in that order, and when it is done they move one epoch along.
+The other two burn down the open cards, of any epoch, that are closest to
+completion by remaining workload: the estimated work to meet every open
+criterion with its named proof, never the criteria count. The orchestrator
+ranks the candidate cards by that estimate, smallest first, after reading each
+card's criteria against the code; the ranking and each card's estimate are
+logged on Tower. The two agents take disjoint halves of the ranking and close
+cards in order. A card closes only on real work. Every criterion is met by
+its named proof run green on `dev` against the landed commit, or is marked
+obsolete or duplicate where a recorded owner decision or a landed commit
+makes it so. Rewording, splitting, moving or re-scoping criteria to make a
+card look done is forbidden. Work the owner puts ahead of the epoch order
+takes the agents the owner gives it until it is done. Implementers write the
+code and submit it; the orchestrator tests it in batches and sends every
+failure back to its implementer to fix.
 
 Tower is the only work ledger. Every incomplete stream has exactly one card
 recording its phase, plan, dependencies, criteria, and handoff state. Workers
