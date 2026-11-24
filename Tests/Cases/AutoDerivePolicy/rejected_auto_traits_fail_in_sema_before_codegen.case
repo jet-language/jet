@@ -1,5 +1,5 @@
 # tests/auto_derive_policy.rs::rejected_auto_traits_fail_in_sema_before_codegen at tests/auto_derive_policy.rs:683; hand-port
-# The original also counted at least six E0112 rows and read TraitRegistry sets; neither has a case predicate, so this keeps the codes and the JIT refusal.
+# The original also read TraitRegistry sets, which have no case predicate; this keeps the codes, the six E0112 rows and the JIT refusal.
 fixture: RejectedAutoTraitsFailInSemaBeforeCodegen.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -8,6 +8,7 @@ env: JETPACK_ENV=1
 step: jet check main.jet
 exit: any # the original asserts diagnostics, not an exit status
 stderr: ~ "Jet.ValueTypeMismatch" # tests/auto_derive_policy.rs:723 E0112 rows
+stderr: count "Error: Jet.ValueTypeMismatch" = 6 # each refused value, wrapped or not: print and :Debug of FileReader, the FileReader, NoPrint, NoDebug and Hidden wrappers
 stderr: ~ "Jet.EqualityNotSupported" # tests/auto_derive_policy.rs:731 E0312
 step: jet run main.jet
 exit: any # the original asserts RunOutcome::Problems
