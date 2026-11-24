@@ -18,7 +18,8 @@ use {
 // `jet.report` objects of `diagnostics`, by index, when the host renders
 // them; a published diagnostic carries its own as `data`. `declared` are
 // the functions of the Core modules the checked modules import by name, read
-// from the Core sources the check read (JetSemIndex semindex_declared).
+// from the Core sources the check read (JetSemIndex semindex_declared);
+// `declared_files` are those sources' files, where they have one.
 LSPChecked: struct {
     diagnostics: [Diagnostic],
     modules: [JetDriverDocModule],
@@ -28,6 +29,16 @@ LSPChecked: struct {
     choices: [LSPChoice]{[LSPChoice]{}},
     reports: [String]{[String]{}},
     declared: [SemDeclared]{[SemDeclared]{}},
+    declared_files: [LSPDeclaredFile]{[LSPDeclaredFile]{}},
+}
+
+// A Core source file `declared` rows were read from: the module it holds,
+// its path, and its text, which those rows' spans index. Core read from a
+// toolchain tree has a file; the Core built into jet has none.
+LSPDeclaredFile: struct {
+    module_name: String,
+    path: String,
+    source: String,
 }
 
 // What made a generated module, as the build that made it recorded it

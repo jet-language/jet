@@ -216,11 +216,21 @@ lsp_keyword_symbol_at: fn(view: LSPView, offset: Int) -> Int? Never! {
     None
 }
 
+// The declaration under the cursor. A Core function the document calls has
+// its declaration in the Core source file the check read; the Core built
+// into jet and the ambient `print` have no file, so no location.
 lsp_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
-    target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "null")
-    location: lsp_location(at.view.checked, target.module_path, target.span) ?? return lsp_response(id, "null")
-    lsp_response(id, lsp_location_json(location))
+    if lsp_target_at(at.view, at.offset) == .Val(target) {
+        if lsp_location(at.view.checked, target.module_path, target.span) == .Val(location) -> return lsp_response(id, lsp_location_json(location))
+    }
+    declared: lsp_declared_at(at.view, at.offset) ?? return lsp_response(id, "null")
+    loop file in at.view.checked.declared_files {
+        if file.module_name == declared.def.module_path {
+            return lsp_response(id, lsp_source_location_json(lsp_path_to_uri(file.path), file.source, declared.def.def_span))
+        }
+    }
+    lsp_response(id, "null")
 }
 
 // Every use of the declaration, in this document's check and in each other
