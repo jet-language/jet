@@ -2,7 +2,8 @@
 // appended to the source a program stopped in, in a package beside the
 // entry's) replaces that source in the program's snapshot.
 use {
-    jet_cli.[JetCLIOverlay, jet_cli_prepare_snapshot]
+    jet_cli.[jet_cli_prepare_snapshot]
+    jet_driver.[JetDriverSourceDocument]
     overlay_files: core.files
     overlay_process: core.process
     overlay_sys: core.sys
@@ -21,7 +22,7 @@ use {
     entry: "{root}/app/run.jet"
     // The line table names the dependency's source through the entry
     // package's directory.
-    overlays: [JetCLIOverlay]{JetCLIOverlay{path: "{root}/app/../greeter/greeter.jet", source: appended}}
+    overlays: [JetDriverSourceDocument]{JetDriverSourceDocument{path: "{root}/app/../greeter/greeter.jet", source: appended}}
     found := ""
     wanted: "{root}/greeter/greeter.jet"
     if jet_cli_prepare_snapshot(entry, entry, overlays, false, appended: true) == {
@@ -37,7 +38,7 @@ use {
         }
     }
     assert_eq(found, appended)
-    if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{JetCLIOverlay{path: "{root}/elsewhere.jet", source: appended}}, false, appended: true) == .Held(_) {
+    if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{JetDriverSourceDocument{path: "{root}/elsewhere.jet", source: appended}}, false, appended: true) == .Held(_) {
         panic("an overlay of no checked source must be refused")
     }
     overlay_files.remove_all(made) ?? panic("dependency overlay cleanup")

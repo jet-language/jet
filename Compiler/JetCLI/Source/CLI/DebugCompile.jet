@@ -45,7 +45,7 @@ use {
     debug_eval_files: core.files
     debug_eval_time: core.time
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_name_byte, native_eval_names]
-    jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_answer, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
+    jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, JetDriverSourceDocument, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_answer, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, Interner, Name, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_column_get, name_count, name_text, type_failure_name, type_name, type_unqualified_nominals]
     jet_ir.[IRBuildResult, IRModule, IROptOptions, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_module_row_ty, ir_pointer_row, ir_program_new, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
@@ -538,12 +538,12 @@ jet_cli_debug_eval_sliced: fn(entry: String, color: Bool, options: BuildOptions,
     at: if host >= 0 -> host else -> 0
     source := ""
     asked := entry
-    others := [JetCLIOverlay]{}
+    others := [JetDriverSourceDocument]{}
     loop cut.len() > 0 {
         piece := cut.pop() ?? break
         place := paths.pop() ?? break
         if cut.len() != at {
-            others.push(JetCLIOverlay{path: place, source: piece})
+            others.push(JetDriverSourceDocument{path: place, source: piece})
             next
         }
         source = piece
@@ -562,7 +562,7 @@ JetCLIDebugEvalMembers: struct {
 // The snapshot of the sources of `entry` as they read now; None when it is
 // refused.
 jet_cli_debug_eval_snapshot: fn(entry: String, color: Bool) -> JetDriverAuthorizedSourceSnapshot? {
-    if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, appended: true) == {
+    if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, color, appended: true) == {
         .Refused(_) -> return None
         .Held(snapshot) -> return Val(snapshot)
     }
@@ -853,7 +853,7 @@ jet_cli_debug_eval_item_names: fn(code: String) -> [String] Never! {
 // expression, or the debugger's refusal of an effect it uses; None, so the
 // check where the frame stopped answers, for any other refusal, a value
 // that can fail, or a build that doesn't finish.
-jet_cli_debug_eval_direct: fn(entry: String, color: Bool, options: BuildOptions, path: String, source: String, text: String, params: [NativeEvalBinder], owned: Bool, others: &&[JetCLIOverlay]{[JetCLIOverlay]{}}, core_bound: Bool?{None}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
+jet_cli_debug_eval_direct: fn(entry: String, color: Bool, options: BuildOptions, path: String, source: String, text: String, params: [NativeEvalBinder], owned: Bool, others: &&[JetDriverSourceDocument]{[JetDriverSourceDocument]{}}, core_bound: Bool?{None}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
     typed: loop param in params -> "{param.name}: {param.type_name}"
     lead: "{JET_CLI_DEBUG_EXPRESSION}: fn({typed.join(", ")}) {{\n    "
     // The ask's offset is the statement's first byte in the appended source.
@@ -1189,10 +1189,10 @@ jet_cli_debug_eval_held_cut_open: fn(entry: String, color: Bool, options: BuildO
     paths := members.paths.move()
     declared := jet_cli_debug_eval_declared(members.sources.move())
     cut := jet_cli_debug_eval_alone("", [NativeEvalBinder]{}, declared) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
-    overlays := [JetCLIOverlay]{}
+    overlays := [JetDriverSourceDocument]{}
     loop cut.len() > 0 {
         piece := cut.pop() ?? break
-        overlays.push(JetCLIOverlay{path: "{paths[cut.len()]}", source: piece})
+        overlays.push(JetDriverSourceDocument{path: "{paths[cut.len()]}", source: piece})
     }
     prepared: jet_cli_prepare_overlays(entry, entry, overlays.move(), color, None, JetDriverCompileMode.Check, appended: true)
     compiled: jet_cli_compile_prepared(prepared, None, None, hold_check_state: true) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
@@ -1882,11 +1882,11 @@ jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions,
 // (JetDriverCompileRequest core_tests), which the compile reads whole, its
 // functions' bodies checked and kept for the build, as a `jet test` of it
 // does.
-jet_cli_debug_eval_prepare: fn(entry: String, color: Bool, path: String, source: String?, others: &&[JetCLIOverlay]{[JetCLIOverlay]{}}) -> JetCLIPrepared {
+jet_cli_debug_eval_prepare: fn(entry: String, color: Bool, path: String, source: String?, others: &&[JetDriverSourceDocument]{[JetDriverSourceDocument]{}}) -> JetCLIPrepared {
     row: jet_cli_debug_core_row(path)
     if row == "" {
-        overlays := [JetCLIOverlay]{}
-        if source == .Val(text) -> overlays.push(JetCLIOverlay{path: path, source: text})
+        overlays := [JetDriverSourceDocument]{}
+        if source == .Val(text) -> overlays.push(JetDriverSourceDocument{path: path, source: text})
         overlays.extend(others)
         prepared := jet_cli_prepare_overlays(entry, entry, overlays, color, None, JetDriverCompileMode.Program, appended: true)
         if source != None && &prepared == .Prepared(request, _) {

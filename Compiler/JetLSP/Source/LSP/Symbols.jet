@@ -3,7 +3,7 @@ use {
     core.encoding.[Dyn]
     jet_foundation.[Diagnostic, ImportDecl, Span, foundation_byte_text, foundation_json_quote, interner_empty]
     jet_parser.[parse_source]
-    jet_driver.[JetDriverDocModule]
+    jet_driver.[JetDriverDocModule, JetDriverSourceDocument]
     jet_semindex.[SemDef, SemEffectProjection, SemSymbol, semindex_build, semindex_symbol_imported_module]
 }
 
@@ -169,7 +169,7 @@ lsp_path_below: fn(path: String, root: String) -> Bool Never! {
 
 // A saved file's declarations, from its text parsed and indexed alone: the
 // module is named by the file's stem.
-lsp_saved_outline: fn(source: &&LSPOverlay) -> LSPChecked Never! {
+lsp_saved_outline: fn(source: &&JetDriverSourceDocument) -> LSPChecked Never! {
     parsed: parse_source(source.source.bytes())
     physical: source.path.move()
     stem: lsp_file_stem(physical)

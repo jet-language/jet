@@ -9,7 +9,8 @@ use {
     jet_canvas.[CanvasDebugError, CanvasDebugHost, QUERY_SCHEMA_VERSION, canvas_debug_error, canvas_debug_error_json, canvas_debug_lines, canvas_host_new, canvas_host_publish_graph, json_bool, json_str, query_error, read_source_without_symlinks, source_revision]
     jet_debug.[render_event_observations]
     jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, diagnostic_render_all, foundation_parse_protocol_json_with_limit]
-    jet_lsp.[LSPChecker, LSPOverlay]
+    jet_driver.[JetDriverSourceDocument]
+    jet_lsp.[LSPChecker]
     jet_pkg_model.[WorkspaceDeclarationCache]
     jetpack_foundation.[FILE_EXT, StatusEnvelope]
 }
@@ -466,7 +467,7 @@ command_receipt_payload: fn(checker: LSPChecker, entry: String, request: String)
 
 // The check command checks `src` as the text of `path` in its project.
 check_command_outcome: fn(checker: LSPChecker, path: String, src: String) -> CommandOutcome {
-    checked: checker.check(path, [LSPOverlay]{LSPOverlay{path: canonical_path(path), source: src}})
+    checked: checker.check(path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: canonical_path(path), source: src}})
     errors := [Diagnostic]{}
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)

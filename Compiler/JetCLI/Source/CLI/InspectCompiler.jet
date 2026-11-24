@@ -9,6 +9,7 @@ use {
         comptime_char_text,
     ]
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverVerbOutput,
         JetDriverCompileMode,
         JetDriverCompilerCheckInput,
@@ -96,7 +97,7 @@ jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVer
         }
     }
     parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return jet_cli_ice("the compiler source query could not parse its source input")
-    held: if jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, false) == {
+    held: if jet_cli_prepare_snapshot(file, file, [JetDriverSourceDocument]{}, false) == {
         .Refused(output) -> {
             return output
         }

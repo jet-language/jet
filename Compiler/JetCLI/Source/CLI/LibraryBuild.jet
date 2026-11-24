@@ -12,6 +12,7 @@ use {
     cli_files: core.files
     jet_backend.[x64_fault_report_object, x64_static_archive]
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverCompileMode,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_OK,
@@ -44,7 +45,7 @@ jet_cli_build_library: fn(file: String, source: String, color: Bool, options: &&
     // jet_cli_compile_prepared): a library has no entry function, and it
     // checks and builds every Core body it calls, since its object carries
     // them.
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Doc)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if prepared.move() == {

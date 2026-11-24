@@ -15,7 +15,7 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     cli_time: core.time
-    jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics, jet_driver_run_receipt_frame]
+    jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics, jet_driver_run_receipt_frame]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CanonicalJSON, CanonicalJSONField, Diagnostic, diagnostic_from_registry, diagnostic_render_all, perf_report_object_new, perf_stable_id]
     jet_sema.[BudgetAxis, BudgetSpec, sema_budget_ascii_lower, sema_budget_baseline_name, sema_budget_provider_identity, sema_budget_provider_kind, sema_budget_safe_relative_path]
     jet_pkg_model.[JET_VERSION]
@@ -143,7 +143,7 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIUsageError!
 // dev profile, and their report.
 jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String, color: Bool) -> JetDriverVerbOutput {
     measured_start: jet_cli_rfc3339(cli_time.unix_ns())
-    prepared: jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Check)
+    prepared: jet_cli_prepare_overlays(entry, entry, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Check)
     if prepared == {
         .Refused(output) -> return output.move()
         .Prepared(request, snapshot) -> {

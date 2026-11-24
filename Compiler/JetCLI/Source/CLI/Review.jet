@@ -9,6 +9,7 @@ use {
     cli_files: core.files
     core.encoding.[Dyn]
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverCompileMode,
         JetDriverCompileResult,
         JetDriverDocModule,
@@ -321,7 +322,7 @@ jet_cli_review_input_error: fn(path: String, message: String, color: Bool, json:
 // to its gate ledger (`append_external_writers` with no invocation choices). A
 // side with errors is refused.
 jet_cli_review_load: fn(path: String) -> JetCLIReviewLoaded {
-    if jet_cli_prepare_overlays(path, path, [JetCLIOverlay]{}, false, None, JetDriverCompileMode.Doc) == {
+    if jet_cli_prepare_overlays(path, path, [JetDriverSourceDocument]{}, false, None, JetDriverCompileMode.Doc) == {
         .Refused(output) -> return JetCLIReviewLoaded.Refused{output: output.move()}
         .Prepared(request, snapshot) -> {
             gated := request.move()

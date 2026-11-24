@@ -5,7 +5,7 @@
 // listing grants no job action authority.
 use {
     cli_files: core.files
-    jet_driver.[JetDriverCheckedProjectionResult, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_projection, jet_driver_check_outcome, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverCheckedProjectionResult, JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_projection, jet_driver_check_outcome, jet_driver_present_diagnostics]
     jet_foundation.[Item, JobRegistry, JobFact, JobArgumentSchema, JobSkip, JobCachePolicy, StringMapEntry]
 }
 
@@ -13,7 +13,7 @@ use {
 // `jet check` does, a clean one lists its jobs, or under `json` prints the
 // `jobs` status.
 jet_cli_compile_jobs: fn(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Program)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Program)
     if prepared == {
         .Refused(output) -> return output.move()
         .Prepared(request, snapshot) -> {

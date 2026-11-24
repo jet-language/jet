@@ -54,6 +54,7 @@ use {
         JetDriverAuthorizedSourceFile,
         JetDriverAuthorizedSourceRoot,
         JetDriverAuthorizedSourceSnapshot,
+        JetDriverSourceDocument,
         JetDriverCompileMode,
         JetDriverBuildEntry,
         JetDriverBuildPath,
@@ -2472,13 +2473,6 @@ jet_cli_compile_file: fn(file: String, color: Bool, threads: Int?, mode: JetDriv
     jet_cli_compile_entry(file, color, threads, mode, None, None)
 }
 
-// One file's bytes as a compile sees them in place of the disk copy, or as a
-// new source file beside it; nothing is written.
-JetCLIOverlay: struct {
-    path: String,
-    source: String,
-}
-
 // `jet_cli_compile_file` with the entry file's bytes replaced by
 // `entry_source` when given (`jet fmt --explicit-copies` asks sema about a
 // policy-marked copy of the entry; nothing is written), traced through
@@ -2490,9 +2484,9 @@ JetCLIOverlay: struct {
 // host; `jet check --target`); `hold_check_state` and `capture_cost_report`
 // as in jet_cli_compile_prepared.
 jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}) -> JetCLICompiled {
-    overlays := [JetCLIOverlay]{}
+    overlays := [JetDriverSourceDocument]{}
     if entry_source == .Val(replacement) {
-        overlays.push(JetCLIOverlay{path: file, source: replacement})
+        overlays.push(JetDriverSourceDocument{path: file, source: replacement})
     }
     jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report, release_state_aside: release_state_aside)
 }
@@ -2596,7 +2590,7 @@ jet_cli_unread_file_what: fn(file: String) -[FS]> String Never! {
 // walk is the `sources` span; the request carries `trace_sink` into the
 // driver's phases; `hold_check_state` and `capture_cost_report` as in
 // jet_cli_compile_prepared.
-jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}) -> JetCLICompiled {
+jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetDriverSourceDocument], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
@@ -2696,7 +2690,7 @@ JetCLIExecutableCompiled: enum {
 // starting at the function `entry` when one is selected.
 jet_cli_compile_executable_file: fn(file: String, entry: String?, color: Bool, threads: Int?, options: BuildOptions, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Program)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
     jet_cli_compile_executable(prepared, entry, options, None, trace_sink, color)
 }
@@ -2865,7 +2859,7 @@ jet_cli_snapshot_file_count: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> 
 // `alone` holds the entry by itself, `target` holds a build target's whole
 // folder, and `appended` overlays only add code to the files they replace,
 // as jet_cli_prepare_snapshot says.
-jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLIPrepared {
+jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetDriverSourceDocument], color: Bool, threads: Int?, mode: JetDriverCompileMode, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLIPrepared {
     if jet_cli_prepare_snapshot(anchor, entry, overlays, color, alone, target, appended) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, mode)
@@ -2990,7 +2984,7 @@ jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? 
 
 // Whether the entry at `entry_path` (or its overlay) is a script: its first
 // line is a `#!/...` launch line (Authority.jet `jet_cli_is_script`).
-jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS, Env]> Bool Never! {
+jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetDriverSourceDocument]) -[FS, Env]> Bool Never! {
     loop overlay in overlays {
         if jet_cli_overlay_path(overlay.path) == entry_path {
             return jet_cli_is_script(overlay.source)
@@ -3012,7 +3006,7 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
 // overlay (an editor's unsaved buffer). Overlays that are `appended` (a
 // debugger's expression added to a source it reaches) keep a loose entry
 // loose: they reach no other file than the disk copies do.
-jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLISnapshotted {
+jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetDriverSourceDocument], color: Bool, alone: Bool{false}, target: Bool{false}, appended: Bool{false}) -> JetCLISnapshotted {
     anchor_path: cli_files.realpath(anchor) ?? jet_cli_overlaid_path(anchor, overlays) ?? return jet_cli_snapshot_refused(jet_cli_unread_file_what(anchor), "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
     script: alone || jet_cli_entry_is_script(entry_path, overlays)
@@ -3150,7 +3144,7 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOve
 }
 
 // The snapshot path of `path` when one of `overlays` holds it.
-jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> String? Never! {
+jet_cli_overlaid_path: fn(path: String, overlays: [JetDriverSourceDocument]) -[FS, Env]> String? Never! {
     held: jet_cli_overlay_path(path)
     loop overlay in overlays {
         if jet_cli_overlay_path(overlay.path) == held -> return Val(held)

@@ -3,7 +3,7 @@ use {
     cli_files: core.files
     cli_process: core.process
     cli_struct_text: core.text
-    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_headline, interner_empty, sha256_hex]
     jet_parser.[jet_format_source]
     jet_semindex.[SemDefinitionFact, semindex_doc_text]
@@ -506,7 +506,7 @@ jet_cli_structural: fn(argv: [String], command: String, json: Bool) -> JetDriver
         return jet_cli_struct_fail("structural merge produced source that does not parse", "resolve edits manually; no output was written")
     }
     output: jet_cli_report_path(jet_cli_report_cwd(), jet_cli_option_value(argv, "--out") ?? paths[1])
-    compiled: jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, None, JetDriverCompileMode.Doc, None)
+    compiled: jet_cli_compile_overlays(paths[1], output, [JetDriverSourceDocument]{JetDriverSourceDocument{path: output, source: formatted.text}}, false, None, JetDriverCompileMode.Doc, None)
     if compiled == {
         .Refused(refusal) -> return refusal.move()
         .Compiled(result, _) -> {

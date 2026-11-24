@@ -7,7 +7,7 @@
 // internal error (exit 101), never a result.
 use {
     prove_crypto: core.crypto
-    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, jet_driver_lowering_inputs, jet_driver_run_receipt_frame]
+    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverSourceDocument, jet_driver_lowering_inputs, jet_driver_run_receipt_frame]
     jet_foundation.[Diagnostic, Span, diagnostic_column_at, diagnostic_from_registry, diagnostic_line_at, foundation_json_quote]
 }
 
@@ -43,7 +43,7 @@ jet_cli_prove_solver: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
             owned.push(member.copy())
         }
         entry: members[group.entry].path
-        front: jet_cli_solver_inputs(jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Check)) ?? return Err(JetCLIProveStop{output: jet_cli_ice("the solver's check compile of `{entry}` failed inside Jet")})
+        front: jet_cli_solver_inputs(jet_cli_prepare_overlays(entry, entry, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Check)) ?? return Err(JetCLIProveStop{output: jet_cli_ice("the solver's check compile of `{entry}` failed inside Jet")})
         if front == {
             .Refused(output) -> return Err(JetCLIProveStop{output: output.copy()})
             .Checked(found) -> {

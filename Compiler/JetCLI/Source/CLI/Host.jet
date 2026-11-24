@@ -48,6 +48,7 @@ use {
         x64_process_wait_foreground,
     ]
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverDevConfig,
         jet_driver_dev_config_stock,
         jet_driver_query_dev_config,
@@ -372,7 +373,7 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
 jet_cli_compile_prelude_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     watch: cli_time.start()
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Check, true)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Check, true)
     compiled: jet_cli_compile_prepared(prepared, None, trace_sink, [BuildSettingOverride]{}, "", true)
     if compiled == {
         .Refused(refusal) -> { output = refusal.move() }
@@ -407,7 +408,7 @@ jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: 
     entry: "{scratch.path}/core.jet"
     source: jet_cli_core_check_source()
     cli_files.write(entry, source) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
+    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, color, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, Val(core), "", None, true)
     }
@@ -641,7 +642,7 @@ jet_cli_compile_eval: fn(file: String, pure: Bool, color: Bool, json: Bool) -> J
     source: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     mode: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.RootRun
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, mode)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, mode)
     compiled := jet_cli_compile_executable(prepared, None, build_options_stock("run"), None, None, color)
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
@@ -2572,7 +2573,7 @@ jet_cli_build_sbom: fn(file: String, name: String, source: String, binary: Strin
 // (jet_cli_compile_release), so the next node starts while it drops.
 jet_cli_compile_target: fn(file: String, name: String, source: String, sources: [String], generated: [JetDriverGeneratedModule], color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program, false, true)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Program, false, true)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
     compiled: if prepared.move() == {
         .Refused(refusal) -> {
@@ -3108,7 +3109,7 @@ jet_cli_run_settled: fn(step: &&JetCLIRunStep) -> JetCLIRunStep {
 // compile it, keep it, and run it (ScriptCache.jet).
 jet_cli_compile_kept: fn(file: String, source: String, color: Bool, json: Bool, options: BuildOptions, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
     step := JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
-    held: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
+    held: jet_cli_prepare_snapshot(file, file, [JetDriverSourceDocument]{}, color)
     keep: if held == .Held(snapshot) -> jet_cli_script_keeper(file, options, snapshot) else -> None
     if keep == .Val(kept) {
         if held == .Held(snapshot) {
@@ -3566,7 +3567,7 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
-    snapshotted := jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
+    snapshotted := jet_cli_prepare_snapshot(file, file, [JetDriverSourceDocument]{}, color)
     doctests := [JetCLIDoctestFile]{}
     measure := JetCLIMeasurePlan?{None}
     tested := source
@@ -3617,7 +3618,7 @@ jet_cli_compile_core_test: fn(file: String, source: String, path: String, color:
         doctests.push(doctest_file)
     }
     measure := JetCLIMeasurePlan?{None}
-    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
+    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetDriverSourceDocument]{}, color, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> {
             if options.measure {
@@ -4669,7 +4670,7 @@ jet_cli_completion_program: fn(shell: String, program: String, name: String) -> 
 jet_cli_project_source_request: fn(root: String, command: String, color: Bool) -> JetDriverCompileRequest? {
     notices := [String]{}
     if jet_cli_find_project_entry(root, command, color, notices) == .Entry(found) {
-        if jet_cli_prepare_overlays(found.path, found.path, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
+        if jet_cli_prepare_overlays(found.path, found.path, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc) == {
             .Refused(_) -> {}
             .Prepared(request, _) -> return Val(request)
         }
@@ -4685,7 +4686,7 @@ jet_cli_schema_host: fn(action: String, root: String, before: String, color: Boo
 
 // `jet explain` policy essays over the authorized load-only query of `file`.
 jet_cli_policy_explain_host: fn(key: PolicyKey, file: String, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan {
-    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
+    if jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc) == {
         .Refused(output) -> return JetCLIPlan.Done{output: output}
         .Prepared(request, _) -> return jet_cli_explain_loaded_policy(key, jet_driver_source_query(request), site, line, color, json)
     }
@@ -4694,7 +4695,7 @@ jet_cli_policy_explain_host: fn(key: PolicyKey, file: String, site: String?, lin
 // `jet explain web.BadPath [file]`: the library diagnostic type's texts over
 // the authorized load-only request of `file`.
 jet_cli_diagnostic_type_explain_host: fn(name: String, file: String, color: Bool, json: Bool) -> JetCLIPlan {
-    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
+    if jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc) == {
         .Refused(output) -> return JetCLIPlan.Done{output: output}
         .Prepared(request, _) -> return jet_cli_explain_loaded_diagnostic_type(name, jet_driver_source_query(request), color, json)
     }
@@ -4707,7 +4708,7 @@ jet_cli_diagnostic_type_explain_host: fn(name: String, file: String, color: Bool
 // Transfer the prepared request when replacing its ledger; its execution host
 // cannot be copied.
 jet_cli_gates_run: fn(file: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {
         .Refused(output) -> return output.move()
         .Prepared(request, snapshot) -> {
@@ -4735,7 +4736,7 @@ jet_cli_external_gate_rows: fn(external: &&[GateEntry], snapshot: JetDriverAutho
 // `run_output`: the canonical Output query (run intent, dev profile) over the
 // authorized request of `file`.
 jet_cli_output_run: fn(file: String, address: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {
         .Refused(output) -> return output.move()
         .Prepared(request, _) -> return jet_cli_output_host(request, address, file, json)
@@ -5097,7 +5098,7 @@ JetCLIDevConfigured: enum {
 
 // The package's dev configuration: its `dev: fn(d: Dev)`, or the stock loop.
 jet_cli_dev_config: fn(file: String, source: String, color: Bool, threads: Int?) -> JetCLIDevConfigured {
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Doc)
     if prepared.move() == {
         .Refused(output) -> return JetCLIDevConfigured.Refused{output: output}
         .Prepared(request, _) -> {

@@ -12,19 +12,19 @@
 // shows the Core module's own declaration, read from the Core source.
 use {
     cli_files: core.files
-    jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverToolStageItem, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverSourceDocument, JetDriverToolStageItem, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
     jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_headline]
-    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPProducer, lsp_serve, lsp_write_log]
+    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPProducer, lsp_serve, lsp_write_log]
     jet_semindex.[SemDeclared, SemSymbol, semindex_build_symbols, semindex_declared, semindex_imports]
 }
 
 JetCLILSPChecker: struct {
     impl LSPChecker {
-        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             producer: jet_cli_lsp_producer(entry)
             alone: jet_cli_lsp_unsaved_loose(entry)
             entry_path: jet_cli_overlay_path(entry)
-            given := [JetCLIOverlay]{}
+            given := [JetDriverSourceDocument]{}
             // The entry's slot in `given`: its open text is what a report with
             // no origin of its own names.
             entry_slot := -1
@@ -32,7 +32,7 @@ JetCLILSPChecker: struct {
                 same: jet_cli_overlay_path(overlay.path) == entry_path
                 if !alone || same {
                     if same -> entry_slot = given.len()
-                    given.push(JetCLIOverlay{path: overlay.path.copy(), source: overlay.source.copy()})
+                    given.push(JetDriverSourceDocument{path: overlay.path.copy(), source: overlay.source.copy()})
                 }
             }
             if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone) == {
@@ -77,12 +77,8 @@ JetCLILSPChecker: struct {
 
         // A stage whose program does not check answers nothing; the client's
         // log shows why.
-        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
-            given := [JetCLIOverlay]{}
-            loop overlay in overlays.move() {
-                given.push(JetCLIOverlay{path: overlay.path, source: overlay.source})
-            }
-            run := jet_cli_tool_stage_run(entry, given, stage, bodies, program)
+        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            run := jet_cli_tool_stage_run(entry, overlays.move(), stage, bodies, program)
             if run.stop == .Val(stop) {
                 lsp_write_log("the `{stage}` hooks of `{entry}` did not run: {diagnostic_headline(stop.code, stop.what)}").drop("standard error is the log; a failed log write has nowhere to go")
             }
@@ -91,19 +87,19 @@ JetCLILSPChecker: struct {
 
         // A document that already declares the policy writes its own marks;
         // the second declaration refuses the prepended copy, so it gets none.
-        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             alone: jet_cli_lsp_unsaved_loose(entry)
             entry_path: jet_cli_overlay_path(entry)
             shift: JET_CLI_FMT_EXPLICIT_FAILURES_POLICY.count_bytes()
-            given := [JetCLIOverlay]{}
+            given := [JetDriverSourceDocument]{}
             length := -1
             loop overlay in overlays.move() {
                 if jet_cli_overlay_path(overlay.path) == entry_path {
                     length = overlay.source.count_bytes()
-                    given.push(JetCLIOverlay{path: overlay.path, source: "{JET_CLI_FMT_EXPLICIT_FAILURES_POLICY}{overlay.source}"})
+                    given.push(JetDriverSourceDocument{path: overlay.path, source: "{JET_CLI_FMT_EXPLICIT_FAILURES_POLICY}{overlay.source}"})
                     next
                 }
-                if !alone -> given.push(JetCLIOverlay{path: overlay.path, source: overlay.source})
+                if !alone -> given.push(JetDriverSourceDocument{path: overlay.path, source: overlay.source})
             }
             sites := [Int]{}
             if length < 0 -> return sites
@@ -128,13 +124,13 @@ JetCLILSPChecker: struct {
 
         // The `.git` and `.jet` trees hold no workspace source; an
         // unreadable file is left out.
-        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
-            saved := [LSPOverlay]{}
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
+            saved := [JetDriverSourceDocument]{}
             loop item in cli_files.walk_files(root, skip: [String]{".git", ".jet"}) {
                 entry: item ?? return saved
                 if !entry.path.ends_with(".jet") -> next
                 source: cli_files.read(entry.path) ?? next
-                saved.push(LSPOverlay{path: entry.path, source: source})
+                saved.push(JetDriverSourceDocument{path: entry.path, source: source})
             }
             saved
         }
@@ -152,7 +148,7 @@ jet_cli_failure_mark: fn(sites: &[Int], edit: TextEdit, shift: Int, length: Int)
 // Each diagnostic's `jet check --json` report, its paths absolute as the
 // editor's URIs are. A report with no origin of its own names the entry's
 // open text, at `slot` in `given`.
-jet_cli_lsp_reports: fn(entry: String, given: [JetCLIOverlay], slot: Int, diagnostics: [Diagnostic]) -> [String] Never! {
+jet_cli_lsp_reports: fn(entry: String, given: [JetDriverSourceDocument], slot: Int, diagnostics: [Diagnostic]) -> [String] Never! {
     if slot < 0 -> return jet_cli_reports_json(None, entry, "", diagnostics)
     jet_cli_reports_json(None, entry, given[slot].source, diagnostics)
 }

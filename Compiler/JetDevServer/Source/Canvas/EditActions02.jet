@@ -3,9 +3,9 @@
 // AST of the file's own module, then writes through write_checked_formatted.
 use {
     jet_canvas.[is_space_byte, line_after, line_start, lvalue_span, pattern_arm_edit_span, snippet, stmt_execution_anchor, stmt_is_terminal, switch_was_classic_if]
-    jet_driver.[JetDriverDocModule, jet_driver_apply_edits, jet_driver_has_errors]
+    jet_driver.[JetDriverDocModule, JetDriverSourceDocument, jet_driver_apply_edits, jet_driver_has_errors]
     jet_foundation.[ASTTables, DIAGNOSTIC_ERROR, Diagnostic, ExprNode, Func, Item, Span, StmtNode, SwitchArm, TextEdit, ast_expr, ast_expr_span, ast_stmt, ast_visit_body, foundation_byte_text, type_name]
-    jet_lsp.[LSPChecker, LSPOverlay]
+    jet_lsp.[LSPChecker]
     jet_parser.[jet_format_source, jfmt_is_subjectless_guard, jfmt_stmt_span, jfmt_uses_classic_if_spelling]
     jet_semindex.[SemIndex]
 }
@@ -876,7 +876,7 @@ CheckedSource: struct {
 
 // Check `src` as `path`; an error diagnostic refuses the edit.
 checked_source: fn(checker: LSPChecker, path: String, src: String) -> CheckedSource Err! {
-    checked: checker.check(path, [LSPOverlay]{LSPOverlay{path: path, source: src}})
+    checked: checker.check(path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: path, source: src}})
     if jet_driver_has_errors(checked.diagnostics) {
         return Err(diagnostics_error(path, src, error_diagnostics(checked.diagnostics)))
     }

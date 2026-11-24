@@ -5,6 +5,7 @@
 // named value is an E0228 diagnostic with a Safe `&` edit, and each that takes
 // one a Safe `&&` edit, at the value. Nothing is written.
 use jet_driver.[
+    JetDriverSourceDocument,
     JetDriverAuthorizedSourceFile,
     JetDriverCompileMode,
     JetDriverVerbOutput,
@@ -62,7 +63,7 @@ jet_cli_audit_write_access: fn(mark: String) -> String Never! {
 // or takes a named value.
 jet_cli_audit_write_sites: fn(file: String, modules: [JetDriverAuthorizedSourceFile], color: Bool) -> [JetCLIWriteSite] {
     shift: JET_CLI_AUDIT_WRITES_POLICY.len()
-    overlays: loop member in modules -> JetCLIOverlay{path: member.path, source: "{JET_CLI_AUDIT_WRITES_POLICY}{member.source}"}
+    overlays: loop member in modules -> JetDriverSourceDocument{path: member.path, source: "{JET_CLI_AUDIT_WRITES_POLICY}{member.source}"}
     sites := [JetCLIWriteSite]{}
     if jet_cli_compile_overlays(file, file, overlays, color, None, JetDriverCompileMode.Check, None) == .Compiled(result, snapshot) {
         loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {

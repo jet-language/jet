@@ -23,6 +23,7 @@ use {
     jet_backend.[LINK_BASE, x64_executable_whole, x64_link_executable]
     jet_build_session.[BuildSessionPolicy, BuildSessionValue, build_plan_execution, build_session_call, build_session_finish, build_session_new, build_session_path]
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverAuthorizedSourceSnapshot,
         JetDriverBuildAction,
         JetDriverCompileResult,
@@ -105,7 +106,7 @@ jet_cli_link_step: fn(file: String, options: BuildOptions, result: JetDriverComp
         taken.push(written)
     }
     program: jet_driver_link_stage_program(step.hook, JetDriverLinkInputs{objects: objects, libraries: libraries, args: build_option_items(build_options_value(options, "link_args")), output_name: name, output: step.output})
-    ran: jet_cli_tool_stage_values(file, [JetCLIOverlay]{}, program)
+    ran: jet_cli_tool_stage_values(file, [JetDriverSourceDocument]{}, program)
     if ran.stop == .Val(stop) {
         return jet_cli_link_step_stopped(step, "{step.setting} names the link step `{step.hook}`", stop)
     }
@@ -143,7 +144,7 @@ jet_cli_post_link_steps: fn(file: String, options: BuildOptions, result: JetDriv
             return failed
         }
         next: if index + 1 == hooks.len() -> output else -> "{folder}/{name}.{index + 1}"
-        ran: jet_cli_tool_stage_values(file, [JetCLIOverlay]{}, jet_driver_post_link_stage_program(hook, name, path, next))
+        ran: jet_cli_tool_stage_values(file, [JetDriverSourceDocument]{}, jet_driver_post_link_stage_program(hook, name, path, next))
         if ran.stop == .Val(stop) {
             return jet_cli_link_step_stopped(step, "{setting} names the post-link step `{hook}`", stop)
         }

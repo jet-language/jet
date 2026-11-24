@@ -6,10 +6,10 @@ use {
     scan_files: core.files
     scan_paths: core.files.path
     jet_canvas.[json_bool, json_optional_str, json_str, json_strs, source_revision]
-    jet_driver.[jet_driver_has_errors]
+    jet_driver.[JetDriverSourceDocument, jet_driver_has_errors]
     jet_env_model.[DevServicePlan, envmodel_evaluate_env, envmodel_workspace_evaluate_checked_source, envmodel_workspace_load_checked_source]
     jet_foundation.[Diagnostic, sha256_hex_bytes]
-    jet_lsp.[LSPChecker, LSPOverlay]
+    jet_lsp.[LSPChecker]
     jet_pkg_model.[
         AuthorityError,
         AuthorityResolver,
@@ -117,7 +117,7 @@ project_file_context: fn(checker: LSPChecker, path: String, runtime_events: Stri
     checked: resolver.checked_file(scan_files.basename(path)) ?? return Err(project_file_error(err.diagnostic()))
     src: checked.text() ?? return Err(project_file_error(err.diagnostic()))
     resolver.revalidate_file(checked) ?? return Err(project_file_error(err.diagnostic()))
-    result: checker.check(path, [LSPOverlay]{LSPOverlay{path: path, source: src}})
+    result: checker.check(path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: path, source: src}})
     if jet_driver_has_errors(result.diagnostics) {
         return Err(ProjectFileError{diagnostics: result.diagnostics})
     }

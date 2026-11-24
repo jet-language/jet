@@ -2,7 +2,7 @@
 // the `Structure.*` rows of the registration fact table, and the Core view is
 // Core.rows's declarations as the compiler reads them (CORE_DECLARATIONS).
 use {
-    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverSourceDocument, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[CORE_BOOTSTRAP_STEPS, CORE_CALLS, CORE_MODULE_DECLARATIONS, CORE_ROOT_TYPES, CORE_SOURCE_OWNED_ROWS, CoreCallRecord, CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_TABLE, core_call_source_member, diagnostic_render_all, name_ledger_from_facts]
     jet_parser.[parse_source]
     jet_sema.[sema_gate_append_structure]
@@ -177,7 +177,7 @@ jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
 // A checked result ends the process behind `notice` (jet_cli_finish).
 jet_cli_structure_host: fn(file: String, color: Bool, json: Bool, threads: Int?, notice: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    prepared := jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    prepared := jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, color, threads, JetDriverCompileMode.Doc)
     compiled: if prepared.move() == {
         .Refused(refusal) -> JetCLICompiled.Refused{output: refusal}
         .Prepared(request, snapshot) -> {

@@ -10,6 +10,7 @@
 use {
     cli_files: core.files
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverCompileMode,
         JetDriverMomentHook,
         JetDriverToolStageItem,
@@ -34,7 +35,7 @@ JetCLIToolStageRun: struct {
     stop: Diagnostic?,
 }
 
-jet_cli_tool_stage_run: fn(document: String, overlays: &&[JetCLIOverlay], stage: String, bodies: [Span], program: &&String) -> JetCLIToolStageRun Never! {
+jet_cli_tool_stage_run: fn(document: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -> JetCLIToolStageRun Never! {
     if bodies.len() == 0 {
         return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, stop: None}
     }
@@ -55,9 +56,9 @@ JetCLIToolStageValues: struct {
     stop: Diagnostic?,
 }
 
-jet_cli_tool_stage_values: fn(document: String, overlays: &&[JetCLIOverlay], program: &&String) -> JetCLIToolStageValues Never! {
+jet_cli_tool_stage_values: fn(document: String, overlays: &&[JetDriverSourceDocument], program: &&String) -> JetCLIToolStageValues Never! {
     given := overlays.move()
-    given.push(JetCLIOverlay{path: jet_cli_tool_stage_file(document), source: program.move()})
+    given.push(JetDriverSourceDocument{path: jet_cli_tool_stage_file(document), source: program.move()})
     if jet_cli_prepare_overlays(document, jet_cli_tool_stage_file(document), given, false, None, JetDriverCompileMode.Comptime) == {
         .Refused(output) -> return jet_cli_tool_stage_stopped(output.stderr.trim())
         .Prepared(request, _) -> {
@@ -94,7 +95,7 @@ jet_cli_tool_stage_file: fn(document: String) -> String Never! {
 jet_cli_moment_hooks_run: fn(file: String, hooks: [JetDriverMomentHook], records: [CompilerEventRecord], color: Bool) -> JetDriverVerbOutput? Never! {
     plan := jet_driver_moment_plan(hooks, records)
     if plan.calls.len() == 0 -> return None
-    ran: jet_cli_tool_stage_values(file, [JetCLIOverlay]{}, plan.program.move())
+    ran: jet_cli_tool_stage_values(file, [JetDriverSourceDocument]{}, plan.program.move())
     if ran.stop == .Val(stop) {
         named := "a moment hook of `{file}`"
         if stop.span == .Val(span) && (stop.source_path ?? JET_CLI_TOOL_STAGE_FILE).ends_with(JET_CLI_TOOL_STAGE_FILE) {
@@ -125,7 +126,7 @@ jet_cli_tool_stage_memo: fn() -> JetCLIToolStageMemo Never! {
 // The markers of the `stage` hooks in the snapshot a compile of `document`
 // with `overlays` sees; the members of one package share it, so `memo`
 // keeps it for the rest of the run. A script or a loose file takes its own.
-jet_cli_tool_stage_markers: fn(document: String, overlays: [JetCLIOverlay], stage: String, memo: &JetCLIToolStageMemo) -[FS, Env]> [String] Never! {
+jet_cli_tool_stage_markers: fn(document: String, overlays: [JetDriverSourceDocument], stage: String, memo: &JetCLIToolStageMemo) -[FS, Env]> [String] Never! {
     root: jet_cli_tool_stage_package_root(document, overlays)
     key: "{stage}\n{root}"
     if root != "" && memo.markers.get(key) == .Val(known) -> return known
@@ -141,7 +142,7 @@ jet_cli_tool_stage_markers: fn(document: String, overlays: [JetCLIOverlay], stag
 
 // The package root whose sources form the snapshot of every member file
 // (jet_cli_prepare_snapshot), or "" for a script or a file with no package.
-jet_cli_tool_stage_package_root: fn(document: String, overlays: [JetCLIOverlay]) -[FS, Env]> String Never! {
+jet_cli_tool_stage_package_root: fn(document: String, overlays: [JetDriverSourceDocument]) -[FS, Env]> String Never! {
     path: cli_files.realpath(document) ?? return ""
     if jet_cli_entry_is_script(jet_cli_overlay_path(document), overlays) -> return ""
     root: jet_cli_source_root(path)
@@ -162,7 +163,7 @@ jet_cli_fmt_block_hooks: fn(text: &&String, origin: String, color: Bool, memo: &
     if blocks.len() == 0 || !jet_cli_tool_stage_imports_package(text) || !cli_files.is_file(origin) {
         return jet_cli_fmt_formatted(text.move())
     }
-    overlays := [JetCLIOverlay]{JetCLIOverlay{path: jet_cli_overlay_path(origin), source: text.move()}}
+    overlays := [JetDriverSourceDocument]{JetDriverSourceDocument{path: jet_cli_overlay_path(origin), source: text.move()}}
     if !jet_driver_tool_stage_hooked(blocks, jet_cli_tool_stage_markers(origin, overlays, TOOL_STAGE_FMT_BLOCK, memo)) {
         unhooked: overlays.pop() ?? return jet_cli_fmt_formatted("")
         return jet_cli_fmt_formatted(unhooked.source)
@@ -185,7 +186,7 @@ jet_cli_fmt_block_hooks: fn(text: &&String, origin: String, color: Bool, memo: &
     if bodies.len() == 0 -> return jet_cli_fmt_formatted(formatted.source)
     // The hooks' program needs no overlay: the file on disk parses as its
     // formatted text does.
-    run := jet_cli_tool_stage_run(origin, [JetCLIOverlay]{}, TOOL_STAGE_FMT_BLOCK, bodies, program)
+    run := jet_cli_tool_stage_run(origin, [JetDriverSourceDocument]{}, TOOL_STAGE_FMT_BLOCK, bodies, program)
     if run.stop == .Val(stop) {
         return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_report(stop.code, "a `fmt.block` hook for `{origin}` did not run: {stop.what}", stop.why, stop.fix, color))}
     }

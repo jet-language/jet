@@ -10,6 +10,7 @@ use {
     cli_files: core.files
     cli_time: core.time
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode,
         JetDriverCompileResult,
@@ -1833,7 +1834,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 }
 
 jet_cli_inspect_checked_build_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
-    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Doc)
     if prepared.move() == {
         .Refused(output) -> return output
         .Prepared(request, _) -> {
