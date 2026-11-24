@@ -1,0 +1,41 @@
+Program: struct {
+    functions: [String],
+    name: String,
+}
+
+build: fn(n: Int) -> {program: Program, values: [Int]} {
+    functions := [String]{}
+    values := [Int]{}
+    loop i in 0..<n {
+        functions.push("f{i}")
+        values.push(i * i)
+    }
+    {program: Program{functions: functions, name: "p{n}"}, values: values}
+}
+
+pair: fn(n: Int) -> {names: [String], label: String} {
+    names := [String]{}
+    loop i in 0..<n -> names.push("n{i}")
+    {names: names, label: "l{n}"}
+}
+
+make_program: fn(n: Int) -> Program {
+    functions := [String]{}
+    loop i in 0..<n -> functions.push("g{i}")
+    Program{functions: functions, name: "q{n}"}
+}
+
+run: fn() {
+    // Each destructured field is a call result's own value, so it moves out:
+    // a record's fields, a struct inside the record, and a returned struct's.
+    {program, values} := build(1000)
+    {names, label}: pair(500)
+    Program{functions, name}: make_program(250)
+    print(program.functions.len())
+    print(program.name)
+    print(values[999])
+    print(names.len())
+    print(label)
+    print(functions.len())
+    print(name)
+}

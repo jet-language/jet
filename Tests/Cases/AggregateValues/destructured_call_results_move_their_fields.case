@@ -1,0 +1,42 @@
+# Destructuring a call's result moves every field out of it and never clones
+# one (#4567). `run` destructures three call results: a record holding a
+# struct and a list (`{program, values} := build(1000)`), a record holding a
+# list and a String (`{names, label}: pair(500)`), and a struct
+# (`Program{functions, name}: make_program(250)`). On every tier, its emitted
+# code has no `#copy<…>` call and no runtime clone. Destructuring a local that
+# is still read afterwards does show both, so they are what a clone looks like.
+fixture: DestructuredCallResultsMoveTheirFields.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect decisions -O0 main.jet
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O0:" # -O0 runs no passes, so this is the code as lowered
+stdout: count "#copy<" = 0 # no destructured field is copied
+stdout: count "_clone" = 0 # and no list or String in one is cloned
+step: jet inspect decisions -O1 main.jet
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O1:" # optimize: O1 runs the O1 passes
+stdout: count "#copy<" = 0 # no destructured field is copied
+stdout: count "_clone" = 0 # and no list or String in one is cloned
+step: jet inspect decisions --release main.jet
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O2:" # --release runs the O2 passes
+stdout: count "#copy<" = 0 # no destructured field is copied
+stdout: count "_clone" = 0 # and no list or String in one is cloned
+step: jet run -O0 main.jet
+exit: 0
+stdout: = destructured_call_results_move_their_fields.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = destructured_call_results_move_their_fields.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = destructured_call_results_move_their_fields.out
+step: jet build -O2 main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = destructured_call_results_move_their_fields.out
