@@ -1,7 +1,7 @@
-// Environment entry stamps (Rust `jetpack::Store`): the composite witness a
-// verified project environment receipt is reused against. It binds the WAL
-// state, the environment definition, every selected package's stable
-// metadata and seal, and the filesystem identity of external outputs.
+// Environment entry stamps: the composite witness a verified project
+// environment receipt is reused against. It binds the WAL state, the
+// environment definition, every selected package's stable metadata and seal,
+// and the filesystem identity of external outputs.
 use files: core.files
 
 // The exact package/output selection captured by a verified project
@@ -130,7 +130,7 @@ store_append_external_metadata_stamp: fn(stamp: ^[U8], metadata: Stat) Never! {
     store_append_environment_stamp_field(stamp, modified.bytes())
 }
 
-// Rust `format!("{:?}", error.kind())` for the stamp.
+// The `Debug` name of the error's kind, for the stamp.
 store_io_kind_name: fn(error: IOError) -> String Never! {
     if error == {
         .NotFound(_) -> "NotFound"
@@ -176,7 +176,7 @@ store_append_external_output_stamp: fn(stamp: ^[U8], path: String) Never! {
 }
 
 // A missing node records `missing`; any other failure records `failed` and
-// the Rust error-kind name.
+// the error-kind name.
 store_append_stat_failure: fn(stamp: ^[U8], error: IOError, missing: String, failed: String) Never! {
     if StoreError.IO(error).is_not_found() {
         store_append_environment_stamp_field(stamp, missing.bytes())

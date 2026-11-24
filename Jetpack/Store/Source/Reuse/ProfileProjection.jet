@@ -2,9 +2,9 @@
 // leased executable through its open handle into the profile and proves the
 // copy's digest and mode; later checks re-prove a projected file without
 // following links.
-// Like the lease receipt methods, these helpers return Rust io::Result as
-// IOError!: native errors pass through unchanged and callers render the
-// canonical shared IOError Display or uplift once at their own boundary.
+// Like the lease receipt methods, these helpers return IOError!: native
+// errors pass through unchanged and callers render the canonical shared
+// IOError Display or uplift once at their own boundary.
 use {
     files: core.files
     sys: core.sys
@@ -24,9 +24,9 @@ ProfileExecutableProof: struct {
     mode: Int,
 }
 
-// Rust `copy_open_profile_file`: stream the leased handle from its start
-// into a freshly created destination (exclusive create), hashing as it
-// copies, apply the source mode, sync, and re-hash the destination.
+// Stream the leased handle from its start into a freshly created destination
+// (exclusive create), hashing as it copies, apply the source mode, sync, and
+// re-hash the destination.
 store_reuse_copy_open_profile_file: fn(input: ^FileReader, destination: String) -> ProfileExecutableProof IOError! {
     input.seek(0)
     info: input.stat()
@@ -52,8 +52,8 @@ store_reuse_copy_open_profile_file: fn(input: ^FileReader, destination: String) 
     Ok(ProfileExecutableProof{digest: "sha256-{digest}", mode: mode})
 }
 
-// Rust `profile_file_proof`: a projected profile file must be a regular
-// file at its path, unchanged between the path check and the open.
+// A projected profile file must be a regular file at its path, unchanged
+// between the path check and the open.
 store_profile_file_proof: fn(path: String) -> ProfileExecutableProof IOError! {
     at_path: files.stat(path)
     if !at_path.is_file || at_path.is_symlink {

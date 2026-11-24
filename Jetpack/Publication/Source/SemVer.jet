@@ -362,7 +362,7 @@ publication_parse_simple: fn(input: String) -> [PublicationComparator]? Never! {
     publication_expand_op(op, publication_parse_partial(rest) ?? return None)
 }
 
-// expand_op (:468-584): partial replacements drop metadata only where Rust does.
+// expand_op (:468-584): partial replacements drop metadata only where required.
 publication_expand_op: fn(op: PublicationOp, p: PublicationPartial) -> [PublicationComparator]? Never! {
     major: p.major ?? return Val([PublicationComparator]{})
     if op == PublicationOp.Eq {
@@ -469,10 +469,10 @@ PublicationReleaseBounds: struct {
     upper: PublicationSemVer,
 }
 
-// Rust set_satisfiable/tighten_lower/tighten_upper (:717-771), with the
-// approved latent-defect correction: actual bounded discrete release
-// existence, not dense interval overlap. Prerelease comparators project onto
-// releases; the public candidate matcher still uses its prerelease gate.
+// set_satisfiable/tighten_lower/tighten_upper (:717-771), with the approved
+// latent-defect correction: actual bounded discrete release existence, not
+// dense interval overlap. Prerelease comparators project onto releases; the
+// public candidate matcher still uses its prerelease gate.
 publication_set_satisfiable: fn(first: [PublicationComparator], second: [PublicationComparator]) -> Bool Never! {
     bounds := PublicationReleaseBounds{
         lower: publication_ver(0, 0, 0),

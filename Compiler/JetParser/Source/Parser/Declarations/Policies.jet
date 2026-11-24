@@ -1,8 +1,7 @@
-// A `#Policy(...)` line that ends at its closing parenthesis
-// is a file-scoped source policy (Rust `policy_is_file_decl` and
-// `policy_declarations_from_marker`). Its arguments become the module's
-// policy declarations; a callable policy (`#Policy(retry(3))`) stays a marker
-// on the declaration that follows it.
+// A `#Policy(...)` line that ends at its closing parenthesis is a file-scoped
+// source policy. Its arguments become the module's policy declarations; a
+// callable policy (`#Policy(retry(3))`) stays a marker on the declaration that
+// follows it.
 use {
     jet_foundation.[
         MARKER_OVERFLOW,
@@ -66,8 +65,8 @@ parser_parse_policy_file_decl: fn(state: ^JetParserState, program: ^Program) {
     loop declaration in declarations -> program.policy_declarations.push(declaration)
 }
 
-// `#Policy(...) { … }` scopes its declarations to the block
-// (Rust `at_policy_stmt`). Each declaration targets the whole statement.
+// `#Policy(...) { … }` scopes its declarations to the block. Each declaration
+// targets the whole statement.
 parser_policy_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt? {
     declarations := parser_policy_declarations_from_marker(state, marker, PolicyScope.Block) ?? return None
     loop index in 0..<declarations.len() -> declarations[index].target = Val(span)
@@ -110,11 +109,10 @@ parser_runtime_block_stmt: fn(state: ^JetParserState, marker: Marker, body: [Stm
     Stmt.Policy{declarations: declarations, body: body, span: span}
 }
 
-// `#Unsafe(reason, obligations: .Track)` selects the gate's per-site
-// obligation mode (Rust `at_unsafe_stmt` / `unsafe_obligation_policy`).
-// Returns the declaration targeting `target`, or None when the mode is
-// absent or `.None`. A package-level mode written at a gate is E3108;
-// other argument shapes are left to sema's typed marker-argument check.
+// `#Unsafe(reason, obligations: .Track)` selects the gate's per-site obligation
+// mode. Returns the declaration targeting `target`, or None when the mode is
+// absent or `.None`. A package-level mode written at a gate is E3108; other
+// argument shapes are left to sema's typed marker-argument check.
 parser_unsafe_obligation_policy: fn(state: ^JetParserState, marker: Marker, scope: PolicyScope, target: Span) -> PolicyDeclaration? {
     values: parser_marker_bindings(marker, [String]{"reason", "obligations"}) ?? return None
     written: values[1] ?? return None
@@ -136,8 +134,8 @@ parser_unsafe_obligation_policy: fn(state: ^JetParserState, marker: Marker, scop
     None
 }
 
-// Rust `CallablePolicyChain.parse(..).is_ok()`: every argument is a policy
-// call (`retry(3)`) whose own arguments are plain positional values.
+// Every argument is a policy call (`retry(3)`) whose own arguments are plain
+// positional values.
 parser_callable_policy_marker: fn(marker: Marker) -> Bool Never! {
     loop index in 0..<marker.args.len() {
         expr: parser_marker_expression(marker, index) ?? return false

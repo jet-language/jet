@@ -11,7 +11,7 @@ use {
 
 // The applied-rule catalog the checker builds (MarkerModules.jet
 // `sema_marker_module_check`). The effect menu is seeded with the roots the
-// placeholders need; the Rust walk read EFFECT_ROOTS the same way.
+// placeholders need.
 mrc_catalog: fn() -> TAppliedRuleCatalog {
     menus: foundation_core_argument_menus(["IO", "FS"]) ?? panic("the applied-rule argument menus must build")
     sema_marker_rules_build_catalog(registration_marker_rules(), menus) ?? panic("the applied-rule catalog must build")
@@ -87,8 +87,8 @@ mrc_program_at: fn(marker: String, rule: TAppliedRule, site: String) -> String? 
                 return Val("#NoPrelude\nuse io: core.term\nrun: fn() {{\n    io.print(\"ok\")\n}}\n")
             } else { return Val("{marker}\nrun: fn() {{\n    print(\"ok\")\n}}\n") }
         }
-        // The Rust walk wrote `c.lib: module`; a dotted user module now needs a
-        // declared namespace (E0960), so the smallest module is `lib: module`.
+        // A dotted user module needs a declared namespace (E0960), so the
+        // smallest module is `lib: module`.
         "Module" -> {
             if marker.starts_with("#Bindgen") {
                 return Val("{marker} c.coverage.__bindgen__: module {{\n}}\n")

@@ -776,7 +776,7 @@ PartialPackage: struct {
     }
 }
 
-// Rust PartialPkg::finish validates borrowed identities before moving the
+// Finishing a partial package validates borrowed identities before moving the
 // source, closure and envelope into the completed package. Read parameters
 // keep those same owned records reusable without cloning their payloads.
 pkg_lock_validate_package_nix: fn(source: LockSource, nix_closure: NixClosureRecord?, envelope: LockEnvelope?) LockError! {
@@ -949,7 +949,7 @@ pkg_lock_assign_envelope: fn(envelope: ^LockEnvelope, key: String, value: String
 }
 
 // Parse a `source = { … }` inline table. The first recognized source key
-// wins, in the Rust reader's order.
+// wins, in a fixed key order.
 pkg_lock_parse_source: fn(input: String) -> LockSource LockError! {
     inline: pkg_lock_inline_body(input)
     if pkg_lock_kv_field(inline, "root") != None -> return Ok(LockSource.Root)

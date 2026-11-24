@@ -1,6 +1,6 @@
-// Correctness path for Rust f64.from_str captures. Decimal digits become an
-// exact rational; only the final quotient is rounded, ties to even. No Float
-// arithmetic, libc parser, or lossy decimal accumulator.
+// Correctness path for f64 parsing. Decimal digits become an exact rational;
+// only the final quotient is rounded, ties to even. No Float arithmetic, libc
+// parser, or lossy decimal accumulator.
 ScanDecimal: struct {
     valid: Bool,
     negative: Bool,
@@ -110,7 +110,7 @@ scan_float_bits: fn(data: I64, len: I64, stride: I64) -> I64 {
     order: decimal.digits + decimal.exponent
     if (order > I64{309}) { return sign | I64{9218868437227405312} }
     if (order < I64{-324}) { return sign }
-    // Rust dec2flt's bound: every binary64 rounding boundary terminates within
+    // dec2flt's bound: every binary64 rounding boundary terminates within
     // 768 significant decimal digits. A longer suffix can affect rounding only
     // when the retained prefix is exactly halfway. decimal.last excludes all
     // trailing zero digits, so an omitted suffix is necessarily nonzero.

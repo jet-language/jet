@@ -18,15 +18,13 @@ use {
     sys: core.sys
 }
 
-// Rust `std::env::temp_dir()`: the evaluation base for sources that read no
-// files.
+// The evaluation base for sources that read no files.
 envmodel_test_base_dir: fn() -[Env]> String { sys.temp_dir() }
 
-// The repository root the committed fixtures are read from (Rust
-// `CARGO_MANIFEST_DIR/../..`): JETPACK_TEST_REPO_ROOT, which
-// Compiler/test.jet's packages suite sets to the checkout. The claims may run
-// inside an assembled scratch project, so the working directory is never
-// that tree.
+// The repository root the committed fixtures are read from:
+// JETPACK_TEST_REPO_ROOT, which Compiler/test.jet's packages suite sets to the
+// checkout. The claims may run inside an assembled scratch project, so the
+// working directory is never that tree.
 envmodel_test_repo_root: fn() -[Env]> String {
     sys.get("JETPACK_TEST_REPO_ROOT") ?? panic("JETPACK_TEST_REPO_ROOT must name the Jet repository whose committed fixtures the claims read")
 }
@@ -80,7 +78,6 @@ envmodel_test_profile_error: fn(result: PackageProfilePlan EnvModelEvalError!) -
     }
 }
 
-// Rust `Diagnostics::render_all(file, src, &[diagnostic])`.
 envmodel_test_render: fn(file: String, src: String, diagnostic: Diagnostic) -> String {
     diagnostic_render_all(file, src, [Diagnostic]{diagnostic}, false)
 }

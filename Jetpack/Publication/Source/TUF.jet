@@ -59,8 +59,8 @@ PublicationMetadataFileSnapshot: struct {
     bytes: [U8]?,
 }
 
-// Rust refresh_registry_metadata: snapshot every destination before the first
-// write; restore all snapshots on ANY later failure, retaining rollback errors.
+// Snapshot every destination before the first write; restore all snapshots on
+// ANY later failure, retaining rollback errors.
 publication_refresh_registry_metadata: fn(repo: String, registry_name: String) -[FS, Env, Time]> PublicationRegistryMetadataFiles PublicationDiagnosticError! {
     root_key: publication_read_registry_root_key(registry_name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     grouped: publication_tuf_all_index_entries(repo) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
@@ -91,8 +91,8 @@ publication_refresh_registry_metadata: fn(repo: String, registry_name: String) -
 
 publication_tuf_refresh_transaction: fn(repo: String, registry_name: String, root_key: String, grouped: [String:[PublicationIndexEntry]]) -[FS, Env, Time]> PublicationRegistryMetadataFiles IOError! {
     records := publication_tuf_read_log(repo)
-    // Rust's BTreeSet membership needs indexed lookup, not a quadratic scan
-    // across a potentially 64MiB log. Ordering is supplied by current below.
+    // Set membership needs indexed lookup, not a quadratic scan across a
+    // potentially 64MiB log. Ordering is supplied by current below.
     known := [String:Bool]{}
     loop record in records -> known[publication_index_to_jsonl(record.entry)] = true
     current := [PublicationIndexEntry]{}
@@ -146,9 +146,8 @@ publication_verify_registry_package: fn(repo: String, registry_name: String, nam
             publication_require_takeover_review(repo, entry.name, entry.version)
         }
     }
-    // Rust rereads the log per entry and treats an unreadable log as no
-    // inclusion; one bounded read/validation gives the same answer without
-    // rehashing the whole chain for every version.
+    // An unreadable log counts as no inclusion; one bounded read/validation
+    // gives the answer without rehashing the whole chain for every version.
     witnessed: publication_tuf_read_log(repo) ?? [PublicationLogRecord]{}
     loop entry in metadata.entries {
         if !publication_tuf_log_contains_entry(witnessed, entry) {
@@ -211,7 +210,7 @@ publication_tuf_read_sparse_metadata: fn(repo: String, name: String) -[FS, Env]>
     publication_tuf_parse_sparse_metadata(publication_tuf_read_bounded(repo, path, PUBLICATION_TUF_MAX_METADATA_BYTES, "registry metadata exceeds its size limit"), name)
 }
 
-// Rust read_sparse_metadata's wire parsing separated from its protected read.
+// Sparse metadata wire parsing, separated from its protected read.
 publication_tuf_parse_sparse_metadata: fn(text: String, name: String) -> PublicationSparseMetadata IOError! {
     fields := [String:[String]]{}
     lines: text.lines()
@@ -355,7 +354,7 @@ publication_tuf_next_log_record: fn(records: [PublicationLogRecord], operation: 
         sequence = last.sequence + 1
         previous = last.leaf
     }
-    // Rust u64 addition's overflow is a refused sequence, never unbounded wire.
+    // u64 addition overflow is a refused sequence, never unbounded wire.
     if sequence > 18446744073709551615 {
         return Err(publication_tuf_invalid("registry transparency log sequence is invalid"))
     }
@@ -365,7 +364,7 @@ publication_tuf_next_log_record: fn(records: [PublicationLogRecord], operation: 
 
 publication_tuf_validate_log: fn(records: [PublicationLogRecord]) IOError! {
     previous := publication_tuf_empty_log_root()
-    // Rust keys identities by the (name, version) tuple. The byte-length
+    // Identities are keyed by the (name, version) tuple. The byte-length
     // prefix keeps this flat key injective without copying a per-package map
     // out of and back into the outer map for every record.
     identities := [String:PublicationIndexEntry]{}
@@ -391,8 +390,8 @@ publication_tuf_validate_log: fn(records: [PublicationLogRecord]) IOError! {
                 if prior_identity != current_identity || prior.yanked || record.operation != "yank" {
                     return Err(publication_tuf_invalid("registry transparency log reuses or changes an immutable package version"))
                 }
-                // Main-approved Rust tandem: remember the terminal yank so a
-                // second identical yank cannot reuse this immutable identity.
+                // Remember the terminal yank so a second identical yank cannot
+                // reuse this immutable identity.
                 identities[identity] = record.entry
             }
             None -> {
@@ -534,8 +533,8 @@ publication_tuf_check_accepted_checkpoint: fn(sequence: Int, root: String, check
     Ok(false)
 }
 
-// Rust with_checkpoint_lock: 100 exclusive-create attempts, stale >300s,
-// 20ms backoff, fsync before action, close and cleanup after every action result.
+// 100 exclusive-create attempts, stale >300s, 20ms backoff, fsync before action,
+// close and cleanup after every action result.
 publication_tuf_with_checkpoint_lock: fn(state: String, action: fn() -[FS, Env, Time]> IOError!) -[FS, Env, Time]> IOError! {
     parent: files.dirname(state)
     if parent == "" {
@@ -711,9 +710,9 @@ publication_tuf_atomic_write: fn(root: String, path: String, bytes: [U8]) -[FS, 
     foundation_write_file_nofollow_at_root(root, files.relative(path, root), bytes, None) ?? return Err(err.error)
 }
 
-// Rust line: no partial append on unsafe keys/values. The boolean core keeps
-// unsigned construction's intentional ignored refusal without another encoder.
-// Callers accumulate parts and join once, never re-copying the whole payload.
+// No partial append on unsafe keys/values. The boolean core keeps unsigned
+// construction's intentional ignored refusal without another encoder. Callers
+// accumulate parts and join once, never re-copying the whole payload.
 publication_tuf_append_line: fn(output: ^[String], key: String, value: String) -> Bool Never! {
     if key == "" -> return false
     loop byte in key.bytes() {
@@ -734,7 +733,7 @@ publication_tuf_line: fn(output: ^[String], key: String, value: String) IOError!
     }
 }
 
-// Rust `sort(); dedup();` over the transaction's touched paths.
+// Sort and dedup the transaction's touched paths.
 publication_tuf_sort_unique: fn(paths: ^[String]) Never! {
     paths.sort()
     unique := [String]{}
@@ -763,7 +762,7 @@ publication_tuf_decode_text: fn(value: String) -> String IOError! {
 }
 
 // Reuse the canonical unsigned decimal contract from Lock/Parse, including
-// optional leading '+', no whitespace and checked Rust u64 arithmetic.
+// optional leading '+', no whitespace and checked u64 arithmetic.
 publication_tuf_sequence: fn(value: String) -> Int? Never! {
     pkg_lock_parse_unsigned(value, 18446744073709551615)
 }

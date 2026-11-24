@@ -1,5 +1,4 @@
-// Core/Files raw path leaves. Rust providers:
-// (fsync/canonicalize/stat_mode/set_mode/temp_dir),
+// Core/Files raw path leaves. (fsync/canonicalize/stat_mode/set_mode/temp_dir),
 // (remove/list_dir/remove_all), (TempDir owner), (Path.to_string). Core owns
 // the fault checkpoints; these leaves do the one host step with std's error
 // mapping (jet_std.io_error_at through compiler_fs_errno) and std's CString
@@ -361,8 +360,8 @@ files_words_take: fn(words: I64, output: I64) -> I64 {
     length
 }
 
-// Stable bottom-up merge sort of DirEntry handles by name bytes (Rust
-// sort_by(|a, b| a.name.cmp(b.name)), equal names keep readdir order).
+// Stable bottom-up merge sort of DirEntry handles by name bytes (equal names
+// keep readdir order).
 files_entries_sort: fn(data: I64, count: I64) {
     if (count < I64{2}) {
         return

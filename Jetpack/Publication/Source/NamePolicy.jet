@@ -83,8 +83,8 @@ publication_assess_name: fn(name: String, existing_names: [String]) -> Publicati
     publication_assess_name_with_thresholds(name, existing_names, PublicationNamePolicyThresholds{})
 }
 
-// Rust assess_name_with_thresholds: confusable matches precede nearest-distance
-// findings, and distance ties use the original name's UTF-8 lexical ordering.
+// Confusable matches precede nearest-distance findings, and distance ties use
+// the original name's UTF-8 lexical ordering.
 publication_assess_name_with_thresholds: fn(name: String, existing_names: [String], thresholds: PublicationNamePolicyThresholds) -> PublicationNamePolicyDecision Never! {
     warn_distance: thresholds.warn_distance
     block_distance: min(thresholds.block_distance, warn_distance)
@@ -131,8 +131,8 @@ publication_assess_name_with_thresholds: fn(name: String, existing_names: [Strin
     PublicationNamePolicyDecision.Allow
 }
 
-// Rust edit_distance / edit_distance_at_most: two rows, with a band for the
-// bounded policy query. Reuse row storage instead of allocating once per scalar.
+// Two rows, with a band for the bounded policy query. Reuse row storage instead
+// of allocating once per scalar.
 publication_edit_distance: fn(left: String, right: String) -> Int Never! {
     limit: max(left.len(), right.len())
     publication_edit_distance_at_most(left, right, limit) ?? panic("Levenshtein distance cannot exceed the maximum scalar length")
@@ -169,8 +169,8 @@ publication_edit_distance_at_most: fn(left: String, right: String, limit: Int) -
 
 publication_confusable_skeleton: fn(name: String) -> String Never! {
     parts := [String]{}
-    // Rust lowercases EACH scalar (not contextual whole-string casing), then
-    // maps it through one scalar match: no per-scalar text or substring scans.
+    // Lowercase EACH scalar (not contextual whole-string casing), then map it
+    // through one scalar match: no per-scalar text or substring scans.
     loop original in name.chars() {
         loop scalar in "{original}".lower().chars() {
             if scalar >= '̀' && scalar <= 'ͯ' -> next

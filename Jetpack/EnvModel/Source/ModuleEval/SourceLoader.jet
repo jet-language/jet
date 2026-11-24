@@ -121,7 +121,7 @@ FileSystemSourceLoader: struct {
 }
 
 // What `PackageFacts.load` found at a package root: no manifest, the
-// composed facts, or a manifest that does not load (Rust `Some(Err(_))`).
+// composed facts, or a manifest that does not load.
 EnvModelPackageRoot: enum {
     Absent,
     Loaded(facts: PackageFacts),
@@ -132,13 +132,12 @@ envmodel_source_loader_error: fn(path: String, cause: String) -> EnvModelEvalErr
     envmodel_error("E1331", "environment source `{path}` cannot be read", cause, "restore a regular source file below the environment root", None)
 }
 
-// True when `path` is `root` or lies below it (Rust `Path::starts_with`).
+// True when `path` is `root` or lies below it.
 envmodel_path_within: fn(path: String, root: String) -> Bool Never! {
     envmodel_paths.is_relative_to(envmodel_paths.of(path), envmodel_paths.of(root))
 }
 
-// A relative path with `.` components and empty segments dropped
-// (Rust `Path::components` filtering `CurDir`).
+// A relative path with `.` components and empty segments dropped.
 envmodel_normalize_relative_path: fn(path: String) -> String Never! {
     parts := [String]{}
     loop part in envmodel_source_files.split_slash(path) {

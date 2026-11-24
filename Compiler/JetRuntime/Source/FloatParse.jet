@@ -117,7 +117,7 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
             at += I64{1}
         }
     }
-    // Rust's case-insensitive specials have exactly 3 or 8 bytes after sign.
+    // The case-insensitive specials have exactly 3 or 8 bytes after sign.
     length: end - at
     if (length == I64{3} || length == I64{8}) {
         special := I64{0}
@@ -173,8 +173,8 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
         loop at < end {
             byte: rt_text_byte(wrapping(data + at))
             if (byte < I64{48} || byte > I64{57}) { break }
-            // Matches Rust parse_scientific: stop accumulating only AFTER the
-            // previous magnitude reaches 0x10000; still validate every digit.
+            // Stop accumulating only AFTER the previous magnitude reaches
+            // 0x10000; still validate every digit.
             if (explicit < I64{65536}) { explicit = explicit * I64{10} + byte - I64{48} }
             at += I64{1}
         }
@@ -200,11 +200,11 @@ numeric_float_error: fn(text: I64, err: I64) -> I64 {
         sync_store(ok, sign)
         return I64{1}
     }
-    // Clinger's fast path, the first stage of Rust's dec2flt: when the
-    // significant digits are an integer w <= 2^53 and |power| <= 22, w and
-    // 10^|power| are both exact doubles (each step of the 10.0 product
-    // below is exact), so one IEEE multiply or divide rounds the exact
-    // rational once, to the same nearest-even result as the exact path.
+    // Clinger's fast path, the first stage of dec2flt: when the significant
+    // digits are an integer w <= 2^53 and |power| <= 22, w and 10^|power|
+    // are both exact doubles (each step of the 10.0 product below is exact),
+    // so one IEEE multiply or divide rounds the exact rational once, to the
+    // same nearest-even result as the exact path.
     if (significant_digits <= I64{16} && power >= I64{-22} && power <= I64{22}) {
         whole := I64{0}
         at = first_nonzero

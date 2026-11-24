@@ -1,7 +1,7 @@
-// TOOLS-D1 Snapshot behavior: has no Rust unit tests; these pin the reference
-// algorithm. Digests are SHA-256 of the exact Rust identity material.
-// Paused-native product proof (111/131, Canvas debug_source_git) needs a real
-// native pause and is not claimed here.
+// TOOLS-D1 Snapshot behavior: these pin the reference algorithm. Digests are
+// SHA-256 of the exact identity material. Paused-native product proof
+// (111/131, Canvas debug_source_git) needs a real native pause and is not
+// claimed here.
 use jet_debug.[DebugEvaluationUsage, DebugSnapshot, DebugValue, FrameSnapshot, ValueSnapshot, debug_render_snapshot_locals, evaluate_snapshot]
 
 debug_snapshot_test_text: fn(bytes: [U8]) -> String Never! {
@@ -113,8 +113,8 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
     // looked up, and U+0085 inside an index is whitespace around a place.
     assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), "_total"), "no readable local named `_total` at this stop")
     assert_eq(debug_snapshot_test_error(debug_snapshot_test_run(), "total[1{c1}]"), "nested debugger evaluation is unavailable until the paused backend publishes child facts")
-    // Outer trimming is Rust str.trim (Unicode White_Space): U+0085 is
-    // trimmed away, so the remaining root is evaluated rather than refused.
+    // Outer trimming removes Unicode White_Space: U+0085 is trimmed away, so
+    // the remaining root is evaluated rather than refused.
     nel: evaluate_snapshot(debug_snapshot_test_run(), "{c1}total{c1}") ?? panic("NEL is outer whitespace: {err.message}")
     assert_eq(nel.expression, "total")
 }

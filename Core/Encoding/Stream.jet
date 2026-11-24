@@ -167,8 +167,7 @@ io_cause: fn(error: IOError) -> EncodingCause Never! {
     EncodingCause{kind: kind, os_code: code, message: message}
 }
 
-// format!("{:?}", io::Error::from_raw_os_error(code).kind()) on Linux (the
-// Rust 1.97 sys::decode_error_kind table).
+// format!("{:?}", io::Error::from_raw_os_error(code).kind()) on Linux.
 errno_kind: fn(code: Int) -> String Never! {
     if code == {
         1 -> "PermissionDenied"
@@ -1921,8 +1920,8 @@ plain_quoted: fn(bytes: [U8], open: Int) -> String? Never! {
     None
 }
 
-// Rust's shipped stream writer used binary64 Display, not Jet's Debug-style
-// Float display. Re-spell the existing shortest digits without another kernel.
+// The stream writer uses binary64 Display, not Jet's Debug-style Float
+// display. Re-spell the existing shortest digits without another kernel.
 wire_float: fn(value: Float) -> String Never! {
     shown: "{value}"
     bytes := shown.bytes()

@@ -1,7 +1,7 @@
-// Test-only transport. One dynamic Thread TLS key; no alternate TCB, Rust TLS,
-// or process env hooks. TLS32: authorizer closure0, trust raw-text8, fault
-// text16, borrow flag24. The source owns cleanup; the C test transport supplies
-// its real code address.
+// Test-only transport. One dynamic Thread TLS key; no alternate TCB or process
+// env hooks. TLS32: authorizer closure0, trust raw-text8, fault text16, borrow
+// flag24. The source owns cleanup; the C test transport supplies its real code
+// address.
 vault_test_key := I64{0}
 
 vault_test_destructor := I64{0}
@@ -55,7 +55,7 @@ vault_test_state_ensure: fn() -> I64 {
 
 // Borrow conflict stop text: "RefCell already borrowed".
 // Foreign panic precedent: flush stdout, exact body + LF on stderr, exit101;
-// no Jet program stop publication, atexit, or Rust thread/backtrace prefix.
+// no Jet program stop publication, atexit, or thread/backtrace prefix.
 vault_test_borrow_stop: fn() {
     reason: rt_static_text("RefCell already borrowed")
     trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})

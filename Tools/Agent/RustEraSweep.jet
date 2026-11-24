@@ -1,0 +1,539 @@
+#!/usr/bin/env jet
+// Rust-era sweep: rewrites the comments that name Rust (RustEraRatchet.jet
+// rule 3) so each states its contract itself, and lists the ones that need a
+// person.
+//
+// A comment counts exactly as the ratchet counts it: a `//` comment in a
+// tracked Jet or C source under Compiler/, Core/ or Jetpack/ that names Rust
+// where Rust is not the foreign language. Each such comment block is split
+// into paragraphs, and every paragraph that names Rust goes through these
+// mechanical classes, in order:
+// 1. A pure provenance paragraph ("Rust `name`.", "Rust reference `a`/`b`")
+//    is deleted.
+// 2. A parenthetical naming Rust loses its provenance clause when the rest
+//    stands alone ("(the last wins, as Rust's insert keeps it)"); otherwise
+//    it is deleted ("(Rust `x`)"), its error codes kept.
+// 3. A provenance lead ("Rust `name`:", "Rust's checker `a` (E0101) —") is
+//    cut at a sentence start; error codes stay, and the sentence is
+//    recapitalized.
+// 4. A provenance clause ("as Rust `x` does", "like the Rust host",
+//    "matching the Rust reference", "in the Rust host") is cut before the
+//    punctuation that ends it.
+// The rewritten paragraph is reflowed to the block's width, never splitting a
+// code span. A paragraph that still names Rust afterwards, or whose lines are
+// indented (lists, examples), is left as written and reported for judgment.
+//
+// Usage (from the repository root): jet Tools/Agent/RustEraSweep.jet prints
+// the comment blocks left for judgment and a summary; `--write` also applies
+// the rewrites. Lower the ratchet afterwards with
+// `jet Tools/Agent/RustEraRatchet.jet --write`.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+SWEEP_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
+
+SOURCE_SUFFIXES: [String]{".jet", ".c", ".h"}
+
+NAMES_RUST: Regex{"\brust\b"}
+
+NAMES_RUST_EXACT: Regex{"\bRust\b"}
+
+// Matched against the lowercased comment: Rust as the foreign language.
+FOREIGN_PHRASE: Regex{"extern rust|externrust|\bcargo\b|\brustc\b|crates\.io|\brlib\b|rust toolchain|foreign rust|rust ffi|rust[- ]abi|rust-mangled|\brust symbols?\b|\b(?:bridge|helper) crates?\b"}
+
+// A provenance-only paragraph: "Rust `name`.", "Rust reference a / b (x)".
+PURE: Regex{"^Rust(?:'s)?(?:\s+(?:reference|lowering|CheckInner))*\s+(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?)(?:(?:\s*/\s*|\s+\+\s+|\s+and\s+|,\s+|\s+then\s+)(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?))*(?:\s+\([^()]*\))?\.?$"}
+
+// "Rust: none (Jet-only pass)": a function with no Rust twin.
+NO_TWIN: Regex{"^Rust:\s+none\b[^.]*\.?$"}
+
+WORD: Regex{"[A-Za-z]"}
+
+// A parenthetical naming Rust; group 1 is the space before it, group 2 its
+// text.
+PAREN: Regex{"(\s*)\(((?:[^()]|\([^()]*\))*?\bRust\b(?:[^()]|\([^()]*\))*)\)"}
+
+PAREN_PART: Regex{"(?:,|;)\s+"}
+
+ERROR_CODES: Regex{"^[A-Z]\d{{4}}(?:/[A-Z]\d{{4}})*$"}
+
+ERROR_CODE: Regex{"\b[A-Z]\d{{4}}\b"}
+
+// "Rust `name`:" or "Rust's checker a / b (E0101) —" at a sentence start;
+// group 1 is the sentence start, group 2 the parenthetical, group 3 the next
+// character.
+LEAD: Regex{"(^|(?<=\. ))Rust(?:'s)?\s+(?:(?:sema|Sema|codegen|lowering|checker|parser|reference)\s+)?(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?)(?:(?:\s*/\s*|\s+\+\s+|\s+and\s+|,\s+|\s+then\s+)(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?))*(?:\s+\(([^()]*)\))?\s*(?::|—|--)\s+(.?)"}
+
+// "Rust's lexer `x` (E0101):" with up to four words before the colon.
+LEAD_WORDS: Regex{"(^|(?<=\. ))Rust(?:'s)?(?:\s+(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?)){{0,4}}(?:\s+\(([^()]*)\))?\s*:\s+(.?)"}
+
+// "as Rust `x` does", "like the Rust host reads it", up to the punctuation
+// that ends the clause.
+AS_RUST: Regex{"(?:^|,?\s+)(?:(?:read|resolved|ordered|sorted|spelled|rendered|written|printed|checked|parsed|split|joined|decoded|encoded|formatted|reported)\s+)?(?:just\s+)?(?:as|like)\s+(?:in\s+)?(?:the\s+)?Rust(?:'s)?(?:\s+(?:reference|host|original|frontend|checker|parser|lexer|compiler|driver|codegen|lowering)(?:'s)?)?(?:\s+(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?)(?:(?:\s*/\s*|\s+\+\s+|\s+and\s+|,\s+|\s+then\s+)(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?))*){{0,3}}(?:\s+(?:does|did|do|has|had|is|was|reports|reported|keeps|kept|checks|checked|builds|built|reads|read|resolves|resolved|requires|required|prints|printed|writes|wrote|orders|sorts|spells|renders|uses|used)(?:\s+(?:it|them))?)?(?=[.,;:)]|$)"}
+
+// "matching the Rust reference `x`", "per Rust".
+AFTER_RUST: Regex{"(?:^|,?\s+)(?:matching|mirroring|mirrors|matches|per|after|from|following)\s+(?:the\s+)?Rust(?:'s)?(?:\s+(?:reference|host|original)(?:'s)?)?(?:\s+(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?)(?:(?:\s*/\s*|\s+\+\s+|\s+and\s+|,\s+|\s+then\s+)(?:`[^`]+`|[A-Za-z_]\w*(?:(?:\.|::)\w+)*(?:\(\))?))*)?(?=[.,;:)]|$)"}
+
+// "in the Rust host", "of the Rust original".
+IN_RUST: Regex{"\s+(?:in|of|on)\s+the\s+Rust\s+(?:host|original|reference|frontend)(?=[.,;:)]|$)"}
+
+SPACE_BEFORE_MARK: Regex{"\s+([.,;:])(?=\s|$)"}
+
+COLON_AFTER_STOP: Regex{"([.?!]) ?: (\w)"}
+
+SPACES: Regex{"  +"}
+
+COMMA_AFTER_MARK: Regex{"([:;,])\s*,"}
+
+CODES_LEAD: Regex{"^\(([A-Z]\d{{4}}(?:/[A-Z]\d{{4}})*)\):"}
+
+SPANS_LEAD: Regex{"^\((`[^`]+`(?: / `[^`]+`)*)\):"}
+
+COMMENT_MARKER: Regex{"^(//+)( ?)"}
+
+TRAILING_COMMENT: Regex{"^(//+\s*)(.*)$"}
+
+#Error
+SweepError: struct {
+    message: String,
+}
+
+// One rewrite: lines `start` through `end` (1-based, inclusive) become
+// `lines`.
+SweepHunk: struct {
+    start: Int,
+    end: Int,
+    lines: [String],
+}
+
+SweepFile: struct {
+    hunks: [SweepHunk],
+    // `path:start-end` and the block's text, one entry per block left as
+    // written.
+    residue: [String],
+}
+
+git_lines: fn(argv: [String]) -[Exec, IO, Time.Wait]> [String] SweepError! {
+    receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(SweepError{message: "cannot run {argv.join(" ")}: {err}"})
+    if receipt.code == 1 && receipt.errors == "" -> return Ok([String]{})
+    if receipt.code != 0 {
+        return Err(SweepError{message: "{argv.join(" ")} failed ({receipt.code}): {receipt.errors}"})
+    }
+    lines := [String]{}
+    loop line in receipt.output.split("\n") {
+        if line != "" -> lines.push(line.copy())
+    }
+    Ok(lines)
+}
+
+is_source: fn(path: String) -> Bool Never! {
+    loop suffix in SOURCE_SUFFIXES {
+        if path.ends_with(suffix) -> return true
+    }
+    false
+}
+
+// The bytes [start, end) of `text`.
+cut: fn(text: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes_lossy(text.bytes()[start..<end])
+}
+
+// Whether `prefix`, the code before a `//`, leaves no string literal open.
+closes_strings: fn(prefix: String) -> Bool Never! {
+    plain: prefix.replace("\\\\", "").replace("\\\"", "")
+    (plain.split("\"").len() - 1) % 2 == 0
+}
+
+// The byte offset of a line's comment: the first `//` that starts the line or
+// follows whitespace outside a string literal; -1 when there is none.
+comment_start: fn(line: String) -> Int Never! {
+    prefix := ""
+    first := true
+    loop part in line.split("//") {
+        if !first {
+            starts: prefix.trim() == "" || prefix.ends_with(" ") || prefix.ends_with("\t")
+            if starts && closes_strings(prefix) -> return prefix.count_bytes()
+        }
+        prefix = if first -> part.copy() else -> "{prefix}//{part}"
+        first = false
+    }
+    -1
+}
+
+// Whether `path` is a file where Rust is a foreign language: a `Rust…` or
+// `…Foreign…` segment, a Gauntlet or Perf folder, or a runtime pack.
+foreign_path: fn(path: String) -> Bool Never! {
+    loop segment in path.split("/") {
+        if segment.starts_with("Rust") || segment.contains("Foreign") -> return true
+        if segment == "Gauntlet" || segment == "Perf" || segment == "RuntimePack.jet" -> return true
+    }
+    false
+}
+
+names_rust: fn(path: String, comment: String) -> Bool Never! {
+    lowered: comment.lower()
+    NAMES_RUST.is_match(lowered) && !FOREIGN_PHRASE.is_match(lowered) && !foreign_path(path)
+}
+
+capitalized: fn(text: String) -> String Never! {
+    if text == "" -> return ""
+    first: text.bytes()[0]
+    if first < (U8{97}) || first > (U8{122}) -> return text.copy()
+    "{cut(text, 0, 1).upper()}{cut(text, 1, text.count_bytes())}"
+}
+
+// `edit` applied to the text outside code spans.
+outside_spans: fn(text: String, edit: fn(String) -> String Never!) -> String Never! {
+    parts := text.split("`").to_list()
+    loop index in 0..<parts.len() {
+        if index % 2 == 0 -> parts[index] = edit(parts[index])
+    }
+    parts.join("`")
+}
+
+// The error codes a dropped parenthetical carried, as "E0101, E0102: ", or "".
+kept_codes: fn(text: String) -> String Never! {
+    codes: ERROR_CODE.find_all(text)
+    if codes.len() == 0 -> return ""
+    "{codes.join(", ")}: "
+}
+
+// A provenance lead's replacement: the sentence start, the codes it carried,
+// and the next character, capitalized when no code leads.
+lead_replacement: fn(start: String, codes: String, next: String) -> String Never! {
+    if codes != "" -> return "{start}{codes}{next}"
+    "{start}{next.upper()}"
+}
+
+// A parenthetical naming Rust, after `space`: kept without its provenance
+// clause when the rest stands alone, else only its error codes, else nothing.
+paren_replacement: fn(space: String, text: String) -> String Never! {
+    inner: rust_clauses_cut(rust_leads_cut(text)).trim()
+    if inner != "" && !NAMES_RUST_EXACT.is_match(inner) && !text.trim().starts_with("Rust") -> return "{space}({paren_text(inner)})"
+    if inner != "" && !NAMES_RUST_EXACT.is_match(inner) -> return "{space}({lowered_first(paren_text(inner))})"
+    kept := [String]{}
+    loop part in PAREN_PART.split(text) {
+        if !NAMES_RUST_EXACT.is_match(part) -> kept.push(part.trim())
+    }
+    if kept.len() == 0 -> return ""
+    loop part in kept {
+        if !ERROR_CODES.is_match(part) -> return ""
+    }
+    "{space}({kept.join(", ")})"
+}
+
+// `text` without its provenance clauses ("as Rust `x` does", "matching the
+// Rust reference", "in the Rust host").
+rust_clauses_cut: fn(text: String) -> String Never! {
+    IN_RUST.replace(AFTER_RUST.replace(AS_RUST.replace(text, ""), ""), "")
+}
+
+// A parenthetical's kept text, without a leading `:`, `,` or `;` that a cut
+// clause left behind.
+paren_text: fn(text: String) -> String Never! {
+    if text.starts_with(":") || text.starts_with(",") || text.starts_with(";") -> return cut(text, 1, text.count_bytes()).trim()
+    text.copy()
+}
+
+// `text` with a recapitalized first word lowered again.
+lowered_first: fn(text: String) -> String Never! {
+    head: text.bytes()
+    if head.len() < 2 || head[0] < 65 || head[0] > 90 || head[1] < 97 || head[1] > 122 || text.starts_with("Jet") -> return text.copy()
+    "{cut(text, 0, 1).lower()}{cut(text, 1, text.count_bytes())}"
+}
+
+// `text` without its provenance leads ("Rust `name`:" at a sentence start).
+rust_leads_cut: fn(text: String) -> String Never! {
+    out := text.copy()
+    rounds := 0
+    loop rounds < 4 && LEAD.is_match(out) {
+        out = LEAD.replace_all_with(out, fn(found) { lead_replacement(found.group(1) ?? "", kept_codes(found.group(2) ?? ""), found.group(3) ?? "") })
+        rounds += 1
+    }
+    rounds = 0
+    loop rounds < 4 && LEAD_WORDS.is_match(out) {
+        out = LEAD_WORDS.replace_all_with(out, fn(found) { lead_replacement(found.group(1) ?? "", kept_codes(found.group(2) ?? ""), found.group(3) ?? "") })
+        rounds += 1
+    }
+    out
+}
+
+// The mechanical rewrite of one paragraph of comment text; "" deletes it.
+rewrite: fn(text: String) -> String Never! {
+    if PURE.is_match(text.trim()) || NO_TWIN.is_match(text.trim()) -> return ""
+    out := PAREN.replace_all_with(text, fn(found) { paren_replacement(found.group(1) ?? "", found.group(2) ?? "") })
+    out = rust_clauses_cut(rust_leads_cut(out))
+    out = outside_spans(out, fn(part) { SPACE_BEFORE_MARK.replace(part, "$1") })
+    out = outside_spans(out, fn(part) { COLON_AFTER_STOP.replace_all_with(part, fn(found) { "{found.group(1) ?? ""} {(found.group(2) ?? "").upper()}" }) })
+    out = outside_spans(out, fn(part) { SPACES.replace(part, " ") })
+    out = out.trim()
+    if out.starts_with(":") || out.starts_with(",") || out.starts_with(";") -> out = capitalized(cut(out, 1, out.count_bytes()).trim())
+    out = CODES_LEAD.replace(out, "$1:")
+    out = SPANS_LEAD.replace(out, "$1:")
+    outside_spans(out, fn(part) { COMMA_AFTER_MARK.replace(part, "$1") })
+}
+
+// `text` wrapped greedily to `width` columns; a code span is never split.
+wrap: fn(text: String, width: Int) -> [String] Never! {
+    words := [String]{}
+    open := false
+    loop piece in text.split(" ") {
+        if piece == "" && !open -> next
+        ticks: piece.split("`").len() - 1
+        if open {
+            last: words.len() - 1
+            words[last] = "{words[last]} {piece}"
+            if ticks % 2 == 1 -> open = false
+            next
+        }
+        words.push(piece.copy())
+        if ticks % 2 == 1 -> open = true
+    }
+    lines := [String]{}
+    line := ""
+    loop word in words {
+        if line != "" && line.count_bytes() + 1 + word.count_bytes() <= width {
+            line = "{line} {word}"
+            next
+        }
+        if line != "" -> lines.push(line.copy())
+        line = word.copy()
+    }
+    if line != "" -> lines.push(line.copy())
+    lines
+}
+
+// Whether line `at` continues the comment block that `indent` + `marker`
+// opens.
+in_block: fn(lines: [String], at: Int, indent: String, marker: String) -> Bool Never! {
+    if at < 0 || at >= lines.len() -> return false
+    lines[at].starts_with("{indent}{marker}") && !lines[at].starts_with("{indent}{marker}/")
+}
+
+// One paragraph of a comment block, rewritten onto `rewritten` when it names
+// Rust and verbatim otherwise; false when it needs a person: its lines are
+// indented, or it still names Rust after the rewrite.
+sweep_paragraph: fn(paragraph: [String], lead: String, width: Int, rewritten: ^[String]) -> Bool Never! {
+    joined := ""
+    loop part in paragraph {
+        joined = if joined == "" -> part.trim() else -> "{joined} {part.trim()}"
+    }
+    if !NAMES_RUST.is_match(joined.lower()) {
+        loop part in paragraph -> rewritten.push("{lead}{part}")
+        return true
+    }
+    loop part in paragraph {
+        if !part.starts_with(" ") || part.starts_with("  ") -> return false
+    }
+    replaced: rewrite(joined)
+    if NAMES_RUST.is_match(replaced.lower()) || (replaced != "" && !WORD.is_match(replaced)) -> return false
+    loop wrapped in wrap(replaced, width) -> rewritten.push("{lead} {wrapped}")
+    true
+}
+
+// The rewrite of the whole-line comment block holding 0-based line `at`.
+sweep_block: fn(path: String, lines: [String], at: Int, done: ^[Bool], swept: ^SweepFile) Never! {
+    cs: comment_start(lines[at])
+    indent: cut(lines[at], 0, cs)
+    marker_found: COMMENT_MARKER.match(cut(lines[at], cs, lines[at].count_bytes())) ?? return
+    marker: marker_found.group(1) ?? "//"
+    first := at
+    loop in_block(lines, first - 1, indent, marker) -> first -= 1
+    last := at
+    loop in_block(lines, last + 1, indent, marker) -> last += 1
+    widest := 80
+    loop index in first..<(last + 1) {
+        done[index] = true
+        if lines[index].count_bytes() > widest -> widest = lines[index].count_bytes()
+    }
+    width: widest - indent.count_bytes() - marker.count_bytes() - 1
+    lead: "{indent}{marker}"
+    rewritten := [String]{}
+    paragraph := [String]{}
+    bad := false
+    loop index in first..<(last + 2) {
+        text: if index <= last -> cut(lines[index], lead.count_bytes(), lines[index].count_bytes()) else -> ""
+        if index <= last && text.trim() != "" {
+            paragraph.push(text.copy())
+            next
+        }
+        if paragraph.len() > 0 {
+            if !sweep_paragraph(paragraph, lead, width, rewritten) {
+                bad = true
+                break
+            }
+            paragraph = [String]{}
+        }
+        if index <= last -> rewritten.push(lead.copy())
+    }
+    if bad {
+        block := [String]{"{path}:{first + 1}-{last + 1}:"}
+        loop index in first..<(last + 1) -> block.push(lines[index].copy())
+        swept.residue.push(block.join("\n"))
+        return
+    }
+    // Collapse doubled, leading and trailing empty comment lines.
+    collapsed := [String]{}
+    loop row in rewritten {
+        empty: row.trim() == marker
+        if empty && (collapsed.len() == 0 || collapsed[collapsed.len() - 1].trim() == marker) -> next
+        collapsed.push(row.copy())
+    }
+    loop collapsed.len() > 0 && collapsed[collapsed.len() - 1].trim() == marker -> collapsed.pop().drop("a trailing empty comment line")
+    unchanged := collapsed.len() == last - first + 1
+    if unchanged {
+        loop index in 0..<collapsed.len() {
+            if collapsed[index] != lines[first + index] -> unchanged = false
+        }
+    }
+    if unchanged -> return
+    end := last + 1
+    if collapsed.len() == 0 && first > 0 && lines[first - 1].trim() == "" && last + 1 < lines.len() && lines[last + 1].trim() == "" {
+        end = last + 2
+    }
+    swept.hunks.push(SweepHunk{start: first + 1, end: end, lines: collapsed})
+}
+
+// The rewrite of a comment that trails code on 0-based line `at`.
+sweep_trailing: fn(path: String, lines: [String], at: Int, swept: ^SweepFile) Never! {
+    line: lines[at]
+    cs: comment_start(line)
+    code: cut(line, 0, cs)
+    found: TRAILING_COMMENT.match(cut(line, cs, line.count_bytes())) ?? return
+    replaced: rewrite(found.group(2) ?? "")
+    if NAMES_RUST.is_match(replaced.lower()) {
+        swept.residue.push("{path}:{at + 1}-{at + 1}:\n{line}")
+        return
+    }
+    row: if replaced == "" -> code.trim_end() else -> "{code}{found.group(1) ?? "// "}{replaced}"
+    if row != line -> swept.hunks.push(SweepHunk{start: at + 1, end: at + 1, lines: [String]{row}})
+}
+
+// The rewrites and the residue of one file, from the 1-based lines whose
+// comment names Rust.
+sweep_file: fn(path: String, lines: [String], hits: [Int]) -> SweepFile Never! {
+    swept := SweepFile{hunks: [SweepHunk]{}, residue: [String]{}}
+    done := [Bool]{}
+    loop _ in 0..<lines.len() -> done.push(false)
+    loop hit in hits {
+        at: hit - 1
+        if at >= lines.len() || done[at] -> next
+        cs: comment_start(lines[at])
+        if cut(lines[at], 0, cs).trim() == "" {
+            sweep_block(path, lines, at, done, swept)
+            next
+        }
+        done[at] = true
+        sweep_trailing(path, lines, at, swept)
+    }
+    swept
+}
+
+// `lines` with every hunk applied; hunks are in ascending, disjoint order.
+apply_hunks: fn(lines: [String], hunks: [SweepHunk]) -> [String] Never! {
+    out := [String]{}
+    next_line := 1
+    loop hunk in hunks {
+        loop next_line < hunk.start {
+            out.push(lines[next_line - 1].copy())
+            next_line += 1
+        }
+        loop row in hunk.lines -> out.push(row.copy())
+        next_line = hunk.end + 1
+    }
+    loop next_line <= lines.len() {
+        out.push(lines[next_line - 1].copy())
+        next_line += 1
+    }
+    out
+}
+
+// Each source file's 1-based lines whose comment names Rust.
+naming_hits: fn() -[Exec, IO, Time.Wait]> [String:[Int]] SweepError! {
+    argv := [String]{"git", "grep", "-n", "-I", "-i", "-w", "-e", "rust", "--"}
+    loop root in SWEEP_ROOTS -> argv.push(root)
+    hits := [String:[Int]]{}
+    loop row in git_lines(argv) ?? return Err(err) {
+        location: row.partition(":")
+        rest: location.tail.partition(":")
+        if !is_source(location.head) -> next
+        cs: comment_start(rest.tail)
+        if cs < 0 || !names_rust(location.head, cut(rest.tail, cs, rest.tail.count_bytes())) -> next
+        number: Int.parse(rest.head) ?? next
+        rows := hits.get(location.head) ?? [Int]{}
+        rows.push(number)
+        hits[location.head] = rows
+    }
+    Ok(hits)
+}
+
+sweep_main: fn(write: Bool) -[Exec, FS, IO, Time.Wait]> Int SweepError! {
+    hits: naming_hits() ?? return Err(err)
+    paths := hits.keys().to_list()
+    paths.sort()
+    rewritten := 0
+    changed := 0
+    residue := 0
+    loop path in paths {
+        text: files.read(path) ?? return Err(SweepError{message: "cannot read {path}: {err}"})
+        lines: text.split("\n").to_list()
+        swept: sweep_file(path, lines, hits.get(path) ?? [Int]{})
+        loop block in swept.residue {
+            print(block)
+            print("")
+        }
+        residue += swept.residue.len()
+        if swept.hunks.len() == 0 -> next
+        rewritten += swept.hunks.len()
+        changed += 1
+        if write {
+            files.write(path, apply_hunks(lines, swept.hunks).join("\n")) ?? return Err(SweepError{message: "cannot write {path}: {err}"})
+        }
+    }
+    verb: if write -> "rewrote" else -> "would rewrite"
+    term.eprint("rust-era-sweep: {verb} {rewritten} comment block(s) in {changed} file(s); {residue} block(s) left for judgment")
+    Ok(0)
+}
+
+run: fn() {
+    args: process.args()
+    write: args.len() == 1 && args[0] == "--write"
+    if args.len() > 0 && !write {
+        process.fail(64, "usage: jet Tools/Agent/RustEraSweep.jet [--write]")
+    }
+    code: sweep_main(write) ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
+}
+
+#Test("provenance leads, parentheticals and clauses are cut; codes stay") {
+    assert_eq(rewrite("Rust `named_leaf`: the last `.` segment."), "The last `.` segment.")
+    assert_eq(rewrite("Rust `check_call` (E0301): a call checks once."), "E0301: a call checks once.")
+    assert_eq(rewrite("A call checks once (Rust `check_call`, E0301)."), "A call checks once (E0301).")
+    assert_eq(rewrite("A call checks once (Rust `check_call`)."), "A call checks once.")
+    assert_eq(rewrite("Remove `key` (the last wins, as Rust's map insert keeps it)."), "Remove `key` (the last wins).")
+    assert_eq(rewrite("Stable order, as Rust's sort_by_key does."), "Stable order.")
+    assert_eq(rewrite("The entry to search, resolved as the Rust host resolves it."), "The entry to search.")
+    assert_eq(rewrite("Rust discover_units, in path order."), "Rust discover_units, in path order.")
+    assert_eq(rewrite("A stale lock is E1202 in the Rust host."), "A stale lock is E1202.")
+    assert_eq(rewrite("Rust `a` / `b`."), "")
+}
+
+#Test("a paragraph that still names Rust is residue; others reflow") {
+    lines: [String]{"", "// Rust `x`: keeps", "// order.", "", "// The Rust narrow helper always", "// pads.", "x: 1 // as Rust does"}
+    swept: sweep_file("Compiler/A.jet", lines, [Int]{2, 5, 7})
+    assert_eq(swept.residue.len(), 1)
+    assert_eq(apply_hunks(lines, swept.hunks).join("|"), "|// Keeps order.||// The Rust narrow helper always|// pads.|x: 1")
+}
+
+#Test("code spans survive the wrap") {
+    assert_eq(wrap("a `b c` d", 5).join("|"), "a|`b c`|d")
+}
+
+#Test("comments in foreign-language files do not count") {
+    assert(!names_rust("Jetpack/X/Foreign/RustBridge/A.jet", "// Rust ABI rows."))
+    assert(names_rust("Compiler/A.jet", "// Rust parity."))
+    assert(!names_rust("Compiler/A.jet", "// cargo builds the Rust crate."))
+}

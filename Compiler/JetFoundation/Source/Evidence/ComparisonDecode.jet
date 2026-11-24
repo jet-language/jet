@@ -7,7 +7,7 @@ comparison_decode_error: fn(message: String) -> ComparisonRecordError Never! {
     ComparisonRecordError{message: message}
 }
 
-// Rust `json_field` over `json_object(value, "comparison value")`.
+// The field `key` of the comparison value object.
 comparison_json_field: fn(value: CanonicalJSON, key: String) -> CanonicalJSON ComparisonRecordError! {
     if value == {
         .Object(fields) -> {
@@ -70,8 +70,7 @@ comparison_json_optional_integer: fn(value: CanonicalJSON, key: String) -> Strin
     }
 }
 
-// Rust `str.parse<u16 | u64 | usize>`: optional leading `+`, decimal
-// digits only, within `maximum`.
+// Optional leading `+`, decimal digits only, within `maximum`.
 comparison_parse_unsigned: fn(text: String, maximum: Int, message: String) -> Int ComparisonRecordError! {
     bytes: text.bytes()
     start: if bytes.len() > 0 && bytes[0] == (U8{43}) -> 1 else -> 0
@@ -92,7 +91,6 @@ comparison_parse_unsigned: fn(text: String, maximum: Int, message: String) -> In
     Ok(number)
 }
 
-// Rust `parse_comparison_status`.
 comparison_parse_status: fn(value: String) -> ComparisonStatus ComparisonRecordError! {
     if value == {
         "matched" -> Ok(ComparisonStatus.Matched)
@@ -108,7 +106,7 @@ comparison_parse_status: fn(value: String) -> ComparisonStatus ComparisonRecordE
     }
 }
 
-// Rust `parse_observation_relation`: any other non-empty name is Custom.
+// Any other non-empty name is Custom.
 comparison_parse_relation: fn(value: String) -> ObservationRelation ComparisonRecordError! {
     if value == "" -> return Err(comparison_decode_error("comparison relation cannot be empty"))
     Ok(
@@ -121,7 +119,6 @@ comparison_parse_relation: fn(value: String) -> ObservationRelation ComparisonRe
     )
 }
 
-// Rust `json_strings`.
 comparison_json_strings: fn(value: CanonicalJSON, key: String) -> [String] ComparisonRecordError! {
     result := [String]{}
     loop child in comparison_json_array(value, key) {
@@ -133,8 +130,7 @@ comparison_json_strings: fn(value: CanonicalJSON, key: String) -> [String] Compa
     Ok(result)
 }
 
-// Rust `comparison_observation_from_json`: an unlabeled observation needs a
-// non-empty raw rendering.
+// An unlabeled observation needs a non-empty raw rendering.
 comparison_observation_from_json: fn(value: CanonicalJSON, label: String) -> ComparisonObservation ComparisonRecordError! {
     raw: comparison_json_text(value, "raw")
     typed_failure: comparison_json_optional_string(value, "typed_failure")
@@ -147,7 +143,6 @@ comparison_observation_from_json: fn(value: CanonicalJSON, label: String) -> Com
     Ok(ComparisonObservation{raw: raw, typed_failure: typed_failure, mutation: mutation, ordered_effects: ordered_effects, cleanup: cleanup})
 }
 
-// Rust `comparison_identity_from_json`.
 comparison_identity_from_json: fn(value: CanonicalJSON) -> ComparisonIdentity ComparisonRecordError! {
     identity := comparison_identity_new(comparison_json_text(value, "case_id"), comparison_json_text(value, "input_id"), comparison_json_text(value, "source"), comparison_json_text(value, "tool"), comparison_json_text(value, "target"))
     if comparison_json_optional_integer(value, "seed") == .Val(text) {
@@ -156,7 +151,7 @@ comparison_identity_from_json: fn(value: CanonicalJSON) -> ComparisonIdentity Co
     Ok(identity)
 }
 
-// Rust `comparison_sample_from_json`: replays come in pairs.
+// Replays come in pairs.
 comparison_sample_from_json: fn(value: CanonicalJSON, index: Int) -> ComparisonSample ComparisonRecordError! {
     identity: comparison_identity_from_json(comparison_json_field(value, "identity"))
     reference: comparison_observation_from_json(comparison_json_field(value, "reference"), "sample {index} reference")
@@ -182,7 +177,6 @@ comparison_sample_from_json: fn(value: CanonicalJSON, index: Int) -> ComparisonS
     Ok(sample)
 }
 
-// Rust `ComparisonRecord.from_json`.
 comparison_record_from_json: fn(value: CanonicalJSON) -> ComparisonRecord ComparisonRecordError! {
     schema: comparison_parse_unsigned(comparison_json_integer(value, "schema_version"), 65535, "comparison schema_version is not a valid u16")
     if (U16{schema}) != TEST_COMPARISON_SCHEMA_VERSION {

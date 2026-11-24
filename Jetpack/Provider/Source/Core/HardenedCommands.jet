@@ -44,7 +44,7 @@ provider_create_temp_candidate: fn(parent: Directory, name: String) -[FS]> IOErr
     _: parent.create_directory(name)
 }
 
-// Best-effort removal of a temporary tree (Rust `TempDirGuard` drop).
+// Best-effort removal of a temporary tree.
 provider_remove_tree_quiet: fn(path: String) -[FS]> Never! {
     files.remove_all(path).drop("an abandoned temporary tree is swept by later cleanup")
 }

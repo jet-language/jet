@@ -113,7 +113,7 @@ publication_transport_test_bad_authority: fn(value: String, expected: String) Ne
     assert_eq(ipv6.port, Val(443))
     assert_eq((publication_registry_host_and_port("[2001:4860::1]") ?? panic("no ipv6 port")).port, None)
     assert_eq((publication_registry_host_and_port("example.test:+00080") ?? panic("Rust positive sign")).port, Val(80))
-    // Host parsing is not IP validation; Rust delegates this to the resolver.
+    // Host parsing is not IP validation; the resolver does that.
     assert_eq((publication_registry_host_and_port("[not-an-ip]") ?? panic("deferred IP parsing")).host, "not-an-ip")
     assert_eq(publication_registry_host("2001:4860::1"), "[2001:4860::1]")
     assert_eq(publication_registry_host("example.test"), "example.test")

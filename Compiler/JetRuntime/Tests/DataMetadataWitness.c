@@ -1,5 +1,5 @@
-// Real native providers only; no Rust at test time.
-// Private carriers are fixed by DataABI.jet, not Rust or checked-IR layouts.
+// Real native providers only.
+// Private carriers are fixed by DataABI.jet, not checked-IR layouts.
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>

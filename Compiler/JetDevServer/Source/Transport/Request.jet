@@ -56,7 +56,7 @@ DevserverRequest: struct {
     }
 }
 
-// Rust's lowercased, last-value-wins map, except the five security headers.
+// A lowercased, last-value-wins map, except the five security headers.
 // Input is Core's ordered parsed Header facts; Core already validates syntax.
 // Core errors take precedence when Core rejects an unprojectable message.
 // #4438: native Core.Headers currently lowers to JetHTTPHeaders{entries},
@@ -78,8 +78,8 @@ devserver_request_headers: fn(parsed: Headers) -> [String:String] DevserverTrans
     Ok(headers)
 }
 
-// Rust query_param's raw-name/exact-first-match policy: query names are
-// never decoded. The raw value is the encoded text the target carries.
+// The raw-name, exact-first-match query policy: query names are never
+// decoded. The raw value is the encoded text the target carries.
 devserver_query_param_raw_value: fn(target: String, key: String) -> String? Never! {
     if !target.contains("?") -> return None
     loop part in target.after("?").split("&") {
@@ -90,9 +90,9 @@ devserver_query_param_raw_value: fn(target: String, key: String) -> String? Neve
     None
 }
 
-// Rust query_param: the raw-name first match, its value decoded by Core's
-// one tolerant form decoder (+ is a space, a broken
-// escape stays as written, bytes that are not UTF-8 become U+FFFD).
+// The raw-name first match, its value decoded by Core's one tolerant form
+// decoder (+ is a space, a broken escape stays as written, bytes that are not
+// UTF-8 become U+FFFD).
 devserver_query_param: fn(target: String, key: String) -> String? Never! {
     raw: devserver_query_param_raw_value(target, key) ?? return None
     Val(devserver_http.form_component_decode(raw))

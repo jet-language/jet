@@ -19,7 +19,7 @@ LeaseOutputSource: struct {
     source: String,
 }
 
-// Rust `components()` yielding exactly one normal component.
+// Whether a path is exactly one normal component.
 store_reuse_single_component: fn(value: String) -> Bool Never! {
     if value == "" || value == "." || value.starts_with("/") || value.starts_with("./") {
         return false
@@ -50,7 +50,7 @@ store_reuse_direct_cas_entry: fn(verification: ^StoreVerification, roots: Hangar
     sealed == digest
 }
 
-// Rust `snapshot_lease_unlocked`: the caller holds the Hangar lock.
+// The caller holds the Hangar lock.
 store_snapshot_lease_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, validate_provider_facts: Bool) -> CacheLease StoreError! {
     leases: files.join(roots.root, "leases")
     store_ensure_real_directory(leases, "Hangar lease directory")
@@ -362,11 +362,10 @@ store_reuse_find_system_tool: fn(name: String) -> String StoreError! {
 
 STORE_LEASE_KEEPER_SCRIPT: "set -eu\n\"$1\" -t tmpfs -o size=1m,mode=0755 jetpack-exec \"$2\"\nprintf 'ready\\n'\nIFS= read -r _\n\"$1\" -o remount,bind,ro \"$2\"\nprintf 'sealed\\n'\nIFS= read -r _ || true\n"
 
-// Rust `create_exec_wrappers`: a read-only tmpfs in a private rootless
-// mount namespace holds one link per executable naming that member through
-// the descriptor its bin root is passed at. The keeper exits once the
-// directory is held open. Other hosts refuse: a private snapshot is not a
-// caller-unwritable handoff there.
+// A read-only tmpfs in a private rootless mount namespace holds one link per
+// executable naming that member through the descriptor its bin root is passed
+// at. The keeper exits once the directory is held open. Other hosts refuse: a
+// private snapshot is not a caller-unwritable handoff there.
 store_reuse_create_exec_wrappers: fn(snapshot_root: String, executables: [SnapshotFile], bin_root_fd: Int?, bin: String) -> ExecWrappers? StoreError! {
     if executables.len() == 0 -> return Ok(None)
     if sys.name() != "linux" {
@@ -407,7 +406,7 @@ store_reuse_keeper_line: fn(child: ^ProcessChild) -> String Never! {
     ""
 }
 
-// Rust `wrapper_keeper_error`: the keeper's stderr names the failure.
+// The keeper's stderr names the failure.
 store_reuse_wrapper_keeper_error: fn(child: ^^ProcessChild, action: String) -> StoreError Never! {
     lines := [String]{}
     loop line in child.stderr.lines() -> lines.push(line)

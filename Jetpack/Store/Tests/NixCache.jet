@@ -1,15 +1,15 @@
 // Native Nix binary-cache claims.
 //
 // Reduced, with reasons:
-// - `native_nix_cache_streams_without_process_tools` asserted that the Rust
+// - `native_nix_cache_streams_without_process_tools` asserted that the
 //   source text contains no `Command`/`curl`/`nix-store`; source-text checks
 //   are not behavior, so only its streaming hash / zstd / NAR claims remain.
 // - `native_nix_cache_failures_are_e1350_and_snapshot_pinned` compared a
-//   rendered diagnostic against a Rust stderr snapshot; Compiler/ has no Jet
+//   rendered diagnostic against a stderr snapshot; Compiler/ has no Jet
 //   diagnostic renderer, so the E1350 code and classification claims remain.
 // - The corrupted-zstd claim flips the frame's first byte instead of its last:
 //   Core's test encoder writes checksum-free raw-block frames, so the last byte
-//   is NAR padding rather than the frame checksum Rust's level-19 encoder wrote.
+//   is NAR padding rather than a frame checksum.
 use {
     files: core.files
     sys: core.sys
@@ -156,7 +156,7 @@ store_nix_test_hash_key: fn(store_path: String) -> String Never! {
     files.basename(store_path).slice(0, 32)
 }
 
-// One signed object served from a fresh claim root (Rust `single_object_cache`).
+// One signed object served from a fresh claim root.
 NixTestSingleCache: struct {
     root: String,
     roots: HangarRoots,
@@ -197,7 +197,7 @@ store_nix_test_object: fn(admitted: AdmittedNixClosure, store_path: String) -> A
 }
 
 // Admission must fail with `expected` and leave no entry, object, or receipt
-// behind (Rust `assert_single_nix_cache_failure`).
+// behind.
 store_nix_test_single_failure: fn(verification: ^StoreVerification, label: String, store_path: String, narinfo: [U8], object: [U8], trusted_seed: [U8], expected: NixCacheErrorKind) -> NixCacheError Never! {
     root: store_nix_test_unique_dir(label)
     narinfo_text: String.from_bytes(narinfo) ?? panic("narinfo text")
@@ -233,7 +233,7 @@ store_nix_test_single_failure: fn(verification: ^StoreVerification, label: Strin
     error
 }
 
-// Byte counters behind a progress handle (Rust `Output::ByteProgress`).
+// Byte counters behind a progress handle.
 NixTestProgress: struct {
     discovered: Cell<Int>,
     transferred: Cell<Int>,

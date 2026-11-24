@@ -14,10 +14,10 @@ HermeticBuildPlan: struct {
 
     default_target: fn(self) -> TargetRef? Never! { self.default }
 
-    // Rust `provider_plan_facts`: the deterministic facts a provider records
-    // for this plan. Jet plans carry no fact contributions, plugins or
-    // generated modules, and no legacy wrapper. Toolchain, signing and probe
-    // rows are the digest of their canonical key bytes.
+    // The deterministic facts a provider records for this plan. Jet plans carry
+    // no fact contributions, plugins or generated modules, and no legacy
+    // wrapper. Toolchain, signing and probe rows are the digest of their
+    // canonical key bytes.
     provider_plan_facts: fn(self) -> [String:String] Never! {
         facts := [String:String]{}
         facts["plan.recipe_fingerprint"] = build_complete_recipe_fingerprint(self)
@@ -134,7 +134,7 @@ HermeticBuildPlan: struct {
 
     // Actions reachable from the selected default target, plus their file and
     // target prerequisites. A plan without a default selects every target.
-    // Ascending ids (Rust `BTreeSet<ActionId>`).
+    // Ascending ids.
     selected_action_ids: fn(self) -> [Int] HermeticBuildError! {
         selected := [Int]{}
         if self.default == {
@@ -336,8 +336,7 @@ HermeticBuildPlan: struct {
     }
 }
 
-// One finished action of an execution, by handle (Rust `(ActionHandle,
-// ActionOutcome)`).
+// One finished action of an execution, by handle.
 BuildActionOutcomeRow: struct {
     action: HermeticActionHandle,
     outcome: ActionOutcome,
@@ -398,8 +397,8 @@ build_insert_sorted_int: fn(values: ^[Int], value: Int) Never! {
     values.sort()
 }
 
-// Rust `default_resource_pools`: CPU and memory have automatic capacity (0);
-// linker, console and GPU serialize.
+// CPU and memory have automatic capacity (0); linker, console and GPU
+// serialize.
 build_default_resource_pools: fn() -> [BuildResourcePoolSpec] Never! {
     [BuildResourcePoolSpec]{
         {pool: BuildResourcePool.CPU, slots: 0},
@@ -415,8 +414,8 @@ build_action_pools: fn(action: HermeticBuildAction) -> [BuildResourcePool] Never
     action.resource_pools
 }
 
-// Rust `collect_target_actions`: the actions of `target` and its dependency
-// closure; revisiting a target on the walk is a target cycle.
+// The actions of `target` and its dependency closure; revisiting a target on
+// the walk is a target cycle.
 build_collect_target_actions: fn(plan: HermeticBuildPlan, target: Int, visiting: [Int], out: ^[Int]) HermeticBuildError! {
     if visiting.contains(target) -> return Err(build_target_cycle_error(plan, visiting, target))
     node: plan.targets.get(target) ?? return Err(HermeticBuildError.UnknownTarget(target))
@@ -435,8 +434,7 @@ build_visit_target_closure: fn(plan: HermeticBuildPlan, target: Int, out: ^[Int]
     loop dep in node.deps -> build_visit_target_closure(plan, dep.id, out)
 }
 
-// Rust `target_cycle_error` over `closed_cycle`: the walk from the first
-// visit of `repeated` back to it.
+// The walk from the first visit of `repeated` back to it.
 build_target_cycle_error: fn(plan: HermeticBuildPlan, stack: [Int], repeated: Int) -> HermeticBuildError Never! {
     start := 0
     loop index in 0..<stack.len() {
@@ -461,8 +459,8 @@ build_action_name: fn(plan: HermeticBuildPlan, action: Int) -> String Never! {
     node.name
 }
 
-// Rust `execution_stages`: Kahn layers in ascending id order; a stalled sort
-// reports the cycle left behind.
+// Kahn layers in ascending id order; a stalled sort reports the cycle left
+// behind.
 build_execution_stages: fn(plan: HermeticBuildPlan, prereqs: [Int:[Int]]) -> [BuildExecutionStage] HermeticBuildError! {
     keys := prereqs.keys().to_list()
     keys.sort()
@@ -507,8 +505,8 @@ build_execution_stages: fn(plan: HermeticBuildPlan, prereqs: [Int:[Int]]) -> [Bu
     Ok(stages)
 }
 
-// Rust `action_cycle_error` over `stalled_cycle`: walk the residual graph in
-// ascending order, prerequisites sorted, until a node repeats on the stack.
+// Walk the residual graph in ascending order, prerequisites sorted, until a
+// node repeats on the stack.
 build_action_cycle_error: fn(plan: HermeticBuildPlan, remaining: [Int], prereqs: [Int:[Int]]) -> HermeticBuildError Never! {
     settled := [Int]{}
     loop node in remaining {

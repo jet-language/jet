@@ -89,7 +89,7 @@ session_drop: fn(session: I64) {
         ordered = current
         current = following
     }
-    // Rust's thread-local BTreeMap destroys session IDs in ascending order.
+    // Session IDs are destroyed in ascending order.
     loop ordered != (I64{0}) {
         following: sync_load(ordered)
         session_drop(ordered)
@@ -102,7 +102,7 @@ session_drop: fn(session: I64) {
 #Export(c) jet_rt_session_create: fn() -> I64 {
     id := sync_load(session_counter)
     loop {
-        // Rust fetch_update refuses u64.MAX before issuing that ID.
+        // Refuse u64.MAX before issuing that ID.
         if (id == I64{-1}) { return I64{0} }
         observed: sync_cas(session_counter, id, wrapping(id + I64{1}))
         if (observed == id) { break }
@@ -216,7 +216,7 @@ session_access: fn(id: I64, binding: I64, key0: I64, key1: I64, key2: I64, key3:
     loop slot != (I64{0}) {
         if (sync_load(wrapping(slot + I64{8})) == binding) {
             sync_store(link, sync_load(slot))
-            // Remove before invoking glue, as Rust drops outside RefCell borrow.
+            // Remove before invoking glue, outside the session table borrow.
             session_slot_drop(slot)
             return true
         }

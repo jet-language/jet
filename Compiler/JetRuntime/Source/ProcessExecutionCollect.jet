@@ -337,8 +337,8 @@ process_execution_wait: fn(child: I64, ok: I64, err: I64) -> I64 {
     }
     process_execution_flags_add(child, I64{4})
     if !process_execution_collect_start(child, err) -> return I64{0}
-    // Rust's wait drops the public readers before joining the collector: a
-    // stream read after an explicit wait is at EOF.
+    // Wait drops the public readers before joining the collector: a stream
+    // read after an explicit wait is at EOF.
     park: sync_park_new()
     sync_mutex_lock(child)
     pipe_detach(fd_word(child, PROCESS_EXECUTION_STDOUT))
@@ -476,9 +476,9 @@ process_stdin_failure: fn(errno: I64, err: I64) -> I64 {
 #Export(c) jet_rt_handle_drop_process_stdin: fn(stdin: I64) { jet_process_drop_raw(stdin) }
 
 // Borrowed: each field lends the child's own Pipe40 cell for the place's
-// lifetime, made on first use. Like Rust's ProcessReader.Shared, the cell
-// reads the collector's capture of its stream rather than the pipe itself, so
-// the receipt keeps every byte and the child never blocks on an unread pipe.
+// lifetime, made on first use. The cell reads the collector's capture of its
+// stream rather than the pipe itself, so the receipt keeps every byte and the
+// child never blocks on an unread pipe.
 #Export(c) jet_rt_handle_field_process_child_stdout: fn(child: I64) -> I64 {
     process_execution_pipe(child, I64{1})
 }

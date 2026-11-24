@@ -1,6 +1,5 @@
-// The seed delegated Clone/Drop. The Rust original derives
-// Clone over Arc<Mutex<JetWorldState>> and Arc<Condvar>: clones share state,
-// never deep-copy it. The existing native producer World.jet18/425 owns
+// Clones share the world state and its condition variable, never deep-copy
+// it. The existing native producer World.jet18/425 owns
 // World144 refs0; its callbacks and all world routes use this pointer. Core's
 // `DeterministicWorld` struct carries the pointer as its `priv handle`, and
 // its methods' jet.runtime.testing leaves take it. Reuse the existing native

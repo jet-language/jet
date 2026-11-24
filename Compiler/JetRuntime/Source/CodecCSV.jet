@@ -223,9 +223,8 @@ csv_finish: fn(state: I64) -> I64 {
     I64{0}
 }
 
-// The Rust original parse over the borrowed text. Status 1 writes the owned
-// record list (records of owned field Strings) to `out`; status 0 writes the
-// owned error message.
+// Parse over the borrowed text. Status 1 writes the owned record list (records
+// of owned field Strings) to `out`; status 0 writes the owned error message.
 csv_parse: fn(text: I64, out: I64) -> I64 {
     state: jet_rt_alloc(CSV_STATE_BYTES, I64{8})
     coll_zero(state, CSV_STATE_BYTES)
@@ -360,7 +359,7 @@ csv_invoke: fn(invoke: I64, tree: I64, value: I64, status: I64, errors: I64, cou
         return I64{0}
     }
     csv_words_free(failures)
-    // Rust hands back an exactly sized buffer: capacity equals length.
+    // Hand back an exactly sized buffer: capacity equals length.
     length: trap_word(decoded)
     stride: trap_word(meta)
     bytes: length * stride

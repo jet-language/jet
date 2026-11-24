@@ -64,10 +64,8 @@ evidence_report_write: fn(report: EvidenceReport, path: String) -[FS.Write]> Evi
 EVIDENCE_MAX_REPORT_BYTES: 16777216
 
 // The capture context a test producer stamps on its records: the running test's
-// declared expectation and whether a property case catches its stops. Rust
-// keeps both in thread-locals scoped by `jet_evidence_with_expectation` and
-// `jet_evidence_with_property_case`; Core has no task-local storage, so the
-// harness that runs the test passes them.
+// declared expectation and whether a property case catches its stops. Core has
+// no task-local storage, so the harness that runs the test passes them.
 EvidenceCaptureContext: struct {
     expectation: EvidenceExpectation,
     property_case: Bool,
@@ -111,9 +109,8 @@ evidence_write_record_with_derivation: fn(path: String, record: EvidenceRecord, 
 
 // `append_frame`: one frame appended under the report's exclusive lock, writing
 // the header into an empty report and refusing a report whose header is another
-// schema. Rust serializes the appends of one process with a mutex; the
-// exclusive OS lock on the report also serializes concurrent test processes
-// sharing it.
+// schema. The exclusive OS lock on the report serializes the appends of one
+// process and of concurrent test processes sharing it.
 evidence_append_frame: fn(path: String, frame: [U8]) -[FS, Env]> EvidenceCodecError! {
     if frame.len() > EVIDENCE_MAX_REPORT_BYTES {
         return Err(evidence_codec_error("evidence record exceeds the 16 MiB limit"))
@@ -155,7 +152,7 @@ evidence_append_locked: fn(path: String, writer: ^evidence_files.FileWriter, fra
     writer.flush() ?? return Err(evidence_codec_error("{err}"))
 }
 
-// The first ten bytes of the report (Rust `read_exact` into `[u8; 10]`).
+// The first ten bytes of the report.
 evidence_read_header: fn(path: String) -[FS.Read]> [U8] IOError! {
     reader := evidence_files.open(path)
     header := [U8]{}

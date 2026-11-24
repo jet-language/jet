@@ -15,18 +15,18 @@ use {
 
 STORE_NIX_TEST_CACHE_INFO: "StoreDir: /nix/store\nWantMassQuery: 1\n"
 
-// A fresh private directory for one claim (Rust `unique_dir`).
+// A fresh private directory for one claim.
 store_nix_test_unique_dir: fn(label: String) -> String Never! {
     files.tmpdir("jet-nix-cache-{label}-") ?? panic("claim temp directory")
 }
 
-// Best-effort removal of a claim directory (Rust `remove_dir`).
+// Best-effort removal of a claim directory.
 store_nix_test_remove_dir: fn(path: String) Never! {
     store_make_tree_writable_for_removal(path).drop("claim cleanup")
     files.remove_all(path).drop("claim cleanup")
 }
 
-// A 32-byte Ed25519 seed of repeated `byte` (Rust `SigningKey::from_bytes(&[n; 32])`).
+// A 32-byte Ed25519 seed of repeated `byte`.
 store_nix_test_seed: fn(byte: Int) -> [U8] Never! {
     seed := [U8]{}
     loop _ in 0..<32 -> seed.push(U8{byte})
@@ -80,7 +80,7 @@ store_nix_test_signed_narinfo_with_payload: fn(store_path: String, nar_name: Str
 }
 
 // A loopback binary cache serving `routes` (URL path -> body); absent routes
-// are 404 (Rust `TestCacheServer`).
+// are 404.
 NixTestCacheServer: struct {
     endpoint: String,
     priv site: String,

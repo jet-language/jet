@@ -47,8 +47,8 @@ LayerFile: struct {
     mode: Int,
 }
 
-// Everything needed to build one `.Oci` image (Rust `BuildSpec`). Pure data;
-// `files` need not be sorted because the build sorts by path.
+// Everything needed to build one `.Oci` image. Pure data; `files` need not be
+// sorted because the build sorts by path.
 OCIBuildSpec: struct {
     files: [LayerFile],
     // The single platform represented by this OCI layout.
@@ -63,7 +63,6 @@ OCIBuildSpec: struct {
     // Optional `CM ` health command.
     healthcheck: String?,
 
-    // Rust `BuildSpec::default()`.
     defaults: fn() -> OCIBuildSpec Never! {
         OCIBuildSpec{
             files: [LayerFile]{},
@@ -665,7 +664,7 @@ image_node: fn(path: String) -[FS]> OCINode ImageError! {
     }
 }
 
-// `image_node`, but a missing path is the stat error (Rust `symlink_metadata(path)?`).
+// `image_node`, but a missing path is the stat error.
 image_existing_node: fn(path: String) -[FS]> OCINode ImageError! {
     node: image_node(path)
     if node == OCINode.Missing {
@@ -714,7 +713,7 @@ image_replace_through: fn(temporary: String, path: String, bytes: [U8]) -[FS]> I
     files.rename(temporary, path)
 }
 
-// Rust `Path::with_extension`: replace the file name's extension, if any.
+// Replace the file name's extension, if any.
 image_with_extension: fn(path: String, extension: String) -> String Never! {
     name: files.basename(path)
     raw: name.bytes()
@@ -759,7 +758,7 @@ image_ensure_real_layout_directory: fn(path: String) -[FS, Env]> ImageError! {
     }
 }
 
-// Rust `sorted_env`: key-sorted, with the last value for a repeated key.
+// Key-sorted, with the last value for a repeated key.
 image_sorted_env: fn(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
     by_key := [String:String]{}
     loop entry in entries -> by_key[entry.key] = entry.value
@@ -778,8 +777,8 @@ image_sorted_unique_ints: fn(values: [Int]) -> [Int] Never! {
     unique
 }
 
-// Best-effort cleanup (Rust `let _ = fs::remove_file(path)`).
+// Best-effort cleanup.
 image_remove_quiet: fn(path: String) -[FS]> { files.remove(path) ?? return }
 
-// Best-effort cleanup (Rust `let _ = fs::remove_dir_all(path)`).
+// Best-effort cleanup.
 image_remove_all_quiet: fn(path: String) -[FS]> { files.remove_all(path) ?? return }

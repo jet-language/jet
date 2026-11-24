@@ -16,7 +16,6 @@ comparison_relation_compares: fn(relation: ObservationRelation, reference: Compa
     }
 }
 
-// Rust `compare_samples`.
 testing_compare_samples: fn(relation: ObservationRelation, samples: [ComparisonSample]) -> ComparisonRecord Never! {
     testing_compare_samples_with_discarded(relation, samples, 0)
 }
@@ -74,8 +73,8 @@ testing_compare_samples_with_discarded: fn(relation: ObservationRelation, sample
     record
 }
 
-// Rust `reduce_mismatch`: a reduction counts only when the same relation
-// still observes a mismatch; otherwise the record's own counterexample stays.
+// A reduction counts only when the same relation still observes a mismatch;
+// otherwise the record's own counterexample stays.
 testing_reduce_mismatch: fn(record: ComparisonRecord, candidates: [[ComparisonSample]]) -> ComparisonSample? Never! {
     if record.status != ComparisonStatus.Mismatch -> return None
     loop candidate in candidates {

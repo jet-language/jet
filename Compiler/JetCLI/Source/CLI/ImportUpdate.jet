@@ -42,7 +42,6 @@ jet_cli_import_update_error: fn(message: String) -> JetCLIImportPlanError Never!
     JetCLIImportPlanError{message: message}
 }
 
-// Rust `indexed_artifact_path`.
 jet_cli_import_indexed_artifact_path: fn(root: String, entry: JetCLIRecordIndexEntry, cwd: String) -> String Never! {
     if import_update_files.is_abs(entry.path) -> return entry.path.copy()
     if entry.path == ".jet" || entry.path.starts_with(".jet/") {
@@ -51,8 +50,8 @@ jet_cli_import_indexed_artifact_path: fn(root: String, entry: JetCLIRecordIndexE
     import_update_files.join(root, entry.path)
 }
 
-// Rust `receipt_store_for_artifact`: `<root>/.jet/receipts/objects/<key>`
-// names the project root whose store holds the receipt.
+// `<root>/.jet/receipts/objects/<key>` names the project root whose store holds
+// the receipt.
 jet_cli_import_receipt_project_for_artifact: fn(path: String) -> String JetCLIImportPlanError! {
     objects: import_update_files.dirname(path)
     if objects == "" || objects == path {
@@ -68,7 +67,6 @@ jet_cli_import_receipt_project_for_artifact: fn(path: String) -> String JetCLIIm
     Ok(import_update_files.dirname(import_update_files.dirname(receipts)))
 }
 
-// Rust `attachment_values` / `require_attachment` / `require_attachment_set`.
 jet_cli_import_attachment_values: fn(record: EvidenceRecord, name: String) -> [String] Never! {
     loop attachment in record.attachments if attachment.name == name -> attachment.value.copy()
 }
@@ -88,7 +86,6 @@ jet_cli_import_require_attachment_set: fn(record: EvidenceRecord, name: String, 
     }
 }
 
-// Rust `validate_import_binding`.
 jet_cli_import_validate_import_binding: fn(record: EvidenceRecord, boundary: ForeignBoundaryContract, boundary_digest: String, source_digest: String, replacement_digest: String) JetCLIImportPlanError! {
     jet_cli_import_require_attachment(record, "boundary", boundary_digest) ?? return Err(err)
     jet_cli_import_require_attachment(record, "source-digest", source_digest) ?? return Err(err)
@@ -119,7 +116,6 @@ JetCLIImportIndexedEvidence: struct {
     derivation: DerivationRecord,
 }
 
-// Rust `indexed_import_evidence`.
 jet_cli_import_indexed_import_evidence: fn(index: JetCLIRecordIndex, root: String, cwd: String, boundary: ForeignBoundaryContract, boundary_digest: String, source_digest: String, replacement_digest: String) -[FS.Read]> JetCLIImportIndexedEvidence JetCLIImportPlanError! {
     report_id: "source-import-{boundary_digest}"
     entry: jet_cli_record_index_find(index, "evidence", report_id, true) ?? return Err(jet_cli_import_update_error("source import update requires prior indexed import evidence for the current source"))
@@ -166,7 +162,6 @@ jet_cli_import_indexed_import_evidence: fn(index: JetCLIRecordIndex, root: Strin
     Ok(JetCLIImportIndexedEvidence{record: record, derivation: derivation})
 }
 
-// Rust `validate_comparison_binding`.
 jet_cli_import_validate_comparison_binding: fn(record: EvidenceRecord, comparison: ComparisonRecord, artifact_id: String, boundary: ForeignBoundaryContract, boundary_digest: String) JetCLIImportPlanError! {
     jet_cli_import_require_attachment(record, "comparison-artifact", artifact_id) ?? return Err(err)
     jet_cli_import_require_attachment(record, "boundary", boundary_digest) ?? return Err(err)
@@ -186,7 +181,7 @@ jet_cli_import_validate_comparison_binding: fn(record: EvidenceRecord, compariso
     }
 }
 
-// Rust `indexed_comparison`: newest matched comparison bound to this boundary.
+// Newest matched comparison bound to this boundary.
 jet_cli_import_indexed_comparison: fn(index: JetCLIRecordIndex, root: String, cwd: String, boundary: ForeignBoundaryContract, boundary_digest: String) -[FS, Time.Wait]> ComparisonRecord JetCLIImportPlanError! {
     entries := jet_cli_record_index_query_kind(index, "comparison", true)
     entries.sort_by(fn(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) {
@@ -276,7 +271,6 @@ jet_cli_import_indexed_comparison: fn(index: JetCLIRecordIndex, root: String, cw
     Err(jet_cli_import_update_error(stale_reason ?? "source import update requires an indexed matched comparison bound to the current source, generated candidate, tool, target, coverage, and assumptions"))
 }
 
-// Rust `accept_update_replacement`.
 jet_cli_import_accept_update_replacement: fn(plan: ^JetCLIImportPlan, cwd: String) -[FS, Time.Wait, Env]> ForeignSourceReceipt JetCLIImportPlanError! {
     boundary := plan.boundary.copy()
     if !boundary.has_complete_artifact_coverage() {
@@ -305,7 +299,6 @@ jet_cli_import_json_text: fn(value: String) -> CanonicalJSON Never! {
     CanonicalJSON.String(value.copy())
 }
 
-// Rust `accepted_receipt_json`.
 jet_cli_import_accepted_receipt_json: fn(receipt: ForeignSourceReceipt, assumptions: [String]) -> CanonicalJSON JetCLIImportPlanError! {
     identity: canonical_json_object(
         [CanonicalJSONField]{
@@ -357,8 +350,6 @@ jet_cli_import_accepted_receipt_json: fn(receipt: ForeignSourceReceipt, assumpti
     Ok(value)
 }
 
-// Rust `persist_accepted_receipt` (ReceiptStore `record_with_sections_and_links`
-// plus `index_published_receipt`).
 jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: ForeignSourceReceipt, cwd: String) -[FS, Env, Time, IO]> JetCLIImportPlanError! {
     receipt.validate() ?? return Err(jet_cli_import_update_error(err.message))
     files := [String]{}

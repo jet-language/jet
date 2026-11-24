@@ -105,8 +105,8 @@ publication_parse_registry_endpoint: fn(registry: PublicationRegistryConfig) -> 
     Ok(PublicationRegistryEndpoint.Network{scheme: scheme, host: parsed.host, port: parsed.port ?? default_port, explicit_port: parsed.port != None})
 }
 
-// Rust RegistryTransport: the address is the FIRST member of the complete,
-// validated resolver answer set. It is never obtained by string re-parsing.
+// The address is the FIRST member of the complete, validated resolver answer
+// set. It is never obtained by string re-parsing.
 PublicationRegistryTransport: enum {
     Local,
     Network(scheme: String, host: String, port: Int, explicit_port: Bool, address: [U8]),
@@ -133,7 +133,7 @@ PublicationRegistryTransport: enum {
     }
 }
 
-// The shared formatter is both Rust registry_ip and registry_curl_address.
+// The shared formatter serves both the registry IP and the curl address.
 // Their IPv6 bracket semantics are identical, so neither needs a second body.
 publication_address_text: fn(address: [U8]) -> String Never! {
     if address.len() == 4 {

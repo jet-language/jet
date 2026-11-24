@@ -581,7 +581,7 @@ provider_native_validate_artifact_file: fn(destination: String, label: String) -
 }
 
 // Copy a local artifact into a staging file that must not exist yet. Its
-// failures always read as native release failures, as in Rust.
+// failures always read as native release failures.
 provider_native_copy_bounded_file: fn(source: String, destination: String) -[FS]> RegistryError! {
     stat: files.stat(source) ?? return Err(RegistryError.Provider(provider_native_error("could not stat fixture artifact: {err}")))
     if stat.is_symlink || !stat.is_file || stat.size == 0 {

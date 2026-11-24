@@ -351,8 +351,8 @@ parser_expression_form_parse_loop: fn(state: ^JetParserState, depth: Int) -> Par
         loop_stmt: Stmt.Loop{body: block.statements, span: parser_cover(start.span, end), arrow_body: false, label: None}
         return parser_expression_form_make_loop_lambda(state: state, body: [Stmt]{loop_stmt}, start: start.span, end: end, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
     }
-    // Rust yielding_loop_expr accepts only the header shapes with an
-    // exhaustion edge before attempting the collecting expression.
+    // A yielding loop accepts only the header shapes with an exhaustion edge
+    // before attempting the collecting expression.
     head: parser_current_kind(state)
     following: parser_kind_at(state, 1)
     binding_head: head == TOKEN_IDENT || head == TOKEN_KW_IT

@@ -21,7 +21,7 @@ FlakeOutputAssignment: struct {
 
 TRUST_FLAKE_OUTPUT_PREFIXES: [String]{"packages.", "legacyPackages.", "devShells.", "devShell.", "apps.", "checks.", "formatter."}
 
-// Rust `is_nix_name_char`: ASCII alphanumerics, `_`, `-`, and `.`.
+// ASCII alphanumerics, `_`, `-`, and `.`.
 trust_nix_is_name_byte: fn(code: Int) -> Bool Never! {
     trust_text_is_alphanumeric(code) || code == TRUST_UNDERSCORE || code == TRUST_DASH || code == TRUST_DOT
 }
@@ -132,8 +132,8 @@ trust_nix_quoted_rhs: fn(value: String) -> String? Never! {
     None
 }
 
-// The end of the Nix name run starting at `start`, with Rust's quirk that a
-// run which is empty extends to the end of the text.
+// The end of the Nix name run starting at `start`, with the quirk that a run
+// which is empty extends to the end of the text.
 trust_nix_path_end: fn(raw: [U8], start: Int) -> Int Never! {
     index := start
     loop index < raw.len() && trust_nix_is_name_byte(Int{raw[index]}) -> index += 1

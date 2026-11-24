@@ -59,8 +59,8 @@ store_nix_take_wave: fn(queue: ^Rank<String>, limit: Int) -> [String] Never! {
 }
 
 // Resolve and verify closure metadata without downloading or publishing any
-// NAR. Rust fans each wave out over OS threads; the cooperative port walks the
-// same waves in the same sorted order, so results and first failures agree.
+// NAR. Each wave is walked in sorted order, so results and first failures are
+// deterministic.
 store_plan_nix_downloads: fn(verification: ^StoreVerification, roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
     endpoint: NixCacheEndpoint.from_roots(roots)
     store_dir := "/nix/store"
@@ -112,7 +112,7 @@ store_plan_nix_downloads: fn(verification: ^StoreVerification, roots: HangarRoot
         }
 
         // Successful lookups are handled in path order before the first
-        // failure, as Rust sorts joined results Ok-first.
+        // failure.
         fetched := [String:FetchedInfo]{}
         first_error := NixCacheError?{None}
         loop store_path in pending {
@@ -171,9 +171,8 @@ store_plan_nix_downloads: fn(verification: ^StoreVerification, roots: HangarRoot
 }
 
 // The verified signed narinfos of the last plan for this Hangar root and cache
-// endpoint (Rust thread-local `PLANNED_NARINFOS`), carried by the verification
-// owner like the proven-member memo. An endpoint URL never holds a tab, so the
-// joined key is unambiguous.
+// endpoint, carried by the verification owner like the proven-member memo. An
+// endpoint URL never holds a tab, so the joined key is unambiguous.
 store_nix_planned_key: fn(roots: HangarRoots, endpoint: NixCacheEndpoint) -> String Never! {
     "{endpoint.endpoint}\t{roots.root}"
 }

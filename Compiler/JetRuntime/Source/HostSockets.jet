@@ -135,7 +135,7 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
 }
 
 #Export(c) jet_socket_mark_closed_raw: fn(state: I64) {
-    // Rust network close is logical while the owning socket remains alive.
+    // Network close is logical while the owning socket remains alive.
     // Last FD72 drop closes its still-owned descriptor, even when closed16=1.
     fd_lock(state)
     if (fd_word(state, I64{16}) == I64{0}) {

@@ -4,8 +4,8 @@ use jetpack_artifact_store.[ArtifactDigest, ArtifactStore, ArtifactStoreError]
 BuildArtifactStoreHandle: struct {
     store: ArtifactStore,
 
-    // The store named by `JET_STORE_DIR` (else the default store root). Rust
-    // reports the open refusal as its display string; `{err}` is that text.
+    // The store named by `JET_STORE_DIR` (else the default store root). The
+    // open refusal is reported as its display string; `{err}` is that text.
     open: fn() -[FS, Env, Rand]> BuildArtifactStoreHandle ArtifactStoreError! {
         Ok(BuildArtifactStoreHandle{store: ArtifactStore.from_env()})
     }
@@ -52,7 +52,7 @@ BuildArtifactStoreHandle: struct {
     }
 }
 
-// Rust `store_io_error`: every store refusal is an `Other` I/O error.
+// Every store refusal is an `Other` I/O error.
 build_store_io_error: fn(error: ArtifactStoreError) -> BuildIOError Never! {
     BuildIOError.new(.Other, "{error}")
 }

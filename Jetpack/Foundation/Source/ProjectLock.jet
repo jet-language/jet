@@ -18,7 +18,7 @@ RUNTIME_LOCK_DIR: ".locks"
 
 RUNTIME_LOCK_OWNER_FILE: ".jetpack.lock"
 
-// Rust LOCK_WAIT: a contended acquire gives up after 30 seconds.
+// A contended acquire gives up after 30 seconds.
 RUNTIME_LOCK_WAIT_SECONDS: 30
 
 RUNTIME_LOCK_MARKER_MODE: 0o600
@@ -50,8 +50,8 @@ RuntimeLock: struct {
         env_lock_validate_marker(self.marker_parent, self.marker, self.marker_name, self.path)
     }
 
-    // Rust `drop(lock)`: release the kernel lock now instead of at scope exit.
-    // Both files stay on disk so every later opener locks the same owner inode.
+    // Release the kernel lock now instead of at scope exit. Both files stay on
+    // disk so every later opener locks the same owner inode.
     impl Close {
         close: fn(^^self) {}
     }
@@ -65,7 +65,6 @@ RuntimeLockScope: struct {
     path: String,
 }
 
-// Rust `lock_path_for_scope`.
 env_lock_path_for_scope: fn(root: String, scope: String) -> String Never! {
     files.join(files.join(root, RUNTIME_LOCK_DIR), "{env_lock_sanitize_scope(scope)}.lock")
 }
@@ -95,14 +94,14 @@ env_lock_invalid_input: fn(path: String, cause: String) -> IOError Never! {
     IOError.InvalidInput(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val(cause)})
 }
 
-// Rust `acquire_lock`: wait up to 30 seconds for the root's lock domain.
+// Wait up to 30 seconds for the root's lock domain.
 env_acquire_lock: fn(root: String, scope: String) -[FS, Env, Time]> RuntimeLock IOError! {
     env_acquire_lock_waiting(root, scope, time.duration_seconds(RUNTIME_LOCK_WAIT_SECONDS))
 }
 
-// Rust `try_acquire_lock`: claim for recovery without waiting behind a live
-// owner. Recovery must hold the claim while inspecting and removing state; a
-// probe followed by deletion lets a contender take the same inode in the gap.
+// Claim for recovery without waiting behind a live owner. Recovery must hold
+// the claim while inspecting and removing state; a probe followed by deletion
+// lets a contender take the same inode in the gap.
 env_try_acquire_lock: fn(root: String, scope: String) -[FS, Env]> RuntimeLock? IOError! {
     authority: foundation_open_directory_authority(root, true)
     opened: env_lock_open_scope(authority, scope)
@@ -112,7 +111,7 @@ env_try_acquire_lock: fn(root: String, scope: String) -[FS, Env]> RuntimeLock? I
     Ok(Val(env_lock_hold(opened, owner)))
 }
 
-// Rust `acquire_lock_with_timing`: a bounded wait reports IOError.TimedOut.
+// A bounded wait reports IOError.TimedOut.
 env_acquire_lock_waiting: fn(root: String, scope: String, wait: Duration) -[FS, Env, Time]> RuntimeLock IOError! {
     authority: foundation_open_directory_authority(root, true)
     env_lock_acquire_opened(env_lock_open_scope(authority, scope), wait)
@@ -132,7 +131,7 @@ env_lock_acquire_opened: fn(opened: ^^RuntimeLockScope, wait: Duration) -[FS, En
     }
 }
 
-// Rust `acquire_lease_lock`. The lock is this process's own descriptor; a
+// Acquire the lease lock. The lock is this process's own descriptor; a
 // lease that holds it keeps it until the launched process tree exits
 // (`RuntimeLock.release` with `keep_for_descendant`).
 env_acquire_lease_lock: fn(root: String, scope: String) -[FS, Env, Time]> RuntimeLock IOError! {
@@ -217,8 +216,8 @@ env_lock_validate_marker: fn(parent: FoundationDirectoryAuthority, marker: FileR
     }
 }
 
-// Rust `lock_state`: probe the kernel lock behind one marker. An absent
-// marker (or lock directory) is Absent and the probe creates nothing.
+// Probe the kernel lock behind one marker. An absent marker (or lock directory)
+// is Absent and the probe creates nothing.
 env_lock_state: fn(path: String) -[FS, Env]> RuntimeLockState IOError! {
     lock_dir: files.dirname(path)
     if lock_dir == "" {
@@ -255,13 +254,13 @@ env_lock_state: fn(path: String) -[FS, Env]> RuntimeLockState IOError! {
     Ok(RuntimeLockState.Idle)
 }
 
-// Rust `with_lock` for a single, non-nested scope: the returned lock is held
-// until the caller's scope exits.
+// A lock for a single, non-nested scope: the returned lock is held until the
+// caller's scope exits.
 env_runtime_lock: fn(root: String, scope: String) -[FS, Env, Time]> RuntimeLock IOError! {
     env_acquire_lock(root, scope)
 }
 
-// Rust `with_project_lock`: the project's managed `.jet` directory.
+// The project's managed `.jet` directory.
 env_runtime_project_lock: fn(project: String, scope: String) -[FS, Env, Time]> RuntimeLock IOError! {
     env_runtime_lock(files.join(project, SOURCE_ROOT_DIR), scope)
 }
@@ -274,10 +273,10 @@ RuntimeLockGuard: struct {
     lock: RuntimeLock?,
 }
 
-// Rust HELD_LOCK_ROOTS: all scopes for one managed root share one kernel lock
-// domain, so a nested claim on a root this session already holds reuses the
-// outer guard instead of waiting on itself. Jet carries the held set
-// explicitly instead of in thread-local state.
+// All scopes for one managed root share one kernel lock domain, so a nested
+// claim on a root this session already holds reuses the outer guard instead of
+// waiting on itself. Jet carries the held set explicitly instead of in
+// thread-local state.
 RuntimeLockSession: struct {
     held_roots: [FileID],
 

@@ -1,4 +1,4 @@
-// Real packed List.Byte client, not a Rust Vec-layout witness.
+// Real packed List.Byte client.
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>

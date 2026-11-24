@@ -10,8 +10,7 @@ env_overlay_test_root: fn(label: String) -[FS]> String {
     files.tmpdir("jet-overlay-{label}-") ?? panic("overlay scratch")
 }
 
-// Rust test helper `apply_unified_patch`: stage one patch against a held
-// source root and commit it.
+// Stage one patch against a held source root and commit it.
 env_overlay_test_apply: fn(source_root: String, patch_text: String) -[FS, Env, Rand]> [PatchApplication] OverlayError! {
     source: OverlayAuthority.open(source_root, "source root")
     stage := OverlayStage.new()

@@ -1,16 +1,10 @@
-// Project entry resolution for the Jet-hosted `jet` which file a bare `jet
-// check`/`jet run`, or one aimed at a directory, compiles. A port of
-// `resolve_bare_entry`, `resolve_command_target`, `resolve_source_path`,
-// `find_project_entry_with_callable`, `command_override_entry` and
-// `missing_bare_entry`, over the pieces of the package model they read:
-// jet-pkg-model Package `resolve_run_entry_checked`, `entry_file_checked`,
-// `resolve_command_entry_checked`, `migrate_retired_entry`,
-// `top_level_function_lines`; Authority `resolve_workspace_source`; jet-driver
-// Loader `find_package_root_checked` and `package_run_member`; jet-env-model
-// WorkspaceFile `evaluate` (literal member lists and `find("./dir")`);
-// CmdInspect `package_is_library_only` and
-// `missing_project_context_diagnostic`. Every report is the Rust host's bytes
-// and exit status. A shape this port does not read yet (a computed `members:`
+// Project entry resolution for the Jet-hosted `jet`: which file a bare
+// `jet check`/`jet run`, or one aimed at a directory, compiles. It reads the
+// package model (the run entry, the entry file, the command entry, retired
+// entry migration, top-level function lines), workspace source resolution,
+// the loader's package root and run member, the workspace file's literal
+// member lists and `find("./dir")`, and the library-only and missing project
+// context checks. A shape it does not read yet (a computed `members:`
 // expression, an ambiguous output selection, a stale workspace lock, a build
 // entry) is refused with E2104 instead of guessed.
 use {
@@ -629,8 +623,7 @@ jet_cli_offset_lines: fn(bytes: [U8], starts: [Int]) -> [Int] Never! {
     lines
 }
 
-// A source that lexes and parses with no error, read as Rust
-// `Parser.parse_with_source(..).ok()` reads it.
+// A source that lexes and parses with no error.
 jet_cli_parsed_program: fn(source: String) -> Program? Never! {
     parsed: jet_driver_parse_user_source(source)
     loop diagnostic in parsed.diagnostics {
@@ -726,9 +719,8 @@ jet_cli_output_entry_file: fn(root: String, output: JetCLIOutputFact) -[FS]> Jet
         if found.len() != 1 -> return None
         return Val(JetCLIEntry{path: found[0], callable: Val(parts[0])})
     }
-    // `entry: file.callable` names the one member file whose
-    // stem is `file`, declaring exactly one top-level `callable`. Every source
-    // must parse, as Rust `parse_sources` requires.
+    // `entry: file.callable` names the one member file whose stem is `file`,
+    // declaring exactly one top-level `callable`. Every source must parse.
     programs := [Program]{}
     loop file in files {
         block: jet_driver_inline_package(file.source)
@@ -1313,7 +1305,7 @@ jet_cli_resolve_bare_entry: fn(command: String, cwd: String, member_flag: String
     if source == .Failed(plan) -> return JetCLIEntryFound.Refused{plan: plan}
     if !jet_cli_workspace_present(source) {
         // A workspace lock is a checked member index: a stale one with no
-        // workspace source is E1202 in the Rust host.
+        // workspace source is E1202.
         if jet_cli_checked_file(root, ".jet/lock") == .Val(lock_path) {
             if jet_cli_looks_like_workspace_lock(cli_files.read(lock_path) ?? "") {
                 return JetCLIEntryFound.Refused{plan: jet_cli_entry_not_ported(command, "project with a workspace lock", color)}

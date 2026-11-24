@@ -817,9 +817,8 @@ store_lease_write_new_synced: fn(path: String, bytes: [U8]) -[FS]> IOError! {
     file.fsync()
 }
 
-// Rust `matches!(complete_generation_artifacts(path), Ok(false))`: the
-// generation directory lacks a receipt or witness, and inspecting it did not
-// fail.
+// The generation directory lacks a receipt or witness, and inspecting it did
+// not fail.
 store_lease_generation_is_plainly_partial: fn(path: String) -[FS]> Bool Never! {
     if store_lease_complete_generation_artifacts(path) == {
         .Ok(complete) -> !complete

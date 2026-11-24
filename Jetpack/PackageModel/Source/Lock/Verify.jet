@@ -72,7 +72,7 @@ LockCompletenessError: struct {
         LockCompletenessError.missing(LockIncompleteKind.Dependency, name, missing_field, LockRegeneration.dependency())
     }
 
-    // The Rust `Display` text.
+    // The `Display` text.
     message: fn(self) -> String Never! {
         "{self.kind.label()} `{self.name}` is missing `{self.missing_field}`; regenerate with {self.regeneration.display()}"
     }
@@ -269,7 +269,7 @@ pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, gener
 }
 
 // One computed fact writer's stable lock projection. The value is the
-// writer's Rust `Debug` spelling (`Text("…")`, `Bool(true)`, …).
+// writer's derived `Debug` spelling (`Text("…")`, `Bool(true)`, …).
 pkg_lock_locked_build_contribution: fn(package: String, contribution: FactContribution) -> LockedBuildContribution Never! {
     LockedBuildContribution{
         package: package,
@@ -426,8 +426,7 @@ pkg_lock_dep_source: fn(dep_name: String, spec: DepSpec) -> LockSource Never! {
 }
 
 // A registered diagnostic whose What/Why/Fix come from the registry row
-// templates, with each `{name}` placeholder filled (Rust
-// `Diagnostic::from_row`).
+// templates, with each `{name}` placeholder filled.
 pkg_diagnostic_from_row: fn(code: String, args: [{name: String, value: String}], span: Span?) -> Diagnostic Never! {
     row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     diagnostic_from_registry(code, span, pkg_diagnostic_fill_row(row.what, args), pkg_diagnostic_fill_row(row.why, args), pkg_diagnostic_fill_row(row.fix, args))

@@ -1,6 +1,5 @@
 // File translation leaves. Input paths are display text; no foreign execution,
-// filesystem access, publication, or evidence fabrication. Rust `Translation`
-// (408-414).
+// filesystem access, publication, or evidence fabrication.
 JetCLIImportTranslation: struct {
     source: String,
     todos: [JetCLIImportTodo],
@@ -8,13 +7,12 @@ JetCLIImportTranslation: struct {
     tests: Int,
 }
 
-// Rust rendered enterprise row (608). Named row avoids tuple JetShow #4357.
+// One rendered enterprise row; a named row, not a tuple (#4357).
 JetCLIImportRenderedFunction: struct {
     carried_test: Bool,
     text: String,
 }
 
-// Rust `gap` (3376-3392).
 jet_cli_import_gap: fn(what: String, why: String, fix: String, source: String, target: String, line: Int) -> JetCLIImportTodo Never! {
     JetCLIImportTodo{what: what, why: why, fix: fix, source: "{source}:{line}", target: target, status: "omitted-reported"}
 }
@@ -23,7 +21,7 @@ jet_cli_import_files_append: fn(output: ^[U8], text: String) Never! {
     loop byte in text.bytes() -> output.push(byte)
 }
 
-// Rust `translate_file` (422-518): Python annotated functions only.
+// Python annotated functions only.
 jet_cli_import_translate_file: fn(raw: String, source: String, target: String) -> JetCLIImportTranslation Never! {
     lines: raw.lines()
     rendered := [String]{}
@@ -89,7 +87,6 @@ jet_cli_import_translate_file: fn(raw: String, source: String, target: String) -
     JetCLIImportTranslation{source: String.from_bytes(output) ?? panic("Python translation UTF-8"), todos: todos, functions: functions, tests: tests}
 }
 
-// Rust `translate_pascal_file` (520-555).
 jet_cli_import_translate_pascal_file: fn(raw: String, source: String, target: String) -> JetCLIImportTranslation Never! {
     output := [U8]{}
     jet_cli_import_files_append(output, jet_cli_import_binder_header("pascal"))
@@ -105,7 +102,6 @@ jet_cli_import_translate_pascal_file: fn(raw: String, source: String, target: St
     JetCLIImportTranslation{source: String.from_bytes(output) ?? panic("Pascal preparation UTF-8"), todos: [todo], functions: 0, tests: 0}
 }
 
-// Rust `translate_ada_file` (557-590).
 jet_cli_import_translate_ada_file: fn(raw: String, source: String, target: String) -> JetCLIImportTranslation Never! {
     output := [U8]{}
     jet_cli_import_files_append(output, jet_cli_import_binder_header("ada"))
@@ -121,7 +117,7 @@ jet_cli_import_translate_ada_file: fn(raw: String, source: String, target: Strin
     JetCLIImportTranslation{source: String.from_bytes(output) ?? panic("Ada preparation UTF-8"), todos: [todo], functions: 0, tests: 0}
 }
 
-// Rust `translate_enterprise_file` (595-830): Java/C#/TS/JS/Go scalar orchestration.
+// Java/C#/TS/JS/Go scalar orchestration.
 jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, source: String, target: String) -> JetCLIImportTranslation Never! {
     output := [U8]{}
     jet_cli_import_files_append(output, jet_cli_import_header(language))

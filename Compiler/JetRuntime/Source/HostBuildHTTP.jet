@@ -1,4 +1,4 @@
-// The checked-build DNS answer, ported from the deleted Rust bridge (lines 5536-5712). The caller checks the answer
+// The checked-build DNS answer. The caller checks the answer
 // it gets; no lookup policy lives here. The pinned GET over those answers is Jet source
 // (core.http.client.jet_http_build_get). Results are native [[U8]]: an outer buffer of 24-byte [len,cap,data]
 // headers, inner data at RT_HOST_U8_STRIDE, exact capacity, null when empty.
@@ -116,8 +116,8 @@ bh_range_error: fn(error: I64) -> I64 {
     bh_static_error(error, rt_static_text("out of range integral type conversion attempted"))
 }
 
-// Rust `(host, port).to_socket_addrs()` after one [..] pair is removed.
-// Answers stay in resolver order as 4 or 16 network-order octets.
+// Resolve `(host, port)` after one [..] pair is removed. Answers stay in
+// resolver order as 4 or 16 network-order octets.
 #Export(c) jet_http_build_resolve: fn(host: I64, port: I64, ok: I64, ok_len: I64, error: I64) -> I64 {
     native_port: host_native_int(port)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }

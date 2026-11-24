@@ -204,8 +204,8 @@ rt_age_unwrap: fn(identity: I64, own_public: I64, input: I64, at: I64, line_end:
     I64{0}
 }
 
-// Binary age only (the SecretsCrypto Rust path does not use an armor reader).
-// Full input/header/chunks authenticated. On any failure wipe emitted plaintext.
+// Binary age only. Full input/header/chunks authenticated. On any failure wipe
+// emitted plaintext.
 rt_age_open: fn(identity: I64, input: I64, length: I64, output: I64, capacity: I64, scratch: I64) -> I64 {
     rt_crypto_wipe(scratch, I64{2048})
     footer: rt_age_header_scan(input, length)

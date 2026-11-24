@@ -1,7 +1,6 @@
-// Provider-output JSON (Rust `jet_foundation::JSON::parse_lenient` and the
-// `Dyn` accessors provider parsers use). Known Nix store noise lines are
-// filtered before the strict Core parse and retained, so every later schema
-// error still shows the lines that were dropped.
+// Provider-output JSON. Known Nix store noise lines are filtered before the
+// strict Core parse and retained, so every later schema error still shows the
+// lines that were dropped.
 use json: core.encoding.json
 
 PROVIDER_JSON_MAX_BYTES: 1048576
@@ -50,8 +49,8 @@ provider_json_parse_lenient: fn(input: String) -> ProviderFilteredJSON ProviderE
     }
 }
 
-// Rust `Dyn::get`: the value at `key`, or `missing key `key``. The
-// accessors fail with the Rust accessor's message text.
+// The value at `key`, or `missing key `key``. The accessors fail with fixed
+// message text.
 provider_json_get: fn(value: Dyn, key: String) -> Dyn ProviderReason! {
     object: pkg_json_object(value) ?? return Err(ProviderReason{message: PKG_JSON_NOT_OBJECT})
     found: object.get(key) ?? return Err(ProviderReason{message: "missing key `{key}`"})

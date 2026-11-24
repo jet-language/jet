@@ -140,9 +140,8 @@ TargetLayoutNameResolution: struct {
 
 // The engine owns the selected target and the complete source-item registry.
 // The registry is required for nominal field/payload resolution; the target is
-// required explicitly so sema cannot infer a host default. The registry's
-// name indexes (first row per name) are built once with the engine, not per
-// query (Rust `TargetLayoutEngine.new`).
+// required explicitly so sema cannot infer a host default. The registry's name
+// indexes (first row per name) are built once with the engine, not per query.
 TargetLayoutEngine: struct {
     target: JetTargetLayout,
     items: [Item],
@@ -173,7 +172,6 @@ JetTargetLayoutQuery: struct {
     completed: [ByteLayout?],
 }
 
-// Rust: none (Jet-only pass)
 jet_target_layout_resolution_key: fn(owner: String, source: String) -> String Never! {
     "{owner.bytes().len()}:{owner}{source}"
 }
@@ -1007,7 +1005,6 @@ jet_layout_one_bit_shift: fn(value: Int) -> Int? Never! {
     None
 }
 
-// Rust: none (Jet-only pass)
 jet_target_layout_resolved_name: fn(engine: TargetLayoutEngine, owner_qualified_name: String, source_name: String) -> String Never! {
     key: jet_target_layout_resolution_key(owner_qualified_name, source_name)
     position: name_column_get(engine.resolution_keys, engine.resolution_positions, key) ?? return source_name.copy()

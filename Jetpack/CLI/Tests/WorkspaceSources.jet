@@ -1,13 +1,12 @@
-// Claims for project and workspace root discovery (Rust
-// jetpack::CLI::workspace_sources tests).
+// Claims for project and workspace root discovery.
 use files: core.files
 
 cli_ws_test_scratch: fn(label: String) -[FS]> String {
     files.tmpdir("jetpack-{label}-root-") ?? panic("claim scratch dir")
 }
 
-// The Rust test-only `load_workspace`: the checked index snapshot, written
-// through to `.jet/lock`; None when no index source declares a workspace.
+// Load the workspace: the checked index snapshot, written through to
+// `.jet/lock`; None when no index source declares a workspace.
 cli_ws_test_load_workspace: fn(cache: ^WorkspaceDeclarationCache, dir: String) -> WorkspacePlan? {
     source: if cli_checked_workspace_source(cache, dir) == {
         .Val(found) -> found

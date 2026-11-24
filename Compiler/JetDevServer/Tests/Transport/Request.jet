@@ -112,8 +112,8 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
         assert_eq(devserver_test_header_error([String]{"{name}: x", "{name}: x"}), "duplicate devserver security header")
     }
     assert_eq(devserver_test_header_error([String]{"Transfer-Encoding: chunked"}), "devserver does not accept transfer-encoded requests")
-    // Transfer-Encoding's first occurrence is already refused (Rust order);
-    // no dead duplicate-only branch or replacement message is manufactured.
+    // Transfer-Encoding's first occurrence is already refused; no dead
+    // duplicate-only branch or replacement message is manufactured.
     headers: devserver_request_headers(devserver_http.headers_parse([String]{"X-Trace: first", "x-trace: last"})) ?? panic("ordinary duplicate")
     assert_eq(headers.get("x-trace"), Val("last"))
 }

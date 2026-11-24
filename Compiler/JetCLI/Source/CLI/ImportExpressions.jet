@@ -6,7 +6,7 @@ JetCLIImportBodyError: struct {
     message: String,
 }
 
-// Shared byte slicing: Rust str search/char_indices offsets must not reach String.slice.
+// Shared byte slicing: byte search offsets must not reach String.slice.
 jet_cli_import_byte_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
     String.from_bytes(bytes[start..<end]) ?? panic("import text slice is not UTF-8")
 }
@@ -53,7 +53,7 @@ jet_cli_import_utf8_width: fn(byte: U8) -> Int Never! {
     4
 }
 
-// Rust char.is_whitespace (used by split_whitespace). No allocation per scalar.
+// Unicode White_Space (as split_whitespace reads it). No allocation per scalar.
 jet_cli_import_space_at: fn(bytes: [U8], at: Int, width: Int) -> Bool Never! {
     lead: Int{bytes[at]}
     point := if width == 1 -> lead else -> lead & (1 << (7 - width)) - 1
@@ -61,7 +61,7 @@ jet_cli_import_space_at: fn(bytes: [U8], at: Int, width: Int) -> Bool Never! {
     point == 32 || (point >= 9 && point <= 13) || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
 }
 
-// Rust split_whitespace: Unicode whitespace, scanned once without character-index slicing.
+// Unicode whitespace, scanned once without character-index slicing.
 jet_cli_import_words: fn(text: String) -> [String] Never! {
     bytes: text.bytes()
     out := [String]{}
@@ -85,7 +85,6 @@ jet_cli_import_alpha: fn(byte: U8) -> Bool Never! {
 
 jet_cli_import_digit: fn(byte: U8) -> Bool Never! { byte >= (U8{48}) && byte <= (U8{57}) }
 
-// Rust `identifier` (3460-3464).
 jet_cli_import_identifier: fn(value: String) -> Bool Never! {
     bytes: value.bytes()
     if bytes.is_empty() || (!jet_cli_import_alpha(bytes[0]) && bytes[0] != (U8{95})) -> return false
@@ -97,7 +96,7 @@ jet_cli_import_identifier: fn(value: String) -> Bool Never! {
     true
 }
 
-// Rust `canonical_identifier` (3436-3458). ASCII boundaries; non-ASCII is retained byte-exact.
+// The canonical identifier. ASCII boundaries; non-ASCII is retained byte-exact.
 jet_cli_import_canonical_identifier: fn(value: String) -> String Never! {
     bytes: value.bytes()
     output := [U8]{}
@@ -120,7 +119,7 @@ jet_cli_import_canonical_identifier: fn(value: String) -> String Never! {
     String.from_bytes(output) ?? panic("canonical identifier UTF-8")
 }
 
-// Rust `split_commas` (2060-2077), deliberately not quote-aware.
+// Split on commas, deliberately not quote-aware.
 jet_cli_import_split_commas: fn(raw: String) -> [String] Never! {
     bytes: raw.bytes()
     out := [String]{}
@@ -139,7 +138,7 @@ jet_cli_import_split_commas: fn(raw: String) -> [String] Never! {
     out
 }
 
-// Rust `split_top` (3402-3430); unlike foreign quote scanners, no backtick quote.
+// Split at top level; unlike foreign quote scanners, no backtick quote.
 jet_cli_import_split_top: fn(raw: String, needle: String) -> {left: String, right: String}? Never! {
     bytes: raw.bytes()
     wanted: needle.bytes()
@@ -166,13 +165,12 @@ jet_cli_import_split_top: fn(raw: String, needle: String) -> {left: String, righ
     None
 }
 
-// Rust `translate_foreign_body` (1195-1330).
 jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImportFunction, float_literals: Bool, expression_body: Bool) -> [String] JetCLIImportBodyError! {
     if function.body.is_empty() {
         if function.result == "()" -> return Ok([])
         return Err(JetCLIImportBodyError{line: 1, message: "a value-returning function has an empty body"})
     }
-    // #4366: Set.add Bool result missing in Rust emit. Membership only, never iterated.
+    // #4366: Set.add has no Bool result. Membership only, never iterated.
     bindings := [String:Bool]{}
     output := [String]{}
     returned := false
@@ -247,7 +245,6 @@ jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImpo
     Ok(output)
 }
 
-// Rust `split_foreign_statements` (1332-1364).
 jet_cli_import_split_foreign_statements: fn(raw: String) -> [String] Never! {
     bytes: raw.bytes()
     statements := [String]{}
@@ -278,7 +275,6 @@ jet_cli_import_split_foreign_statements: fn(raw: String) -> [String] Never! {
     statements
 }
 
-// Rust `foreign_control_statement` (1366-1375).
 jet_cli_import_foreign_control_statement: fn(line: String) -> Bool Never! {
     prefixes: [String]{"if ", "if(", "for ", "for(", "while ", "while(", "switch ", "switch(", "try", "catch", "finally", "throw ", "defer ", "go ", "select", "else", "case ", "default:"}
     loop prefix in prefixes {
@@ -287,7 +283,6 @@ jet_cli_import_foreign_control_statement: fn(line: String) -> Bool Never! {
     line.contains("++") || line.contains("--")
 }
 
-// Rust `foreign_local_name` (1377-1399).
 jet_cli_import_foreign_local_name: fn(language: String, left: String) -> String? Never! {
     tokens: jet_cli_import_words(left)
     name := ""
@@ -318,7 +313,6 @@ jet_cli_import_foreign_local_name: fn(language: String, left: String) -> String?
     Val(jet_cli_import_canonical_identifier(name))
 }
 
-// Rust `foreign_expression` (1401-1432).
 jet_cli_import_foreign_expression: fn(language: String, raw: String, float_literals: Bool) -> String JetCLIImportTextError! {
     expression := jet_cli_import_trim_suffix(raw.trim().copy(), ";").trim().copy()
     if expression.contains("`") {
@@ -348,8 +342,8 @@ jet_cli_import_foreign_expression: fn(language: String, raw: String, float_liter
     Ok(jet_cli_import_parse_expression_with_float(expression, float_literals))
 }
 
-// Rust `materialize_borrowed_string` (1434-1444): a borrowed String parameter
-// returned by value is copied, in the current explicit-copy spelling.
+// A borrowed String parameter returned by value is copied, in the current
+// explicit-copy spelling.
 jet_cli_import_materialize_borrowed_string: fn(function: JetCLIImportFunction, source: String, expression: String) -> String Never! {
     trimmed: jet_cli_import_trim_suffix(source.trim().copy(), ";").trim().copy()
     canonical: jet_cli_import_canonical_identifier(trimmed)
@@ -368,7 +362,6 @@ jet_cli_import_quote: fn(byte: U8) -> Bool Never! {
     byte == (U8{39}) || byte == (U8{34}) || byte == (U8{96})
 }
 
-// Rust `strip_foreign_line_comment` (1446-1466).
 jet_cli_import_strip_foreign_line_comment: fn(raw: String) -> String Never! {
     bytes: raw.bytes()
     quote := U8{0}
@@ -392,7 +385,7 @@ jet_cli_import_strip_foreign_line_comment: fn(raw: String) -> String Never! {
     raw.copy()
 }
 
-// Rust `replace_unquoted` (1468-1502). Byte buffer: linear, no repeated tail-string copies.
+// Replace unquoted text. Byte buffer: linear, no repeated tail-string copies.
 jet_cli_import_replace_unquoted: fn(text: String, needle: String, replacement: String) -> String Never! {
     bytes: text.bytes()
     wanted: needle.bytes()
@@ -430,12 +423,10 @@ jet_cli_import_replace_unquoted: fn(text: String, needle: String, replacement: S
     String.from_bytes(output) ?? panic("unquoted replacement UTF-8")
 }
 
-// Rust `has_unquoted_char` (1504-1506).
 jet_cli_import_has_unquoted_char: fn(text: String, needle: String) -> Bool Never! {
     jet_cli_import_find_unquoted(text, needle) != None
 }
 
-// Rust `has_unquoted_single_quote` (1508-1527).
 jet_cli_import_has_unquoted_single_quote: fn(text: String) -> Bool Never! {
     quote := U8{0}
     escaped := false
@@ -454,7 +445,7 @@ jet_cli_import_has_unquoted_single_quote: fn(text: String) -> Bool Never! {
     false
 }
 
-// Rust `find_unquoted` (1570-1589). Returns a BYTE offset; wanted is one scalar.
+// Find unquoted text. Returns a BYTE offset; wanted is one scalar.
 jet_cli_import_find_unquoted: fn(line: String, wanted: String) -> Int? Never! {
     bytes: line.bytes()
     target: wanted.bytes()
@@ -479,7 +470,6 @@ jet_cli_import_find_unquoted: fn(line: String, wanted: String) -> Int? Never! {
     None
 }
 
-// Rust `brace_delta` (1591-1613).
 jet_cli_import_brace_delta: fn(line: String) -> Int Never! {
     quote := U8{0}
     escaped := false
@@ -501,7 +491,6 @@ jet_cli_import_brace_delta: fn(line: String) -> Int Never! {
     delta
 }
 
-// Rust `strip_unquoted_braces` (1615-1637).
 jet_cli_import_strip_unquoted_braces: fn(line: String) -> String Never! {
     output := [U8]{}
     quote := U8{0}
@@ -526,7 +515,6 @@ jet_cli_import_strip_unquoted_braces: fn(line: String) -> String Never! {
     String.from_bytes(output) ?? panic("brace stripping UTF-8")
 }
 
-// Rust `Token` (2163-2171).
 JetCLIImportToken: enum {
     Word(String),
     Number(String),
@@ -537,12 +525,10 @@ JetCLIImportToken: enum {
     Comma,
 }
 
-// Rust `parse_expression` (2173-2175).
 jet_cli_import_parse_expression: fn(raw: String) -> String JetCLIImportTextError! {
     Ok(jet_cli_import_parse_expression_with_float(raw, false))
 }
 
-// Rust `parse_expression_with_float` (2177-2257).
 jet_cli_import_parse_expression_with_float: fn(raw: String, float_literals: Bool) -> String JetCLIImportTextError! {
     tokens: jet_cli_import_lex(raw)
     if tokens.is_empty() -> return Err(jet_cli_import_text_error("empty expression"))
@@ -621,7 +607,7 @@ jet_cli_import_parse_expression_with_float: fn(raw: String, float_literals: Bool
     Ok(String.from_bytes(output) ?? panic("expression output UTF-8"))
 }
 
-// Rust `lex` (2259-2324); even non-ASCII token failures retain Rust's byte-as-char display.
+// The foreign lexer; even non-ASCII token failures display each byte as a char.
 jet_cli_import_lex: fn(raw: String) -> [JetCLIImportToken] JetCLIImportTextError! {
     bytes: raw.bytes()
     out := [JetCLIImportToken]{}
@@ -704,7 +690,6 @@ jet_cli_import_latin1_byte: fn(byte: U8) -> String Never! {
     String.from_bytes([U8]{checked(U8{192 + value /% 64}) ?? panic("Latin-1 lead"), checked(U8{128 + value % 64}) ?? panic("Latin-1 trail")}) ?? panic("Latin-1 token")
 }
 
-// Rust `push_piece` (2326-2331).
 jet_cli_import_push_piece: fn(output: ^[U8], piece: String) Never! {
     if !output.is_empty() && output[output.len() - 1] != (U8{40}) && output[output.len() - 1] != (U8{32}) {
         output.push(U8{32})
@@ -720,7 +705,7 @@ jet_cli_import_assignment: fn(line: String) -> {left: String, right: String}? Ne
     Val({left: pair.left.trim().copy(), right: pair.right.trim().copy()})
 }
 
-// Rust `indentation`, spaces/tabs only, measured in bytes.
+// The indentation, spaces/tabs only, measured in bytes.
 jet_cli_import_indentation: fn(line: String) -> Int Never! {
     at := 0
     bytes: line.bytes()

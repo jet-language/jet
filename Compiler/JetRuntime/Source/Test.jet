@@ -172,7 +172,7 @@ test_number: fn(value: I64) {
 }
 
 // Malformed wires are internal host-corruption paths, never user diagnostics.
-// Their single defect message deliberately replaces Rust's per-field invariant
+// Their single defect message deliberately replaces per-field invariant
 // panic prose; valid unit outcomes retain byte-identical product reports.
 test_invalid: fn() {
     reason: rt_static_text("native test record is invalid")
@@ -452,8 +452,8 @@ test_report_text: fn(record: I64, capture: I64) {
     test_write_word(I64{1}, I64{10}, I64{1})
 }
 
-// Borrow wire; validate all records before emitting anything, just as the
-// canonical Rust consumer builds its complete outcome list before finishing.
+// Borrow wire; validate all records before emitting anything, so the complete
+// outcome list is built before finishing.
 #Export(c) jet_rt_test_finish_wire: fn(wire: I64) -> Bool {
     data: trap_word(wire)
     end: trap_word(wrapping(wire + I64{8}))

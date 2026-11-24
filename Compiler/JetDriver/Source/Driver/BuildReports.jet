@@ -137,7 +137,7 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     generated: loop generated_row in permit.value.generated -> jet_driver_build_generated_json(generated_row)
     schedule: loop node in build_session_schedule(permit.value) -> jet_driver_build_schedule_json(permit.value, node)
     default: if plan.default >= 0 -> { "{plan.default}" } else -> { "null" }
-    // Rust BuildGraph.affected_files() is the static file universe here,
+    // The build graph's affected files are the static file universe here,
     // not receipt_diff's rebuild-impact closure. Reuse the canonical rows.
     "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"schedule\":[{schedule.join(",")}]}}"
 }

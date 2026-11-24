@@ -1,11 +1,11 @@
-// Native network holders, independent of Rust std/Arc/Mutex representations.
+// Native network holders.
 // Stream64: owned FD72*0, carry8, readShutdown16, writeShutdown24,
 // readTimeoutMs32, writeTimeoutMs40, metadata mutex48, readBuffer56. Only
 // FD72.closed16 is the close source of truth. TCP and Unix streams use the
 // same holder shape. carry8 is the bytes a text read kept for the next read
 // (net_carry_*); readBuffer56 is the block every read reuses (net_read_buffer_*).
 // Listener8 owns one FD72 reference. TCP clone duplicates the native fd;
-// Unix listener clone retains the shared fd, matching its Rust Arc ownership.
+// Unix listener clone retains the shared fd.
 // UDP8 -> State32(refs0, mutex8, ownedFD72*16, singleTimeoutMs24).
 #Export(c) jet_socket_stream_from_fd_raw: fn(state: I64) -> I64 {
     value: jet_rt_alloc(I64{64}, I64{8})

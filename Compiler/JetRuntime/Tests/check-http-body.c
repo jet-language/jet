@@ -274,8 +274,8 @@ static void errors_and_stops(void) {
     stop_scope_end();
     pending = 0;
 }
-// Same 1GiB bounded File Take as the Rust reference, with packed native U8
-// output. Consume every byte so neither side can elide the body transfer.
+// Same 1GiB bounded File Take, with packed native U8 output. Consume every byte
+// so neither side can elide the body transfer.
 static void stream_perf(const char *path) {
     int fd = open(path, O_RDONLY);
     assert(fd >= 0);

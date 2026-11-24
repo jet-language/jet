@@ -49,7 +49,7 @@ store_lifecycle_test_fixture: fn() -> LifecycleTestFixture Never! {
     LifecycleTestFixture{roots: roots, known: known}
 }
 
-// Rust test helper `validated_transaction_paths`.
+// The validated transaction paths.
 store_lifecycle_test_transaction_paths: fn(roots: HangarRoots) -> [String] Never! {
     journal: store_lifecycle_ensure_journal_dir(roots) ?? panic("journal")
     scan: store_lifecycle_scan_journal(journal) ?? panic("scan")
@@ -65,7 +65,7 @@ store_lifecycle_test_prepare_controlled: fn(roots: HangarRoots, known: [String],
     store_lifecycle_prepare_unlocked_controlled(roots, identity, [String]{target}, store_lifecycle_test_at(at), known, control)
 }
 
-// Rust test helper `persist_controlled`, under the Hangar lock.
+// Persist under control, under the Hangar lock.
 store_lifecycle_test_persist_controlled: fn(roots: HangarRoots, known: [String], entry: LifecycleJournalEntry, control: LifecycleWriteControl) StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     state := store_lifecycle_load_state(roots, known)

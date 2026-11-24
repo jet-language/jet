@@ -1,9 +1,9 @@
 // Byte-offset text helpers for the Trust area's lock and flake scanners.
 //
 // Scanners cut only at ASCII delimiters, so every slice is whole UTF-8
-// scalars. Unicode whitespace (Rust `trim`, `split_whitespace`) goes through
-// PackageModel's `pkg_bytes_*` helpers; ASCII whitespace is Rust's
-// `u8::is_ascii_whitespace` set.
+// scalars. Unicode whitespace (`trim`, `split_whitespace`) goes through
+// PackageModel's `pkg_bytes_*` helpers; ASCII whitespace is the
+// space/tab/LF/FF/CR set.
 use jet_pkg_model.[
     pkg_bytes_skip_space,
     pkg_bytes_space_width,
@@ -98,7 +98,6 @@ trust_text_rfind_byte: fn(raw: [U8], code: Int) -> Int Never! {
     -1
 }
 
-// Rust `split_once(byte)`.
 trust_text_split_first: fn(text: String, code: Int) -> TrustTextSplit? Never! {
     raw: text.bytes()
     at: trust_text_find_byte(raw, code, 0)
@@ -106,7 +105,6 @@ trust_text_split_first: fn(text: String, code: Int) -> TrustTextSplit? Never! {
     Val(TrustTextSplit{before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + 1, raw.len())})
 }
 
-// Rust `rsplit_once(byte)`.
 trust_text_split_last: fn(text: String, code: Int) -> TrustTextSplit? Never! {
     raw: text.bytes()
     at: trust_text_rfind_byte(raw, code)
@@ -114,7 +112,7 @@ trust_text_split_last: fn(text: String, code: Int) -> TrustTextSplit? Never! {
     Val(TrustTextSplit{before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + 1, raw.len())})
 }
 
-// Rust `rsplit_once(needle)` for a text needle.
+// Split once at the last `needle`, for a text needle.
 trust_text_split_last_text: fn(text: String, needle: String) -> TrustTextSplit? Never! {
     raw: text.bytes()
     pattern: needle.bytes()
@@ -128,7 +126,7 @@ trust_text_split_last_text: fn(text: String, needle: String) -> TrustTextSplit? 
     None
 }
 
-// Rust `split(byte)`: every piece, including empty ones.
+// Every piece, including empty ones.
 trust_text_split: fn(text: String, code: Int) -> [String] Never! {
     raw: text.bytes()
     pieces := [String]{}
@@ -143,7 +141,7 @@ trust_text_split: fn(text: String, code: Int) -> [String] Never! {
     pieces
 }
 
-// Rust `trim_matches(byte)`: strip every leading and trailing `code`.
+// Strip every leading and trailing `code`.
 trust_text_trim_byte: fn(text: String, code: Int) -> String Never! {
     raw: text.bytes()
     start := 0
@@ -153,7 +151,7 @@ trust_text_trim_byte: fn(text: String, code: Int) -> String Never! {
     pkg_bytes_text(raw, start, end)
 }
 
-// Rust `trim_matches([..])` over a set of ASCII bytes.
+// Trim a set of ASCII bytes from both ends.
 trust_text_trim_bytes: fn(text: String, codes: [Int]) -> String Never! {
     raw: text.bytes()
     start := 0
@@ -163,8 +161,8 @@ trust_text_trim_bytes: fn(text: String, codes: [Int]) -> String Never! {
     pkg_bytes_text(raw, start, end)
 }
 
-// Rust `str::lines`: split at `\n`, drop the `\r` of a `\r\n` ending, and
-// yield no final empty line after a trailing newline.
+// Split at `\n`, drop the `\r` of a `\r\n` ending, and yield no final empty
+// line after a trailing newline.
 trust_text_lines: fn(text: String) -> [String] Never! {
     raw: text.bytes()
     lines := [String]{}
@@ -182,7 +180,6 @@ trust_text_lines: fn(text: String) -> [String] Never! {
     lines
 }
 
-// Rust `split_whitespace` (Unicode White_Space separators, no empty words).
 trust_text_words: fn(text: String) -> [String] Never! {
     raw: text.bytes()
     words := [String]{}
@@ -197,7 +194,7 @@ trust_text_words: fn(text: String) -> [String] Never! {
     words
 }
 
-// Rust `str::replace`: every non-overlapping occurrence of `needle`.
+// Every non-overlapping occurrence of `needle`.
 trust_text_replace_all: fn(text: String, needle: String, replacement: String) -> String Never! {
     raw: text.bytes()
     pattern: needle.bytes()
@@ -216,7 +213,6 @@ trust_text_replace_all: fn(text: String, needle: String, replacement: String) ->
     String.from_bytes(out) ?? text.copy()
 }
 
-// Rust `u8::is_ascii_whitespace`.
 trust_text_is_ascii_space: fn(code: Int) -> Bool Never! {
     code == TRUST_SPACE || code == TRUST_TAB || code == TRUST_NEWLINE || code == TRUST_FORM_FEED || code == TRUST_CARRIAGE_RETURN
 }
@@ -228,18 +224,15 @@ trust_text_skip_ascii_space: fn(raw: [U8], at: Int) -> Int Never! {
     index
 }
 
-// Rust `u8::is_ascii_hexdigit`.
 trust_text_is_hex: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)
 }
 
-// Rust `u8::is_ascii_alphanumeric`.
 trust_text_is_alphanumeric: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-// Byte-order comparison of two string lists (Rust `Vec<String>` `Ord`):
-// -1, 0, or 1.
+// Byte-order comparison of two string lists: -1, 0, or 1.
 trust_text_compare_lists: fn(left: [String], right: [String]) -> Int Never! {
     shared: if left.len() < right.len() -> left.len() else -> right.len()
     loop index in 0..<(shared) {
@@ -252,7 +245,7 @@ trust_text_compare_lists: fn(left: [String], right: [String]) -> Int Never! {
     1
 }
 
-// SHA-256 hex of `parts` joined by NUL bytes (Rust `format!("{a}\0{b}")`).
+// SHA-256 hex of `parts` joined by NUL bytes.
 trust_sha256_nul_joined: fn(parts: [String]) -> String Never! {
     bytes := [U8]{}
     loop index in 0..<parts.len() {

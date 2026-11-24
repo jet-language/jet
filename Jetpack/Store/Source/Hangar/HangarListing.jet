@@ -1,6 +1,6 @@
-// The Hangar store facade (Rust `jetpack::Store`): checked listing, the
-// read-only audit projection, lease inventory, whole-Hangar crash recovery,
-// and the human-readable entry identities.
+// The Hangar store facade: checked listing, the read-only audit projection,
+// lease inventory, whole-Hangar crash recovery, and the human-readable entry
+// identities.
 //
 // End-state roots are user-owned by default (U2, U28 /
 // ): `JETPACK_ROOT` overrides everything, the ordinary path
@@ -51,9 +51,8 @@ AuditSnapshot: struct {
     leases: LeaseInventory,
 }
 
-// The package records of this root (the checked model listing). The Rust
-// process memo keyed by the WAL identity stamp is a performance cache only;
-// every call reads the committed projection.
+// The package records of this root (the checked model listing); every call
+// reads the committed projection.
 store_list_unlocked: fn(roots: HangarRoots) -> [StoreEntry] StoreError! {
     pkg_store_list_checked(roots)
 }
@@ -152,7 +151,7 @@ store_audit_read_only: fn(verification: ^StoreVerification, roots: HangarRoots) 
     Ok(AuditSnapshot{entries: entries, leases: store_inspect_leases(roots)})
 }
 
-// The package record ids of `graph` in Rust `BTreeMap` order.
+// The package record ids of `graph` in key order.
 store_sorted_record_ids: fn(graph: ClosureGraph) -> [String] Never! {
     ids := graph.records.keys().to_list()
     ids.sort()
@@ -290,8 +289,7 @@ store_lease_name_is_valid: fn(name: String) -> Bool Never! {
     pid != 0 && pid <= 4294967295 && second.after != ""
 }
 
-// Rust `str::parse::<u64>` over ASCII decimal digits (one leading `+`
-// allowed).
+// A u64 over ASCII decimal digits (one leading `+` allowed).
 store_parse_decimal: fn(text: String) -> Int? Never! {
     digits: text.removeprefix("+")
     if digits == "" -> return None

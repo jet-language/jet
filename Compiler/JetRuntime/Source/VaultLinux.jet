@@ -1,6 +1,6 @@
 // Linux x86-64 raw descriptor policy; no Core fd carrier. Paths borrow native
-// raw-byte Text spans, never Rust Path/File objects. os_syscall_i64 via the
-// audited trap_syscall leaf preserves negative errno.
+// raw-byte Text spans. os_syscall_i64 via the audited trap_syscall leaf
+// preserves negative errno.
 VAULT_O_CLOEXEC: I64{524288}
 
 VAULT_O_NOFOLLOW: I64{131072}
@@ -292,11 +292,10 @@ vault_linux_install_exact: fn(dirfd: I64, next: I64, final_name: I64, temp: I64,
     I64{0}
 }
 
-// The duplicate shares the seek offset as Rust File.try_clone does. It is
-// closed on all paths; the borrowed original stays live. Binary result adopts a
-// packed DataSequence, not a Rust Vec carrier. scratch borrows one exclusive
-// byte for EOF probing; a full buffer does not allocate or copy merely to
-// discover EOF.
+// The duplicate shares the seek offset. It is closed on all paths; the
+// borrowed original stays live. Binary result adopts a packed DataSequence.
+// scratch borrows one exclusive byte for EOF probing; a full buffer does not
+// allocate or copy merely to discover EOF.
 vault_linux_read_file: fn(file: I64, out: I64, scratch: I64) -> I64 {
     cloned: trap_syscall(I64{72}, file, I64{1030}, I64{3}, I64{0}, I64{0}, I64{0})
     if (cloned < I64{0}) { return vault_error_new(I64{4}, I64{0}, I64{0}) }

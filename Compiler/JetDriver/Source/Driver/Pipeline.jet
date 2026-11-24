@@ -643,7 +643,7 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
                 } else {
                     // Loader's explicit ABI-only fallback, not an empty real
                     // Core source. Keep its checked row internally, but it is
-                    // not a Rust-loaded source in Review's input digest.
+                    // not a loaded source in Review's input digest.
                     if unit.file_index != -1 || unit.relative_path != "{unit.module_name}.jet" || source != "" || core_module_export(unit.module_name) == None {
                         return [JetDriverDocModule]{}
                     }
@@ -917,14 +917,14 @@ jet_driver_host_fact_value: fn(request: JetDriverCompileRequest, path: String) -
     if target_os_parse(raw_os) == .Val(running) -> target_os_name(running) else -> ""
 }
 
-// The build snapshot sema folds `#package.*` and `build.*` from (Rust
-// `seed_build_facts_from_stamp`). A manifest package names itself; the
-// manifest-less rung uses the entry file stem and version `0.0.0`. The stamp is
-// the lock's `[build.stamp]` the host read (request.build_stamp); without one
-// it is no git revision, clean, the compiler's own package version and no time.
-// A compile never captures a fresh stamp from git and the clock: only lock
-// writers do. Each loaded dependency's settings are its own, each folded
-// over its own writer chain (jet_driver_setting_writers).
+// The build snapshot sema folds `#package.*` and `build.*` from. A manifest
+// package names itself; the manifest-less rung uses the entry file stem and
+// version `0.0.0`. The stamp is the lock's `[build.stamp]` the host read
+// (request.build_stamp); without one it is no git revision, clean, the
+// compiler's own package version and no time. A compile never captures a fresh
+// stamp from git and the clock: only lock writers do. Each loaded dependency's
+// settings are its own, each folded over its own writer chain
+// (jet_driver_setting_writers).
 jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: TargetMachine) -> SemaBuildFacts Never! {
     package_name := ""
     package_version := ""
@@ -1033,7 +1033,7 @@ jet_driver_locked_setting_text: fn(value: String) -> String? Never! {
     }
 }
 
-// Rust TARGET_MACHINE_NAMES and target_machine_by_name; restored45acf6f8f.
+// Target machine names and their lookup by name; restored45acf6f8f.
 JET_DRIVER_TARGET_MACHINE_NAMES: [String]{
     "board.sensor_v1",
     "board.virt_aarch64",
@@ -3968,9 +3968,8 @@ jet_driver_comptime_run: fn(
                     next
                 }
                 // A comptime input with a literal path that is the item's whole
-                // value (`TEXT: #run embed_file("x")`) is read here, as
-                // Rust's `try_eval_build_time_io` did, with no evaluation; a
-                // computed path is evaluated.
+                // value (`TEXT: #run embed_file("x")`) is read here, with no
+                // evaluation; a computed path is evaluated.
                 if jet_driver_comptime_literal_input(comptime_request.expression) == .Val(literal_input) {
                     if jet_driver_comptime_read_input(request, source.source_file, literal_input) == {
                         .Ok(value) -> {
@@ -4564,10 +4563,9 @@ jet_driver_canonical_effect_module: fn(effects: EffectModuleSource, table: ^Modu
     })
 }
 
-// Rust CheckInner `retain_error_prelude_module`: the original Prelude error
-// declarations join the load as one compiler-generated source module (source
-// unit, source file, loaded row), as Rust pushes its LoadedModule into the
-// bundle, so registration, checking, assembly, and every loaded-identity check
+// The original Prelude error declarations join the load as one
+// compiler-generated source module (source unit, source file, loaded row),
+// so registration, checking, assembly, and every loaded-identity check
 // see one module set. Like Core, foreign aggregate, and canonical effect
 // sources, its bytes also ride the generated sidecar, so a diagnostic sited in
 // it projects through the host codec. The contract rule module
@@ -4714,8 +4712,8 @@ jet_driver_compile_escaped_failure: fn(message: String) -> JetDriverCompileResul
     }
 }
 
-// Rust Completion's Test boundary admits either a named test block or an
-// authenticated selected Check Output.
+// The Test boundary admits either a named test block or an authenticated
+// selected Check Output.
 jet_driver_runnable_test_count: fn(graph: SemaRegistrationGraph) -> Int Never! {
     count := 0
     loop module_index in 0..<graph.modules.len() {
@@ -4973,8 +4971,7 @@ jet_driver_job_rows: fn(graph: SemaRegistrationGraph, entry_module_identity: Mod
     rows
 }
 
-// The one native spelling of an exported C symbol (Rust
-// `Sema.Guest.guest_export_native_symbol`).
+// The one native spelling of an exported C symbol.
 jet_driver_c_symbol: fn(name: String) -> String Never! {
     bytes := [U8]{}
     loop byte in name.bytes() {
@@ -4985,13 +4982,12 @@ jet_driver_c_symbol: fn(name: String) -> String Never! {
     String.from_bytes(bytes) ?? "_"
 }
 
-// The Core source modules whose top-level bodies are lowered only when
-// reached (Rust `core_source_module_indices`). Compiler-private parts
-// (`Core/Text/String.jet`) are listed too: a receiver function there is kept
-// only when a kept body's checked `ModuleCall` names it (Rust
-// `called_private_part_methods`), never the whole part. Host-only Core
-// modules are not listed, so their bodies stay rooted; so is a Core module
-// with foreign rows, whose close and undo adapters Codegen resolves by key.
+// The Core source modules whose top-level bodies are lowered only when reached.
+// Compiler-private parts (`Core/Text/String.jet`) are listed too: a receiver
+// function there is kept only when a kept body's checked `ModuleCall` names it,
+// never the whole part. Host-only Core modules are not listed, so their bodies
+// stay rooted; so is a Core module with foreign rows, whose close and undo
+// adapters Codegen resolves by key.
 jet_driver_prunable_core_modules: fn(load: JetDriverLoadResult, core_sources: [JetDriverCoreSource], modules: [SemaGraphModuleResult]) -> [ModuleID] Never! {
     identities := [ModuleID]{}
     loop semantic_module in modules {
@@ -5498,8 +5494,8 @@ JetDriverCheckedProjectionResult: struct {
     budget_facts: JetDriverBudgetFacts{jet_driver_budget_facts_empty()},
 }
 
-// One checked budget spec and where it is written (Rust `source_location`):
-// the source file its span starts in, and the 1-based line and column there.
+// One checked budget spec and where it is written: the source file its span
+// starts in, and the 1-based line and column there.
 JetDriverBudgetSpec: struct {
     spec: BudgetSpec,
     source_path: String,
@@ -5508,7 +5504,7 @@ JetDriverBudgetSpec: struct {
 }
 
 // The exact checked front-end facts `jet budget`'s CompilerFacts provider
-// measures (Rust `compiler_fact`).
+// measures.
 JetDriverBudgetFacts: struct {
     public_api_items: Int,
     dependency_count: Int,
@@ -6800,8 +6796,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     }
     // The merge was the staged closures' last reader.
     comptime_functions = [SemaComptimeFunctionResult]{}
-    // A check whose bodies hold `#Todo` goals says so, so `jet check` can
-    // print each goal card from a Doc projection (Rust `render_goal_report`).
+    // A check whose bodies hold `#Todo` goals says so, so `jet check` can print
+    // each goal card from a Doc projection.
     if request.mode == JetDriverCompileMode.Check {
         load.typed_goals = jet_driver_has_typed_goals(checked_graph.modules)
     }
@@ -7188,8 +7184,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     registration_graph.interner = interner_empty()
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.registration", c_export_rows.len())
 
-    // #3980: lower only the Core source bodies the program reaches (Rust
-    // reference lowering's `should_lower_imported_core_body`).
+    // #3980: lower only the Core source bodies the program reaches.
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
     lowering_rows := ir_reachable_core_rows(checked_functions, decls, symbol_rows, interner_rows, lowering_candidates, prunable_modules, entry_roots, jet_driver_value_function_keys(comptime_values), request.compiler_threads, request.trace_sink)
     symbols := symbol_rows.pop() ?? panic("the run's symbol table left core reachability")
@@ -7657,13 +7652,12 @@ jet_driver_release_facts_aside: fn(checked: Int, facts: ^^[SemaCheckedFacts]) {
 // maximal row an open-world call seeds into `solved` is a ceiling fact (E0743),
 // not an effect the program performs; a written C call with no declared root
 // lists `FFI.C` as a direct effect. The generated typed-CLI entry
-// `__jet_cli_run` and the parser it calls, `__jet_cli_parse` of
-// its module (`__jet_cli_parse_<binding>` for `__jet_cli_run_<binding>`;
-// JetSema Registration/CliEntry.jet), read argv and its env fallbacks, print
-// help and exit on a refusal through Core; that parse is the toolchain's, as
-// the Rust runtime parse was, so only the user functions they dispatch to
-// contribute required effects. The platform contract's env reads
-// (jet_driver_toolchain_env_read) are the toolchain's too.
+// `__jet_cli_run` and the parser it calls, `__jet_cli_parse` of its module
+// (`__jet_cli_parse_<binding>` for `__jet_cli_run_<binding>`; JetSema
+// Registration/CliEntry.jet), read argv and its env fallbacks, print help and
+// exit on a refusal through Core; that parse is the toolchain's, so only the
+// user functions they dispatch to contribute required effects. The platform
+// contract's env reads (jet_driver_toolchain_env_read) are the toolchain's too.
 jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [String] Never! {
     // Each key's first row: a hashed map, only looked up.
     by_key: ir_first_function_rows(functions)
@@ -7741,9 +7735,9 @@ jet_driver_effect_budget_root: fn(load: JetDriverLoadResult) -> Int? Never! {
     Val(index)
 }
 
-// Into `names`, each dependency's source root by its name (Rust
-// `ProgramBundle.dep_roots`) and its name by its package identity; the
-// count of the dependencies. The entry package is no dependency of itself.
+// Into `names`, each dependency's source root by its name and its name by its
+// package identity; the count of the dependencies. The entry package is no
+// dependency of itself.
 jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: ^JetDriverDependencyNames) -> Int Never! {
     loop package in load.packages {
         loop dependency in package.dependencies {
@@ -7806,10 +7800,10 @@ jet_driver_budget_spec: fn(spec: BudgetSpec, module_file: String, segments: [Sem
     JetDriverBudgetSpec{spec: spec, source_path: path, line: line, column: column}
 }
 
-// The CompilerFacts of a checked graph (Rust `compiler_fact`), over its
-// non-Core modules: the public functions, types, traits and code modules
-// they declare, the build's dependency roots, and the distinct effects the
-// checker solved for their functions.
+// The CompilerFacts of a checked graph, over its non-Core modules: the public
+// functions, types, traits and code modules they declare, the build's
+// dependency roots, and the distinct effects the checker solved for their
+// functions.
 jet_driver_budget_facts: fn(load: JetDriverLoadResult, graph: SemaRegistrationGraph, functions: [FnBody]) -> JetDriverBudgetFacts {
     users := [U32:Bool]{}
     public_items := 0

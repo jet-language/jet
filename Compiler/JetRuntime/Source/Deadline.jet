@@ -50,10 +50,9 @@ deadline_save: fn(save: I64) {
     }
 }
 
-// `task.timeout(duration)`: the task deadline becomes the
-// earlier of the installed one and now plus the Duration's whole
-// milliseconds, a negative delay counting as none (Rust
-// jet_task_timeout_duration_ns).
+// `task.timeout(duration)`: the task deadline becomes the earlier of the
+// installed one and now plus the Duration's whole milliseconds, a negative
+// delay counting as none.
 #Export(c) jet_task_timeout_duration_ns: fn(nanos: I64) {
     millis: if (nanos <= I64{0}) -> I64{0} else -> nanos /% I64{1000000}
     now: jet_std_time_now()
@@ -85,9 +84,9 @@ deadline_monotonic_ns: fn(scratch: I64) -> I64 {
     time_host_monotonic_i64()
 }
 
-// Rust str.parse has no whitespace trimming, accepts one leading '+'; signed
-// parsing also accepts '-'. out is an exclusively borrowed word. Negative
-// accumulation admits i64.MIN without negation overflow.
+// No whitespace trimming; one leading '+' is accepted, and signed parsing also
+// accepts '-'. out is an exclusively borrowed word. Negative accumulation
+// admits i64.MIN without negation overflow.
 deadline_parse_i64: fn(text: I64, out: I64) -> Bool {
     if (text == I64{0}) { return false }
     length: sync_load(wrapping(text + I64{8}))
@@ -129,8 +128,8 @@ deadline_wall_now_ns: fn() -> I64 {
 
 deadline_wall_now_ms: fn() -> I64 { deadline_wall_now_ns() /% I64{1000000} }
 
-// CoreReview2 #49 Rust's std.env reads the immutable host
-// startup capture, never the Jet env overlay. RtL7 owns the one rt_env_get view.
+// CoreReview2 #49: host environment reads see the immutable host startup
+// capture, never the Jet env overlay. RtL7 owns the one rt_env_get view.
 // That capture never changes, so the replay or epoch override it names is
 // parsed once (time_host_root @32..55) instead of on every clock read.
 // Whether the host clock reads that fixed override (@48).

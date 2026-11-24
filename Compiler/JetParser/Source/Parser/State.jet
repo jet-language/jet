@@ -107,8 +107,8 @@ JetParserState: struct {
     sources: [[U8]]{[[U8]]{[U8]{}}},
     source_offset: Int{0},
     line_base: Int{0},
-    // Rust stops a statement or item at its first fatal error and resumes at
-    // the next boundary, so one mistake reports once. `abort_mark` is the
+    // A statement or item stops at its first fatal error and parsing resumes
+    // at the next boundary, so one mistake reports once. `abort_mark` is the
     // diagnostics length just after that error (0 = none; a rewind below it
     // cancels the abort); `abort_position` is the cursor where it was found.
     abort_mark: Int{0},
@@ -131,25 +131,23 @@ JetParserState: struct {
     // body's final `if` whose value reading is one keeps that reading, so a
     // missing `else` is reported as such (parser_parse_tail_if).
     hole_value_table: Int{-1},
-    // Rust `block_depth`: braced statement lists entered so far. Value
-    // blocks read their lines at the enclosing depth, as in Rust.
+    // Braced statement lists entered so far. Value blocks read their lines at
+    // the enclosing depth.
     block_depth: Int{0},
-    // Rust `callable_tail_block_depth`: the block depth of the innermost
-    // callable body (-1 = none). Its last line may be a bare value.
+    // The block depth of the innermost callable body (-1 = none). Its last line
+    // may be a bare value.
     callable_tail_depth: Int{-1},
-    // Rust `callable_tail_expects_value`: that body's callable has a declared
-    // result, so an audited region at its tail keeps the value grammar.
+    // That body's callable has a declared result, so an audited region at its
+    // tail keeps the value grammar.
     callable_tail_value: Bool{false},
-    // Rust `derive_template_depth`: derive, marker and declaration-loop
-    // template bodies entered so far. A `#loop` inside one is a
-    // template loop the derive expansion unrolls.
+    // Derive, marker and declaration-loop template bodies entered so far. A
+    // `#loop` inside one is a template loop the derive expansion unrolls.
     derive_template_depth: Int{0},
     // Code and generic module bodies entered so far; 0 is a file's top
     // level, where `priv` already keeps a declaration inside the package.
     module_depth: Int{0},
-    // Rust `allow_environment_reads`: a Jetpack config surface reads `$NAME`
-    // as the typed environment read ordinary source
-    // rejects the same token with E0003.
+    // A Jetpack config surface reads `$NAME` as the typed environment read
+    // ordinary source rejects the same token with E0003.
     allow_environment_reads: Bool{false},
     // The lexed source's names and literal facts, as one row. A nested state
     // (an interpolation, a pattern hole) borrows the row while it parses and
@@ -689,7 +687,7 @@ parser_add_error_code: fn(state: ^JetParserState, code: String, span: Span, what
     state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
 }
 
-// A coded error with its fix edit (Rust `Diagnostic.error(…).with_edit(edit)`).
+// A coded error with its fix edit.
 parser_add_error_code_edit: fn(state: ^JetParserState, code: String, span: Span, what: String, why: String, fix: String, edit: TextEdit) {
     if parser_aborting(state) {
         return
@@ -697,8 +695,7 @@ parser_add_error_code_edit: fn(state: ^JetParserState, code: String, span: Span,
     state.diagnostics.push(diagnostic_with_edit(diagnostic_from_registry(code, Val(span), what, why, fix), edit))
 }
 
-// Rust `deletion_edit`: an edit deleting `span` and the horizontal whitespace
-// after it.
+// An edit deleting `span` and the horizontal whitespace after it.
 parser_deletion_edit: fn(state: JetParserState, span: Span) -> TextEdit Never! {
     end := span.end
     limit: parser_source_end_offset(state)
@@ -710,8 +707,8 @@ parser_deletion_edit: fn(state: JetParserState, span: Span) -> TextEdit Never! {
     TextEdit{span: Span{start: span.start, end: end}, new_text: ""}
 }
 
-// A fatal error: Rust returns it as the statement's or item's `Err`, so
-// nothing more is reported until the enclosing loop resynchronizes.
+// A fatal error ends the statement or item, so nothing more is reported until
+// the enclosing loop resynchronizes.
 parser_add_fatal_code: fn(state: ^JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
     if parser_aborting(state) {
         return
@@ -735,8 +732,8 @@ parser_aborting: fn(state: ^JetParserState) -> Bool Never! {
 }
 
 // Resume after a fatal error found inside the construct that began at token
-// index `start`: put the cursor back where the error was found, as Rust's
-// `?` leaves it. An abort from before `start` belongs to an outer loop.
+// index `start`: put the cursor back where the error was found. An abort from
+// before `start` belongs to an outer loop.
 parser_take_abort: fn(state: ^JetParserState, start: Int) -> Bool Never! {
     if !parser_aborting(state) || state.abort_position < start -> return false
     state.abort_mark = 0
@@ -812,7 +809,7 @@ parser_report_expected: fn(state: ^JetParserState, context: String) {
 parser_expect_name: fn(state: ^JetParserState, context: String) -> Token {
     if parser_current_kind(state) == TOKEN_IDENT -> return parser_bump(state)
     token: parser_current(state)
-    // Rust `expect_ident`: `in` is the source-loop keyword, never a name.
+    // `in` is the source-loop keyword, never a name.
     if token.kind == TOKEN_KW_IN {
         parser_add_error(state, token.span, "`in` is reserved as the source-loop keyword", "the `in` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `in` in a source loop; after `.` it is allowed as a member name")
         return parser_synthetic_token(TOKEN_IDENT, token.span)

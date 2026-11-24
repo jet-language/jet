@@ -1,5 +1,4 @@
-// Declaration grammar. AST nodes are assembled directly from Jet tokens; no
-// Rust parser or semantic compiler is involved.
+// Declaration grammar. AST nodes are assembled directly from Jet tokens.
 use {
     jet_foundation.[
         AccessConvention,
@@ -164,7 +163,7 @@ ParsedItemModifiers: struct {
     is_comptime: Bool,
     markers: [Marker],
     start_span: Span,
-    // The markers came from at least one `#[…]` list (Rust's grouped marker path).
+    // The markers came from at least one `#[…]` list.
     grouped_markers: Bool{false},
 }
 
@@ -429,8 +428,7 @@ parser_parse_item_modifiers: fn(state: ^JetParserState, item_visibility: Bool) -
             sequence.end = marker.span.end
             marker_chunks += 1
             markers.push(marker)
-            // Rust `parse_attached_marker_sequence`: a marker on its own line
-            // still attaches to the declaration below.
+            // A marker on its own line still attaches to the declaration below.
             parser_skip_semicolons(state)
             next
         }
@@ -443,7 +441,7 @@ parser_parse_item_modifiers: fn(state: ^JetParserState, item_visibility: Bool) -
     ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, grouped_markers: bracket_chunks > 0}
 }
 
-// The target a declaration marker sequence attaches to, named as Rust's
+// The target a declaration marker sequence attaches to, named as the
 // marker-sequence sites name it; empty where no sequence check applies.
 parser_marker_sequence_noun: fn(state: ^JetParserState, item_visibility: Bool) -> String {
     kind: parser_current_kind(state)
@@ -1092,13 +1090,12 @@ parser_parse_function: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
             break true
         }
     } ?? false
-    // (card #4512): a named function has one arrow, before its
-    // result, and a braced body. A body `->` after the result, or an
-    // expression right after the arrow, is E0080 and recovers to the same
-    // body. An
-    // `#FFI` function's body is its foreign source instead. A trait slot
-    // (`body_required` false) has no effect-arrow body, as Rust
-    // `trait_method_sig`: `f: fn() -[FS]> Never!` ends a bodiless requirement.
+    // (card #4512): a named function has one arrow, before its result, and a
+    // braced body. A body `->` after the result, or an expression right after
+    // the arrow, is E0080 and recovers to the same body. An `#FFI` function's
+    // body is its foreign source instead. A trait slot (`body_required` false)
+    // has no effect-arrow body: `f: fn() -[FS]> Never!` ends a bodiless
+    // requirement.
     marker_kind: parser_current_kind(state)
     marker_span: parser_current(state).span
     effect_body: body_required && !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_COLON && marker_kind != TOKEN_EQ
@@ -1194,10 +1191,10 @@ parser_parse_function: fn(state: ^JetParserState, modifiers: ParsedItemModifiers
     ParsedFunction{value: func, has_body: has_body}
 }
 
-// Rust `is_c_guest_import_marker`: the per-callable C import `#Import(c)`
-// as written: the Import hook's spelling with the `c` argument, whatever it
-// resolves to. Declared infallible: it is called inside the `guest_import`
-// loop expression, which would otherwise carry its failure into the parser.
+// The per-callable C import `#Import(c)` as written: the Import hook's spelling
+// with the `c` argument, whatever it resolves to. Declared infallible: it is
+// called inside the `guest_import` loop expression, which would otherwise carry
+// its failure into the parser.
 parser_marker_spells_c_guest_import: fn(marker: Marker) -> Bool Never! {
     hook: marker_hook_of_declaration(marker.name) ?? return false
     if marker.negated || hook != MarkerHook.Import -> return false
@@ -1251,10 +1248,9 @@ parser_drop_body_shaping_lines: fn(state: ^JetParserState, markers: [Marker]) ->
     kept
 }
 
-// (Rust `guest_import_fn_from_markers`): the one string body
-// of an `#Import(c)` function names its C symbol. The symbol moves into the
-// marker's compile-time fact and the Jet body is cleared, so it never reaches
-// expression checking or codegen.
+// The one string body of an `#Import(c)` function names its C symbol. The
+// symbol moves into the marker's compile-time fact and the Jet body is cleared,
+// so it never reaches expression checking or codegen.
 parser_bind_guest_import_symbol: fn(state: ^JetParserState, func: ^Func) {
     symbol := ""
     error_span := func.span
@@ -1319,11 +1315,10 @@ parser_service_import: fn(function: Func) -> {provider: String, symbol: String}?
     None
 }
 
-// Rust Sema `guest_import_symbol`: the fixed C symbol the parser bound as the
-// `#Import(c)` marker's compile-time fact. A missing or empty value is an
-// invalid declaration (E3212 above), never an import. Sema and the Jetpack
-// bridge read the binding through this one reader; only the application that
-// reached the Import hook carries the fact.
+// The fixed C symbol the parser bound as the `#Import(c)` marker's compile-time
+// fact. A missing or empty value is an invalid declaration (E3212 above), never
+// an import. Sema and the Jetpack bridge read the binding through this one
+// reader; only the application that reached the Import hook carries the fact.
 parser_guest_import_symbol: fn(function: Func) -> String? Never! {
     loop marker in function.markers {
         if !parser_marker_spells_c_guest_import(marker) -> next
@@ -1535,7 +1530,7 @@ parser_effect_value_literal: fn(state: ^JetParserState, base: String, field: Str
     None
 }
 
-// Rust `type_starts_here`, with the `#Tag Type` value-tag prefix.
+// Whether a type starts here, with the `#Tag Type` value-tag prefix.
 parser_type_starts_here: fn(state: ^JetParserState) -> Bool Never! {
     kind: parser_current_kind(state)
     parser_type_starts(kind) || parser_type_tag_ahead(state)
@@ -1817,11 +1812,10 @@ parser_return_type_has_value: fn(return_type: Type?) -> Bool Never! {
     }
 }
 
-// Rust `apply_callable_markers`: the typed projections of the function rules,
-// applied once the function is parsed. The marker list itself stays on the
-// function. A rule with no projection here projects nothing; sema reports an
-// unknown rule (E0927). A refused rule ends the
-// function (a fatal diagnostic), as Rust's applicator returns its error.
+// The typed projections of the function rules, applied once the function is
+// parsed. The marker list itself stays on the function. A rule with no
+// projection here projects nothing; sema reports an unknown rule (E0927). A
+// refused rule ends the function (a fatal diagnostic).
 parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: [Marker]) {
     policy := [PolicyDeclaration]{}
     callable_policy_seen := false
@@ -1878,10 +1872,9 @@ parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: 
                     }
                 }
             }
-            // Bare `#Inline` is a hint; `#Inline(Always)`
-            // is the checked promise. A written `Hint` or `Never` mode is
-            // E0930 here (Rust `apply_callable_markers`); sema's menu check
-            // reports any other value.
+            // Bare `#Inline` is a hint; `#Inline(Always)` is the checked
+            // promise. A written `Hint` or `Never` mode is E0930 here; sema's
+            // menu check reports any other value.
             .Inline -> {
                 func.inline_span = Val(marker.span)
                 mode := Expr?{None}
@@ -1902,9 +1895,8 @@ parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: 
                     .None -> func.is_inline = true
                 }
             }
-            // (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
-            // `#Post(cond, msg)` become the function's contract clauses; both
-            // arguments are required.
+            // `#Pre(cond, msg)` and `#Post(cond, msg)` become the function's
+            // contract clauses; both arguments are required.
             .Pre -> { parser_project_contract_marker(state, func, marker, true) }
             .Post -> { parser_project_contract_marker(state, func, marker, false) }
             // A callable chain (`#Policy(retry(3))`) stays a marker; the scoped
@@ -1994,7 +1986,7 @@ parser_apply_function_markers: fn(state: ^JetParserState, func: ^Func, markers: 
                 func.max_depth = depth
             }
             // C declarations select their calling convention; foreign bodies
-            // never reach this applicator in Rust.
+            // never reach this applicator.
             .ABI -> {
                 if !foreign {
                     parser_add_fatal_code(state, "E3212", marker.span, "`#ABI` only applies to C declarations", "ordinary Jet functions do not select a native C calling convention", "move the function into a `#Import c.<library>: module {{ … }}` declaration or remove `#ABI`")
@@ -2038,8 +2030,8 @@ parser_state_marker_shape_fatal: fn(state: ^JetParserState, marker: Marker) {
     parser_add_fatal_code(state, "E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#State` arguments do not match `State(S)` or `State(A -> B)`", "a typestate marker names the state a call requires, or one transition from a state (`_` at entry) to a state", "write `#State(S)`, `#State(A -> B)`, or `#State(_ -> B)`")
 }
 
-// Rust `web_target_from_marker` at a function: `#Target(Wasm)` or
-// `#Target(JS)` selects its web partition; any other target ends the function.
+// `#Target(Wasm)` or `#Target(JS)` selects its web partition; any other target
+// ends the function.
 parser_function_web_partition: fn(state: ^JetParserState, marker: Marker) -> WebPartitionMarker? {
     values: parser_marker_bindings(marker, [String]{"target"}) ?? [Expr?]{None}
     target: values[0] ?? {
@@ -2123,9 +2115,8 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
             next
         }
         if parser_take_prep_fn(state) -> member_modifiers.is_comptime = true
-        // (Rust `cli_binding_starts_here` / `cli_binding`):
-        // `name = callable` binds a program-struct command to a function; it
-        // is a command member, never a stored field.
+        // `name = callable` binds a program-struct command to a function; it is
+        // a command member, never a stored field.
         if parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_EQ {
             command_name: parser_bump(state)
             parser_bump(state)
@@ -2134,7 +2125,6 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
             parser_finish_data_member(state, "command binding")
             next
         }
-        // (Rust `at_validate_block` / `validate_block`):
         // `validate { … }` holds the struct's rule statements as an ordinary
         // block; sema restricts and synthesizes them (sema_validate_blocks).
         if parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_LBRACE && parser_value_at(state, 0) == "validate" {
@@ -2222,10 +2212,10 @@ parser_parse_struct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) 
     value
 }
 
-// Rust `attach_type_markers`: the markers, the derives and serde markers they
-// request, the package auto-derive default and the SingleUse/MustUse/
-// published-schema facts. They apply once the whole body is read, so a marker
-// line anywhere in the body counts the same as the markers above.
+// The markers, the derives and serde markers they request, the package
+// auto-derive default and the SingleUse/MustUse/ published-schema facts. They
+// apply once the whole body is read, so a marker line anywhere in the body
+// counts the same as the markers above.
 parser_apply_struct_markers: fn(state: ^JetParserState, value: ^StructDef, markers: [Marker], grouped: Bool) {
     parser_apply_struct_type_markers(state, value, markers)
     value.layout = parser_layout_marker_fact(state, markers, grouped, false)
@@ -2254,8 +2244,7 @@ parser_parse_enum: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) ->
     value.type_params = parser_parse_type_params(state)
     parser_expect(state, TOKEN_LBRACE, "`{{` before enum variants")
     inside := [Marker]{}
-    // A fatal error ends the whole enum, as Rust's `?` does; the item loop
-    // resynchronizes.
+    // A fatal error ends the whole enum; the item loop resynchronizes.
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
         if parser_current_kind(state) == TOKEN_SEMI {
             parser_bump(state)
@@ -2296,9 +2285,9 @@ parser_parse_enum: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) ->
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after enum variants")
     value.span = parser_cover(modifiers.start_span, close.span)
-    // Rust `attach_type_markers`, as for structs: markers, derives, serde
-    // markers, the package auto-derive default and SingleUse/MustUse, applied
-    // once the body (and every marker line in it) is read.
+    // Attach type markers, as for structs: markers, derives, serde markers,
+    // the package auto-derive default and SingleUse/MustUse, applied once the
+    // body (and every marker line in it) is read.
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "enum `{value.name}`")
     parser_apply_enum_type_markers(state, value, markers)
     value.cap = parser_type_fx_cap(state, markers, value.name, "type")
@@ -2664,15 +2653,14 @@ parser_check_step_limit: fn(state: ^JetParserState, markers: [Marker]) {
     }
 }
 
-// `name: value` / `name := value` at file scope declares a
-// module binding, not an executable script statement (Rust
-// `module_binding_def`).
+// `name: value` / `name := value` at file scope declares a module binding, not
+// an executable script statement.
 parser_module_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_current_kind(state) != TOKEN_IDENT -> return false
     next: parser_kind_at(state, 1)
     if next == TOKEN_COLON_EQ || next == TOKEN_COLON -> return true
     // `Type{ … }: value` is a destructuring head; the module-binding parser
-    // rejects it with one diagnostic (Rust `pattern_target_is_binding`).
+    // rejects it with one diagnostic.
     if next != TOKEN_LBRACE -> return false
     depth := 0
     offset := 1
@@ -2717,14 +2705,14 @@ parser_module_binding_def: fn(statement: Stmt, start: Span, end: Int) -> ConstDe
     None
 }
 
-// `#Persist name := value` at file scope (Rust `at_persist_binding`): module
-// state that survives a `jet dev` reload. A local `#Persist` never reaches
-// here and keeps the statement parser's E0145.
+// `#Persist name := value` at file scope: module state that survives a
+// `jet dev` reload. A local `#Persist` never reaches here and keeps the
+// statement parser's E0145.
 parser_persist_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Persist" && parser_kind_at(state, 2) == TOKEN_IDENT
 }
 
-// Rust `persist_def`: the marker, then one named module binding.
+// The marker, then one named module binding.
 parser_parse_persist_binding: fn(state: ^JetParserState) -> Item? {
     hash: parser_bump(state)
     marker: parser_bump(state)
@@ -2997,10 +2985,10 @@ parser_impl_trait_args_ahead: fn(state: ^JetParserState) -> Bool Never! {
     false
 }
 
-// The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
-// `[A, B]`, or bare names joined by `|`. A bound may name a module's trait by
-// its dotted path (`mem.Allocator`). Each context names the place in the
-// expected-name and missing-`]` reports.
+// The trait bounds after a `:`: a bracketed list `[A, B]`, or bare names joined
+// by `|`. A bound may name a module's trait by its dotted path
+// (`mem.Allocator`). Each context names the place in the expected-name and
+// missing-`]` reports.
 parser_parse_trait_bounds: fn(state: ^JetParserState, list_context: String, close_context: String, single_context: String) -> [String] {
     bounds := [String]{}
     if parser_current_kind(state) == TOKEN_LBRACKET {

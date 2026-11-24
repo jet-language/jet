@@ -1,5 +1,4 @@
-// Real Jet-object client:; no provider mocks.
-// The Rust original supplies semantic values, not native layout.
+// Real Jet-object client; no provider mocks.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>

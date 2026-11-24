@@ -42,14 +42,13 @@ build_test_require_sandbox: fn() -[FS, Env, Exec, Time.Wait]> Bool {
     true
 }
 
-// Rust `delayed_descendant_script`: a background descendant that holds the
-// output pipes for two seconds of Bash's builtin `SECONDS` clock, then writes
-// `marker`; `rest` runs in the foreground.
+// A background descendant that holds the output pipes for two seconds of Bash's
+// builtin `SECONDS` clock, then writes `marker`; `rest` runs in the foreground.
 build_test_delayed_descendant: fn(marker: String, rest: String) -> String Never! {
     "(start=$SECONDS; while [ $((SECONDS-start)) -lt 2 ]; do :; done; printf leaked > {marker}) & {rest}"
 }
 
-// Rust `assert_descendant_reaped`: the descendant's marker never appears.
+// The descendant's marker never appears.
 build_test_assert_descendant_reaped: fn(marker: String) -[FS, Time]> {
     time.sleep(time.duration_ms(3000))
     assert(!files.exists(marker))

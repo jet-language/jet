@@ -1,6 +1,6 @@
-// Machine-wide artifact store configuration (Rust `jet_store::StoreConfig`):
-// the store root, an optional explicit capacity cap, the free-disk reserve
-// kept for the host, and the bound on waiting for a live lock owner.
+// Machine-wide artifact store configuration: the store root, an optional
+// explicit capacity cap, the free-disk reserve kept for the host, and the bound
+// on waiting for a live lock owner.
 use {
     jet_foundation.[ENV_JET_STORE_CAP_BYTES, ENV_JET_STORE_DIR, ENV_JET_STORE_RESERVE_BYTES]
     jet_pkg_model.[pkg_bytes_text]
@@ -71,7 +71,7 @@ ArtifactStoreConfig: struct {
         )
     }
 
-    // Rust `Default`: the environment configuration, else `.cache/jet/store`.
+    // The environment configuration, else `.cache/jet/store`.
     default: fn() -[Env]> ArtifactStoreConfig Never! {
         ArtifactStoreConfig.from_env() ?? ArtifactStoreConfig.new(files.join(".cache", "jet/store"))
     }
@@ -203,13 +203,13 @@ store_artifact_ascii_upper: fn(value: String) -> String Never! {
     pkg_bytes_text(out, 0, out.len())
 }
 
-// Addition clamped at the Rust u64 size ceiling, not Jet Int's range.
+// Addition clamped at the u64 size ceiling, not Jet Int's range.
 store_artifact_saturating_add: fn(left: Int, right: Int) -> Int Never! {
     if right > 0 && left > STORE_ARTIFACT_U64_MAX - right -> return STORE_ARTIFACT_U64_MAX
     left + right
 }
 
-// Subtraction clamped at zero (Rust `saturating_sub` on u64 sizes).
+// Subtraction clamped at zero.
 store_artifact_saturating_sub: fn(left: Int, right: Int) -> Int Never! {
     if right >= left -> return 0
     left - right

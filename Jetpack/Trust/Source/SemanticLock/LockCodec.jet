@@ -41,8 +41,8 @@ trust_lock_escape: fn(value: String) -> String Never! {
     trust_text_replace_all(trust_text_replace_all(value, "\\", "\\\\"), "\"", "\\\"")
 }
 
-// Source maps in Rust's derived `Ord` order: pattern, then sources. A stable
-// insertion keeps equal entries in their given order.
+// Source maps in derived order: pattern, then sources. A stable insertion
+// keeps equal entries in their given order.
 trust_lock_sorted_source_maps: fn(maps: [SourceMapEntry]) -> [SourceMapEntry] Never! {
     sorted := [SourceMapEntry]{}
     loop map in maps {
@@ -58,7 +58,7 @@ trust_lock_source_map_before: fn(left: SourceMapEntry, right: SourceMapEntry) ->
     trust_text_compare_lists(left.sources, right.sources) < 0
 }
 
-// Rust `parse_string_list`: the items of a `["a", "b"]` value.
+// The items of a `["a", "b"]` value.
 trust_lock_string_list: fn(raw: String) -> [String] Never! {
     inner := raw.trim()
     loop inner.starts_with("[") -> inner = inner.removeprefix("[")
@@ -257,8 +257,8 @@ SemanticLockReader: struct {
     }
 }
 
-// Rust `SemanticLock::parse`: blank and `#` lines are skipped, unknown
-// lines ignored, and incomplete blocks dropped.
+// Blank and `#` lines are skipped, unknown lines ignored, and incomplete blocks
+// dropped.
 trust_parse_semantic_lock: fn(raw: String) -> SemanticLockFile Never! {
     reader := SemanticLockReader.new()
     loop raw_line in trust_text_lines(raw) {
@@ -281,7 +281,6 @@ trust_parse_semantic_lock: fn(raw: String) -> SemanticLockFile Never! {
     reader.lock
 }
 
-// Rust `SemanticLock::write`.
 trust_write_semantic_lock: fn(lock: SemanticLockFile) -> String Never! {
     records := lock.records
     records.sort_by(fn(record) { record.identity.semantic_key() })

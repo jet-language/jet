@@ -9,20 +9,20 @@ CanonicalJSON: enum {
     Object([CanonicalJSONField]),
 }
 
-// Rust keeps a BTreeMap; the fields here are always sorted by key bytes.
+// The fields are always sorted by key bytes.
 
 CanonicalJSONField: struct {
     key: String,
     value: CanonicalJSON,
 }
 
-// Rust's `String` refusal.
+// A canonical JSON refusal message.
 #Error
 CanonicalJSONError: struct {
     message: String,
 }
 
-// Rust `CanonicalJson.object`: a repeated key is refused.
+// A repeated key is refused.
 canonical_json_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON CanonicalJSONError! {
     seen := [String:Bool]{}
     loop field in fields {
@@ -37,7 +37,7 @@ canonical_json_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON Canonic
     Ok(CanonicalJSON.Object(sorted))
 }
 
-// Rust `CanonicalJson.bytes`: the encoding plus one LF.
+// The encoding plus one LF.
 canonical_json_bytes: fn(value: CanonicalJSON) -> [U8] Never! {
     out := [U8]{}
     canonical_json_encode(value, out)
@@ -45,7 +45,6 @@ canonical_json_bytes: fn(value: CanonicalJSON) -> [U8] Never! {
     out
 }
 
-// Rust `CanonicalJson.sha256`.
 canonical_json_sha256: fn(value: CanonicalJSON) -> String Never! {
     bytes: canonical_json_bytes(value)
     sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
@@ -55,7 +54,6 @@ canonical_json_append: fn(out: ^[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
 }
 
-// Rust `encode_json`.
 canonical_json_encode: fn(value: CanonicalJSON, out: ^[U8]) Never! {
     if value == {
         .Null -> { canonical_json_append(out, "null") }
@@ -83,8 +81,8 @@ canonical_json_encode: fn(value: CanonicalJSON, out: ^[U8]) Never! {
     }
 }
 
-// Rust `encode_string`: short escapes for `"`, `\`, BS, FF, LF, CR, TAB; other
-// C0 controls as `\u00xx`; every other scalar verbatim.
+// Short escapes for `"`, `\`, BS, FF, LF, CR, TAB; other C0 controls as
+// `\u00xx`; every other scalar verbatim.
 canonical_json_encode_string: fn(value: String, out: ^[U8]) Never! {
     hex: "0123456789abcdef".bytes()
     out.push(U8{34})

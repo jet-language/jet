@@ -269,7 +269,7 @@ value_block_binding_init: fn(program: Program, function_name: String) -> Expr {
 
 // An authored `;` after nested control in a fallback block is not a synthetic
 // terminator: it is reported as the explicit-semicolon diagnostic E0373 at
-// exactly that `;` (Rust `report_explicit_semicolon`).
+// exactly that `;`.
 #Test("fallback_block_rejects_authored_semicolon_after_nested_control") {
     source: "\nrun: fn(value: Int?) {{\n    result: value ?? {{\n        loop {{\n            break\n        }};\n        1\n    }}\n}}\n"
     diagnostics: value_block_rejected(source)
@@ -372,8 +372,8 @@ arm_table_fix_all: fn(source: String) -> String {
     assert(found, "the chain still warns")
 }
 
-// A module binding whose value only lints (L0507) is still a declaration, as
-// Rust `module_binding_def` keeps every binding that parsed without an error.
+// A module binding whose value only lints (L0507) is still a declaration:
+// every binding that parsed without an error is kept.
 #Test("linted_else_if_module_binding_stays_a_declaration") {
     source: "LIMIT: if 1 <= 0 -> 4 else if 2 == 8 -> 5 else -> 6\nNEXT: LIMIT + 1\n"
     diagnostics: arm_table_checked(source)

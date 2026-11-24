@@ -244,7 +244,7 @@ cli_dashboard_activity_text: fn(activity: DashboardActivity) -> String Never! {
 }
 
 // Decimal units: whole bytes, then one decimal below 10 and none above,
-// rounding a tie to even (Rust float formatting).
+// rounding a tie to even.
 cli_dashboard_format_size: fn(bytes: Int) -> String Never! {
     units: [String]{"B", "KB", "MB", "GB", "TB"}
     unit := 0
@@ -278,7 +278,7 @@ cli_dashboard_sanitize: fn(value: String) -> String Never! {
     out.join("")
 }
 
-// Rust `char::is_control` over one UTF-8 encoded scalar.
+// Unicode control characters over one UTF-8 encoded scalar.
 cli_dashboard_is_control: fn(bytes: [U8]) -> Bool Never! {
     if bytes.len() == 1 {
         code: Int{bytes[0]}

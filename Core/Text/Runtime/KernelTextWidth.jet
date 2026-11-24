@@ -166,7 +166,7 @@ cluster_width: fn(cps: [Int]) -> Int Never! {
     1
 }
 
-// Rust jet_text_display_width_default: summed default cluster widths.
+// Summed default cluster widths.
 display_width: fn(text: String) -> Int Never! {
     total := 0
     loop cluster in graphemes(text) -> total += cluster_width(decode_scalars(cluster))
@@ -191,10 +191,10 @@ fill_columns: fn(fill: String, columns: Int) -> String Never! {
     String.from_bytes(out) ?? panic("fill columns are whole graphemes and ASCII spaces")
 }
 
-// Rust jet_text_pad_start/pad_end/center: pad `text` to `width` display columns
-// with fill_columns units, before (`left`), after (`right`) or split floor-left
-// (both). The one padding owner for core.text.pad_start/pad_end/center,
-// core.text.parse.ljust/rjust/center and the String methods.
+// Pad `text` to `width` display columns with fill_columns units, before
+// (`left`), after (`right`) or split floor-left (both). The one padding owner
+// for core.text.pad_start/pad_end/center, core.text.parse.ljust/rjust/center
+// and the String methods.
 pad: fn(text: String, width: Int, fill: String, left: Bool, right: Bool) -> String Never! {
     gap := width - display_width(text)
     if gap < 0 -> gap = 0

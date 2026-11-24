@@ -62,8 +62,8 @@ LifecycleWriteControl: struct {
     }
 }
 
-// The Hangar lock plus the closure inputs every lifecycle operation reads
-// under it (Rust `with_lifecycle_lock`). Dropping it releases the lock.
+// The Hangar lock plus the closure inputs every lifecycle operation reads under
+// it. Dropping it releases the lock.
 LifecycleSession: struct {
     lock: RuntimeLock,
     known: [String],
@@ -77,7 +77,6 @@ LifecycleJournalTransaction: struct {
     entry: LifecycleJournalEntry,
 }
 
-// Rust `JournalScan`.
 LifecycleJournalScan: struct {
     snapshot: LifecycleSnapshotRecord?,
     transactions: [LifecycleJournalTransaction],
@@ -101,14 +100,12 @@ store_lifecycle_session: fn(verification: ^StoreVerification, roots: HangarRoots
     Ok(LifecycleSession{lock: lock, known: inputs.known, closure_head: inputs.closure_head})
 }
 
-// Rust `prepare`.
 store_lifecycle_prepare: fn(verification: ^StoreVerification, roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     store_lifecycle_prepare_unlocked(roots, identity, targets, at, session.known)
     store_lifecycle_snapshot_unlocked(roots, session.known, session.closure_head, [LegacyRoot]{})
 }
 
-// Rust `commit`.
 store_lifecycle_commit: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     state := store_lifecycle_load_state(roots, session.known)
@@ -116,7 +113,6 @@ store_lifecycle_commit: fn(verification: ^StoreVerification, roots: HangarRoots,
     store_lifecycle_snapshot_from_state(state, session.closure_head)
 }
 
-// Rust `remove_root`.
 store_lifecycle_remove_root: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, incarnation: Incarnation, witness: RootWitness, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     state := store_lifecycle_load_state(roots, session.known)
@@ -144,10 +140,10 @@ store_lifecycle_apply_if_new: fn(roots: HangarRoots, state: ^[String:LifecycleRo
     store_lifecycle_persist_entry(roots, entry, state, LifecycleWriteControl.none())
 }
 
-// Rust `atomic_update`: replace one typed root. The prepare and commit
-// records are serialized under one Hangar lock. If the process dies between
-// them, the prepared union stays protected and the same request resumes by
-// witness, metadata and target identity instead of silently rebinding.
+// Replace one typed root. The prepare and commit records are serialized under
+// one Hangar lock. If the process dies between them, the prepared union stays
+// protected and the same request resumes by witness, metadata and target
+// identity instead of silently rebinding.
 store_lifecycle_atomic_update: fn(verification: ^StoreVerification, roots: HangarRoots, update: RootUpdate) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     expected := RootEtag?{None}
     if update.expected_etag == {
@@ -212,9 +208,9 @@ store_lifecycle_atomic_update_unlocked: fn(roots: HangarRoots, update: RootUpdat
     store_lifecycle_snapshot_from_state(state, closure_head)
 }
 
-// Rust `prepare_if_absent`: prepare an immutable root only when its stable
-// identity is absent. The existence check and the append share one lock, so
-// no caller can observe an absent root and race another producer into it.
+// Prepare an immutable root only when its stable identity is absent. The
+// existence check and the append share one lock, so no caller can observe an
+// absent root and race another producer into it.
 store_lifecycle_prepare_if_absent: fn(verification: ^StoreVerification, roots: HangarRoots, identity: RootIdentity, targets: [String], at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     proposed: store_lifecycle_checked_targets(targets, session.known)
@@ -234,8 +230,8 @@ store_lifecycle_prepare_if_absent: fn(verification: ^StoreVerification, roots: H
     store_lifecycle_snapshot_from_state(reloaded, session.closure_head)
 }
 
-// Rust `atomic_remove`: tombstone a typed root with one compare-and-swap
-// check. Repeating a removal whose tombstone is durable succeeds.
+// Tombstone a typed root with one compare-and-swap check. Repeating a removal
+// whose tombstone is durable succeeds.
 store_lifecycle_atomic_remove: fn(verification: ^StoreVerification, roots: HangarRoots, id: RootID, expected_etag: String, at: LifecycleTimestamp) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     expected: RootEtag.parse(expected_etag)
     session: store_lifecycle_session(verification, roots)
@@ -261,7 +257,7 @@ store_lifecycle_same_request: fn(root: LifecycleRoot, update: RootUpdate, propos
     root.identity.kind == update.identity.kind && root.identity.producer == update.identity.producer && root.identity.witness == update.identity.witness && root.targets == proposed && root.metadata == update.metadata
 }
 
-// A compare-and-swap refusal (io kind AlreadyExists in the Rust reference).
+// A compare-and-swap refusal (io kind AlreadyExists).
 store_lifecycle_cas_conflict: fn(expected: RootEtag?, current: RootEtag?) -> StoreError Never! {
     expected_text: if expected == {
         .Val(etag) -> Val(etag.render())
@@ -274,7 +270,6 @@ store_lifecycle_cas_conflict: fn(expected: RootEtag?, current: RootEtag?) -> Sto
     StoreError.LifecycleConflict{expected: expected_text, current: current_text}
 }
 
-// Rust `import_legacy_root`.
 store_lifecycle_import_legacy_root: fn(verification: ^StoreVerification, roots: HangarRoots, legacy: LegacyRoot) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     targets: store_lifecycle_checked_targets(legacy.targets, session.known)
@@ -284,23 +279,22 @@ store_lifecycle_import_legacy_root: fn(verification: ^StoreVerification, roots: 
     store_lifecycle_snapshot_from_state(state, session.closure_head)
 }
 
-// Rust `list`: every durable root in root-id order.
+// Every durable root in root-id order.
 store_lifecycle_list: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> [LifecycleRoot] StoreError! {
     snapshot: store_lifecycle_snapshot(verification, roots)
     Ok(snapshot.root_list())
 }
 
-// Rust `snapshot`.
 store_lifecycle_snapshot: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     store_lifecycle_snapshot_with_legacy(verification, roots, [LegacyRoot]{})
 }
 
-// Rust `protected_targets_unlocked`: the caller already owns the Hangar lock.
-// Clean uses this exact set so dropping a short-lived verification lease
-// cannot expose durable roots. The known objects come from the closure graph
-// the caller loaded and validated, so a record clean is quarantining (a
-// proven missing output) is left out here too, rather than reloading the
-// whole graph and refusing on that record's store proof.
+// The caller already owns the Hangar lock. Clean uses this exact set so
+// dropping a short-lived verification lease cannot expose durable roots. The
+// known objects come from the closure graph the caller loaded and validated, so
+// a record clean is quarantining (a proven missing output) is left out here
+// too, rather than reloading the whole graph and refusing on that record's
+// store proof.
 store_lifecycle_protected_targets_unlocked: fn(roots: HangarRoots, graph: ClosureGraph) -[FS, Env, Time]> [String] StoreError! {
     store_lifecycle_recover_unlocked(roots)
     known := graph.objects.keys().to_list()
@@ -310,14 +304,14 @@ store_lifecycle_protected_targets_unlocked: fn(roots: HangarRoots, graph: Closur
     Ok(store_lifecycle_protected_union(state, store_lifecycle_unix_now()))
 }
 
-// Rust `snapshot_with_legacy`: legacy roots absent from the journal are
-// protected in this view without being persisted.
+// Legacy roots absent from the journal are protected in this view without being
+// persisted.
 store_lifecycle_snapshot_with_legacy: fn(verification: ^StoreVerification, roots: HangarRoots, legacy: [LegacyRoot]) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
     session: store_lifecycle_session(verification, roots)
     store_lifecycle_snapshot_unlocked(roots, session.known, session.closure_head, legacy)
 }
 
-// Rust `recover`: the number of abandoned partial members removed.
+// The number of abandoned partial members removed.
 store_lifecycle_recover: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> Int StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
     recovered: store_lifecycle_recover_unlocked(roots)
@@ -371,8 +365,8 @@ store_lifecycle_protected_union: fn(state: [String:LifecycleRoot], now: Lifecycl
     store_lifecycle_sorted_set(protected)
 }
 
-// Rust `snapshot_from_state`: the protected set plus the deterministic
-// lifecycle and composite store revisions.
+// The protected set plus the deterministic lifecycle and composite store
+// revisions.
 store_lifecycle_snapshot_from_state: fn(roots: [String:LifecycleRoot], closure_head: String) -[Time]> LifecycleSnapshot StoreError! {
     store_lifecycle_validate_state_bounds(roots)
     protected_targets: store_lifecycle_protected_union(roots, store_lifecycle_unix_now())
@@ -383,8 +377,8 @@ store_lifecycle_snapshot_from_state: fn(roots: [String:LifecycleRoot], closure_h
     Ok(LifecycleSnapshot{roots: roots, protected_targets: protected_targets, revision: revision, store_revision: store_revision})
 }
 
-// Rust `load_state`: the snapshot state plus every later transaction,
-// bounded by recovery work and checked against the known closure targets.
+// The snapshot state plus every later transaction, bounded by recovery work and
+// checked against the known closure targets.
 store_lifecycle_load_state: fn(roots: HangarRoots, known: [String]) -[FS, Env]> [String:LifecycleRoot] StoreError! {
     journal: store_lifecycle_ensure_journal_dir(roots)
     scan: store_lifecycle_scan_journal(journal)
@@ -420,8 +414,8 @@ store_lifecycle_load_state: fn(roots: HangarRoots, known: [String]) -[FS, Env]> 
     Ok(state)
 }
 
-// Rust `entry_already_applied`: the state already records exactly this
-// transition, so a retry with a newer timestamp changes nothing.
+// The state already records exactly this transition, so a retry with a newer
+// timestamp changes nothing.
 store_lifecycle_entry_already_applied: fn(state: [String:LifecycleRoot], entry: LifecycleJournalEntry) -> Bool Never! {
     if entry == {
         .Prepare(identity, proposed, protected, metadata, revision, _) -> {
@@ -443,7 +437,6 @@ store_lifecycle_entry_already_applied: fn(state: [String:LifecycleRoot], entry: 
     }
 }
 
-// Rust `validate_state_bounds`.
 store_lifecycle_validate_state_bounds: fn(state: [String:LifecycleRoot]) StoreError! {
     if state.len() > STORE_LIFECYCLE_MAX_ROOTS {
         return Err(StoreError.InvalidData("lifecycle state exceeds root-count bound"))
@@ -466,7 +459,7 @@ store_lifecycle_validate_state_bounds: fn(state: [String:LifecycleRoot]) StoreEr
     }
 }
 
-// Rust `validate_state_targets`: every target is a digest the closure knows.
+// Every target is a digest the closure knows.
 store_lifecycle_validate_state_targets: fn(state: [String:LifecycleRoot], known: [String]) StoreError! {
     ids: store_lifecycle_sorted_ids(state)
     loop id in ids {
@@ -485,7 +478,7 @@ store_lifecycle_require_known_target: fn(target: String, known: [String]) StoreE
     }
 }
 
-// Rust `apply_entry`: one state transition with its invariants.
+// One state transition with its invariants.
 store_lifecycle_apply_entry: fn(state: ^[String:LifecycleRoot], entry: LifecycleJournalEntry) StoreError! {
     if entry == {
         .Prepare(identity, proposed, protected, metadata, revision, at) -> {
@@ -586,8 +579,7 @@ store_lifecycle_apply_prepare: fn(state: ^[String:LifecycleRoot], identity: Root
     state[key] = LifecycleRoot{identity: identity, targets: proposed, protected_targets: protected, phase: RootPhase.Prepared, prepared_at: at, committed_at: None, tombstoned_at: None, metadata: metadata, revision: revision, legacy: false}
 }
 
-// Rust `checked_targets`: a nonempty, bounded, duplicate-free set of known
-// digests.
+// A nonempty, bounded, duplicate-free set of known digests.
 store_lifecycle_checked_targets: fn(targets: [String], known: [String]) -> [String] StoreError! {
     if targets.len() == 0 {
         return Err(StoreError.InvalidData("lifecycle root target set must not be empty"))
@@ -609,7 +601,6 @@ store_lifecycle_checked_targets: fn(targets: [String], known: [String]) -> [Stri
     Ok(store_lifecycle_sorted_set(exact))
 }
 
-// Rust `validate_entry_targets`.
 store_lifecycle_validate_entry_targets: fn(entry: LifecycleJournalEntry, known: [String]) StoreError! {
     targets: if entry == {
         .Prepare(_, proposed, protected, _, _, _) -> store_lifecycle_union(proposed, protected)
@@ -619,8 +610,7 @@ store_lifecycle_validate_entry_targets: fn(entry: LifecycleJournalEntry, known: 
     loop target in targets { store_lifecycle_require_known_target(target, known) }
 }
 
-// Rust `persist_entry`: publish one transaction durably, then compact when
-// the history is long.
+// Publish one transaction durably, then compact when the history is long.
 store_lifecycle_persist_entry: fn(roots: HangarRoots, entry: LifecycleJournalEntry, state: [String:LifecycleRoot], control: LifecycleWriteControl) -[FS, Env]> StoreError! {
     store_lifecycle_validate_state_bounds(state)
     store_lifecycle_validate_snapshot_wire(state)
@@ -648,8 +638,7 @@ store_lifecycle_persist_entry: fn(roots: HangarRoots, entry: LifecycleJournalEnt
     store_lifecycle_compact_if_needed(roots, state)
 }
 
-// Rust `recover_unlocked`: remove abandoned partial members and refuse
-// unknown ones; the number removed.
+// Remove abandoned partial members and refuse unknown ones; the number removed.
 store_lifecycle_recover_unlocked: fn(roots: HangarRoots) -[FS, Env]> Int StoreError! {
     journal: store_lifecycle_ensure_journal_dir(roots)
     recovered := 0
@@ -710,8 +699,8 @@ store_lifecycle_parse_sequence: fn(name: String) -> Int? Never! {
     store_lifecycle_parse_u64(prefix)
 }
 
-// Rust `scan_journal`: authenticate every member, decode the transactions
-// after the snapshot, and prove the sequence is contiguous.
+// Authenticate every member, decode the transactions after the snapshot, and
+// prove the sequence is contiguous.
 store_lifecycle_scan_journal: fn(journal: PinnedLifecycleDirectory) -[FS]> LifecycleJournalScan StoreError! {
     names := store_lifecycle_bounded_names(journal)
     names.sort()
@@ -799,8 +788,8 @@ store_lifecycle_member_entry: fn(journal: PinnedLifecycleDirectory, name: String
     }
 }
 
-// Rust `read_member_bounded`: read a regular member of at most `maximum`
-// bytes as UTF-8, without following a link.
+// Read a regular member of at most `maximum` bytes as UTF-8, without following
+// a link.
 store_lifecycle_read_member_bounded: fn(journal: PinnedLifecycleDirectory, name: String, maximum: Int) -[FS]> String StoreError! {
     file := journal.open_read(name)
     length: file.stat().size
@@ -821,8 +810,8 @@ store_lifecycle_read_member_bounded: fn(journal: PinnedLifecycleDirectory, name:
     Ok(text)
 }
 
-// Rust `compact_if_needed`: after more than 128 live transactions, publish a
-// snapshot through the newest sequence and delete the folded members.
+// After more than 128 live transactions, publish a snapshot through the newest
+// sequence and delete the folded members.
 store_lifecycle_compact_if_needed: fn(roots: HangarRoots, state: [String:LifecycleRoot]) -[FS, Env]> StoreError! {
     journal: store_lifecycle_ensure_journal_dir(roots)
     scan: store_lifecycle_scan_journal(journal)
@@ -851,8 +840,8 @@ store_lifecycle_compact_if_needed: fn(roots: HangarRoots, state: [String:Lifecyc
     journal.sync()
 }
 
-// Rust `validate_snapshot_wire`: admission uses the longest sequence spelling
-// so a later compaction cannot fail after its transaction is durable.
+// Admission uses the longest sequence spelling so a later compaction cannot
+// fail after its transaction is durable.
 store_lifecycle_validate_snapshot_wire: fn(state: [String:LifecycleRoot]) StoreError! {
     body: store_lifecycle_render_snapshot_text(STORE_LIFECYCLE_MAX_SEQUENCE_TEXT, state)
     wire_len: body.bytes().len() + STORE_LIFECYCLE_CHECKSUM_FIELD.bytes().len() + 64 + 1
@@ -861,7 +850,7 @@ store_lifecycle_validate_snapshot_wire: fn(state: [String:LifecycleRoot]) StoreE
     }
 }
 
-// Rust `corrupt_name`: InvalidData naming the journal member.
+// InvalidData naming the journal member.
 store_lifecycle_corrupt_name: fn(journal: PinnedLifecycleDirectory, name: String, detail: String) -> StoreError Never! {
     StoreError.InvalidData("lifecycle journal `{journal.member_path(name)}`: {detail}")
 }

@@ -1,11 +1,10 @@
 // One policy-bound, credential-clean fetch path for the native registries
-// (CRAN, LuaRocks, RubyGems, CPAN, Packagist), ported from
-// jetpack::Provider::fetch.
+// (CRAN, LuaRocks, RubyGems, CPAN, Packagist).
 //
 // Downloads go through one Core HTTP client that follows at most five
 // redirects and only to the authorized hosts, ignores ambient proxies, and
 // caps every body. Core's HTTP client has no destination-address policy, so
-// the Rust public-address pin is not enforced here. Core has no streaming
+// no public-address pin is enforced here. Core has no streaming
 // gzip or tar reader: an archive is decoded in memory, its raw headers walked
 // by the preflight, then its members read by the strict local tar reader.
 use {
@@ -29,15 +28,15 @@ PROVIDER_MAX_ARCHIVE_PATH_BYTES: 4096
 PROVIDER_FETCH_MAX_REDIRECTS: 5
 
 // A tar stream decoded through gzip may carry at most this much after its end
-// marker: the pipe capacity the Rust `gzip -dc` preflight child could fill
-// before the closed reader stopped it.
+// marker: the pipe capacity a `gzip -dc` preflight child could fill before
+// the closed reader stopped it.
 PROVIDER_TAR_TRAILER_BYTES: 65536
 
 PROVIDER_TAR_BLOCK: 512
 
 PROVIDER_READ_CHUNK: 65536
 
-// Rust `std::io::Error` text for `read_exact` at end of input.
+// The IO error text for an exact read at end of input.
 PROVIDER_SHORT_READ: "failed to fill whole buffer"
 
 // ── Error carrier ──
@@ -51,8 +50,8 @@ RegistryErrorKind: enum {
     NativeCatalog,
 }
 
-// The registry layer's failure: a final reason text (Rust `String` errors of
-// the fetch and provider helpers) or a provider error passed through as is.
+// The registry layer's failure: a final reason text or a provider error passed
+// through as is.
 #Error
 RegistryError: enum {
     Reason(String),
@@ -153,7 +152,7 @@ provider_registry_archive_root: fn(unpack: String) -[FS]> String RegistryError! 
 
 // Build scratch under `<store>/<build scratch>/<label>-<pid>-…`. The caller
 // owns cleanup: `guard := RegistryScratch{path: scratch}` then
-// `defer close(guard)` (Rust `Scratch` drop).
+// `defer close(guard)`.
 provider_registry_scratch: fn(store: String, label: String, context: String) -[FS, Env, Rand]> String RegistryError! {
     parent: files.join(store, STORE_BUILD_SCRATCH_DIR)
     provider_registry_create_dir_all(parent, context)
@@ -181,7 +180,7 @@ RegistrySourceObject: struct {
 }
 
 // The CAS closure edges and `dependency.object.*` facts of every non-root
-// source archive, in closure order (Rust `dependency_objects`).
+// source archive, in closure order.
 provider_registry_dependency_objects: fn(root: String, objects: [RegistrySourceObject]) -> {references: [String], facts: [String:String]} Never! {
     references := [String]{}
     facts := [String:String]{}
@@ -194,18 +193,17 @@ provider_registry_dependency_objects: fn(root: String, objects: [RegistrySourceO
     {references: references, facts: facts}
 }
 
-// A tool on PATH (Rust `which`: the first `PATH` entry holding a file).
+// A tool on PATH (the first `PATH` entry holding a file).
 provider_registry_which: fn(tool: String) -[FS, Env]> String? Never! { files.which(tool) }
 
-// Run one provisioned tool and require success (Rust `status()` +
-// `success()`): `could not {action}: {error}` when it cannot start,
-// `failure` when it exits unsuccessfully.
+// Run one provisioned tool and require success: `could not {action}: {error}`
+// when it cannot start, `failure` when it exits unsuccessfully.
 provider_registry_run: fn(spec: ProcessSpec, action: String, failure: String) -[Exec, Time.Wait]> RegistryError! {
     receipt: spec.run() ?? return Err(RegistryError.Reason("could not {action}: {err}"))
     if !receipt.success -> return Err(RegistryError.Reason(failure))
 }
 
-// ── Text helpers (Rust `str` semantics) ──
+// ── Text helpers ──
 
 // `str::split_whitespace`.
 provider_registry_words: fn(text: String) -> [String] Never! {
@@ -296,8 +294,8 @@ provider_registry_valid_hex: fn(value: String, length: Int) -> Bool Never! {
     true
 }
 
-// A relative path whose every component is a plain name (Rust
-// `Path::components` all `Normal`): no root, no `..`, no leading `.`.
+// A relative path whose every component is a plain name: no root, no `..`, no
+// leading `.`.
 provider_registry_safe_relative: fn(path: String) -> Bool Never! {
     if path == "" || path.starts_with("/") -> return false
     pieces: path.split("/").to_list()
@@ -320,7 +318,7 @@ provider_registry_stable_suffix: fn(value: String) -> String Never! {
     provider_registry_slice(pkg_sha256_hex(value.bytes()), 0, 16)
 }
 
-// Every CR LF pair as LF (Rust `replace("\r\n", "\n")`).
+// Every CR LF pair as LF.
 provider_registry_crlf_to_lf: fn(text: String) -> String Never! {
     raw: text.bytes()
     out := [U8]{}
@@ -331,8 +329,7 @@ provider_registry_crlf_to_lf: fn(text: String) -> String Never! {
     pkg_bytes_text(out, 0, out.len())
 }
 
-// Split at every byte of `delimiters` (Rust `str::split([...])`); empty
-// pieces are kept.
+// Split at every byte of `delimiters`; empty pieces are kept.
 provider_registry_split_any: fn(text: String, delimiters: String) -> [String] Never! {
     raw: text.bytes()
     stops: delimiters.bytes()
@@ -379,7 +376,7 @@ provider_registry_locked_platform: fn(envelope: LockEnvelope) -[Env]> String Nev
 // The producer record of a registry closure realization: the closure's
 // source hash as its immutable CAS source, the repository and fetch
 // authority as plan facts, and the recipe as its toolchain facts. A refused
-// record keeps Rust's `invalid producer record: {error:?}` text.
+// record keeps the `invalid producer record: {error:?}` text.
 provider_registry_producer: fn(provider: String, action_kind: String, source_hash: String, repository: String, fetch_authority: String, version: String, extra_plan_facts: [String:String], recipe: String, identity: CacheIdentity, facts: [String:String]) -> ProducerRecord RegistryError! {
     plan_facts := [String:String]{
         "action.kind": action_kind,
@@ -393,7 +390,7 @@ provider_registry_producer: fn(provider: String, action_kind: String, source_has
 }
 
 // Exact installed output under the store: `<name>-<version>-<hash[..12]>`,
-// refused when anything already sits there (Rust `out_dir.exists()`).
+// refused when anything already sits there.
 provider_registry_fresh_output: fn(store: String, name: String, version: String, source_hash: String) -[FS]> String RegistryError! {
     out_dir: files.join(store, "{name}-{version}-{provider_registry_slice(source_hash, 0, 12)}")
     if files.exists(out_dir) {
@@ -604,7 +601,7 @@ provider_registry_authority_of: fn(url: String) -> String RegistryError! {
     Ok(authority)
 }
 
-// Rust `Ipv4Addr::from_str`: four decimal octets, no leading zeros.
+// Four decimal octets, no leading zeros.
 provider_registry_ipv4_octets: fn(text: String) -> [Int]? Never! {
     parts: text.split(".").to_list()
     if parts.len() != 4 -> return None
@@ -721,10 +718,9 @@ provider_registry_preflight_tar: fn(stream: [U8], gzipped: Bool) RegistryError! 
     }
 }
 
-// The raw tar header walker (Rust `inspect_tar_stream`), fed decoded bytes in
-// any chunking. It counts every header, metadata records included, bounds
-// stored payloads and logical (sparse or PAX) sizes, and stops at the first
-// all-zero header.
+// The raw tar header walker, fed decoded bytes in any chunking. It counts every
+// header, metadata records included, bounds stored payloads and logical (sparse
+// or PAX) sizes, and stops at the first all-zero header.
 RegistryTarPreflight: struct {
     priv pending: [U8],
     priv remaining: Int,
@@ -931,11 +927,10 @@ provider_registry_tar_kind: fn(flag: Int, name: String) -> RegistryTarKind Never
     }
 }
 
-// Every member of a decoded tar stream (Rust `tar::Archive::entries`),
-// stopping one past the entry budget so the caller reports it. A PAX `path`
-// record or GNU long name names the next member; global PAX headers and GNU
-// long link names are metadata only. Every header checksum and payload bound
-// is checked against the stream.
+// Every member of a decoded tar stream, stopping one past the entry budget so
+// the caller reports it. A PAX `path` record or GNU long name names the next
+// member; global PAX headers and GNU long link names are metadata only. Every
+// header checksum and payload bound is checked against the stream.
 provider_registry_tar_members: fn(stream: [U8]) -> [RegistryTarMember] RegistryError! {
     unreadable: RegistryError.Reason("source is not a readable tar archive")
     members := [RegistryTarMember]{}
@@ -1047,15 +1042,14 @@ provider_registry_tar_entries: fn(stream: [U8]) -> [RegistryTarEntry] RegistryEr
     Ok(listing)
 }
 
-// Every entry of the archive (Rust `tar -t[v][z]f`), stopping one past the
-// entry budget so the caller reports it.
+// Every entry of the archive, stopping one past the entry budget so the caller
+// reports it.
 provider_registry_tar_listing: fn(path: String, gzipped: Bool) -[FS]> [RegistryTarEntry] RegistryError! {
     provider_registry_tar_entries(provider_registry_tar_stream(path, gzipped))
 }
 
 // Extract a validated archive of regular files and directories under
-// `destination` (Rust `tar -x[z]f … -C destination` as an unprivileged user:
-// no owners, permission bits under the process umask).
+// `destination`.
 provider_registry_extract_tar: fn(path: String, gzipped: Bool, destination: String) -[FS]> RegistryError! {
     stream: provider_registry_tar_stream(path, gzipped)
     members: provider_registry_tar_members(stream)

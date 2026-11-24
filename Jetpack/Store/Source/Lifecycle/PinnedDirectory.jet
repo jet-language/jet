@@ -4,11 +4,9 @@
 // operation names an entry relative to that held directory. A component that
 // is renamed or replaced after opening cannot redirect journal writes.
 //
-// The Rust reference reaches this through openat/mkdirat/renameat/linkat/
-// unlinkat/fdopendir FFI on Unix and pinned handles on Windows. Here the held
-// directory is the ratified Core directory handle and member
-// identity is the ratified Stat identity the per-platform
-// flags and the unsupported-platform fallback are Core's responsibility.
+// The held directory is the ratified Core directory handle and member
+// identity is the ratified Stat identity; the per-platform flags and the
+// unsupported-platform fallback are Core's responsibility.
 use files: core.files
 
 STORE_PINNED_PRIVATE_MODE: 0o700
@@ -17,8 +15,8 @@ STORE_PINNED_FILE_MODE: 0o600
 
 PinnedLifecycleDirectory: struct {
     priv directory: Directory,
-    // The absolute path the held directory was opened at (Rust `path`);
-    // read through `path()`.
+    // The absolute path the held directory was opened at; read through
+    // `path()`.
     priv absolute_path: String,
 
     // Open `path`, creating missing components as private directories. A

@@ -34,10 +34,10 @@ publication_verify_index_entry: fn(all: [PublicationIndexEntry], entry: Publicat
     Ok([String]{})
 }
 
-// Rust resolve_and_verify_all. PublicationRegistryConfig and the protected
+// Resolve and verify all. PublicationRegistryConfig and the protected
 // publication_ensure_index_clone are mandatory JP-PUB-REG-TRANSPORT and
 // JP-PUB-REG-TRUST-CACHE seams (#4262/#3593/#3594), not a checkout here.
-// Rust closure: DNS=Net, git=Exec, lock sleep=Time.Wait, suffix=Time/Env,
+// Closure: DNS=Net, git=Exec, lock sleep=Time.Wait, suffix=Time/Env,
 // descriptor-relative clone installation=FS; TUF also uses FS/Env/Time.
 publication_resolve_and_verify_all: fn(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
     repo: publication_ensure_index_clone(registry)
@@ -51,8 +51,8 @@ publication_resolve_and_verify_all: fn(registry: PublicationRegistryConfig, name
     Ok(PublicationVerifiedEntries{entries: all, warnings: warnings})
 }
 
-// Rust resolve_and_verify: filter only AFTER all recorded entries have passed
-// TUF, tier and signature verification. A yank never invalidates an exact lock.
+// Filter only AFTER all recorded entries have passed TUF, tier and signature
+// verification. A yank never invalidates an exact lock.
 publication_resolve_and_verify: fn(registry: PublicationRegistryConfig, name: String) -[FS, Env, Time, Time.Wait, Exec, Net]> PublicationVerifiedEntries PublicationDiagnosticError! {
     verified: publication_resolve_and_verify_all(registry, name)
     live := [PublicationIndexEntry]{}

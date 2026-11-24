@@ -96,7 +96,7 @@ services_daemonizing_error: fn(name: String) -> ServicesError Never! {
     ServicesError.new("service {name} must stay in the foreground; daemonizing commands cannot be supervised")
 }
 
-// Rust `split(|c| !c.is_ascii_alphanumeric() && c != '-')`, keeping empty words.
+// Split at every byte that is neither ASCII alphanumeric nor `-`, keeping empty words.
 services_command_words: fn(argument: String) -> [String] Never! {
     words := [String]{}
     current := [U8]{}
@@ -234,9 +234,9 @@ ServicePortReservation: struct {
     ports: [Int],
     listeners: [TCPListener],
 
-    // Rust `drop(allocated_ports)`: release the listeners immediately before
-    // spawn so the service binds its ports without a race. The consuming
-    // method drops the reservation, and so closes every listener, on return.
+    // Release the listeners immediately before spawn so the service binds its
+    // ports without a race. The consuming method drops the reservation, and so
+    // closes every listener, on return.
     release: fn(^^self) {}
 }
 
@@ -277,7 +277,7 @@ ServiceSocketReservation: struct {
         if first_error == .Val(message) -> return Err(ServicesError.new(message))
     }
 
-    // Rust `Drop`: remove every reserved path.
+    // Remove every reserved path.
     abandon: fn(^^self) -[FS]> Never! {
         loop path in self.paths -> services_remove_quiet(path)
     }

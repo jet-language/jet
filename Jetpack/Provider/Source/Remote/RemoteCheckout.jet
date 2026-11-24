@@ -2,13 +2,11 @@
 // and their publication into the content-addressed source cache.
 //
 // Every checkout, fingerprint, copy, and publication works through held
-// directory handles each path component is opened without
-// following links, and later operations name entries relative to the held
-// directory, so a component renamed or swapped for a link after opening
-// cannot redirect reads or writes. File identity and link counts come from
-// Exclusive creation from and cross-
-// directory renames from. The Rust reference reached this
-// through openat/mkdirat/renameat/unlinkat FFI.
+// directory handles: each path component is opened without following links,
+// and later operations name entries relative to the held directory, so a
+// component renamed or swapped for a link after opening cannot redirect
+// reads or writes. Creation is exclusive and cross-directory renames are
+// handle-relative.
 use {
     files: core.files
     random: core.crypto.random
@@ -399,8 +397,7 @@ HeldDirectoryEntry: struct {
         self.parent.rename(self.name, destination.name, into: Val(destination.directory))
     }
 
-    // Remove this directory tree relative to its held parent (Rust
-    // `HeldTempDirectory` drop); best effort.
+    // Remove this directory tree relative to its held parent; best effort.
     remove: fn(self) -[FS]> Never! {
         foundation_remove_held_tree(self.parent, self.name).drop("a temporary checkout is swept by later cleanup")
     }

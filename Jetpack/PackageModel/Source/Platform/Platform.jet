@@ -32,8 +32,8 @@ PlatformKey: struct {
         Val(PlatformKey{arch: arch, os: os})
     }
 
-    // The host process's key in Rust `std::env::consts` spelling:
-    // `linux`/`macos`/`windows` and `x86_64`/`aarch64`.
+    // The host process's key: `linux`/`macos`/`windows` and
+    // `x86_64`/`aarch64`.
     host: fn() -[Env]> PlatformKey Never! {
         os: if {
             pkg_platform_core_sys.is_macos() -> OS_MACOS
@@ -55,7 +55,7 @@ PlatformKey: struct {
     is_tier_one: fn(self) -> Bool Never! { pkg_is_tier_one(self.arch, self.os) }
 }
 
-// The host's `arch-os` envelope key (Rust `host_key`).
+// The host's `arch-os` envelope key.
 pkg_host_key: fn() -[Env]> String Never! { PlatformKey.host().envelope_key() }
 
 pkg_is_tier_one: fn(arch: String, os: String) -> Bool Never! {

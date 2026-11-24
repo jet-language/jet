@@ -348,7 +348,7 @@ pkg_bundle_native_materialize: fn(plan: ^BundlePlan, output: String, parent: Str
     if linux {
         files.set_mode(artifact, 493) ?? return Err(BundleMaterializeError{reason: "could not set package mode on `{artifact}`: {err}"})
     }
-    // AppImage facts precede post-sign hooks; MSIX hashes after hooks (Rust).
+    // AppImage facts precede post-sign hooks; MSIX hashes after hooks.
     digest := if linux -> pkg_bundle_native_hash(artifact) else -> ""
     pkg_bundle_native_hooks(plan, SigningPhase.PostSign, stage, writable, signing)
     pkg_bundle_native_hooks(plan, SigningPhase.Verify, stage, writable, signing)

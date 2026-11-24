@@ -2,10 +2,9 @@
 // recording definitions, use-site references, call edges, members, arithmetic
 // policy facts, structural boundaries, and spelled bypasses, then the finalized
 // index rows (`SymbolDB.finalize_index`). Reference targets come from sema's
-// name references (the Rust name ledger's `reference` rows) and effect rows
-// from the checked functions (the Rust `SemIndexEffectFacts` summaries), so
-// this walk never runs a second checker. LSP hover and inlay text have no Jet
-// consumer and are not produced.
+// name references and effect rows from the checked functions, so this walk
+// never runs a second checker. LSP hover and inlay text have no Jet consumer
+// and are not produced.
 use {
     jet_driver.[JetDriverDocModule, jet_driver_doc_callee_key]
     jet_foundation.[
@@ -726,8 +725,8 @@ semindex_slot_enter: fn(db: ^SemDB, ctx: ^SemWalk, name: String, kind: String) -
         parent_start: db.nodes[parent].span.start
         parent_end: db.nodes[parent].span.end
         exact_parent_end: db.nodes[parent].class == "arm"
-        // `ctx.block_spans` is sorted by start: from Rust's `partition_point` lower bound,
-        // the first unclaimed candidate is the minimum-start one (`min_by_key` keeps the first).
+        // `ctx.block_spans` is sorted by start: from the partition-point lower bound,
+        // the first unclaimed candidate is the minimum-start one (the first minimum wins).
         first := 0
         high := ctx.block_spans.len()
         loop first < high {

@@ -1,6 +1,6 @@
 use files: core.files
 
-// Fact files render through Core JSON in the Rust field order.
+// Fact files render through Core JSON in a fixed field order.
 jetos_write_hardware_facts: fn(dir: String, system: SystemPlan) -[FS]> IOError! {
     hw_dir: files.join(dir, "hardware")
     bin_dir: files.join(dir, "sw/bin")
@@ -122,14 +122,14 @@ jetos_specialization_items: fn(specializations: [{key: String, value: String}]) 
     Dyn.Array(items)
 }
 
-// Rust's `{x}\tdeclared\n` manifest rows, in declaration order.
+// The `{x}\tdeclared\n` manifest rows, in declaration order.
 jetos_declared_manifest: fn(items: [String]) -> String Never! {
     rows := [String]{}
     loop item in items -> rows.push("{item}\tdeclared\n")
     rows.join("")
 }
 
-// Rust make_executable: the followed file's mode with every execute bit set.
+// The followed file's mode with every execute bit set.
 jetos_make_executable: fn(path: String) -[FS]> IOError! {
     stat: files.stat(path, links: .Follow)
     files.set_mode(path, (stat.mode) & 0o7777 | 0o111)

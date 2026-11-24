@@ -33,7 +33,7 @@ impl MetadataFacts {
     }
 }
 
-// Rust `json_string`: the non-blank string at `key`.
+// The non-blank string at `key`.
 provider_graph_json_string: fn(object: [String:Dyn], key: String) -> String? Never! {
     value: object.get(key) ?? return None
     text: pkg_json_text(value) ?? return None
@@ -41,8 +41,8 @@ provider_graph_json_string: fn(object: [String:Dyn], key: String) -> String? Nev
     Val(text)
 }
 
-// Rust `as_i64`: a JSON whole number (no fraction or exponent). Strict
-// `json.parse` keeps every number as its exact lexeme (#4602).
+// A JSON whole number (no fraction or exponent). Strict `json.parse` keeps
+// every number as its exact lexeme (#4602).
 provider_graph_json_int: fn(value: Dyn) -> Int? Never! { foundation_json_integer(value) }
 
 // The first non-blank string among `keys`.
@@ -90,7 +90,7 @@ provider_graph_json_array_strings: fn(object: [String:Dyn], key: String) -> [Str
     out
 }
 
-// Rust `json_value_text`: a string's text, anything else as compact JSON.
+// A string's text, anything else as compact JSON.
 provider_graph_json_value_text: fn(value: Dyn) -> String Never! {
     if value == {
         .Text(text) -> text
@@ -107,7 +107,7 @@ provider_graph_is_non_blank_text: fn(value: Dyn) -> Bool Never! {
 
 provider_graph_is_bool: fn(value: Dyn) -> Bool Never! { pkg_json_bool(value) != None }
 
-// Rust `json_string_list`: one string, or an array of only strings.
+// One string, or an array of only strings.
 provider_graph_json_string_list: fn(value: Dyn) -> [String]? Never! {
     if pkg_json_text(value) == {
         .Val(text) -> return Val([String]{text})

@@ -31,14 +31,14 @@ ImpactReport: struct {
     upstream_callers: [ImpactEdge],
     downstream_callees: [ImpactEdge],
 
-    // Rust ImpactReport.analyze (44–72) over one checked program's index.
+    // Analyze one checked program's index.
     analyze: fn(index: SemIndex, symbol: String, depth_limit: Int) -> ImpactReport Never! {
         impact_report(index.definitions, index.references, index.calls, symbol, depth_limit)
     }
 
-    // Rust ImpactReport.to_json and nested edge_json/ref_json (74–115).
-    // Rust json_str (266–282) shares Foundation's exact quote contract, including
-    // DEL/C1 controls and lowercase \u0008/\u000c rather than debug quoting.
+    // The report JSON with its nested edge and ref objects. Strings share
+    // Foundation's exact quote contract, including DEL/C1 controls and
+    // lowercase \u0008/\u000c rather than debug quoting.
     to_json: fn(self) -> String Never! {
         refs: loop reference in self.references -> impact_ref_json(reference)
         sites: loop edge in self.call_sites -> impact_edge_json(edge)
@@ -52,7 +52,7 @@ ImpactReport: struct {
         "{{\"symbol\":{foundation_json_quote(self.symbol)},\"found\":{found},\"depth_limit\":{self.depth_limit},\"definition_module\":{definition_module},\"references\":[{refs.join(",")}],\"call_sites\":[{sites.join(",")}],\"upstream_callers\":[{upstream.join(",")}],\"downstream_callees\":[{downstream.join(",")}]}}"
     }
 
-    // Rust ImpactReport.render_text (117–170): preserve ordering and whitespace.
+    // Preserve ordering and whitespace.
     render_text: fn(self) -> String Never! {
         out := ""
         if !self.found {
@@ -119,9 +119,9 @@ impact_report: fn(definitions: [SemDefinition], references: [SemRef], calls: [Se
     }
 }
 
-// Rust resolve_symbol (173–180): split at the last `.`; the first definition
-// whose module is that prefix, or ends with it, is the symbol. An unqualified
-// query is the first definition of that name.
+// Split at the last `.`; the first definition whose module is that prefix, or
+// ends with it, is the symbol. An unqualified query is the first definition of
+// that name.
 impact_resolve_module: fn(definitions: [SemDefinition], query: String) -> String? Never! {
     bytes: query.bytes()
     separator := -1
@@ -144,9 +144,9 @@ impact_resolve_module: fn(definitions: [SemDefinition], query: String) -> String
     None
 }
 
-// Rust seen (caller, callee) identity and VecDeque frontier (198–243).
-// Named records avoid tuple Debug/Show emission defect #4357; no location is
-// part of identity. Queue is Core's ring buffer, not a shifting front removal.
+// Seen (caller, callee) identity and a queue frontier. Named records avoid
+// tuple Debug/Show emission defect #4357; no location is part of identity.
+// Queue is Core's ring buffer, not a shifting front removal.
 ImpactEdgeKey: struct {
     caller: String,
     callee: String,
@@ -183,7 +183,7 @@ impact_transitive_edges: fn(calls: [SemCall], start: String, depth_limit: Int, u
     out
 }
 
-// Rust ref_to_impact/edge_to_impact (245–264): byte spans are never re-sliced.
+// Byte spans are never re-sliced.
 impact_ref_to_impact: fn(reference: SemRef, depth: Int) -> ImpactRef Never! {
     ImpactRef{
         depth: depth,

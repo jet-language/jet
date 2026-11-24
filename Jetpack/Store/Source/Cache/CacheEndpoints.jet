@@ -166,8 +166,7 @@ store_cache_validate_s3_uri: fn(endpoint: String) StoreError! {
     if !safe -> return Err(StoreError.InvalidData("S3 endpoint has an unsafe bucket or prefix"))
 }
 
-// Whether `value` holds a Unicode White_Space scalar (Rust
-// `char::is_whitespace`).
+// Whether `value` holds a Unicode White_Space scalar.
 store_cache_has_whitespace: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     loop at in 0..<raw.len() {
@@ -491,9 +490,8 @@ store_cache_run_bounded_output: fn(spec: ProcessSpec, input: [U8]?, limit: Int, 
 store_cache_bounded_stderr: fn(text: String) -> String Never! {
     raw: text.bytes()
     if raw.len() <= STORE_CACHE_STDERR_LIMIT -> return text.trim()
-    // The diagnostic is valid UTF-8, so only the cut can split a scalar:
-    // back off to its lead byte and render the partial scalar as U+FFFD,
-    // as Rust's lossy decoding does.
+    // The diagnostic is valid UTF-8, so only the cut can split a scalar: back
+    // off to its lead byte and render the partial scalar as U+FFFD.
     end := STORE_CACHE_STDERR_LIMIT
     loop end > 0 && ((Int{raw[end]}) & 0xC0) == 0x80 -> end -= 1
     kept: pkg_bytes_text(raw, 0, end)

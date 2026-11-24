@@ -8,9 +8,8 @@ use float_bits_math: core.math
 
 rt_f64_bits: fn(value: Float) -> I64 Never! {
     bits: float_bits_math.to_bits(value)
-    // Core returns the complete IEEE word as signed exact Int. The Rust
-    // original uses `value.to_bits() as i64`; the Rust original wraps that
-    // result with jet_int_from_i64, including -0.0 -> i64.MIN.
+    // Core returns the complete IEEE word as signed exact Int: the bits as an
+    // i64, wrapped as an exact Int, including -0.0 -> i64.MIN.
     checked(I64{bits}) ?? panic("a complete IEEE word must fit signed I64")
 }
 

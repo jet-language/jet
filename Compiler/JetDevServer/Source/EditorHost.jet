@@ -1,6 +1,6 @@
 // Host-neutral editor transport; never executes commands. Shared Foundation
 // facts/JSON come from their single published owner.
-// DevtoolsProjection/ResidentDevSession and WebHost decoder calls retain Rust
+// DevtoolsProjection/ResidentDevSession and WebHost decoder calls keep their
 // owner names pending Session/WebHost ABI reconciliation.
 use {
     editor_json: core.encoding.json
@@ -742,7 +742,7 @@ EditorHostTransport: struct {
         if !editor_is_object(params) {
             return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an object params value"))
         }
-        // Unsupported methods do not read common fields, matching Rust precedence.
+        // Unsupported methods do not read common fields.
         if method != EDITOR_WORKBENCH_METHOD && method != EDITOR_RECONNECT_METHOD && method != EDITOR_NAVIGATE_METHOD && method != EDITOR_SELECT_METHOD && method != EDITOR_COMMAND_METHOD {
             return Err(EditorHostError.UnsupportedMethod(method))
         }
@@ -880,7 +880,7 @@ editor_validate_loopback_url: fn(value: String) EditorHostError! {
     if host != "127.0.0.1" && host != "localhost" && host != "[::1]" {
         return Err(EditorHostError.LoopbackViolation("host `{host}` is not loopback"))
     }
-    // Rust u16 FromStr accepts a leading +, but not whitespace or negatives.
+    // A port accepts a leading +, but not whitespace or negatives.
     digits := port  // #4303
     if digits.starts_with("+") -> digits = digits.slice(1, digits.len())
     number := 0
@@ -897,7 +897,7 @@ editor_validate_loopback_url: fn(value: String) EditorHostError! {
     if number == 0 {
         return Err(EditorHostError.LoopbackViolation("URL port must be greater than zero"))
     }
-    // Exclude the first separator: Rust's path starts after that separator.
+    // Exclude the first separator: the path starts after that separator.
     if slash < rest.len() {
         tail := rest.slice(slash + 1, rest.len())
         if tail.contains("//") {
@@ -1014,8 +1014,8 @@ editor_field_u64: fn(params: Dyn, key: String) -> U64 EditorHostError! {
             if checked(U64{number}) == .Val(result) -> return Ok(result)
         }
     } else if value.decode<Float>() == .Ok(number) {
-        // Rust's float-to-u64 cast of a whole number: it saturates at the
-        // rounded MAX, and the top half is above Int's range.
+        // A float-to-u64 cast of a whole number: it saturates at the rounded
+        // MAX, and the top half is above Int's range.
         if number.is_finite() && number >= (Float{0.0}) && number <= (Float{18446744073709551616.0}) && number.rounded(.TowardZero) == number {
             if number >= (Float{18446744073709551616.0}) -> return Ok(U64{18446744073709551615})
             if number < (Float{9223372036854775808.0}) {

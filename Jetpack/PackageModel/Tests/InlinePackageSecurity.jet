@@ -10,9 +10,8 @@ use jet_pkg_model.[InlinePackageBlock, PackageFacts, pkg_binder_slice, pkg_extra
     }
 }
 
-// Rust `extract_inline_package(source).unwrap()`: the scan succeeds and the
-// carrier may be absent. A single `??` would consume both the Result and the
-// Option rail, so absence must stay observable here.
+// The scan succeeds and the carrier may be absent. A single `??` would consume
+// both the Result and the Option rail, so absence must stay observable here.
 pkg_test_scan_inline_package: fn(source: String) -> InlinePackageBlock? Never! {
     scanned := InlinePackageBlock?{None}
     if pkg_extract_inline_package(source) == {

@@ -1,15 +1,12 @@
-// Confined, no-follow filesystem work for recipe runs, ported from
-// jetpack::Recipe (`PinnedRecipeDirectory`, publication, copy and read
-// helpers, source/destination confinement, realized-tool checks).
+// Confined, no-follow filesystem work for recipe runs (`PinnedRecipeDirectory`,
+// publication, copy and read helpers, source/destination confinement,
+// realized-tool checks).
 //
-// The Rust reference holds directory descriptors through openat/mkdirat/
-// renameat/renameat2/unlinkat FFI. Here the held directory is the ratified
-// Core directory handle every stage allocation,
-// publication and cleanup names a member relative to that handle, so a
-// concurrent replacement of the path cannot redirect a write into another
-// tree. Atomic exchange is `rename(if_exists: .Swap)`
-// no-follow opens are `links: .Refuse` and file identity
-// is `Stat.id`.
+// The held directory is the ratified Core directory handle: every stage
+// allocation, publication and cleanup names a member relative to that
+// handle, so a concurrent replacement of the path cannot redirect a write
+// into another tree. Atomic exchange is `rename(if_exists: .Swap)`, no-follow
+// opens are `links: .Refuse` and file identity is `Stat.id`.
 use {
     files: core.files
     sys: core.sys
@@ -154,7 +151,7 @@ PinnedRecipeDirectory: struct {
     sync: fn(self) -[FS]> RecipeError! { self.directory.fsync() }
 }
 
-// Remove `name` under `parent` without following links (Rust `remove_at`).
+// Remove `name` under `parent` without following links.
 recipe_remove_member: fn(parent: Directory, name: String) -[FS]> RecipeError! {
     info: if parent.entry_stat(name) == {
         .Ok(info) -> info
@@ -195,7 +192,7 @@ recipe_remove_member: fn(parent: Directory, name: String) -[FS]> RecipeError! {
     }
 }
 
-// Rust `validate_recipe_component`: one ordinary path component.
+// One ordinary path component.
 recipe_validate_component: fn(value: String) RecipeError! {
     if value == "" || value == "." || value == ".." || pkg_text_has_control(value) || value.contains("/") || value.contains("\\") {
         return Err(RecipeError.InvalidInput("recipe path name must be one ordinary path component"))
@@ -216,8 +213,7 @@ recipe_io_is_unsupported: fn(error: IOError) -> Bool Never! {
     }
 }
 
-// Rust `absolute_recipe_path`: join a relative path to the current
-// directory, then normalize lexically.
+// Join a relative path to the current directory, then normalize lexically.
 recipe_absolute_path: fn(path: String) -[FS, Env]> String RecipeError! {
     if files.is_abs(path) -> return Ok(recipe_normalize(path))
     Ok(recipe_normalize(files.join(files.cwd(), path)))
@@ -273,18 +269,18 @@ recipe_has_parent_component: fn(relative: String) -> Bool Never! {
     segments.contains("..")
 }
 
-// Rust `ensure_recipe_directory`: hold and create a directory path.
+// Hold and create a directory path.
 recipe_ensure_directory: fn(path: String) -[FS, Env]> RecipeError! {
     PinnedRecipeDirectory.open_or_create(path)
 }
 
-// Rust `output_parent`: the held parent of an output root.
+// The held parent of an output root.
 recipe_output_parent: fn(output_root: String) -[FS, Env]> PinnedRecipeDirectory RecipeError! {
     parent: files.dirname(output_root)
     PinnedRecipeDirectory.open_or_create(if parent == "" -> "." else -> parent)
 }
 
-// Rust `output_name`: the output root's one ordinary final name.
+// The output root's one ordinary final name.
 recipe_output_name: fn(output_root: String) -> String RecipeError! {
     name: files.basename(output_root)
     if name == "" || name == "." || name == ".." {
@@ -420,7 +416,7 @@ recipe_copy_regular_file_nofollow: fn(src: String, dst: String, expected: Stat) 
     if !sys.is_windows() -> files.set_mode(dst, expected.mode)
 }
 
-// Rust `same_recipe_file_identity`: identity, length and modification time.
+// Identity, length and modification time.
 recipe_same_file_identity: fn(left: Stat, right: Stat) -> Bool Never! {
     left.id == right.id && left.size == right.size && left.modified == right.modified
 }

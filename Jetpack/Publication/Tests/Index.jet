@@ -1,7 +1,7 @@
 // JP-PUB-INDEX: index, name policy and tier carrier/review claims. Native
 // publication retains real Registry dependencies:
 // JP-PUB-REG-VERIFY, JP-PUB-REG-REFERRERS; authority operations owe Core #3593.
-// Rust InvalidData refusals report InvalidInput until Core has InvalidData (CORE-GAPS 11).
+// InvalidData refusals report InvalidInput until Core has InvalidData (CORE-GAPS 11).
 // The pure name/wire proof is NOT proof of the native publication acceptance.
 use {
     jet_foundation.[diagnostic_render, foundation_json_quote]
@@ -327,8 +327,8 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
         .Err(error) -> { assert(error == .AlreadyExists(_)) }
         .Ok(_) -> panic("immutable version rewritten")
     }
-    // Rust with_index_lock releases the lock on every action result: the
-    // refused rewrite must not leave `.textkit.lock` to time out the next writer.
+    // The index lock is released on every action result: the refused rewrite
+    // must not leave `.textkit.lock` to time out the next writer.
     assert(!files.lexists(files.join(files.join(repo, "index"), ".textkit.lock")))
     publication_write_index_entry(repo, publication_index_test_entry("textkit", "1.1.0", false)) ?? panic("write after refused rewrite")
     assert_eq((publication_read_entries(repo, "textkit") ?? panic("read after refusal")).len(), 2)
@@ -336,8 +336,8 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.remove_all(repo) ?? panic("cleanup")
 }
 
-// Rust with_index_lock: a lock older than 300s is removed and the create is
-// retried; the reclaimed lock is released after the action.
+// A lock older than 300s is removed and the create is retried; the reclaimed
+// lock is released after the action.
 #Test("publication index lock reclaims a stale lock and releases it") {
     repo: publication_index_test_root("stale-lock")
     lock: files.join(files.join(repo, "index"), ".textkit.lock")

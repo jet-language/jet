@@ -18,8 +18,8 @@ publication_registry_checkpoint_path: fn(registry_name: String) -[Env]> String N
     publication_registry_trust_path(publication_keys_dir(), registry_name, "registry-checkpoints", "state")
 }
 
-// Rust Path::parent of a root has no value; a single relative component has
-// the EMPTY parent, not '.'. Preserve that distinction.
+// The parent of a root has no value; a single relative component has the
+// EMPTY parent, not '.'. Preserve that distinction.
 publication_registry_trust_path: fn(keys_dir: String, registry_name: String, directory: String, extension: String) -> String Never! {
     base: if keys_dir == "/" || keys_dir == "" -> "." else -> files.dirname(keys_dir)
     files.join(files.join(base, directory), "{pkg_sha256_hex(registry_name.bytes())}.{extension}")

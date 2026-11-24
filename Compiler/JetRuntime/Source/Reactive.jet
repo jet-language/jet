@@ -1,6 +1,5 @@
-// Dependency-tracked reactive cells. One meaning with the Rust reference:
-// ReactiveObserver, JetReactiveEffect, the per-thread observer stack and root
-// effects, JetSignal, JetDerived, jet_reactive_effect / _rooted / _scope.
+// Dependency-tracked reactive cells: observers, effects, the per-thread
+// observer stack and root effects, signals and derived cells.
 // Signal<T>, Derived<T> and Computed<T> share the one cell carrier; Effect is
 // its observer handle. The Core fields (`value`, `version`, `last`, `active`)
 // are untracked reads of the same carriers.
@@ -10,8 +9,7 @@
 //   derived's own observer, owned by the cell; 0 for a signal)
 //   Sources count their subscribers (refs) but never own them: an owner (an
 //   Effect handle, a derived cell, the thread's root effects) disposes its
-//   observer when its last owner goes, which detaches it from every source
-//   (Rust: weak subscriptions).
+//   observer when its last owner goes, which detaches it from every source.
 // Observer104: refs0 owners8 id16 active24 running32 env40 invoke48
 //   release56 deps{len64 cap72 data80} target88 (a derived's cell, not
 //   counted) last96
@@ -104,7 +102,7 @@ reactive_observer_release: fn(observer: I64) {
     jet_rt_free(observer, REACTIVE_OBSERVER_BYTES, I64{8})
 }
 
-// Detaches the observer from every source it read (Rust clear_dependencies).
+// Detaches the observer from every source it read.
 reactive_clear_dependencies: fn(observer: I64) {
     base: wrapping(observer + I64{64})
     length: reactive_word(base)
@@ -135,8 +133,8 @@ reactive_cell_unsubscribe: fn(cell: I64, observer: I64) {
     }
 }
 
-// Rust dispose: the first owner to end the observer detaches it; a running
-// body keeps its closure until the run returns.
+// The first owner to end the observer detaches it; a running body keeps its
+// closure until the run returns.
 reactive_observer_dispose: fn(observer: I64) {
     if (reactive_word(wrapping(observer + I64{24})) == I64{0}) {
         return
@@ -148,10 +146,10 @@ reactive_observer_dispose: fn(observer: I64) {
     }
 }
 
-// Rust ReactiveObserver.run: an inactive or already running observer is
-// skipped; the body runs with the observer on top of the thread's stack, so
-// each source it reads subscribes it again. A derived's result replaces its
-// cell's value and notifies the cell's own subscribers.
+// An inactive or already running observer is skipped; the body runs with the
+// observer on top of the thread's stack, so each source it reads subscribes it
+// again. A derived's result replaces its cell's value and notifies the cell's
+// own subscribers.
 reactive_observer_run: fn(observer: I64) {
     if (reactive_word(wrapping(observer + I64{24})) == I64{0} || reactive_word(wrapping(observer + I64{32})) != I64{0}) {
         return
@@ -263,8 +261,8 @@ reactive_cell_notify: fn(cell: I64) {
     jet_rt_free(snapshot, length * I64{8}, I64{8})
 }
 
-// Rust get: the active observer subscribes once (deduplicated by identity)
-// and tracks the source for its next clear.
+// The active observer subscribes once (deduplicated by identity) and tracks the
+// source for its next clear.
 reactive_cell_track: fn(cell: I64) {
     observer: reactive_active_observer()
     if (observer == I64{0}) {
@@ -345,9 +343,9 @@ reactive_cell_read: fn(cell: I64, out: I64) {
     if (cell != I64{0}) { reactive_cell_release(cell) }
 }
 
-// `reactive.derived(body)` / `reactive.computed(body)` (Rust JetDerived.new):
-// the initial value is computed once, then the cell's observer runs once
-// under observation to record its sources.
+// `reactive.derived(body)` / `reactive.computed(body)`: the initial value is
+// computed once, then the cell's observer runs once under observation to record
+// its sources.
 #Export(c) jet_reactive_derived_new: fn(env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     cell: reactive_cell_new(meta, I64{0})
     owned: reactive_word(wrapping(cell + I64{8}))
@@ -376,7 +374,7 @@ reactive_cell_read: fn(cell: I64, out: I64) {
 }
 
 // `#Reactive { body }` and `ui.reactive_render(body)`: an effect the thread
-// retains (Rust jet_reactive_effect_rooted / jet_reactive_scope).
+// retains.
 #Export(c) jet_reactive_effect_rooted: fn(env: I64, invoke: I64, release: I64) {
     observer: reactive_observer_new(env, invoke, release)
     event_words_push(wrapping(reactive_thread() + I64{24}), observer)

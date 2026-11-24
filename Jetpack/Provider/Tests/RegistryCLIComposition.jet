@@ -157,7 +157,7 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
 }
 
 // Compose through the real CLI, and inspect the SAME canonical lock/Hangar
-// models as Rust rather than accept a second cache path.
+// models rather than accept a second cache path.
 #Test("publication tuf original registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it") {
     verification := StoreVerification.new()
     root: registry_cli_test_root("locked-reuse")
@@ -356,7 +356,7 @@ registry_cli_test_entry_with: fn(verification: ^StoreVerification, roots: Hangar
     assert(registry_cli_test_entry_with(verification, roots, "freshlib", "1.2.0", "source-policy-exception=id=JSA-2026-0001;scope=freshlib#1.2.0") != None, "an exact source exception must be recorded in Hangar provenance")
     files.write(manifest_path, plain) ?? panic("plain manifest")
     lock_path: files.join(files.join(consumer, ".jet"), "lock")
-    // The Rust fetch resolved without a lock here; drop the exception run's lock.
+    // The fetch resolves without a lock here; drop the exception run's lock.
     files.remove(lock_path) ?? panic("drop exception lock")
     mature: registry_cli_test_fetch(root, consumer, bare, store, "100000")
     assert(mature.success, mature.errors)

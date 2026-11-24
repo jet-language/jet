@@ -136,11 +136,10 @@ JetCLIProveFront: struct {
     contracts: [JetCLIProveContract],
 }
 
-// One declared `#Pre`/`#Post` clause (Rust `ContractDeclaration`): its
-// marker and the member line and column its condition starts at. The test
-// producers settle `state`: -1 not reached, 0 held, 1 failed, 2 failed only
-// where a test expected it to; `evidence` is the test record that observed
-// it, and `message` a failure's stop text.
+// One declared `#Pre`/`#Post` clause: its marker and the member line and column
+// its condition starts at. The test producers settle `state`: -1 not reached, 0
+// held, 1 failed, 2 failed only where a test expected it to; `evidence` is the
+// test record that observed it, and `message` a failure's stop text.
 JetCLIProveContract: struct {
     id: String,
     marker: String,
@@ -322,7 +321,7 @@ jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetC
         }
     }
     report: jet_cli_prove_report(identity, members, front, tests.items, tests.contracts, budgets, solver, proved, failed, grade, floor, replayed, exit_code) ?? return jet_cli_ice(err.message)
-    // Rust `run_prove`: an internal compiler error produces no evidence artifact.
+    // An internal compiler error produces no evidence artifact.
     if exit_code != JET_CLI_EXIT_ICE {
         jet_cli_prove_write(identity, report, tests.consumed) ?? return jet_cli_prove_refused(err, color, json)
     }
@@ -376,10 +375,10 @@ jet_cli_prove_members: fn(target: JetCLIProveTarget) -[FS]> [JetCLIProveMember] 
     Ok(members)
 }
 
-// Rust `budget_projection`: the canonical budget reports of the package the
-// target is in. The search starts at the target's folder (a file's own
-// folder) and takes the nearest `package.jet` at or above it. Each member is
-// requested by its path below that root and its SHA-256.
+// The canonical budget reports of the package the target is in. The search
+// starts at the target's folder (a file's own folder) and takes the nearest
+// `package.jet` at or above it. Each member is requested by its path below that
+// root and its SHA-256.
 jet_cli_prove_budgets: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember]) -[FS, Time.Wait]> JetCLIBudgetProjection Never! {
     start: if cli_files.is_dir(identity.root) -> identity.root.copy() else -> jet_cli_parent(identity.root) ?? "."
     folder: cli_files.realpath(start) ?? return JetCLIBudgetProjection{facts: [JetCLIBudgetFact]{}, rejected: [String]{"couldn't resolve the target's folder: {jet_cli_io_error_text(err)}"}}
@@ -596,10 +595,9 @@ jet_cli_prove_span_text: fn(source: String, span: Span) -> String Never! {
 
 // --- front end ---------------------------------------------------------------
 
-// Each member's errors, or its semantic facts when it has none; then errors
-// of files outside the members. A diagnostic belongs to the member its origin
-// names (Rust gave every error of a compile to the member it started from).
-// One diagnostic reported by two compiles counts once.
+// Each member's errors, or its semantic facts when it has none; then errors of
+// files outside the members. A diagnostic belongs to the member its origin
+// names. One diagnostic reported by two compiles counts once.
 jet_cli_prove_front: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String) -> JetCLIProveFront Never! {
     errors := [JetCLIProveFrontItem]{}
     warnings := [JetCLIProveFrontItem]{}
@@ -1684,9 +1682,9 @@ jet_cli_prove_human: fn(members: [JetCLIProveMember], front: JetCLIProveFront, t
     JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
 }
 
-// Rust `outside_selected_lenses`: each failed, skipped, unavailable or
-// unobserved item the selected lenses hide, so a lens never hides a failure.
-// Front-end errors have facet `all`, which every selection shows.
+// Each failed, skipped, unavailable or unobserved item the selected lenses
+// hide, so a lens never hides a failure. Front-end errors have facet `all`,
+// which every selection shows.
 jet_cli_prove_outside: fn(lenses: [String], tests: JetCLIProveTests, budgets: JetCLIBudgetProjection) -> String Never! {
     rows := ""
     if !jet_cli_prove_lens_shows(lenses, "tests") {

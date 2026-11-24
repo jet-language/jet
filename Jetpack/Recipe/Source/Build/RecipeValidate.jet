@@ -14,8 +14,7 @@
 // E1237 or E1238 before a step runs.
 use files: core.files
 
-// The helper version recipe actions pin (Rust `env!("CARGO_PKG_VERSION")` of
-// the jetpack crate).
+// The helper version recipe actions pin.
 RECIPE_HELPER_VERSION: "0.1.0"
 
 // What a recipe run needs, and where its confinement boundaries are.
@@ -47,7 +46,7 @@ RunReport: struct {
     // policy receipt.
     sandbox_policy: String,
 
-    // Rust `run_report()`: no child launched yet.
+    // No child launched yet.
     new: fn() -> RunReport Never! {
         RunReport{fetches: [FetchRecord]{}, effects: [String]{}, plan_fingerprint: "", sandbox_class: "non-executing", sandbox_policy: "no child launched"}
     }
@@ -297,7 +296,7 @@ recipe_admitted_step_order: fn(plan: HermeticBuildPlan, step_count: Int) -> [Int
     Ok(order)
 }
 
-// Rust `str::parse::<usize>`: ASCII digits only.
+// ASCII digits only.
 recipe_parse_count: fn(text: String) -> Int? Never! {
     if text == "" -> return None
     loop byte in text.bytes() {

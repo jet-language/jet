@@ -47,8 +47,8 @@ fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
         #Unsafe("an owned fresh directory descriptor and writable getdents64 buffer") {
             got = host_syscall(I64{217}, fd, scratch, I64{8192}, I64{0}, I64{0}, I64{0})
         }
-        // Rust's readdir loop treats a null entry as termination, including
-        // an underlying read error; do not introduce a different error rail.
+        // The readdir loop treats a null entry as termination, including an
+        // underlying read error; do not introduce a different error rail.
         if (got <= I64{0}) { break }
         at := I64{0}
         loop at < got {

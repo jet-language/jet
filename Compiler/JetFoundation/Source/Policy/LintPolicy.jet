@@ -20,7 +20,7 @@ LintPolicyError: struct {
     code: String?,
     name: String?,
 
-    // Rust `Display`: the detail text.
+    // The detail text.
     message: fn(self) -> String Never! { self.detail }
 }
 
@@ -32,8 +32,7 @@ lint_policy_code_error: fn(detail: String, code: String, name: String?) -> LintP
     LintPolicyError{detail: detail, code: Val(code), name: name}
 }
 
-// Rust `registered_lints` (`Registry.lint_rows`): every current lint-severity
-// row; a retired lint is never reported.
+// Every current lint-severity row; a retired lint is never reported.
 lint_registered_lints: fn() -> [DiagnosticRegistryRow] Never! {
     rows := [DiagnosticRegistryRow]{}
     loop row in DIAGNOSTIC_ROWS {
@@ -44,7 +43,6 @@ lint_registered_lints: fn() -> [DiagnosticRegistryRow] Never! {
     rows
 }
 
-// Rust `lint_by_name`.
 lint_by_name: fn(name: String) -> DiagnosticRegistryRow? Never! {
     loop row in lint_registered_lints() {
         if row.lint_name == .Val(lint_name) && lint_name == name -> return Val(row)
@@ -52,19 +50,19 @@ lint_by_name: fn(name: String) -> DiagnosticRegistryRow? Never! {
     None
 }
 
-// Rust `code_for_name`: a lint name to its rendered diagnostic code.
+// A lint name to its rendered diagnostic code.
 lint_code_for_name: fn(name: String) -> String? Never! {
     row: lint_by_name(name) ?? return None
     Val(row.code)
 }
 
-// Rust `name_for_code`: a rendered diagnostic code to its stable lint name.
+// A rendered diagnostic code to its stable lint name.
 lint_name_for_code: fn(code: String) -> String? Never! {
     row: diagnostic_registry_row(code) ?? return None
     row.lint_name
 }
 
-// Rust `auto_derive_lint().lint_name`: the reserved auto-derive policy entry.
+// The reserved auto-derive policy entry.
 lint_auto_derive_name: fn() -> String Never! {
     row: lint_by_name("auto_derive") ?? panic("auto_derive must stay registered")
     row.lint_name ?? panic("lint rows have names")
@@ -86,7 +84,7 @@ lint_selection_code_error: fn(value: String, surface: String, span: Span?) -> Di
     Val(diagnostic_from_registry("E0927", span, what, "lint selectors use stable snake_case names; diagnostic codes are rendered report identities", fix))
 }
 
-// Rust `parse_policy_lints`: the `lints:` part of a package policy.
+// The `lints:` part of a package policy.
 lint_parse_policy_lints: fn(body: String) -> [String]? LintPolicyError! {
     lints_body: lint_block_body(body, LINT_POLICY_FIELD_LINTS) ?? return Ok(None)
     deny := [String]{}
@@ -138,7 +136,6 @@ lint_strip_comments: fn(value: String) -> String Never! {
     String.from_bytes(out) ?? panic("comment removal keeps UTF-8")
 }
 
-// Rust `parse_lint_name_list`.
 lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {
     text: value.trim()
     if !text.starts_with("[") || !text.ends_with("]") || text.bytes().len() < 2 {
@@ -163,7 +160,6 @@ lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {
     Ok(names)
 }
 
-// Rust `known_lint_policy_names`.
 lint_known_policy_names: fn() -> String Never! {
     names := [String]{}
     loop row in lint_registered_lints() {
@@ -173,7 +169,7 @@ lint_known_policy_names: fn() -> String Never! {
     names.join(", ")
 }
 
-// Rust `is_diagnostic_code_shape`: `E`, `L` or `W` and four ASCII digits.
+// `E`, `L` or `W` and four ASCII digits.
 lint_is_diagnostic_code_shape: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     if raw.len() != 5 -> return false
@@ -186,8 +182,8 @@ lint_is_diagnostic_code_shape: fn(value: String) -> Bool Never! {
     true
 }
 
-// Rust `block_body(text, key, '{', '}')`: the body of the first unquoted
-// `key: {…}` (or `key: .{…}`) whose key is not preceded by a word character.
+// The body of the first unquoted `key: {…}` (or `key: .{…}`) whose key is
+// not preceded by a word character.
 lint_block_body: fn(text: String, key: String) -> String? Never! {
     raw: text.bytes()
     pattern: key.bytes()
@@ -233,7 +229,7 @@ lint_bytes_at: fn(raw: [U8], at: Int, pattern: [U8]) -> Bool Never! {
     true
 }
 
-// Rust: no alphanumeric or `_` character immediately before the key.
+// No alphanumeric or `_` character immediately before the key.
 lint_preceded_ok: fn(raw: [U8], at: Int) -> Bool Never! {
     if at == 0 -> return true
     start := at - 1
@@ -242,8 +238,8 @@ lint_preceded_ok: fn(raw: [U8], at: Int) -> Bool Never! {
     previous != "_" && !lint_unicode.is_alphabetic(previous) && !lint_unicode.is_numeric(previous)
 }
 
-// Rust `balanced(stripped, '{', '}')`: `raw` starts at the opening brace; the
-// text up to its matching close (or the rest when unclosed).
+// `raw` starts at the opening brace; the text up to its matching close (or the
+// rest when unclosed).
 lint_balanced: fn(raw: [U8]) -> String Never! {
     depth := 1
     quoted := false
@@ -267,8 +263,7 @@ lint_balanced: fn(raw: [U8]) -> String Never! {
     foundation_byte_text(raw, 1, raw.len())
 }
 
-// Rust `top_level_commas`: split at depth-0 commas outside quotes; a blank
-// tail is dropped.
+// Split at depth-0 commas outside quotes; a blank tail is dropped.
 lint_top_level_commas: fn(body: String) -> [String] Never! {
     raw: body.bytes()
     out := [String]{}
@@ -305,7 +300,7 @@ lint_top_level_commas: fn(body: String) -> [String] Never! {
     out
 }
 
-// Rust `key_value_entries`: `key: value` pairs, trimmed.
+// `key: value` pairs, trimmed.
 lint_key_value_entries: fn(body: String) -> [{key: String, value: String}] Never! {
     out := [{key: String, value: String}]{}
     loop entry in lint_top_level_commas(body) {
@@ -315,7 +310,6 @@ lint_key_value_entries: fn(body: String) -> [{key: String, value: String}] Never
     out
 }
 
-// Rust `unquote`.
 lint_unquote: fn(value: String) -> String Never! {
     text: value.trim()
     if text.bytes().len() >= 2 && text.starts_with("\"") && text.ends_with("\"") {

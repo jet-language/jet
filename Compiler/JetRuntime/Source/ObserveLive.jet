@@ -1,5 +1,5 @@
 // Native records contain only the canonical identity/event metadata, never
-// payloads or Rust layouts. Writer120: mutex0, exited8, sequence16, started24,
+// payloads. Writer120: mutex0, exited8, sequence16, started24,
 // CPU-ticks32, clock-hz40, boot-ns48, identity56..88, directory96, path104,
 // periodic-started112. Value48: next0, canonical five E4 fields8..40 (rendered0
 // means None). Event128: next0, canonical fifteen fields8..120, five owned E4
@@ -130,7 +130,7 @@ observe_event_drop: fn(node: I64) {
 }
 
 // Source has canonical Event fields:49-65 order; sequence is assigned under the
-// same lock as append, as the Rust VecDeque producer does.
+// same lock as append.
 #Export(c) jet_observe_event: fn(source: I64) {
     node: jet_rt_alloc(I64{128}, I64{8})
     at := I64{8}
@@ -142,11 +142,10 @@ observe_event_drop: fn(node: I64) {
     observe_event_append(node)
 }
 
-// One runtime event observation of core.event's carriers (Events.jet,
-// EventHooks.jet, AsyncEvents.jet; Rust jet_event_observe) while the run
-// publishes live snapshots: the record's fields after its sequence, the
-// texts static (rt_static_text, immortal, so the record keeps them as they
-// are). An unobserved run records nothing.
+// One runtime event observation of core.event's carriers while the run
+// publishes live snapshots: the record's fields after its sequence, the texts
+// static (rt_static_text, immortal, so the record keeps them as they are). An
+// unobserved run records nothing.
 observe_event: fn(source: I64, event: I64, owner: I64, subscription: I64, dispatch: I64, lifecycle: I64, queued: I64, blocked: I64, running: I64, capacity: I64, overflow: I64, priority: I64, failure: I64, terminal: I64) {
     if !observe_live() {
         return
@@ -170,8 +169,7 @@ observe_event: fn(source: I64, event: I64, owner: I64, subscription: I64, dispat
 }
 
 // A fresh identity for an event, scope, subscription or dispatch the
-// observations name (Rust JET_EVENT_NEXT_ID), from 1; 0 while the run
-// publishes no live snapshot.
+// observations name, from 1; 0 while the run publishes no live snapshot.
 observe_event_id: fn() -> I64 {
     if !observe_live() -> return I64{0}
     sync_add(wrapping(observe_root + I64{168}), I64{1})

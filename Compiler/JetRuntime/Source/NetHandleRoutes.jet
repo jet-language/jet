@@ -1,6 +1,6 @@
-// TCP handle policy over Stream64/Listener8 and FD72, never Rust Word
-// limits/counts are raw i64; Duration Word parameters borrow exact ns. List
-// bytes follow RT_HOST_U8_STRIDE. Logical close retains the descriptor.
+// TCP handle policy over Stream64/Listener8 and FD72. Word limits/counts are
+// raw i64; Duration Word parameters borrow exact ns. List bytes follow
+// RT_HOST_U8_STRIDE. Logical close retains the descriptor.
 net_tcp_direction_open: fn(stream: I64, reading: Bool, operation: I64, error: I64) -> Bool {
     mask: if reading -> I64{3} else -> I64{5}
     if (jet_socket_stream_flags_raw(stream) & mask == I64{0}) { return true }

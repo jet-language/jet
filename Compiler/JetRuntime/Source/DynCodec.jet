@@ -1,6 +1,5 @@
-// Native Dyn uses DataABI, never the bootstrap Rust Box/enum layout. Scalar
-// inputs borrow; encoded owners retain exact Int/Text, FieldError.under clones
-// each input.
+// Native Dyn uses DataABI. Scalar inputs borrow; encoded owners retain exact
+// Int/Text, FieldError.under clones each input.
 #Export(c) jet_rt_codec_encode_int: fn(value: I64) -> I64 { jet_rt_record_new_dyn_int(value) }
 
 #Export(c) jet_rt_codec_encode_bool: fn(value: U8) -> I64 {
@@ -91,8 +90,8 @@ codec_under_path: fn(segment: I64, path: I64) -> I64 {
 }
 
 #Export(c) jet_rt_codec_parse_json: fn(text: I64, ok: I64, errors: I64, count: I64) -> I64 {
-    // Reuse the strict compiler parser, not Core's distinct policy parser. The
-    // Rust original wraps its exact reason and optional line.
+    // Reuse the strict compiler parser, not Core's distinct policy parser. It
+    // wraps its exact reason and optional line.
     status: jet_std_json_parse(text, ok, errors)
     if (status != I64{0}) { return status }
     error: encoding_word(errors)
@@ -233,9 +232,9 @@ codec_trimmed_is: fn(text: I64, literal: I64) -> Bool {
     true
 }
 
-// `{prefix}{found}`: a Text leaf is `text {:?}` (Rust str Debug), a Number
-// leaf `number {lexeme}` when `lexeme`, anything else its dyn_kind
-// (dyn_kind_name). Owned.
+// `{prefix}{found}`: a Text leaf is `text {:?}`, a Number leaf
+// `number {lexeme}` when `lexeme`, anything else its dyn_kind (dyn_kind_name).
+// Owned.
 codec_found: fn(prefix: I64, tree: I64, lexeme: Bool) -> I64 {
     kind: dyn_word(wrapping(tree + DYN_TAG))
     payload: dyn_word(wrapping(tree + DYN_PAYLOAD))
@@ -275,7 +274,7 @@ codec_lexeme_digit: fn(data: I64, start: I64, int_end: I64, frac_start: I64, ind
 
 // json_decimal_lexeme then json_exact_integer_text: the signed integer text of
 // a mathematically integral number lexeme. Status 1 writes the owned integer
-// text into `out`; status 0 writes the owned reason, in the Rust checks' order.
+// text into `out`; status 0 writes the owned reason, checks in a fixed order.
 codec_integer_text: fn(lexeme: I64, out: I64) -> I64 {
     data: rt_text_data(lexeme)
     start := numeric_trim_start(lexeme)
@@ -293,8 +292,8 @@ codec_integer_text: fn(lexeme: I64, out: I64) -> I64 {
     loop mark < end && rt_text_byte(wrapping(data + mark)) != (I64{101}) && rt_text_byte(wrapping(data + mark)) != (I64{69}) {
         mark += I64{1}
     }
-    // The exponent is Rust's i64 FromStr: one optional sign, then at least
-    // one digit, within i64. Its exact value matters only up to the limit.
+    // The exponent is an i64: one optional sign, then at least one digit,
+    // within i64. Its exact value matters only up to the limit.
     exponent := I64{0}
     exponent_large := false
     if (mark < end) {
@@ -546,8 +545,7 @@ codec_decode_integer: fn(tree: I64, kind: I64, range: I64, ok: I64, err: I64, er
 codec_finite: fn(bits: I64) -> Bool { ((bits >> I64{52}) & I64{2047}) != I64{2047} }
 
 // A Number lexeme is :570-580 decode_finite_lexeme. Lexemes carry no
-// whitespace, so jet_float_parse's trim is Rust's untrimmed str.parse<f64>
-// here.
+// whitespace, so jet_float_parse's trim changes nothing here.
 #Export(c) jet_rt_codec_decode_float: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     kind_tag: dyn_word(wrapping(tree + DYN_TAG))
     payload: dyn_word(wrapping(tree + DYN_PAYLOAD))

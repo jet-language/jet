@@ -44,7 +44,7 @@ cli_run_job_with_access_trace: fn(env: ^ShellEnv, argv: [String], project_dir: S
     Ok(code)
 }
 
-// Rust `Path::starts_with`: whole-component prefix.
+// Whole-component prefix.
 cli_path_starts_with: fn(path: String, prefix: String) -> Bool Never! {
     cli_paths.is_relative_to(cli_paths.of(path), cli_paths.of(prefix))
 }
@@ -93,7 +93,7 @@ cli_path_covered: fn(path: String, allowed: [String]) -> Bool Never! {
     false
 }
 
-// Rust `Path::components` normalization without touching the filesystem:
+// Path component normalization without touching the filesystem:
 // `.` and repeated separators vanish, `..` pops, and a `..` with nothing left
 // to pop is None.
 cli_normalize_trace_path: fn(path: String) -> String? Never! {

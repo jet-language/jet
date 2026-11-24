@@ -47,10 +47,9 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
     }
 }
 
-// The Rust parser also teaches the `::` respelling; retired spellings carry no
-// teaching any more, so only the rejection remains. (teaching for a `<K,
-// capacity: Int>` value slot) has no parser claim left: a bounded type
-// parameter is valid syntax and sema judges the bound.
+// Retired spellings carry no teaching any more, so only the rejection
+// remains. A `<K, capacity: Int>` value slot has no parser claim left: a
+// bounded type parameter is valid syntax and sema judges the bound.
 #Test("generic_module_equals_alias_is_rejected") {
     result: parser_test_result("cache: module<K>(capacity: Int) {{ size: fn() -> Int {{ return capacity }} }}\nold: module = cache<Int>(64)")
     assert(!result.diagnostics.is_empty(), "equals alias spelling")

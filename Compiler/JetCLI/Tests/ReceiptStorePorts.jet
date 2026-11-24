@@ -1,8 +1,8 @@
-// Ports of the deleted store tests (#6096 c17). The Rust ReceiptStore claim,
-// write, lookup, record and list calls map to jet_cli_receipt_claim,
+// Ports of the deleted store tests (#6096 c17). The store's claim, write,
+// lookup, record and list calls are jet_cli_receipt_claim,
 // jet_cli_receipt_prepare plus jet_cli_receipt_publish, jet_cli_receipt_lookup
-// and jet_cli_receipt_list. A Rust store directory is a Jet project root: its
-// objects live under.jet/receipts/objects.
+// and jet_cli_receipt_list. A store directory is a Jet project root: its
+// objects live under .jet/receipts/objects.
 use {
     jet_driver.[JetDriverRecordLink, JetDriverRunReceipt, JetDriverRunReceiptClaim, JetDriverRunReceiptSection]
     jet_cli.[
@@ -45,8 +45,8 @@ rsp_claim: fn(verb: String, args: [String], paths: [String]) -[FS, Env, Time.Wai
     jet_cli_receipt_claim(verb, paths, args, RSP_TERMINAL) ?? panic("claim {verb}: {err.message}")
 }
 
-// The Rust store.write(&claim, &args, status, stdout, stderr). Like the Rust
-// ReceiptStore.new, the store root is created first; the Jet store opens it.
+// Write one receipt for `claim`. The store root is created first; the Jet
+// store opens it.
 rsp_publish: fn(store: String, claim: JetDriverRunReceiptClaim, stdout: String) -[FS, Env, Time.Wait]> {
     rsp_files.create_dir_all(store) ?? panic("create store root {store}")
     receipt: jet_cli_receipt_prepare(claim, 0, stdout.bytes(), [U8]{}, [JetDriverRunReceiptSection]{}, [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, [String]{}) ?? panic("prepare: {err.message}")
@@ -54,7 +54,7 @@ rsp_publish: fn(store: String, claim: JetDriverRunReceiptClaim, stdout: String) 
     assert(published, "a new receipt is published as a new immutable object")
 }
 
-// The Rust store.lookup(&claim).unwrap().is_some().
+// Whether a receipt for `claim` is found.
 rsp_current: fn(store: String, claim: JetDriverRunReceiptClaim) -[FS, Time.Wait]> Bool {
     if jet_cli_receipt_lookup(store, claim) == {
         .Val(_) -> return true
@@ -63,12 +63,12 @@ rsp_current: fn(store: String, claim: JetDriverRunReceiptClaim) -[FS, Time.Wait]
     }
 }
 
-// The Rust store.list().
+// Every listed receipt.
 rsp_list: fn(store: String) -[FS, Time.Wait]> [JetDriverRunReceipt] {
     jet_cli_receipt_list(store) ?? panic("list: {err.message}")
 }
 
-// The Rust store.list_current().len(): listed receipts whose inputs still match.
+// The count of listed receipts whose inputs still match.
 rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     current := 0
     loop receipt in rsp_list(store) {
@@ -105,8 +105,8 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     assert(rsp_current(store, unrelated_claim))
 }
 
-// The Rust ReceiptStore.input_paths_for read the explicit target's authority
-// inputs; jet_cli_comparison_input_paths is the Jet producer of that closure.
+// The authority inputs of the explicit target; jet_cli_comparison_input_paths
+// is the Jet producer of that closure.
 #Test("explicit_check_receipt_tracks_package_workspace_and_generated_authorities") {
     root: rsp_root("project-authorities")
     owner: RspFixtureRoot{path: root}

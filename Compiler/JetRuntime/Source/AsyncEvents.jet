@@ -1,5 +1,5 @@
-// Scheduler-backed typed events. One meaning with the Rust reference:
-// JetDispatchReport, JetAsyncEntry, JetAsyncEvent. An AsyncEvent is shared
+// Scheduler-backed typed events: dispatch reports, async entries and async
+// events. An AsyncEvent is shared
 // across threads: every core field below moves under the core's mutex, and the
 // counts of cores, entries and reports are atomic.
 //
@@ -8,14 +8,14 @@
 //   closed104 canceled112 capacity120 overflow128 failure136 sequence144
 //   next_id152 e_meta160 r_meta168 running_entry176 id184
 //   refs counts the handles, entries and scopes holding the core; owners
-//   counts the handles (Rust's owner Arc): the last owner hard-cancels.
+//   counts the handles: the last owner hard-cancels.
 //   sequence is the futex word every state change bumps. e_meta describes
 //   the failure E and r_meta a handler's `Result<Unit, E>`. id is the
 //   identity the AsyncEvent observations name it by (ObserveLive.jet
 //   observe_event_id).
 // AsyncListener: the Listener64 layout (Events.jet); its refs move under the
-//   core lock. Its subscription has no EventCore (Rust JetSubscription.shared:
-//   the active flag is the state), so unsubscribe only clears the flag and
+//   core lock. Its subscription has no EventCore (the active flag is the
+//   state), so unsubscribe only clears the flag and
 //   the next registration or dispatch prunes the row.
 // AsyncEntry80: refs0 core8 phase16 payload24 meta32 report40 accepted48
 //   trace56 control64 id72
@@ -92,7 +92,7 @@ async_lock: fn(core: I64) { sync_mutex_lock(wrapping(core + I64{16})) }
 
 async_unlock: fn(core: I64) { sync_mutex_unlock(wrapping(core + I64{16})) }
 
-// Wakes every entry task waiting for its turn (Rust: each entry's wake slot).
+// Wakes every entry task waiting for its turn (each entry's wake slot).
 async_notify: fn(core: I64) { sync_cond_notify_all(wrapping(core + I64{144})) }
 
 // The entry task's inherited deadline has passed.

@@ -1,7 +1,7 @@
-// The single verified realization boundary (Rust `jetpack::Store`): cache
-// reuse, quarantine, substitution, provider execution, recording, catalog
-// permission, and project-lock receipt projection. No consumer can bypass
-// it. Also records realized provider outputs into the Hangar.
+// The single verified realization boundary: cache reuse, quarantine,
+// substitution, provider execution, recording, catalog permission, and
+// project-lock receipt projection. No consumer can bypass it. Also records
+// realized provider outputs into the Hangar.
 use {
     files: core.files
     process: core.process
@@ -9,8 +9,8 @@ use {
 
 // Progress facts emitted by a provider while it acquires bytes. The sink is
 // additive so parallel closure workers can report independently; the
-// terminal owns rendering, so callbacks carry its IO/Env/wait effects. Rust
-// installed it thread-locally; the provider context carries it explicitly here.
+// terminal owns rendering, so callbacks carry its IO/Env/wait effects. The
+// provider context carries it explicitly.
 ProgressHandle: struct {
     discovered_bytes: fn(Int) -[IO, Env, Time.Wait]> Never!,
     transferred_bytes: fn(Int) -[IO, Env, Time.Wait]> Never!,
@@ -439,8 +439,7 @@ store_realize_verified: fn(verification: ^StoreVerification, roots: HangarRoots,
     }
 
     prepared: store_build_for_cache(verification, roots, ctx, request, IndependentRootOptions.default(), false)
-    // The private build roots go on every exit once registration is decided
-    // (Rust drops the workspace guards).
+    // The private build roots go on every exit once registration is decided.
     registered: if store_register_prepared(verification, roots, ctx, prepared) == {
         .Ok(value) -> value
         .Err(error) -> {
@@ -541,7 +540,7 @@ store_certify_independent_root_build: fn(verification: ^StoreVerification, roots
     store_closure_graph_structure(verification, roots) ?? return Err(RealizeError.Store(err))
     prepared: store_build_for_cache(verification, roots, ctx, request, options, true)
     // The private roots live until registration is decided, then go on every
-    // exit (Rust drops the workspace guards).
+    // exit.
     certified: if store_certify_prepared(verification, roots, ctx, options, prepared) == {
         .Ok(value) -> value
         .Err(error) -> {

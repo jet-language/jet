@@ -1,6 +1,6 @@
-// Expression, type, pattern and literal printing: a 1:1 port of the Rust
-// formatter's. Every Rust `Fmt` method is `jfmt_<name>(f: ^JetFmt, …)`; shared
-// driver state and the source scans live in Formatter.jet.
+// Expression, type, pattern and literal printing. Every formatter method is
+// `jfmt_<name>(f: ^JetFmt, …)`; shared driver state and the source scans live
+// in Formatter.jet.
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
@@ -59,7 +59,7 @@ use {
     ]
 }
 
-// Rust `dispatch_value_head`: `(subject, table_op)`.
+// `(subject, table_op)`.
 JetFmtDispatchHead: struct {
     subject: Expr,
     op: BinOp,
@@ -71,7 +71,7 @@ JetFmtFnEntry: struct {
     zone: String,
 }
 
-// Rust `let Expr.If { … } = expr else { … }` as an optional record.
+// The parts of an `Expr.If` as an optional record.
 JetFmtIf: struct {
     cond: Expr,
     then_body: [Stmt],
@@ -131,7 +131,7 @@ jfmt_if_span: fn(expr: Expr) -> Span? Never! {
     None
 }
 
-// Skip leading ASCII whitespace (Rust `trim_start` on source text).
+// Skip leading ASCII whitespace.
 jfmt_trim_start_bytes: fn(bytes: [U8], start: Int) -> Int Never! {
     index := start
     loop index < bytes.len() && (bytes[index] == 32 || bytes[index] == 9 || bytes[index] == 10 || bytes[index] == 13) {
@@ -2089,8 +2089,7 @@ jfmt_fmt_for_header: fn(f: ^JetFmt, var: String, var2: NamedSpan?, kind: ForKind
     }
 }
 
-// Rust `AST.is_subjectless_guard`: a `Stmt.Switch` with a compiler-private
-// `true` subject at the `if` span.
+// A `Stmt.Switch` with a compiler-private `true` subject at the `if` span.
 jfmt_is_subjectless_guard: fn(subject: Expr, span: Span) -> Bool Never! {
     if subject == .Bool(value, subject_span, _) {
         return value && jfmt_same_span(subject_span, span)
@@ -2197,8 +2196,7 @@ jfmt_fmt_collecting_body: fn(f: ^JetFmt, body: [Stmt]) {
     jfmt_write(f, "}}")
 }
 
-// Run `jfmt_fmt_block_stmts` with an indent and a trailing-comment limit
-// (Rust `with_trailing_comment_limit(limit, with_indent(fmt_block_stmts))`).
+// Run `jfmt_fmt_block_stmts` with an indent and a trailing-comment limit.
 jfmt_fmt_limited_block: fn(f: ^JetFmt, statements: [Stmt], limit: Int) {
     previous: f.trailing_comment_limit
     if limit < previous -> f.trailing_comment_limit = limit

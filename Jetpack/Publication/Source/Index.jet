@@ -2,7 +2,7 @@
 // writer and parsed through Foundation's shared protocol JSON boundary (not
 // sorted/LF CanonicalJSON or RFC8785 JCS).
 // Registry verification/referrer finalization are mandatory shared dependencies.
-// Rust's InvalidData reports InvalidInput (CORE-GAPS 11); open/create/fsync and
+// InvalidData reports InvalidInput (CORE-GAPS 11); open/create/fsync and
 // Stat.modified nanoseconds owe #3593. No Other-kind fallback.
 use {
     jet_foundation.[diagnostic_headline, foundation_parse_protocol_json]
@@ -112,9 +112,9 @@ publication_validate_takeover: fn(repo: String, entries: [PublicationIndexEntry]
 }
 
 // The IOError kinds Publication reports. Core keeps the IOContext and
-// IOOperation annotations Core-only, so the builders below make every
-// context. Rust's InvalidData reports InvalidInput: InvalidData is
-// ratified, but Core's IOError has no InvalidData yet (CORE-GAPS 11).
+// IOOperation annotations Core-only, so the builders below make every context.
+// InvalidData is ratified, but Core's IOError has no InvalidData yet (CORE-GAPS
+// 11).
 PublicationIOKind: enum {
     InvalidInput,
     NotFound,
@@ -236,8 +236,8 @@ publication_non_yanked_entries: fn(repo: String, name: String) -[FS]> [Publicati
     Ok(out)
 }
 
-// Rust with_index_lock: exclusive create, 100 attempts, stale after >300s,
-// 50ms contention sleep, fsync before action, cleanup on every result.
+// Exclusive create, 100 attempts, stale after >300s, 50ms contention sleep,
+// fsync before action, cleanup on every result.
 publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS, Env, Time]> T IOError!) -[FS, Env, Time]> T IOError! {
     root: files.join(repo, "index")
     files.create_dir_all(root)
@@ -266,7 +266,7 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
             files.remove(path).drop("the unsynced lock is released; the fsync error is primary")
             return Err(error)
         }
-        // Rust cleans the lock up on EVERY action result; a plain call would
+        // The lock is cleaned up on EVERY action result; a plain call would
         // propagate an Err before the lock file is released.
         if action() == {
             .Ok(value) -> {
@@ -365,7 +365,7 @@ publication_mark_yanked_locked: fn(repo: String, name: String, version: String) 
         } else { output.push(line) }
     }
     if found {
-        // A final empty item gives join the Rust trailing newline without another copy.
+        // A final empty item gives join the trailing newline without another copy.
         output.push("")
         publication_index_atomic_replace(repo, path, output.join("\n").bytes())
     }

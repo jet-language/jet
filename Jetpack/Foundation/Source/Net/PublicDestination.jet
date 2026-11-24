@@ -6,8 +6,8 @@ use {
     ip: core.net.ip
 }
 
-// Rust addresses_are_public: an empty set is not public, and every answer must
-// pass. A mixed public/private set is refused, never filtered into an allowed set.
+// An empty set is not public, and every answer must pass. A mixed public/private
+// set is refused, never filtered into an allowed set.
 foundation_addresses_are_public: fn(addresses: [SocketAddr]) -> Bool Never! {
     if addresses.len() == 0 -> return false
     loop address in addresses {
@@ -31,9 +31,8 @@ foundation_address_is_public: fn(address: SocketAddr) -> Bool Never! {
     ip.ipv6_is_public_destination(v6)
 }
 
-// Rust resolve_public_addresses: strip paired outer brackets, resolve every
-// answer in the platform resolver's order, and return that same set only when
-// all of it is public.
+// Strip paired outer brackets, resolve every answer in the platform resolver's
+// order, and return that same set only when all of it is public.
 foundation_resolve_public_addresses: fn(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] FoundationFetchError! {
     name := host
     if host.starts_with("[") && host.ends_with("]") {

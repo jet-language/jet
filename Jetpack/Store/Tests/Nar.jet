@@ -71,8 +71,8 @@ store_test_nar_root: fn(label: String) -> String Never! {
     assert(info.verify_signature("/nix/store", [NixPublicKey]{wrong_key}) == .Err(_))
 }
 
-// Rust used a non-UTF-8 name (`opaque-\xff`); Jet paths are text, so the
-// claim keeps an opaque non-ASCII UTF-8 POSIX name.
+// Jet paths are text, so the claim uses an opaque non-ASCII UTF-8 POSIX name
+// rather than a non-UTF-8 one.
 #Test("store nar roundtrip preserves opaque posix names") {
     root: store_test_nar_root("opaque")
     destination: "{root}.out"

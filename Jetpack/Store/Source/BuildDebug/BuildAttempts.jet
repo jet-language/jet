@@ -1,13 +1,11 @@
-// Failed-build debuggability (U27), ported from
-// jetpack::BuildDebug: per-attempt step logs, preserved scratch directories,
-// crash recovery, promotion out of private roots, and `jet logs` /
-// `jet explain` text. This is Hangar persistence, so it lives in Store (whose
-// explain, recovery and certification paths read it) and fails with
-// StoreError; the recipe engine above records attempts through it.
+// Failed-build debuggability (U27): per-attempt step logs, preserved scratch
+// directories, crash recovery, promotion out of private roots, and
+// `jet logs` / `jet explain` text. This is Hangar persistence, so it lives in
+// Store (whose explain, recovery and certification paths read it) and fails
+// with StoreError; the recipe engine above records attempts through it.
 //
-// The Rust process-global write sequence (a static AtomicU64) becomes a
-// random suffix beside the process id, so concurrent writers still never
-// share a staging name.
+// A staging name carries a random suffix beside the process id, so concurrent
+// writers never share one.
 use {
     files: core.files
     sys: core.sys
@@ -48,7 +46,7 @@ StepLog: struct {
     }
 }
 
-// One build attempt (Rust `BuildDebug::Attempt`).
+// One build attempt.
 BuildAttempt: struct {
     id: String,
     package: String,
@@ -132,7 +130,7 @@ BuildAttempt: struct {
         }
     }
 
-    // The persisted JSON document, fields in the Rust order.
+    // The persisted JSON document, fields in their wire order.
     to_json: fn(self) -> String Never! {
         steps := [Dyn]{}
         loop step in self.steps -> steps.push(step.to_tree())
@@ -308,7 +306,7 @@ recipe_debug_validate_id: fn(id: String) StoreError! {
     }
 }
 
-// Rust `{:02}`: at least two digits.
+// At least two digits.
 recipe_debug_two_digits: fn(value: Int) -> String Never! {
     if value >= 0 && value < 10 -> return "0{value}"
     "{value}"

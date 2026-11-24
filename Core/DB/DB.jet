@@ -469,8 +469,8 @@ priv sql_find: fn(raw: [U8], from: Int, byte: Int) -> Int Never! {
     -1
 }
 
-// Control characters by Rust `char::is_control` on UTF-8 bytes: C0, DEL and
-// C1 (C2 80-9F). `allow_whitespace` admits the whitespace controls.
+// Unicode control characters on UTF-8 bytes: C0, DEL and C1 (C2 80-9F).
+// `allow_whitespace` admits the whitespace controls.
 priv sql_has_control: fn(raw: [U8], allow_whitespace: Bool) -> Bool Never! {
     loop at in 0..<raw.len() {
         byte: Int{raw[at]}
@@ -4475,7 +4475,7 @@ priv __driver_query: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> [[
                 }
                 kind == base.SQL_TEXT -> {
                     text: api.column_text(driver.database, statement.stmt, at) ?? [U8]{}
-                    // The Rust original maps invalid UTF-8 to "".
+                    // Invalid UTF-8 maps to "".
                     value = DBValue.Text(String.from_bytes(text) ?? "")
                 }
                 kind == base.SQL_BLOB -> {

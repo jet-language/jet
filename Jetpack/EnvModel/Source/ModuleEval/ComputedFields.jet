@@ -22,7 +22,7 @@ ModuleEvalScope: struct {
     values: [Int:CtValue],
 }
 
-// `expr` with every enclosing parenthesis removed (Rust `Expr::without_parens`).
+// `expr` with every enclosing parenthesis removed.
 envmodel_unparen: fn(expr: Expr) -> Expr Never! {
     current := expr
     loop {
@@ -38,9 +38,8 @@ envmodel_unparen: fn(expr: Expr) -> Expr Never! {
 // A headed record literal in the one shape the record sites match. The
 // parser gives a bare `{ … }` as Expr.StructLit with an empty type name, and
 // a headed `Env{ … }` or `Env{}` as Expr.TypedLit with a named head; the
-// headed form comes back as the StructLit Rust's parser gave it (its written
-// type name and fields). Any other expression is None, so a site matches it
-// as written.
+// headed form comes back as a StructLit (its written type name and fields).
+// Any other expression is None, so a site matches it as written.
 envmodel_record_literal: fn(expr: Expr) -> Expr? Never! {
     if expr == {
         .TypedLit(head, body, span, id) -> {
@@ -77,8 +76,8 @@ envmodel_dependencies_for_expression: fn(expr: Expr, field_names: [String]) -> [
     dependencies
 }
 
-// Insert into a key-ordered comptime map (Rust `BTreeMap::insert`); false when
-// the key was already present, in which case the map is unchanged.
+// Insert into a key-ordered comptime map; false when the key was already
+// present, in which case the map is unchanged.
 envmodel_ct_map_insert: fn(entries: ^[CtMapEntry], key: CtKey, value: CtValue) -> Bool Never! {
     index := 0
     loop index < entries.len() {

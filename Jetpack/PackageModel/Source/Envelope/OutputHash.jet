@@ -471,7 +471,7 @@ pkg_validate_relative_nix_store_symlink_target: fn(target: String, parent_depth:
     parts: target.split("/").to_list()
     loop index in 0..<parts.len() {
         component: parts[index]
-        // Rust `Path::components` skips empty and interior `.` components.
+        // Path components skip empty and interior `.` components.
         if component == "" || (component == "." && index > 0) -> next
         if crossed_root {
             if component == "." || component == ".." -> next

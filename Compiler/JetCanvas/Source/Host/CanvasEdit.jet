@@ -72,10 +72,9 @@ CanvasProjectFile: struct {
     kind: String,
 }
 
-// The host's own checks of a transaction, in the order the Rust host makes
-// them: a JSON request, the entry readable, a `revision` naming the entry's
-// text now, schema 1, a `source_id` (when given) naming the entry, and an
-// operation this host applies.
+// The host's own checks of a transaction, in order: a JSON request, the entry
+// readable, a `revision` naming the entry's text now, schema 1, a `source_id`
+// (when given) naming the entry, and an operation this host applies.
 canvas_host_edit_admit: fn(state: Shared<CanvasHostState>, taken: CanvasHostEdit) -> CanvasEditStep {
     reply: taken.reply
     request: foundation_json_parse(taken.body) ?? return canvas_host_edit_refused(state, reply, "", "", "", canvas_edit_error("bad_request", "Canvas edit request is not JSON: {err.message}"))

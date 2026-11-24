@@ -1,7 +1,7 @@
-// The Rust original open/writer leaves. JetFileReader and JetFileWriter share
-// the one FD72 carrier (HostFiles.jet): its private 8192-byte writer buffer is
-// BufWriter's, and its drop flushes (ignoring the result) then closes, as
-// BufWriter<File>'s drop does. Held-directory and path opens both go through
+// File open/writer leaves. JetFileReader and JetFileWriter share
+// the one FD72 carrier (HostFiles.jet): its private 8192-byte writer buffer
+// is the write buffer, and its drop flushes (ignoring the result) then
+// closes. Held-directory and path opens both go through
 // HostHeldDirectory.jet fs_open_at (jet_fs_open_at).
 
 // "fault injected: FS.Write" checkpoint (IOError.other).
@@ -270,7 +270,7 @@ files_writer_flush: fn(writer: I64) -> I64 {
     jet_std_file_reader_fd_raw(writer, ok, error)
 }
 
-// Rust `{:#o}` of an i64: the 64-bit two's complement octal digits.
+// The 64-bit two's complement octal digits.
 files_push_octal: fn(target: I64, value: I64) {
     rt_text_push_word(target, I64{28464}, I64{2})  // "0o"
     top := I64{21}

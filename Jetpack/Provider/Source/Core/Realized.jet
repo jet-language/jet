@@ -1,7 +1,7 @@
-// The provider translation boundary (Rust `jetpack::Provider`):
-// what a provider needs to realize a ref (`ProviderCtx`), what it returns
-// (`Realized`), how it was satisfied (`SourceState`), the one provider error
-// carrier, and the acquisition plan the resolver shows before downloading.
+// The provider translation boundary: what a provider needs to realize a ref
+// (`ProviderCtx`), what it returns (`Realized`), how it was satisfied
+// (`SourceState`), the one provider error carrier, and the acquisition plan the
+// resolver shows before downloading.
 //
 // Jetpack owns the package lifecycle. Nix is a compatibility provider; the
 // native builders sit behind this same `Realized` boundary.
@@ -43,8 +43,7 @@ ProviderCtx: struct {
     // Invocation-only permission from `--local-nix-catalog`, never a stored
     // grant.
     allow_local_nix_catalog: Bool,
-    // Terminal progress for admission and registration (Rust installed it
-    // thread-locally; here the context carries it).
+    // Terminal progress for admission and registration.
     progress: ProgressHandle?{None},
 }
 
@@ -170,9 +169,7 @@ ProviderError: enum {
         }
     }
 
-    // Render the one friendly diagnostic for this failure (Rust CLI
-    // `report_provider_error`; it lives with the carrier so Provider callers
-    // below the CLI can report without reaching up).
+    // Render the one friendly diagnostic for this failure.
     report: fn(self, theme: Theme) -[IO, Time.Wait]> Never! {
         if self == {
             .BuildFailed(reason) -> {
@@ -245,10 +242,8 @@ provider_nix_index_code: fn(error: NixIndexError) -> String Never! {
     }
 }
 
-// A provider-internal failure reason (Rust helpers that returned a bare
-// `String` error: tree fingerprints, source validation, approval subjects,
-// provider JSON accessors). Callers wrap it in the `ProviderError` variant
-// their boundary owns.
+// A provider-internal failure reason. Callers wrap it in the `ProviderError`
+// variant their boundary owns.
 #Error
 ProviderReason: struct {
     message: String,

@@ -20,8 +20,8 @@ PKG_MAX_LOCK_VALUE_BYTES: 1048576
 // The largest accepted `nix-size`: 16 GiB.
 PKG_MAX_NIX_NAR_SIZE: 17179869184
 
-// The Lock model's one error carrier. Parse and validation failures keep the
-// exact Rust message text; an unsupported format version stays typed so
+// The Lock model's one error carrier. Parse and validation failures keep their
+// exact message text; an unsupported format version stays typed so
 // `pkg_lock_parse_with_path` maps it to E1214 without re-reading a message.
 #Error
 LockError: enum {
@@ -47,7 +47,6 @@ LockError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::NotFound`.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
             .IO(error) -> if error == {

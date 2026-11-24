@@ -10,8 +10,7 @@ store_broker_test_binding: fn() -> ProvenanceBinding Never! {
     ProvenanceBinding{reference: "demo@ci", source: "source", builder: "builder", action: "action", output: "output", platform: "platform", sandbox: "sandbox", policy: "policy"}
 }
 
-// A private rootless broker under `<roots>/shared-store` (Rust
-// `configure_test_broker`).
+// A private rootless broker under `<roots>/shared-store`.
 store_broker_test_configure: fn(roots: HangarRoots) -> SharedStoreConfig Never! {
     base: files.join(roots.root, STORE_BROKER_SHARED_DIR)
     config: SharedStoreConfig{socket: files.join(base, "broker.sock"), shared_root: files.join(base, "root"), trust_key: files.join(base, "trust/hangar.key"), grants: files.join(base, "users")}
@@ -404,8 +403,8 @@ store_broker_test_ctx: fn(roots: HangarRoots) -> ProviderCtx Never! {
 
 // Core can neither take over a socket-activated listener nor read a socket
 // peer's credentials yet, so the broker service refuses to serve and refuses
-// every connection instead of trusting the socket mode. The Rust namespace
-// peer-uid proof returns with Core peer credentials.
+// every connection instead of trusting the socket mode. The namespace
+// peer-uid proof needs Core peer credentials.
 #Test("store broker fails closed without socket activation and peer credentials") {
     roots: store_test_temp_roots()
     verification := StoreVerification.new()

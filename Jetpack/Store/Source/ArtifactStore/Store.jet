@@ -1,29 +1,29 @@
-// The local content-addressed artifact store (Rust `jet_store::Store`): a
-// verified blob CAS (`cas/`), an immutable action cache (`ac/`), per-namespace
-// LTO objects (`lto/<namespace>/`), build-record pointers, one machine-wide
-// lock, owner-checked leases, a checksummed access journal, capacity
-// admission against a cap and a free-disk reserve, and deterministic LRU
-// pruning. Corrupt entries are moved to `quarantine/` before a miss is
-// reported, so a later publish repairs them.
+// The local content-addressed artifact store: a verified blob CAS (`cas/`), an
+// immutable action cache (`ac/`), per-namespace LTO objects
+// (`lto/<namespace>/`), build-record pointers, one machine-wide lock,
+// owner-checked leases, a checksummed access journal, capacity admission
+// against a cap and a free-disk reserve, and deterministic LRU pruning. Corrupt
+// entries are moved to `quarantine/` before a miss is reported, so a later
+// publish repairs them.
 use {
     files: core.files
     time: core.time
 }
 
-// One action record of a batch publication (Rust `(ActionHandle, Vec<u8>)`).
+// One action record of a batch publication.
 ArtifactActionPublication: struct {
     action: ActionHandle,
     bytes: [U8],
 }
 
-// One journal line to append (Rust `(^str, ^EntryKey, u64)`).
+// One journal line to append.
 ArtifactJournalAppend: struct {
     operation: String,
     key: ArtifactEntryKey,
     length: Int,
 }
 
-// One encoded action record a batch writes (Rust `(PathBuf, EntryKey, Vec<u8>)`).
+// One encoded action record a batch writes.
 ArtifactPendingWrite: struct {
     path: String,
     key: ArtifactEntryKey,
@@ -123,7 +123,7 @@ store_artifact_sort_entries: fn(entries: [ArtifactStoredEntry]) -> [ArtifactStor
     out
 }
 
-// The derived Rust `EntryKey` order: kind, then namespace or key, then key.
+// The `EntryKey` order: kind, then namespace or key, then key.
 store_artifact_entry_order: fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> Ordering Never! {
     (left.key.kind().rank() <=> right.key.kind().rank()).then(left.key.primary() <=> right.key.primary()).then(left.key.secondary() <=> right.key.secondary())
 }
@@ -222,7 +222,7 @@ store_artifact_footprint_replay: fn(tally_path: String, journal_path: String, jo
     Val(ArtifactFootprintTally{journal_bytes: journal_bytes, entry_bytes: total, checksum: last})
 }
 
-// Multiplication clamped at the largest Int (Rust `saturating_mul` on u64).
+// Multiplication clamped at the largest Int.
 store_artifact_saturating_mul: fn(left: Int, right: Int) -> Int Never! {
     if left != 0 && right > STORE_ARTIFACT_U64_MAX /% left -> return STORE_ARTIFACT_U64_MAX
     left * right
@@ -343,10 +343,9 @@ ArtifactStore: struct {
         }
     }
 
-    // Publish one immutable build record through the ordinary blob CAS.
-    // `key` is the caller's content key. The per-program last-run pointer is
-    // workspace state (Rust project_state, JP-STORE-STATE-RECEIPT), never a
-    // machine-wide store pointer.
+    // Publish one immutable build record through the ordinary blob CAS. `key`
+    // is the caller's content key. The per-program last-run pointer is
+    // workspace state, never a machine-wide store pointer.
     publish_build_record: fn(self, key: String, record: BuildRecord) -[FS, Env, Exec, Time, Rand]> ObjectHandle ArtifactStoreError! {
         object: self.publish_blob(record.to_json().bytes())
         self.ensure_layout()
@@ -682,8 +681,8 @@ ArtifactStore: struct {
     // the caller's already-computed lower-case SHA-256 build key, with their
     // disk syncs when `durable`. An artifact a build recomputes is published
     // without them: a read verifies its digest, so one a crash lost or tore
-    // reads as missing and is built again.
-    // Rust order: the source is checked and read before the key is decoded.
+    // reads as missing and is built again. The source is checked and read
+    // before the key is decoded.
     publish_file: fn(self, key: String, source: String, durable: Bool) -[FS, Env, Exec, Time, Rand]> StoredArtifact ArtifactStoreError! {
         metadata: files.stat(source)
         if metadata.is_symlink || !metadata.is_file {
@@ -805,7 +804,7 @@ ArtifactStore: struct {
     }
 
     // Scanned entries with their last use and whether a live lease pins them.
-    // `pinned` is keyed by entry identity (the Rust BTreeSet lookup).
+    // `pinned` is keyed by entry identity.
     annotated_entries: fn(self, journal: ArtifactJournalState, pinned: [String:Bool]) -[FS]> [ArtifactStoredEntry] ArtifactStoreError! {
         entries := self.scan_entries()
         loop index in 0..<entries.len() {
@@ -872,8 +871,8 @@ ArtifactStore: struct {
                 pinned_bytes = store_artifact_saturating_add(pinned_bytes, entry.size_bytes)
             }
         }
-        // Rust orders by (pinned, last_use, key) in one comparator; no reliance
-        // on sort stability across two passes.
+        // Order by (pinned, last_use, key) in one comparator; no reliance on
+        // sort stability across two passes.
         order := entries.copy()
         order = loop fresh_item in order -> fresh_item
         order.sort_by(fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) { ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)) })
@@ -928,7 +927,7 @@ ArtifactStore: struct {
         footprint: self.footprint_locked()
         after := footprint
         if store_artifact_saturating_add(footprint, incoming) > limit {
-            // Rust `let _ = self.prune_locked(..)?`: discard the report, never a prune failure.
+            // Discard the report, never a prune failure.
             _: self.prune_locked(store_artifact_saturating_sub(limit, incoming))
             after = self.footprint_locked()
         }
@@ -1071,8 +1070,7 @@ ArtifactStore: struct {
         store_artifact_append(journal_path, lines.join("").bytes(), durable)
     }
 
-    // Rewrite the journal as one `put` per present entry, oldest use first
-    // (ties by key, the Rust `(last_use, key)` order).
+    // Rewrite the journal as one `put` per present entry, oldest use first.
     compact_journal_locked: fn(self) -[FS, Env, Rand]> ArtifactStoreError! {
         journal_path: files.join(self.root(), "journal")
         journal: store_artifact_read_journal(journal_path)

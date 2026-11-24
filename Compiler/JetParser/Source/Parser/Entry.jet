@@ -159,10 +159,10 @@ parse_type_text: fn(text: String) -> Type? Never! {
     None
 }
 
-// Embedded Core library sources are vetted stdlib internals: they may spell
-// the reserved `__name` namespace (Rust `Lexer.lex_generated`). The loader's
-// embedded-Core path and compiler-generated call arguments (core.testing
-// histories, #6410) parse this way; a user file never does.
+// Embedded Core library sources are vetted stdlib internals: they may spell the
+// reserved `__name` namespace. The loader's embedded-Core path and
+// compiler-generated call arguments (core.testing histories, #6410) parse this
+// way; a user file never does.
 parse_generated_source: fn(source: [U8]) -> ParseResult {
     parser_join_effect_impls(parse_generated_layout(source))
 }
@@ -201,10 +201,10 @@ parse_lexed_with_source_threads: fn(lexed: ^^Lexed, source: [U8], line_starts: [
     parser_join_effect_impls(parser_parse_lexed_lines_threads(lexed, source, line_starts, runs, false, threads))
 }
 
-// Parse a Jetpack config surface (Rust `parse_config_with_source`): the
-// config lexer keeps `$NAME` as one identifier token, which this parser reads
-// as the typed environment read `source` stays available
-// for config values whose spelling is not a general Jet expression.
+// Parse a Jetpack config surface: the config lexer keeps `$NAME` as one
+// identifier token, which this parser reads as the typed environment read
+// `source` stays available for config values whose spelling is not a general
+// Jet expression.
 parse_config_with_source: fn(lexed: ^^Lexed, source: [U8]) -> ParseResult {
     parser_join_effect_impls(parser_parse_lexed_lines(lexed, source, parser_line_starts(source), true))
 }
@@ -1280,11 +1280,11 @@ parser_import_roots: fn(imports: [ImportDecl], items: [Item], used: ^[String], c
     }
 }
 
-// L0103 an import's local name is read when the file spells
-// it outside every import declaration, interpolations included. The module
-// root of a member import (`b` in `use b.[f]`) reads that name as well. A
-// body-less `name: module` is the file import the loader binds for it.
-// Rust: none (Jet-only pass)
+// L0103 an import's local name is read when the file spells it outside every
+// import declaration, interpolations included. The module root of a member
+// import (`b` in `use b.[f]`) reads that name as well. A body-less
+// `name: module` is the file import the loader binds for it. None (Jet-only
+// pass)
 parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [ImportDecl], program_items: [Item]) -> [String] Never! {
     candidates := [String]{}
     used := [String]{}
@@ -1322,10 +1322,10 @@ parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [Imp
 }
 
 // A `core.mem` import is the discovery gate of the low-level tier (E0424,
-// E3102): `Type{ uninit }`, a raw pointer `*x` or `p.*`, a `Ptr` and an
-// inline `#FFI(asm)` body need it though none of them spells its name. In a
-// file that writes one, every name a `core.mem` import binds is read.
-// Rust: none (Jet-only pass)
+// E3102): `Type{ uninit }`, a raw pointer `*x` or `p.*`, a `Ptr` and an inline
+// `#FFI(asm)` body need it though none of them spells its name. In a file that
+// writes one, every name a `core.mem` import binds is read. None (Jet-only
+// pass)
 parser_collect_core_mem_gate_names: fn(imports: [ImportDecl], used: ^[String]) Never! {
     loop declaration in imports {
         if declaration.kind == {
@@ -1349,10 +1349,9 @@ parser_collect_core_mem_gate_names: fn(imports: [ImportDecl], used: ^[String]) N
     }
 }
 
-// Whether the file writes low-level-tier syntax: an `uninit` or `Ptr` name,
-// a `*` where an operand starts (`*x`, and `p.*` after its `.`) or an
-// `FFI(asm)` marker.
-// Rust: none (Jet-only pass)
+// Whether the file writes low-level-tier syntax: an `uninit` or `Ptr` name, a
+// `*` where an operand starts (`*x`, and `p.*` after its `.`) or an `FFI(asm)`
+// marker. None (Jet-only pass)
 parser_low_level_tier_spelled: fn(tokens: [Token], tables: TokenTables) -> Bool Never! {
     uninit_id: if name_find(tables.names, "uninit") == .Val(id) -> name_index(id) else -> -1
     ptr_id: if name_find(tables.names, "Ptr") == .Val(id) -> name_index(id) else -> -1
@@ -1380,11 +1379,10 @@ parser_low_level_tier_spelled: fn(tokens: [Token], tables: TokenTables) -> Bool 
     false
 }
 
-// A qualified marker names its import through the alias's
-// PascalCase spelling (`#Server.Get` uses `server`). A marker head is the
-// identifier after `#`, or after `[` or `,` at the top of a `#[ … ]` list,
-// when a `.` follows it.
-// Rust: none (Jet-only pass)
+// A qualified marker names its import through the alias's PascalCase spelling
+// (`#Server.Get` uses `server`). A marker head is the identifier after `#`, or
+// after `[` or `,` at the top of a `#[ … ]` list, when a `.` follows it. None
+// (Jet-only pass)
 parser_collect_marker_import_names: fn(tokens: [Token], tables: TokenTables, candidates: [String], used: ^[String]) Never! {
     aliases := [String]{}
     spellings := [String]{}
@@ -1422,7 +1420,6 @@ parser_collect_marker_import_names: fn(tokens: [Token], tables: TokenTables, can
     }
 }
 
-// Rust: none (Jet-only pass)
 parser_import_span_index: fn(spans: [Span]) -> [Span] Never! {
     order := [Int]{}
     loop index in 0..<spans.len() -> order.push(index)
@@ -1459,7 +1456,6 @@ parser_import_span_index: fn(spans: [Span]) -> [Span] Never! {
     indexed
 }
 
-// Rust: none (Jet-only pass)
 parser_inside_import_span: fn(indexed_spans: [Span], span: Span) -> Bool Never! {
     low := 0
     high := indexed_spans.len()
@@ -1470,7 +1466,6 @@ parser_inside_import_span: fn(indexed_spans: [Span], span: Span) -> Bool Never! 
     low > 0 && span.end <= indexed_spans[low - 1].end
 }
 
-// Rust: none (Jet-only pass)
 parser_collect_used_import_names: fn(tokens: [Token], tables: TokenTables, indexed_spans: [Span], candidate_ids: [Bool], used_ids: ^[Bool], used: ^[String]) Never! {
     loop token in tokens {
         id: name_index(token.decoded)
@@ -1524,7 +1519,6 @@ parser_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, source: [U
     sites
 }
 
-// Rust: none (Jet-only pass)
 parser_collect_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, debug: Name, source: [U8], source_offset: Int, sites: ^[DebugTraceSite]) Never! {
     has_call := false
     count: tokens.len()
@@ -1726,9 +1720,9 @@ parser_parse_program: fn(state: ^JetParserState) -> Program {
                     }
                 }
             }
-            // (Rust `module_binding_def`): the binding parser
-            // reads one named module binding; a destructuring head or a failed
-            // binding reports and resynchronizes at the next item.
+            // The binding parser reads one named module binding; a
+            // destructuring head or a failed binding reports and resynchronizes
+            // at the next item.
             parser_module_binding_ahead(state) -> {
                 start: parser_current(state).span
                 destructuring: parser_kind_at(state, 1) == TOKEN_LBRACE
@@ -1751,8 +1745,8 @@ parser_parse_program: fn(state: ^JetParserState) -> Program {
                 parser_sync_top(state)
             }
             else -> {
-                // Rust resynchronizes a failed script line like a block line
-                // and steps over a token the line could not consume.
+                // Resynchronize a failed script line like a block line and
+                // step over a token the line could not consume.
                 program.script_body.push(parser_parse_statement(state))
                 parser_recover_aborted_statement(state, before)
                 if state.position == before -> parser_bump(state)
@@ -1909,9 +1903,9 @@ parser_is_file_rule: fn(name: String) -> Bool Never! {
     name == "NoPrelude" || name == "Target" || name == "HTML"
 }
 
-// Rust `marker_list_is_file_rules`: a `#[…]` list whose every entry is a file
-// rule configures the file, unless it heads a type, or every entry is a
-// partition `#Target` that the function below can take (`#[Target(JS)] fn`).
+// A `#[…]` list whose every entry is a file rule configures the file, unless
+// it heads a type, or every entry is a partition `#Target` that the function
+// below can take (`#[Target(JS)] fn`).
 parser_file_marker_group_ahead: fn(state: ^JetParserState) -> Bool Never! {
     offset := 2
     every_entry_fits_function := true
@@ -1954,9 +1948,8 @@ parser_file_marker_group_ahead: fn(state: ^JetParserState) -> Bool Never! {
     !(every_entry_fits_function && function_follows)
 }
 
-// Rust `target_marker_selects_file_web_at`: `#Target(Web)` (or a path ending
-// in `Target.Web`) is the file default, never a marker on the next item.
-// `name_offset` is the offset of the `Target` name.
+// `#Target(Web)` (or a path ending in `Target.Web`) is the file default, never
+// a marker on the next item. `name_offset` is the offset of the `Target` name.
 parser_target_selects_file_web_at: fn(state: ^JetParserState, name_offset: Int) -> Bool Never! {
     if parser_kind_at(state, name_offset + 1) != TOKEN_LPAREN -> return false
     previous := ""
@@ -2039,8 +2032,8 @@ parser_report_repeated_file_marker: fn(state: ^JetParserState, name: String, spa
     parser_add_error_code(state, "E0999", span, "`#{name}` is already applied to this file", "`#{name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
 }
 
-// Rust `html_from_marker`: the companion page is `Path{"page.html"}` or a
-// plain literal string; any other value names no page.
+// The companion page is `Path{"page.html"}` or a plain literal string; any
+// other value names no page.
 parser_html_page_path: fn(page: Expr) -> String? {
     if page == .TypedLit(head, body, _, _) && head == .Val(ty) && ty == .Named(type_name) && type_name == "Path" && body == .Value(inner) {
         return parser_expr_literal_string(inner)
@@ -2048,9 +2041,8 @@ parser_html_page_path: fn(page: Expr) -> String? {
     parser_expr_literal_string(page)
 }
 
-// (Rust `web_target_from_marker`):
-// `#Target(Web)` picks the file's default CLI backend, `#Target(Wasm|JS)`
-// caps its web partition, and `#Target(OS.…)` only gates an `impl`.
+// `#Target(Web)` picks the file's default CLI backend, `#Target(Wasm|JS)` caps
+// its web partition, and `#Target(OS.…)` only gates an `impl`.
 parser_apply_file_target: fn(state: ^JetParserState, program: ^Program, marker: Marker, single: Bool, heads_module: Bool) {
     values: parser_bind_marker_arguments(state, marker, [String]{"target"}, 1) ?? return
     target: values[0] ?? return
@@ -2168,10 +2160,9 @@ parser_site_value_ahead: fn(state: ^JetParserState) -> Bool Never! {
     true
 }
 
-// Rust `Parser.unknown_fact_root`: a `$` word in ordinary expression
-// position. An ALL_CAPS `$NAME` is the config-only environment read; any
-// other `$word` is no name. Both report the whole word. Fatal, as Rust
-// returns it as the expression's `Err`.
+// A `$` word in ordinary expression position. An ALL_CAPS `$NAME` is the
+// config-only environment read; any other `$word` is no name. Both report
+// the whole word. Fatal for the expression.
 parser_report_unknown_fact_root: fn(state: ^JetParserState, name: String, span: Span) {
     body: if name.starts_with("$") -> name.slice(1..<name.len()) else -> name
     if body != "" && parser_constant_name(body) {
@@ -2188,9 +2179,8 @@ parser_marked_const_ahead: fn(state: ^JetParserState, offset: Int) -> Bool Never
     parser_constant_name(parser_value(state, token))
 }
 
-// Rust `marker_sequence_leads_to_function`: newline terminators between the
-// markers and before the item are skipped, so `#[A, B]` on its own line still
-// attaches to the item below.
+// Newline terminators between the markers and before the item are skipped, so
+// `#[A, B]` on its own line still attaches to the item below.
 parser_hash_leads_to_item: fn(state: ^JetParserState) -> Bool Never! {
     offset: parser_hash_item_offset(state)
     if offset < 0 -> return false

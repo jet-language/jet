@@ -31,7 +31,7 @@ store_broker_connect: fn(socket: String) -> UnixStream? StoreError! {
     }
 }
 
-// Rust matches io::ErrorKind NotFound and ConnectionRefused.
+// The NotFound and ConnectionRefused I/O error kinds.
 store_broker_connect_absent: fn(failure: NetError) -> Bool Never! {
     if failure == {
         .ConnectionRefused(_) -> true
@@ -43,9 +43,9 @@ store_broker_send: fn(stream: ^UnixStream, bytes: [U8]) StoreError! {
     net.unix_write_all_bytes(stream, bytes) ?? return Err(store_broker_net_error(err))
 }
 
-// Rust `reuse_shared_entry`: import a published shared entry into the
-// caller's Hangar. None when no broker is configured or it is not
-// listening; an imported entry must still pass cache verification.
+// Import a published shared entry into the caller's Hangar. None when no broker
+// is configured or it is not listening; an imported entry must still pass cache
+// verification.
 store_reuse_shared_entry: fn(verification: ^StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> StoreEntry? StoreError! {
     found_config: store_shared_store_config(roots)
     config: found_config ?? return Ok(None)
@@ -68,8 +68,8 @@ store_reuse_shared_entry: fn(verification: ^StoreVerification, roots: HangarRoot
     Ok(Val(candidate))
 }
 
-// Rust `promote_shared_entry`: offer a verified local entry to a configured
-// broker. Missing broker state is the ordinary per-user path, not an error.
+// Offer a verified local entry to a configured broker. Missing broker state is
+// the ordinary per-user path, not an error.
 store_promote_shared_entry: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
     found_config: store_shared_store_config(roots)
     config: found_config ?? return Ok(false)
@@ -90,9 +90,9 @@ store_promote_shared_entry: fn(verification: ^StoreVerification, roots: HangarRo
     store_broker_read_response(reader)
 }
 
-// Rust `serve_shared_store_fd`: serve one socket-activated request and exit.
-// The service manager's handover is the only listener source; the
-// administrator descriptor is read explicitly, never from JETPACK_ROOT.
+// Serve one socket-activated request and exit. The service manager's handover
+// is the only listener source; the administrator descriptor is read explicitly,
+// never from JETPACK_ROOT.
 store_serve_shared_store: fn(verification: ^StoreVerification, roots: HangarRoots) StoreError! {
     if sys.family() == "windows" {
         return Err(store_broker_invalid("shared-store socket activation is unsupported on this host"))
@@ -104,21 +104,20 @@ store_serve_shared_store: fn(verification: ^StoreVerification, roots: HangarRoot
     store_broker_serve_connection(verification, stream, config)
 }
 
-// The one Unix listener the service manager handed over (Rust takes exactly
-// one from `LISTEN_FDS`). Core has no socket-activation handover.
+// The one Unix listener the service manager handed over. Core has no
+// socket-activation handover.
 store_broker_activation_listener: fn() -> UnixListener StoreError! {
     Err(StoreError.Unsupported(STORE_BROKER_ACTIVATION_UNSUPPORTED))
 }
 
-// The kernel-reported uid of the peer of `stream` (Rust `SO_PEERCRED` /
-// `getpeereid`). Core cannot read peer credentials, so no connection is
-// authorized.
+// The kernel-reported uid of the peer of `stream`. Core cannot read peer
+// credentials, so no connection is authorized.
 store_broker_peer_user: fn(stream: UnixStream) -> Int StoreError! {
     Err(StoreError.Unsupported(STORE_BROKER_PEER_UNSUPPORTED))
 }
 
-// Rust `serve_shared_store_connection`: authorize the kernel-reported peer,
-// then promote one write or answer one read.
+// Authorize the kernel-reported peer, then promote one write or answer one
+// read.
 store_broker_serve_connection: fn(verification: ^StoreVerification, stream: ^^UnixStream, config: SharedStoreConfig) StoreError! {
     user: store_broker_peer_user(stream)
     store_broker_serve_peer(verification, stream, config, user)
@@ -146,10 +145,10 @@ store_broker_serve_peer: fn(verification: ^StoreVerification, stream: ^^UnixStre
     }
 }
 
-// Rust `promote_staged_archive`: admit, verify and sign in an ephemeral
-// stage under `.incoming`, compare the re-derived provenance with the
-// binding, then import under the promotion lock. The stage is always
-// removed; a cleanup failure is reported with any admission failure.
+// Admit, verify and sign in an ephemeral stage under `.incoming`, compare the
+// re-derived provenance with the binding, then import under the promotion lock.
+// The stage is always removed; a cleanup failure is reported with any admission
+// failure.
 store_broker_promote_staged_archive: fn(verification: ^StoreVerification, shared: HangarRoots, config: SharedStoreConfig, key: String, archive: [U8], binding: ProvenanceBinding) StoreError! {
     incoming: files.join(config.shared_root, ".incoming")
     store_broker_ensure_real_dir(incoming)
@@ -220,7 +219,6 @@ store_broker_entry_for_reference: fn(entries: [StoreEntry], reference: String) -
     None
 }
 
-// Rust `authorize_peer`.
 store_broker_authorize_peer: fn(config: SharedStoreConfig, uid: Int, write: Bool, binding: ProvenanceBinding?, credential: String?) StoreError! {
     grant: store_broker_read_writer_grant(config, uid)
     if !write {
@@ -234,8 +232,8 @@ store_broker_authorize_peer: fn(config: SharedStoreConfig, uid: Int, write: Bool
     store_broker_authorize_grant(grant, true, bound, presented, store_broker_now_secs())
 }
 
-// Rust `read_writer_grant`. The owner of a private (rootless) shared root is
-// its own writer; everyone else needs an enrollment file named by uid.
+// Read the writer grant. The owner of a private (rootless) shared root is its
+// own writer; everyone else needs an enrollment file named by uid.
 store_broker_read_writer_grant: fn(config: SharedStoreConfig, uid: Int) -> WriterGrant StoreError! {
     if sys.family() != "windows" && !config.is_admin() && store_broker_owner_uid(config.shared_root) == uid {
         return Ok(WriterGrant.private_owner())
@@ -251,8 +249,8 @@ store_broker_read_writer_grant: fn(config: SharedStoreConfig, uid: Int) -> Write
     store_broker_parse_writer_grant(store_broker_bounded_text_file(grant, STORE_BROKER_MAX_CONFIG_BYTES, "shared-store peer enrollment"))
 }
 
-// Rust `enroll_shared_store`: add or replace one administrator-approved uid
-// grant. The caller must own the private fixture root or be uid 0.
+// Add or replace one administrator-approved uid grant. The caller must own the
+// private fixture root or be uid 0.
 store_enroll_shared_store: fn(roots: HangarRoots, uid: String, writable: Bool) -> String StoreError! {
     found_config: store_shared_store_config(roots)
     config: found_config ?? return Err(store_broker_invalid("shared-store broker is not installed"))
@@ -277,8 +275,8 @@ store_enroll_shared_store: fn(roots: HangarRoots, uid: String, writable: Bool) -
     Ok(path)
 }
 
-// Rust `provenance_binding_for_entry`: the binding a write of `entry` must
-// carry, derived from its producer record and cache identity.
+// The binding a write of `entry` must carry, derived from its producer record
+// and cache identity.
 store_broker_provenance_binding_for_entry: fn(entry: StoreEntry) -> ProvenanceBinding StoreError! {
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(store_broker_invalid("shared-store producer record is invalid: {err.message()}"))
     platform: entry.envelope.platform
@@ -300,8 +298,8 @@ store_broker_provenance_binding_for_entry: fn(entry: StoreEntry) -> ProvenanceBi
     Ok(binding)
 }
 
-// Rust `broker_trust_key`: the system broker signs only with the systemd
-// credential (`LoadCredential=hangar.key`); a private broker uses its key.
+// The system broker signs only with the systemd credential
+// (`LoadCredential=hangar.key`); a private broker uses its key.
 store_broker_trust_key: fn(config: SharedStoreConfig) -> String StoreError! {
     if !config.is_admin() -> return Ok(config.trust_key)
     credentials: sys.get("CREDENTIALS_DIRECTORY") ?? return Err(store_broker_invalid("shared-store broker credentials directory is missing"))
@@ -314,9 +312,8 @@ store_broker_trust_key: fn(config: SharedStoreConfig) -> String StoreError! {
     Ok(actual)
 }
 
-// Rust `writer_credential`: the caller's live write credential, or None when
-// it may not publish (no grant, no write authority, expired, or an empty
-// allowlist).
+// The caller's live write credential, or None when it may not publish (no
+// grant, no write authority, expired, or an empty allowlist).
 store_broker_writer_credential: fn(config: SharedStoreConfig) -> String? StoreError! {
     uid: store_broker_current_uid()
     grant := WriterGrant.empty()
@@ -355,8 +352,8 @@ store_broker_sweep_stale_incoming: fn(incoming: String) -> Int StoreError! {
     store_broker_sweep_stale_incoming_at(incoming, store_broker_now_secs())
 }
 
-// Rust `sweep_stale_incoming_at`: remove stages older than 15 minutes. A
-// symlink or more than 1024 entries fails closed.
+// Remove stages older than 15 minutes. A symlink or more than 1024 entries
+// fails closed.
 store_broker_sweep_stale_incoming_at: fn(incoming: String, now: Int) -> Int StoreError! {
     store_broker_ensure_real_dir(incoming)
     entries: files.list_dir(incoming)
@@ -400,8 +397,7 @@ store_broker_stage_created_at: fn(path: String, info: Stat) -> Int StoreError! {
     Ok(if seconds < 0 -> 0 else -> seconds)
 }
 
-// Rust `remove_incoming_entry`: a stage directory or a stray file, never a
-// link or a special node.
+// A stage directory or a stray file, never a link or a special node.
 store_broker_remove_incoming_entry: fn(path: String) StoreError! {
     info: files.stat(path)
     if info.is_symlink {

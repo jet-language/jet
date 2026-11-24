@@ -26,7 +26,7 @@ cli_env_entry_receipt_path: fn(project_dir: String) -> String Never! {
     files.join(files.join(files.join(project_dir, ".jet"), "receipts"), ENV_ENTRY_RECEIPT_NAME)
 }
 
-// Rust tuple order: reference, name, version, output, metadata.
+// Reference, name, version, output, metadata.
 cli_env_selection_order: fn(left: EnvironmentSelection, right: EnvironmentSelection) -> Ordering Never! {
     (left.reference <=> right.reference)
         .then(left.name <=> right.name)
@@ -114,7 +114,6 @@ cli_publish_receipt: fn(temporary: String, path: String, text: String) -[FS]> CL
     files.rename(temporary, path)
 }
 
-// Rust `u64::to_le_bytes`.
 cli_u64_le: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     rest := value

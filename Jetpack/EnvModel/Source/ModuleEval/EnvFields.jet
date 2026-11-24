@@ -295,7 +295,7 @@ envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope) -> CtV
             loop entry in entries {
                 key_value: envmodel_evaluate_lifecycle_value(entry.key, scope)
                 key: envmodel_scalar_ct_key(key_value) ?? return Err(envmodel_error("E1333", "lifecycle map keys must be deterministic scalar values", "lifecycle records are captured as stable plan facts", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
-                // A repeated key keeps its last value (Rust `collect` into a map).
+                // A repeated key keeps its last value.
                 value: envmodel_evaluate_lifecycle_value(entry.value, scope)
                 if !envmodel_ct_map_insert(lowered, key, value) {
                     envmodel_ct_map_replace(lowered, key, value)

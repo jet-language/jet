@@ -1,20 +1,19 @@
-// Config-surface values through the one comptime path (Rust jet-comptime
-// `evaluate`, without a second evaluator; I8/I9). A config value (a field of
-// an `env.jet`/`config.jet` module) is turned into typed Jet code by the
-// requester (JetParser `jet_config_program`, the program both sides of
-// the compiler service build): every global it reads becomes an ALL_CAPS
-// module constant holding that value's literal, the source's own top-level
-// functions are carried by their exact text, and the value itself becomes
+// Config-surface values through the one comptime path. A config value (a field
+// of an `env.jet`/`config.jet` module) is turned into typed Jet code by the
+// requester (JetParser `jet_config_program`, the program both sides of the
+// compiler service build): every global it reads becomes an ALL_CAPS module
+// constant holding that value's literal, the source's own top-level functions
+// are carried by their exact text, and the value itself becomes
 // `JET_CONFIG_VALUE: #run { <expression> }`. Here the driver checks that
 // program in `JetDriverCompileMode.Comptime`, whose comptime stage lowers the
-// `#run` value to IR and runs it natively in the sealed comptime child
-// (JetEval IR/Native.jet); the checked value is read
-// back as a `CtValue`. The environment model reaches this evaluator through
+// `#run` value to IR and runs it natively in the sealed comptime child (JetEval
+// IR/Native.jet); the checked value is read back as a `CtValue`. The
+// environment model reaches this evaluator through
 // `jet __jetpack comptime-evaluate` (JetpackService.jet), in `jet` and in
 // `jetpack` alike. Its module values arrive whole, through
 // `jet __jetpack module-values`: the source's own declarations checked as one
-// program (JetParser `jet_config_module_values_program`), every immutable
-// value read back by name.
+// program (JetParser `jet_config_module_values_program`), every immutable value
+// read back by name.
 use {
     config_files: core.files
     jet_driver.[

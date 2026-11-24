@@ -10,14 +10,14 @@ use {
     crypto: core.crypto
 }
 
-// Rust `{:?}` of a `Vec<String>`.
+// The `{:?}` spelling of a string list.
 cli_debug_str_list: fn(values: [String]) -> String Never! {
     quoted := [String]{}
     loop value in values -> quoted.push(pkg_debug_str(value))
     "[{quoted.join(", ")}]"
 }
 
-// Rust `{:?}` of an `Option<JobSkip>`.
+// The `{:?}` spelling of an optional `JobSkip`.
 cli_debug_job_skip: fn(skip: JobSkip?) -> String Never! {
     rule: skip ?? return "None"
     if rule == {
@@ -26,7 +26,7 @@ cli_debug_job_skip: fn(skip: JobSkip?) -> String Never! {
     }
 }
 
-// Rust `{:?}` of a `JobCachePolicy`.
+// The `{:?}` spelling of a `JobCachePolicy`.
 cli_debug_job_cache: fn(policy: JobCachePolicy) -> String Never! {
     if policy == {
         .Uncached -> "Uncached"
@@ -93,7 +93,7 @@ cli_task_cache_key: fn(project_dir: String, entry: String, job: String, compiler
     Ok(cli_sha256_hex(identity.bytes()))
 }
 
-// Job limits in key order (the Rust `BTreeMap` iteration).
+// Job limits in key order.
 cli_sorted_limits: fn(limits: [StringMapEntry]) -> [StringMapEntry] Never! {
     sorted := limits
     sorted.sort_by(fn(left: StringMapEntry, right: StringMapEntry) { left.key <=> right.key })

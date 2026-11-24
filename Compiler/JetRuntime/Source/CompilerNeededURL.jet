@@ -1,6 +1,6 @@
-// Rust-free compiler route: JetURLParts.parse (no typed marker).
+// Compiler route: JetURLParts.parse (no typed marker).
 // Core/Net/URL.jet has no raw parse export and its URLError/normalization policy
-// is not the Rust kernel's Text error contract. This port deliberately retains
+// is not the kernel's Text error contract. This port deliberately retains
 // that kernel's permissive ASCII hosts, bracket handling and dot-path fast path.
 // JetURL is an 80-byte raw record in RuntimeRoutes field order: owned E4 Text
 // headers at 0,8,16,24,48,56,64,72; machine port at32; explicit flag at40. The
@@ -174,7 +174,7 @@ compiler_url_puny: fn(out: I64, value: I64, start: I64, end: I64, err: I64) -> B
             if cp >= n && cp < m -> m = cp
             at += rt_text_width(wrapping(rt_text_data(value) + at))
         }
-        // Rust checked_add of saturating_mul in the u32 domain.
+        // A checked add of a saturating multiply in the u32 domain.
         extra := (m - n) * (handled + I64{1})
         if (extra > I64{4294967295}) { extra = I64{4294967295} }
         if (delta > I64{4294967295} - extra) {
@@ -282,7 +282,7 @@ compiler_url_port: fn(value: I64, start: I64, end: I64, output: I64, err: I64) -
             break
         }
         digit: byte - I64{48}
-        // Accumulate negative to admit i64.MIN just like Rust parse<i64>.
+        // Accumulate negative to admit i64.MIN.
         limit: if negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
         // n * 10 - digit >= limit needs n >= ceil((limit + digit) / 10); `/%` floors.
         if (n < -((limit + digit) /% I64{-10})) {
@@ -575,8 +575,8 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
     true
 }
 
-// Rust str.trim uses Unicode White_Space. A trimmed input is its own owned
-// text: under shared text storage a clone of it must not alias a borrow.
+// Trimming uses Unicode White_Space. A trimmed input is its own owned text:
+// under shared text storage a clone of it must not alias a borrow.
 compiler_url_trim_view: fn(value: I64) -> I64 {
     data: rt_text_data(value)
     len: rt_text_len(value)

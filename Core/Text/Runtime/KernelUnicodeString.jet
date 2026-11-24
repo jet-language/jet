@@ -31,7 +31,7 @@ UNICODE_STRING_VERSION: "17.0.0"
 // callers do not claim allocation parity until that borrowed-result leaf lands.
 utf8_bytes: fn(text: String) -> [U8] Never! { text.bytes() }
 
-// Rust jet_unicode_append_mapping:42-53. One caller-owned UTF-8 output buffer.
+// One caller-owned UTF-8 output buffer.
 append_mapping: fn(out: ^[U8], cp: Int, index: View<U8>, pool: View<U8>) Never! {
     if text_asset.mapping(index, pool, cp) == .Val(span) {
         loop i in span.start..<(span.start + span.length) {
@@ -50,7 +50,7 @@ mapping_changes: fn(cp: Int, index: View<U8>, pool: View<U8>) -> Bool Never! {
     false
 }
 
-// Rust jet_unicode_final_sigma:55-66. Ignore Case_Ignorable in both directions.
+// Final sigma: ignore Case_Ignorable in both directions.
 final_sigma: fn(chars: [Int], at: Int, cased: [U8], ignorable: [U8]) -> Bool Never! {
     before := false
     i := at - 1
@@ -83,7 +83,7 @@ scalar_at: fn(raw: [U8], at: Int) -> Int Never! {
     cp
 }
 
-// Rust jet_unicode_lower:68-80. As in Rust, only lowercase collects scalars.
+// Only lowercase collects scalars.
 lower: fn(text: String) -> String Never! {
     lower_index: text_unicode_lower_index.UNICODE_LOWER_INDEX
     lower_pool: text_unicode_lower_pool.UNICODE_LOWER_POOL
@@ -109,7 +109,7 @@ lower: fn(text: String) -> String Never! {
     String.from_bytes(out) ?? panic("Unicode lowercase produced invalid UTF-8")
 }
 
-// Rust jet_unicode_upper:82-89. Streaming input, full expansion into one buffer.
+// Streaming input, full expansion into one buffer.
 upper: fn(text: String) -> String Never! {
     upper_index: text_unicode_upper_index.UNICODE_UPPER_INDEX
     upper_pool: text_unicode_upper_pool.UNICODE_UPPER_POOL
@@ -404,7 +404,7 @@ trim_bounds: fn(text: String, left: Bool, right: Bool) -> {start: Int, end: Int}
     {start: start, end: end}
 }
 
-// Rust jet_unicode_trim_start:96-98, jet_unicode_trim_end:100-102, trim:104-106.
+// trim_start, trim_end and trim.
 trim_start: fn(text: String) -> String Never! {
     bounds: trim_bounds(text, true, false)
     text.slice(bounds.start, bounds.end)
@@ -420,8 +420,8 @@ trim: fn(text: String) -> String Never! {
     text.slice(bounds.start, bounds.end)
 }
 
-// Rust str::split_whitespace: fields separated by White_Space runs; no empty
-// fields. Field bytes are copied whole, so UTF-8 sequences stay intact.
+// Fields separated by White_Space runs; no empty fields. Field bytes are copied
+// whole, so UTF-8 sequences stay intact.
 split_whitespace: fn(text: String) -> [String] Never! {
     whitespace_asset: text_unicode_white_space.UNICODE_WHITE_SPACE
     raw: utf8_bytes(text)
@@ -548,7 +548,7 @@ scalar_offset: fn(raw: [U8], byte: Int) -> Int Never! {
     count
 }
 
-// Rust jet_unicode_index_of:108-111, last_index_of:113-116: scalar, not byte.
+// index_of and last_index_of: scalar, not byte.
 index_of: fn(text: String, needle: String) -> Int? {
     raw: utf8_bytes(text)
     byte: find_bytes(raw, utf8_bytes(needle), 0, false) ?? return None
@@ -561,7 +561,7 @@ last_index_of: fn(text: String, needle: String) -> Int? {
     Val(scalar_offset(raw, byte))
 }
 
-// Rust jet_unicode_count:118-129: nonoverlapping; empty needle counts zero.
+// Nonoverlapping; empty needle counts zero.
 count: fn(text: String, needle: String) -> Int Never! {
     nd: utf8_bytes(needle)
     if nd.len() == 0 -> return 0
@@ -576,8 +576,8 @@ count: fn(text: String, needle: String) -> Int Never! {
     count
 }
 
-// Rust jet_unicode_split_once:131-142, cut_last:144-155: absent, never success
-// with invented empty fields. UTF-8 byte offsets are converted to scalar bounds.
+// split_once and cut_last: absent, never success with invented empty fields.
+// UTF-8 byte offsets are converted to scalar bounds.
 split_once: fn(text: String, sep: String) -> {before: String, after: String}? {
     split_at(text, sep, false)
 }

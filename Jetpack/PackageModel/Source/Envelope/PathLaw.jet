@@ -85,8 +85,7 @@ pkg_validate_path_component_with_mode: fn(name: [U8], allow_nix_store_symlinks: 
 pkg_validate_rel_path: fn(rel: String) PathLawError! { pkg_validate_rel_path_with_mode(rel, false) }
 
 // Validate a relative store path; the empty path is the output root itself.
-// Like Rust `Path::components`, an interior `.` is skipped while a leading
-// `.` and every `..` are rejected.
+// An interior `.` is skipped while a leading `.` and every `..` are rejected.
 pkg_validate_rel_path_with_mode: fn(rel: String, allow_nix_store_symlinks: Bool) PathLawError! {
     if rel.starts_with("/") {
         return Err(PathLawError{code: "absolute", path: rel, detail: "store paths must be relative"})

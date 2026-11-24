@@ -1,8 +1,7 @@
-// Identities of the machine-wide verified artifact store (Rust `jet_store`):
-// the SHA-256 digest every local namespace keys on, the blob, action and LTO
-// handles, the lease targets that pin them, and the store's one failure
-// carrier. The compiler build cache consumes this store; nothing here touches
-// the filesystem.
+// Identities of the machine-wide verified artifact store: the SHA-256 digest
+// every local namespace keys on, the blob, action and LTO handles, the lease
+// targets that pin them, and the store's one failure carrier. The compiler
+// build cache consumes this store; nothing here touches the filesystem.
 use {
     jet_foundation.[sha256_hex_bytes]
     jet_pkg_model.[pkg_bytes_is_word, pkg_bytes_starts_with, pkg_bytes_text]
@@ -10,8 +9,8 @@ use {
     crypto: core.crypto
 }
 
-// The artifact store's one failure carrier. `message` keeps the exact text of
-// the Rust `StoreError` Display implementation.
+// The artifact store's one failure carrier. `message` keeps the exact display
+// text of the store error.
 #Error
 ArtifactStoreError: enum {
     IO(IOError),
@@ -183,7 +182,7 @@ ArtifactEntryKind: enum {
 }
 
 // The storage identity of one entry: its namespace and hex key. Ordered by
-// kind, then namespace, then key (the Rust derived `Ord`).
+// kind, then namespace, then key.
 ArtifactEntryKey: enum {
     Blob(String),
     Action(String),
@@ -270,7 +269,7 @@ store_artifact_sort_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Nev
     out
 }
 
-// Keys in their derived order without duplicates (a Rust `BTreeSet`).
+// Keys in their derived order without duplicates.
 store_artifact_unique_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Never! {
     out := [ArtifactEntryKey]{}
     seen := [String:Bool]{}

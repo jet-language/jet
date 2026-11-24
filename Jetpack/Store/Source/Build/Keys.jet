@@ -7,7 +7,7 @@ use {
     crypto: core.crypto
 }
 
-// Rust `KeyWriter`: u64 big-endian lengths, raw bytes, one-byte booleans.
+// U64 big-endian lengths, raw bytes, one-byte booleans.
 BuildKeyWriter: struct {
     bytes: [U8],
 
@@ -34,7 +34,7 @@ BuildKeyWriter: struct {
         loop value in values -> self.text(value)
     }
 
-    // Rust `BTreeMap<String, String>`: entries in key order.
+    // Entries in key order.
     map: fn(^self, values: [String:String]) Never! {
         keys := values.keys().to_list()
         keys.sort()
@@ -158,10 +158,10 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
     w.finish()
 }
 
-// Rust `complete_recipe_fingerprint`: a stable fingerprint over every
-// action key of the plan, the complete recipe identity for Hangar
+// The complete recipe fingerprint: a stable fingerprint over every action key
+// of the plan, the complete recipe identity for Hangar
 // `CacheIdentity.recipe_fingerprint` (E4-JP2). Every action belongs to the
-// plan, so the Rust unknown-action error has no Jet counterpart.
+// plan, so there is no unknown-action error.
 build_complete_recipe_fingerprint: fn(plan: HermeticBuildPlan) -> String Never! {
     keys := [String]{}
     loop action in plan.actions {
@@ -177,8 +177,8 @@ build_complete_recipe_fingerprint: fn(plan: HermeticBuildPlan) -> String Never! 
     "plan-sha256:{crypto.sha256(bytes).hex()}"
 }
 
-// Rust `map_debug`: entries in key order, each `<len>:<key>:<len>:<value>`
-// with byte lengths, concatenated.
+// Entries in key order, each `<len>:<key>:<len>:<value>` with byte lengths,
+// concatenated.
 build_fact_map: fn(values: [String:String]) -> String Never! {
     keys := values.keys().to_list()
     keys.sort()
@@ -195,7 +195,7 @@ build_fact_digest: fn(w: BuildKeyWriter) -> String Never! {
     "sha256:{crypto.sha256(w.bytes).hex()}"
 }
 
-// Rust `allowlisted_env`: the whole env map when the allowlist is empty.
+// The whole env map when the allowlist is empty.
 build_allowlisted_env: fn(action: HermeticBuildAction) -> [String:String] Never! {
     if action.env_allowlist.len() == 0 -> return action.env
     out := [String:String]{}
@@ -205,8 +205,8 @@ build_allowlisted_env: fn(action: HermeticBuildAction) -> [String:String] Never!
     out
 }
 
-// Rust `declared_dep_outputs`: outputs and inputs of every dependency target
-// of the owning target, plus their actions' outputs, sorted and unique.
+// Outputs and inputs of every dependency target of the owning target, plus
+// their actions' outputs, sorted and unique.
 build_declared_dep_outputs: fn(plan: HermeticBuildPlan, action: HermeticBuildAction) -> [String] Never! {
     owner: plan.action_targets().get(action.id) ?? return [String]{}
     target: plan.targets.get(owner) ?? return [String]{}
@@ -223,10 +223,9 @@ build_declared_dep_outputs: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
     outs
 }
 
-// Rust `canonical_effective_action_key`: the canonical key plus the
-// effective grants, resolved executable digest, the digests of the found
-// programs it is passed (`programs`, in argument order) and actual probe
-// facts, which name each found program's path.
+// The canonical key plus the effective grants, resolved executable digest, the
+// digests of the found programs it is passed (`programs`, in argument order)
+// and actual probe facts, which name each found program's path.
 build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot], grants: [BuildEffect], executable_digest: ContentDigest, programs: [ContentDigest], probe_facts: [BuildProbeFact]) -> String Never! {
     base: build_canonical_action_key(plan, action, inputs)
     w := BuildKeyWriter.new()
@@ -257,7 +256,7 @@ build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: Hermet
     w.finish()
 }
 
-// Rust `BTreeSet<BuildCapability>`: canonical order, each effect once.
+// Canonical order, each effect once.
 build_effect_set: fn(effects: [BuildEffect]) -> [BuildEffect] Never! {
     out := [BuildEffect]{}
     loop ability in effects -> build_insert_effect(out, ability)

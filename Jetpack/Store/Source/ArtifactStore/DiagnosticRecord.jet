@@ -7,7 +7,7 @@
 // Origins are stored once in an origin table. An origin whose revision is one
 // of the caller's closure sources is stored by revision only; the reader
 // supplies the bytes from its own closure. Any other origin source is
-// embedded. The record carries exactly the Rust `Diagnostic` fields; the Jet
+// embedded. The record carries exactly the diagnostic's own fields; the Jet
 // driver's aggregate-source mapping (`source_path`, `source_offset`,
 // `source_start`) is presentation state and decodes as absent.
 use {
@@ -57,8 +57,7 @@ use {
     store_text: core.text
 }
 
-// A diagnostic list the codec cannot carry or a record it cannot decode (the
-// Rust `String` error).
+// A diagnostic list the codec cannot carry or a record it cannot decode.
 #Error
 StoreDiagnosticRecordError: struct {
     message: String,
@@ -341,7 +340,7 @@ store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue
             }
         }
         .CryptoMisuse(reason, operation, expected, actual) -> {
-            // The integer is kept as text, as Rust keeps its `i128`.
+            // The integer is kept as text.
             actual_value: if actual == .Val(number) -> RecordValue.Str{value: "{number}"} else -> RecordValue.Null
             RecordValue.Map{
                 fields: [RecordField]{

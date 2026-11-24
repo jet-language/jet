@@ -89,7 +89,7 @@ static void scalars(void) {
     EXPECT(jet_rt_int_to_string(-7), "-7");
     EXPECT(jet_rt_int_to_string(99), "99");
     EXPECT(jet_rt_int_to_string(-99), "-99");
-    // A borrowed approved base-1e9 boxed carrier. No Rust JetInt is involved.
+    // A borrowed approved base-1e9 boxed carrier.
     uint32_t limbs[] = {1, 0, 234567890, 1};
     struct { uint64_t refs, retired_next, negative; uint32_t *limbs; uint64_t len, cap; } node = {1, 0, 0, limbs, 4, 4};
     int64_t tagged = (int64_t)((uintptr_t)&node | (UINT64_C(1) << 62));

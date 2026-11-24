@@ -1,9 +1,9 @@
-// The deterministic uncompressed layer tar (Rust `build_tar`). Every entry is
-// a ustar regular file with mtime 0 (the Unix epoch), uid/gid 0, and no owner
-// names, written in the caller's (already path-sorted) order, then the two
-// zero end-of-archive blocks. Core's tar writer (`archive.tar_add`) fixes every
-// mode at 0644, so the header is encoded here, field for field as in Rust; a
-// path longer than the 100-byte name field is truncated, as there.
+// The deterministic uncompressed layer tar. Every entry is a ustar regular file
+// with mtime 0 (the Unix epoch), uid/gid 0, and no owner names, written in the
+// caller's (already path-sorted) order, then the two zero end-of-archive
+// blocks. Core's tar writer (`archive.tar_add`) fixes every mode at 0644, so
+// the header is encoded here, field for field; a path longer than the 100-byte
+// name field is truncated, as there.
 image_build_tar: fn(layer_files: [LayerFile]) -> [U8] Never! {
     out := [U8]{}
     loop file in layer_files -> image_write_tar_entry(out, file)

@@ -124,21 +124,21 @@ DoctorReport: struct {
     }
 }
 
-// `text` right-aligned in `width` columns (Rust `{:>width}`).
+// `text` right-aligned in `width` columns.
 cli_doctor_pad_start: fn(text: String, width: Int) -> String Never! {
     out := text
     loop out.chars().len() < width -> out = " {out}"
     out
 }
 
-// `text` left-aligned in `width` columns (Rust `{:<width}`).
+// `text` left-aligned in `width` columns.
 cli_doctor_pad_end: fn(text: String, width: Int) -> String Never! {
     out := text
     loop out.chars().len() < width -> out = "{out} "
     out
 }
 
-// The Rust `io::ErrorKind` debug name of an IOError, as doctor prints it.
+// The IO error kind debug name of an IOError, as doctor prints it.
 cli_doctor_io_kind: fn(error: IOError) -> String Never! {
     if error == {
         .InvalidInput(_) -> "InvalidInput"

@@ -6,10 +6,10 @@ use {
     core.encoding.[EncodingError, EncodingErrorKind, EncodingLimits]
 }
 
-// The Rust strict reader's container depth: the 65th nested container is refused.
+// The strict reader's container depth: the 65th nested container is refused.
 JET_ERROR_REPORT_JSON_DEPTH: 64
 
-// The Rust original reports wire failures as the Rust error string.
+// Wire failures are reported as their error string.
 #Error
 JetErrorReportError: struct {
     message: String,
@@ -119,9 +119,9 @@ JetErrorReport: struct {
         "{{{fields.join(",")}}}"
     }
 
-    // JetErrorReport.from_json: the Rust strict reader (duplicate keys
-    // refused, 64 containers, no byte ceiling, its refusal messages), then the
-    // typed decode, then the canonical round trip.
+    // JetErrorReport.from_json: the strict reader (duplicate keys refused, 64
+    // containers, no byte ceiling, its refusal messages), then the typed
+    // decode, then the canonical round trip.
     from_json: fn(text: String) -> JetErrorReport JetErrorReportError! {
         limits := EncodingLimits.safe()
         limits.max_depth = JET_ERROR_REPORT_JSON_DEPTH
@@ -140,8 +140,8 @@ JetErrorReport: struct {
     }
 }
 
-// Core's refusal in the Rust strict reader's words: a value missing at its
-// position (also at the end of input) is "expected a JSON value", and the 65th
+// Core's refusal in the strict reader's words: a value missing at its position
+// (also at the end of input) is "expected a JSON value", and the 65th
 // container is "nested too deeply".
 jet_error_report_json_reason: fn(error: EncodingError) -> String Never! {
     if error.kind == EncodingErrorKind.Truncated || error.reason.starts_with("expected a JSON value") {
@@ -198,7 +198,7 @@ jet_error_json_optional_array: fn(fields: [{key: String, value: Dyn}], name: Str
 
 jet_error_json_u32: fn(value: Dyn, name: String) -> Int JetErrorReportError! {
     number: foundation_json_integer(value) ?? return Err(jet_error_report_error("error report {name} is not an integer"))
-    // Rust's JSON Int is i64; wider tokens are not an integer.
+    // A JSON Int is 64-bit; wider tokens are not an integer.
     if number < -9223372036854775808 || number > 9223372036854775807 {
         return Err(jet_error_report_error("error report {name} is not an integer"))
     }
@@ -234,7 +234,7 @@ jet_error_details_from_json: fn(value: Dyn) -> JetErrorDetails JetErrorReportErr
         .Null -> None
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
             span: jet_error_json_object(span_value, "source span")
-            // The Rust original writes every usize but reads back only a u32.
+            // Every word-sized count is written, but only a u32 reads back.
             Val(JetErrorSpan{start: jet_error_json_u32(jet_error_json_field(span, "start"), "span start"), end: jet_error_json_u32(jet_error_json_field(span, "end"), "span end")})
         }
     }
@@ -286,9 +286,9 @@ jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError
 }
 
 // `jet_error_json_encode_value`: protocol quoting (every Unicode control
-// escaped) and Rust f64 Display, in the object's own field order. A number
-// lexeme with a fraction or exponent is the Float the Rust reader read, so
-// `1.0` re-encodes as `1`; an integer lexeme stays exact.
+// escaped) and the wire Float form, in the object's own field order. A number
+// lexeme with a fraction or exponent is a Float, so `1.0` re-encodes as `1`;
+// an integer lexeme stays exact.
 jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
     if value == {
         .Null -> "null"

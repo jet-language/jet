@@ -189,8 +189,8 @@ provider_manifest_kind: fn(manifest: PackageFacts?, package: String) -> PackageK
     }
 }
 
-// Rust `core_cache_expectation`: the exact identity a cached core output must
-// carry, derived from current source; any doubt yields no early cache path.
+// The exact identity a cached core output must carry, derived from current
+// source; any doubt yields no early cache path.
 provider_core_cache_expectation: fn(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
     resolved: provider_core_resolve_source(spec, table, ctx) ?? return None
     toolchain: CargoToolchain.resolve_for_core(ctx.offline)

@@ -97,11 +97,11 @@ JetLibStamp: struct {
     abi_identity: String,
     abi_version: U32,
     exports: [JetLibExport],
-    // Sorted and duplicate-free (Rust `EffectSet`).
+    // Sorted and duplicate-free.
     declared_effects: [String],
     payload_digest: String,
 
-    // The all-empty stamp (Rust `Default`).
+    // The all-empty stamp.
     empty: fn() -> JetLibStamp Never! {
         JetLibStamp{
             compiler_version: "",
@@ -119,7 +119,7 @@ JetLibStamp: struct {
         }
     }
 
-    // Rust for_this_compiler/for_library/for_library_with_identity:207–265.
+    // The compiler, library, and library-with-identity record constructors.
     for_this_compiler: fn(declared_effects: [String], identity: JetLibIdentity) -> JetLibStamp Never! {
         JetLibStamp.for_library_with_identity("anonymous", [JetLibExport]{}, declared_effects, identity.compiler_version, identity.target, "system", identity)
     }
@@ -187,8 +187,8 @@ JetLibStamp: struct {
         out.bytes
     }
 
-    // Rust decode/decode_prefix:320–415. Ordered wire effects stay intact in
-    // prefix decode; only package entrypoints project the canonical set.
+    // Decode, or decode a prefix. Ordered wire effects stay intact in prefix
+    // decode; only package entrypoints project the canonical set.
     decode_bytes: fn(bytes: View<U8>) -> JetLibStamp Err! {
         reader := JetLibReader{bytes: bytes, at: 0, loader: false}
         stamp := JetLibStamp.decode_prefix(reader) ?? return Err(err)
@@ -264,9 +264,9 @@ JetLibStamp: struct {
     }
 }
 
-// Rust Artifact encode/decode:175–202. The payload is a View of the original
-// input owner and extent; no payload to_list/to_vec conversion. host_max is
-// actual target usize::MAX.
+// Artifact encode/decode. The payload is a View of the original input owner
+// and extent; no payload to_list/to_vec conversion. host_max is the actual
+// target's largest word value.
 JetLibArtifact: struct {
     stamp: JetLibStamp,
     payload: View<U8>,
@@ -320,8 +320,8 @@ JetLibWriter: struct {
     }
 }
 
-// The Rust take_bytes/take_string. One structured private failure rail;
-// each consumer's original strings render only here.
+// Take bytes or a string. One structured private failure rail; each
+// consumer's original strings render only here.
 JetLibReader: struct {
     bytes: View<U8>,
     at: Int,
@@ -476,9 +476,8 @@ pkg_jetlib_valid_payload_digest: fn(digest: String) -> Bool Never! {
 
 // Validate metadata meaningful only at the native load boundary. Compiler
 // identity stays a separate first check so E1338 wins over any untrusted
-// effect or ABI claim.
-// Rust validate_load_metadata:531–626. A structured result also supplies the
-// loader's Invalid/Unsupported classification without a second validation walk.
+// effect or ABI claim. A structured result also supplies the loader's
+// Invalid/Unsupported classification without a second validation walk.
 JetLibMetadataKind: enum {
     Invalid,
     Unsupported,
@@ -552,7 +551,7 @@ pkg_jetlib_validate_load_metadata: fn(stamp: JetLibStamp, target: String, loader
     None
 }
 
-// Rust e1338/e1339:646–672; canonical Foundation Diagnostic value.
+// E1338/E1339 as the canonical Foundation Diagnostic value.
 pkg_e1338: fn(artifact_version: String, version: String) -> Diagnostic Never! {
     Diagnostic{
         severity: DIAGNOSTIC_ERROR,
@@ -573,8 +572,8 @@ pkg_e1339: fn(library: String, effect_name: String) -> Diagnostic Never! {
     }
 }
 
-// Rust Result<(),Diagnostic/Vec<Diagnostic>> uses the existing result-carrier
-// convention, not a new public #Error identity.
+// A diagnostic result uses the existing result-carrier convention, not a new
+// public #Error identity.
 JetLibRefusal: struct {
     diagnostics: [Diagnostic],
 }

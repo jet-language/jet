@@ -296,7 +296,7 @@ cli_schema_wasm_leb: fn(bytes: View<U8>, at: ^Int, maximum: U64) -> Int RecordDe
         byte: bytes[at]
         at += 1
         if shift >= bits -> return Err(RecordDecodeError.Malformed{why: "Wasm LEB overflow"})
-        // Rust's usize shift truncates high bits on a 32-bit reader.
+        // A word-sized shift truncates high bits on a 32-bit reader.
         value = (value | (U64{byte & U8{127}} << shift)) & maximum
         if byte & (U8{128}) == (U8{0}) -> return Ok(Int{value})
         shift += 7

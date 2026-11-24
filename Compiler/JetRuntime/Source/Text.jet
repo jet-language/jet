@@ -247,8 +247,8 @@ rt_text_decode: fn(ptr: I64) -> I64 {
     scalar
 }
 
-// Positive = valid scalar width; negative = Rust Utf8Error's invalid subpart
-// length. An incomplete tail is replaced once, not once per remaining byte.
+// Positive = valid scalar width; negative = the invalid subpart length. An
+// incomplete tail is replaced once, not once per remaining byte.
 rt_text_valid_width: fn(ptr: I64, remaining: I64, stride: I64) -> I64 {
     lead: rt_text_byte(ptr)
     if (lead < I64{128}) { return I64{1} }
@@ -1646,8 +1646,8 @@ rt_text_slice_range: fn(value: I64, start: I64, end: I64, exclusive: U8, file: I
 }
 
 // Split state: owned text, owned separator, then the split cursor
-// (text_split_piece). Empty separators yield leading/trailing empty strings
-// and one piece per Unicode scalar, exactly like Rust str.split.
+// (text_split_piece). Empty separators yield leading/trailing empty strings and
+// one piece per Unicode scalar, exactly.
 text_iter_state: fn(text: I64, separator: I64) -> I64 {
     state: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(state, jet_rt_string_clone(text))
@@ -1758,7 +1758,7 @@ text_iter_drop: fn(state: I64) {
 #Export(c) jet_rt_native_iter_string_rsplit: fn(text: I64, separator: I64, meta: I64) -> I64 {
     n: rt_text_len(separator)
     if (n == I64{0}) { return jet_rt_native_iter_string_split(text, separator, meta) }
-    // Rust rsplit's matches are rightmost nonoverlapping matches, not the
+    // A reverse split's matches are rightmost nonoverlapping matches, not the
     // forward split's matches (they differ for overlapping separators).
     list: coll_list_new()
     slot: jet_rt_alloc(I64{8}, I64{8})

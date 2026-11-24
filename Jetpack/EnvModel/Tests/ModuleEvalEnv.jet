@@ -580,8 +580,7 @@ use {
 }
 
 #Test("dev services are captured independently of other tiers") {
-    // Rewritten from the Rust dev-vs-jetos independence claim: only the dev
-    // services list exists in the Jet plan.
+    // Only the dev services list exists in the Jet plan.
     src: "\nenv.dev: module {{\n    services: {{ redis: {{ enable: true }} }}\n}}\nsystem.box: module {{\n    target: linux.x64,\n    services: {{ openssh: {{ enable: true }} }}\n}}\n"
     plan: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
     assert_eq(plan.dev_services.len(), 1)

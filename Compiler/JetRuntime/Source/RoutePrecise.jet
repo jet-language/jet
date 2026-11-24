@@ -1,11 +1,10 @@
-// core.math Fraction and Decimal routes. Rust providers: (route kernels),
-// CtFraction (334-480) and CtDecimal (2078-2791) for the value law, for the
-// route wrappers for the C ABI (borrowed Int and handle arguments, native() on
-// from_int/new, owned results). A Fraction handle owns two exact-Int words,
-// numerator@0 and denominator@8, always reduced with the sign on the numerator.
-// A Decimal handle owns its signed exact-Int coefficient@0 and its scale@8
-// (digits after the point); a zero coefficient is never negative and keeps its
-// written scale.
+// core.math Fraction and Decimal routes. (route kernels), CtFraction (334-480)
+// and CtDecimal (2078-2791) for the value law, for the route wrappers for the C
+// ABI (borrowed Int and handle arguments, native() on from_int/new, owned
+// results). A Fraction handle owns two exact-Int words, numerator@0 and
+// denominator@8, always reduced with the sign on the numerator. A Decimal
+// handle owns its signed exact-Int coefficient@0 and its scale@8 (digits after
+// the point); a zero coefficient is never negative and keeps its written scale.
 PRECISE_HANDLE_BYTES: I64{16}
 
 PRECISE_TOP: I64{0}
@@ -25,9 +24,9 @@ precise_pair: fn(top: I64, bottom: I64) -> I64 {
     result
 }
 
-// The Rust `panic!("{}", failure_message(..))` is a foreign String panic under
-// the CAbi guard: the payload bytes, a newline and the host-fault status 101
-// (as rt_seq_capacity_overflow_stop), not a Jet stop report.
+// The failure message panic is a foreign String panic under the CAbi guard:
+// the payload bytes, a newline and the host-fault status 101 (as
+// rt_seq_capacity_overflow_stop), not a Jet stop report.
 precise_fault: fn(message: I64) -> I64 {
     trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
     trap_defect_prepare()

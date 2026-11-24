@@ -18,7 +18,6 @@ result_table_binding: fn(function: Func, name: String) -> Expr? {
     None
 }
 
-// (stale on dev: Rust rejects retired Error with E0432 and teaches Err)
 #Test("result_table_lookahead_keeps_neighboring_forms_unambiguous") {
     source: "\noptional: fn() -> Success? {{ None }}\nfallible: fn() Err! {{ Err(\"bad\") }}\n\nrun: fn(value: Int Err!, optional: String) {{\n    propagated: value\n    noted: value?(\"context\")\n    chained: optional?.len\n    negated: !true\n    handled: if value == {{ .Ok(ok) -> if {{ !true -> ok, else -> ok }}, .Err(error) -> error }}\n}}\n"
     lexed: lex(source.bytes())

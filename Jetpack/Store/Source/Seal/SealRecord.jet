@@ -1,4 +1,4 @@
-// Sealed Hangar verification manifests (Rust `jetpack::Store::Seal`).
+// Sealed Hangar verification manifests.
 //
 // A seal authenticates the content digest recorded at admission together
 // with the cheap filesystem identity used to decide whether that digest can
@@ -52,10 +52,10 @@ StoreVerificationState: struct {
     verified_digests: [String:VerifiedDigestMemo],
     verified_digest_hash_counts: [String:Int],
     // Closure members proven against their seals, keyed by
-    // `store_proven_member_key(hangar, digest)` (Rust `PROVEN_MEMBERS`).
+    // `store_proven_member_key(hangar, digest)`.
     proven_members: [String:Bool],
     // The signed narinfos the last Nix download plan verified, keyed by
-    // `store_nix_planned_key(roots, endpoint)` (Rust `PLANNED_NARINFOS`).
+    // `store_nix_planned_key(roots, endpoint)`.
     planned_narinfos: [String:[String:FetchedInfo]],
 }
 
@@ -132,8 +132,8 @@ store_seal_pad_left: fn(text: String, width: Int) -> String Never! {
     out
 }
 
-// Rust arm_command_memo/memo_get/memo_put/memo_forget: one owner keeps the
-// armed view until command exit; library owners begin strictly disarmed.
+// One owner keeps the armed view until command exit; library owners begin
+// strictly disarmed.
 store_arm_command_memo: fn(verification: ^StoreVerification) Never! {
     state: verification.state
     permit := state.guard_edit()
@@ -356,8 +356,8 @@ store_seal_ensure_real_directory: fn(path: String, label: String) StoreError! {
     }
 }
 
-// Test seam for the thread-local memo lifetime: a fresh Rust thread starts
-// disarmed, which the port models by disarming and clearing the memo.
+// Test seam for the memo lifetime: a fresh run starts disarmed, which this
+// models by disarming and clearing the memo.
 store_disarm_command_memo: fn(verification: ^StoreVerification) Never! {
     state: verification.state
     permit := state.guard_edit()

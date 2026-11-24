@@ -2298,8 +2298,8 @@ release_field: fn(config: String, key: String) -> String? Never! {
         end := start
         loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
         line_end := end
-        // Rust lines accepts LF and CRLF, but does not split bare CR or the
-        // additional Unicode/Python splitlines separators.
+        // Lines end at LF and CRLF, not at a bare CR or the additional
+        // Unicode/Python splitlines separators.
         if end < raw.len() && end > start && raw[end - 1] == (U8{13}) -> line_end = end - 1
         matched := line_end - start >= wanted.len()
         i := 0

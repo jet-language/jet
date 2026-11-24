@@ -71,8 +71,9 @@ progress_unsigned_text: fn(word: I64) -> I64 {
     output
 }
 
-// Rust {:.2} rounds the exact binary value ties-to-even, not value*100 in
-// floating point (which would introduce a second rounding at half boundaries).
+// Two-place formatting rounds the exact binary value ties-to-even, not
+// value*100 in floating point (which would introduce a second rounding at
+// half boundaries).
 progress_fixed2: fn(value: Float, suffix: I64) -> I64 {
     bits: rt_f64_bits(value)
     binary: (bits >> I64{52}) & I64{2047}

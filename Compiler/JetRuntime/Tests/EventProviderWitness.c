@@ -288,8 +288,8 @@ static void event_drop_first(void) {
 
 // A handler drops the last Event handle and its scope mid-emit (the scope's
 // cancel unsubscribes the later listener). The dispatch holds its own count
-// (Rust: `&self` on the Rc), so the core outlives the handler and is freed
-// when emit returns, not while emit still reads it.
+// (`&self` on the Rc), so the core outlives the handler and is freed when emit
+// returns, not while emit still reads it.
 static void drop_event_and_scope(Handler *self, int64_t payload) {
     (void)payload;
     jet_rt_handle_drop_jet_event(self->event);

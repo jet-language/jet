@@ -81,7 +81,7 @@ BuildExecutionError: enum {
     is_reported_action_failure: fn(self) -> Bool Never! { self.report() != None }
 }
 
-// Rust `action_failure_report`: E3505 with the `BuildActionFailure` details.
+// E3505 with the `BuildActionFailure` details.
 build_action_failure_report: fn(action: String, exit_code: Int, stderr: String) -> DiagnosticBuildError Never! {
     DiagnosticBuildError{
         code: Val("E3505"),
@@ -154,9 +154,8 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
     Ok(BuildExecutionResult{report: report, probes: probes})
 }
 
-// Rust `execution_batches`: deterministic resource-pool packing. CPU and
-// memory have automatic capacity; linker, console, GPU and custom pools
-// serialize by name.
+// Deterministic resource-pool packing. CPU and memory have automatic capacity;
+// linker, console, GPU and custom pools serialize by name.
 build_execution_batches: fn(plan: HermeticBuildPlan, actions: [Int]) -> [[Int]] Never! {
     batches := [[Int]]{}
     limits := [String:Int]{}
@@ -294,19 +293,19 @@ build_folder_mount: fn(path: String) -> String Never! {
 // its own process id.
 BUILD_STEP_TRACE_FOLDER: ".jet-trace"
 
-// Rust `execute_one_action` on the local path, for many actions at once:
-// each of `ids` (their prerequisites already done) is keyed and, with
-// `artifact_store`, restored from a cached record, else staged in a fresh
-// private work tree; the staged ones run together under the native sandbox,
-// at most `jobs` at a time, and each publishes only its declared outputs. One
-// slot per action, in `ids` order: one action's failure never stops the
-// others. With `traces`, a host folder, each staged child also runs with
-// `JET_TRACE_FILE` in its work tree's BUILD_STEP_TRACE_FOLDER (outside its
-// key: a trace changes no output), and every trace file a process of it wrote
-// there is moved to `traces` as `<action id>-<file>` once it exits, whether it
-// succeeded or not. With `threads`, the build's compiler thread cap, each
-// staged child also runs with `JET_BUILD_THREADS` (outside its key too: a
-// cap changes no output), which each jet it starts takes as its own.
+// Execute actions on the local path, many at once: each of `ids` (their
+// prerequisites already done) is keyed and, with `artifact_store`, restored
+// from a cached record, else staged in a fresh private work tree; the staged
+// ones run together under the native sandbox, at most `jobs` at a time, and
+// each publishes only its declared outputs. One slot per action, in `ids`
+// order: one action's failure never stops the others. With `traces`, a host
+// folder, each staged child also runs with `JET_TRACE_FILE` in its work tree's
+// BUILD_STEP_TRACE_FOLDER (outside its key: a trace changes no output), and
+// every trace file a process of it wrote there is moved to `traces` as
+// `<action id>-<file>` once it exits, whether it succeeded or not. With
+// `threads`, the build's compiler thread cap, each staged child also runs with
+// `JET_BUILD_THREADS` (outside its key too: a cap changes no output), which
+// each jet it starts takes as its own.
 build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int, traces: String?, threads: Int?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [ActionOutcome BuildExecutionError!] Never! {
     results := [ActionOutcome BuildExecutionError!]{}
     runs := [BuildActionRun]{}
@@ -782,15 +781,14 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
     Ok(outcome)
 }
 
-// Rust `execute_one_action` output publication: every declared output is
-// checked in the work tree through no-follow opens (a FIFO or other special
-// file is refused before any blocking open; when `bounded` is true — store
-// on — the per-file and per-action store limits are checked against its
-// size). Only when all of them pass are they published under the project
-// root, so a refused output publishes nothing: each output is renamed into
-// place (build_move_output, with streaming cross-device fallback), and a
-// kept output is stream-hashed first so one that already holds its bytes is
-// left as it is and one holding bytes no build wrote (build_output_write)
+// Every declared output is checked in the work tree through no-follow opens (a
+// FIFO or other special file is refused before any blocking open; when
+// `bounded` is true — store on — the per-file and per-action store limits
+// are checked against its size). Only when all of them pass are they published
+// under the project root, so a refused output publishes nothing: each output is
+// renamed into place (build_move_output, with streaming cross-device fallback),
+// and a kept output is stream-hashed first so one that already holds its bytes
+// is left as it is and one holding bytes no build wrote (build_output_write)
 // refuses publication and returns its path.
 build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction, *, bounded: Bool{true}) -[FS, Rand]> String? BuildIOError! {
     writes := [BuildOutputWrite]{}
@@ -823,8 +821,8 @@ build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action:
     Ok(None)
 }
 
-// Rust `execute_probes`: each selected probe resolves through its toolchain
-// and runs inside the sandbox; the first failure stops the build.
+// Each selected probe resolves through its toolchain and runs inside the
+// sandbox; the first failure stops the build.
 build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Exec, Time.Wait, Rand]> [BuildProbeFact] BuildExecutionError! {
     facts := [BuildProbeFact]{}
     loop probe in plan.probes {
@@ -883,11 +881,10 @@ build_receipt_code: fn(receipt: ProcessReceipt) -> Int Never! {
     if receipt.signal != None -> 1 else -> receipt.code
 }
 
-// Rust `run_probe_sandboxed`: a private temporary root, the optional probe
-// source written into it, one sandboxed run with an empty environment and
-// no network, then the root removed. Unlike Rust, the run has the same
-// finite wall-clock budget as an action: a probe past `timeout` is killed and
-// fails the build.
+// Run a probe sandboxed: a private temporary root, the optional probe source
+// written into it, one sandboxed run with an empty environment and no network,
+// then the root removed. The run has the same finite wall-clock budget as an
+// action: a probe past `timeout` is killed and fails the build.
 build_run_probe_sandboxed: fn(executable: String, args: [String], source: {path: String, contents: String}?, timeout: Duration) -[FS, Env, Exec, Time.Wait, Rand]> ProcessReceipt BuildExecutionError! {
     nonce: random.bytes(8) ?? return Err(BuildExecutionError.IO{action: "build probe sandbox", detail: "{err}"})
     root: files.join(sys.temp_dir(), "jet-build-probe-{sys.pid()}-{build_hex_encode(nonce)}")
@@ -919,8 +916,8 @@ build_run_probe_sandboxed: fn(executable: String, args: [String], source: {path:
     }
 }
 
-// Rust `run_compile_probe`: the first declared `cc`, `clang` or `gcc` checks
-// the probe source's syntax inside the sandbox.
+// The first declared `cc`, `clang` or `gcc` checks the probe source's syntax
+// inside the sandbox.
 build_run_compile_probe: fn(plan: HermeticBuildPlan, toolchain: ToolchainHandle, source: String) -[FS, Env, Exec, Time.Wait, Rand]> {success: Bool, detail: String} BuildExecutionError! {
     compiler := String?{None}
     names: [String]{"cc", "clang", "gcc"}
@@ -934,7 +931,6 @@ build_run_compile_probe: fn(plan: HermeticBuildPlan, toolchain: ToolchainHandle,
     Ok({success: false, detail: if detail == "" -> "{found} rejected the syntax probe" else -> "{found}: {detail}"})
 }
 
-// Rust `Path::components().count()`.
 build_path_component_count: fn(path: String) -> Int Never! {
     count := if path.starts_with("/") -> 1 else -> 0
     parts: path.split("/").to_list()
@@ -953,11 +949,10 @@ build_canonical_executable_path: fn(program: String) -[FS, Env]> String? Never! 
     Val(resolved)
 }
 
-// Rust `find_program_path`: a path with several components directly, else
-// the first regular file of that name in an absolute PATH directory,
-// canonicalized. Unlike Rust, an empty or relative PATH entry is skipped,
-// so the working directory never supplies a tool, and the result must be
-// absolute.
+// Find a program: a path with several components directly, else the first
+// regular file of that name in an absolute PATH directory, canonicalized. An
+// empty or relative PATH entry is skipped, so the working directory never
+// supplies a tool, and the result must be absolute.
 build_find_program_path: fn(program: String) -[FS, Env]> String? Never! {
     if build_path_component_count(program) > 1 && files.is_file(program) {
         resolved: files.canonicalize(program) ?? return None
@@ -975,10 +970,9 @@ build_find_program_path: fn(program: String) -[FS, Env]> String? Never! {
     None
 }
 
-// Rust `resolve_program_path`: the toolchain's declared tool (by name, then
-// basename) through its mounts; a declared-only toolchain stops there. Only
-// the host toolchain, or a target that is the running host, may fall back to
-// an explicit path or PATH.
+// The toolchain's declared tool (by name, then basename) through its mounts; a
+// declared-only toolchain stops there. Only the host toolchain, or a target
+// that is the running host, may fall back to an explicit path or PATH.
 build_resolve_program_path: fn(plan: HermeticBuildPlan, toolchain_handle: ToolchainHandle, program: String) -[FS, Env]> String? Never! {
     toolchain: plan.toolchain(toolchain_handle) ?? return None
     if toolchain.tools.get(program) == .Val(declared) {
@@ -1001,7 +995,6 @@ build_resolve_program_path: fn(plan: HermeticBuildPlan, toolchain_handle: Toolch
     None
 }
 
-// Rust `target_matches_running_host`.
 build_target_matches_running_host: fn(triple: String) -[Env]> Bool Never! {
     arch: sys.arch()
     candidates: if {
@@ -1013,10 +1006,10 @@ build_target_matches_running_host: fn(triple: String) -[Env]> Bool Never! {
     candidates.contains(triple)
 }
 
-// Rust `canonical_tool_path`: a declared tool under a mount destination maps
-// to the mount source (a `..` component refuses it); otherwise the declared
-// path itself. Matching and joining use path components, so `//` or `.`
-// after a destination stays under its source.
+// A declared tool under a mount destination maps to the mount source (a `..`
+// component refuses it); otherwise the declared path itself. Matching and
+// joining use path components, so `//` or `.` after a destination stays under
+// its source.
 build_canonical_tool_path: fn(toolchain: HermeticBuildToolchain, declared: String) -[FS, Env]> String? Never! {
     loop mount in toolchain.mounts {
         relative: build_strip_path_prefix(declared, mount.destination) ?? next
@@ -1028,8 +1021,8 @@ build_canonical_tool_path: fn(toolchain: HermeticBuildToolchain, declared: Strin
     build_canonical_executable_path(declared)
 }
 
-// Rust `Path::components` of a `/`-separated path: empty and `.` parts
-// dropped, `..` kept for the caller to refuse.
+// The components of a `/`-separated path: empty and `.` parts dropped, `..`
+// kept for the caller to refuse.
 build_path_parts: fn(path: String) -> [String] Never! {
     parts := [String]{}
     loop part in path.split("/") {
@@ -1039,9 +1032,8 @@ build_path_parts: fn(path: String) -> [String] Never! {
     parts
 }
 
-// Rust `Path::strip_prefix` over whole components: the components of
-// `path` after `prefix`, or None when `prefix`'s components do not lead
-// `path` (an absolute and a relative path never match).
+// The components of `path` after `prefix`, or None when `prefix`'s components
+// do not lead `path` (an absolute and a relative path never match).
 build_strip_path_prefix: fn(path: String, prefix: String) -> [String]? Never! {
     if path.starts_with("/") != prefix.starts_with("/") -> return None
     path_parts: build_path_parts(path)
@@ -1053,9 +1045,8 @@ build_strip_path_prefix: fn(path: String, prefix: String) -> [String]? Never! {
     Val(path_parts.slice(prefix_parts.len(), path_parts.len()))
 }
 
-// Rust `runtime_toolchain_arguments`: Linux keeps declared virtual paths
-// (the sandbox projects the mounts); macOS and Windows translate only the
-// declared mount paths at the adapter boundary.
+// Linux keeps declared virtual paths (the sandbox projects the mounts); macOS
+// and Windows translate only the declared mount paths at the adapter boundary.
 build_runtime_toolchain_arguments: fn(plan: HermeticBuildPlan, handle: ToolchainHandle, args: [String]) -[Env]> [String] Never! {
     if sys.is_linux() -> return args.copy()
     toolchain: plan.toolchain(handle) ?? return args
@@ -1098,8 +1089,7 @@ build_runtime_mount_path: fn(toolchain: HermeticBuildToolchain, value: String) -
     None
 }
 
-// Rust `toolchain_provenance_digest`: SHA-256 of the toolchain's derived
-// `Debug` text.
+// SHA-256 of the toolchain's derived `Debug` text.
 build_toolchain_provenance_digest: fn(plan: HermeticBuildPlan, handle: ToolchainHandle) -> ContentDigest Never! {
     identity: if plan.toolchain(handle) == {
         .Val(toolchain) -> build_debug_toolchain(toolchain)
@@ -1108,7 +1098,7 @@ build_toolchain_provenance_digest: fn(plan: HermeticBuildPlan, handle: Toolchain
     ContentDigest.from_bytes(identity.bytes())
 }
 
-// Rust derived `Debug` of `BuildToolchain` and the types inside it.
+// The derived `Debug` form of `BuildToolchain` and the types inside it.
 build_debug_toolchain: fn(t: HermeticBuildToolchain) -> String Never! {
     role: if t.role == ToolchainRole.Host -> "Host" else -> "Target"
     sdk: if t.sdk == {

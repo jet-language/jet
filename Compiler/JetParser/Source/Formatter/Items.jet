@@ -1,6 +1,6 @@
-// Formatter declarations, markers, templates, imports and packages: a port.
-// Every Rust `Fmt` method `name` is the free function `jfmt_name(f, …)`;
-// shared state lives in Formatter.jet.
+// Formatter declarations, markers, templates, imports and packages. Every
+// formatter method `name` is the free function `jfmt_name(f, …)`; shared
+// state lives in Formatter.jet.
 use jet_foundation.[
     BLOCK_COMMENT_OPEN,
     BudgetField,
@@ -75,16 +75,15 @@ use jet_foundation.[
     owned_trait_requested,
 ]
 
-// Rust `TypeBodyMember`: one member of a struct or enum body, tagged with
-// where the author wrote it. The parser splits a type body into parallel
-// vectors — `fields`, `cli_bindings`, `trait_impls`, `methods`,
-// `validate_block` — which erases the authored interleaving. Printing those
-// vectors back to back rewrites every program that did not happen to use that
-// order, and `emit_leading` would then hand each comment to whichever member
-// happens to be printing. Rethread the vectors into one source-ordered list.
-// `index` addresses the member's vector; `start` is its leftmost authored
-// offset (every key names a span inside the member, so keys rise exactly as
-// the source does).
+// One member of a struct or enum body, tagged with where the author wrote it.
+// The parser splits a type body into parallel vectors — `fields`,
+// `cli_bindings`, `trait_impls`, `methods`, `validate_block` — which erases
+// the authored interleaving. Printing those vectors back to back rewrites every
+// program that did not happen to use that order, and `emit_leading` would then
+// hand each comment to whichever member happens to be printing. Rethread the
+// vectors into one source-ordered list. `index` addresses the member's vector;
+// `start` is its leftmost authored offset (every key names a span inside the
+// member, so keys rise exactly as the source does).
 JFMT_MEMBER_STATE: 0
 
 JFMT_MEMBER_FIELD: 1
@@ -134,9 +133,8 @@ JetFmtTypeBody: struct {
     markers: [Marker]{[Marker]{}},
 }
 
-// Rust `TypeBodyMember.is_compact` / `ImplBodyMember.is_compact`: data
-// declarations stack on adjacent lines; anything carrying a body is set off
-// from its neighbor by a blank line.
+// Data declarations stack on adjacent lines; anything carrying a body is set
+// off from its neighbor by a blank line.
 jfmt_member_is_compact: fn(member: JetFmtMember) -> Bool Never! {
     member.kind == JFMT_MEMBER_FIELD || member.kind == JFMT_MEMBER_ASSOC_TYPE || member.kind == JFMT_MEMBER_CONSTANT || member.kind == JFMT_MEMBER_MARKER
 }
@@ -180,7 +178,7 @@ jfmt_fmt_above_markers: fn(f: ^JetFmt, markers: [Marker]) {
     jfmt_fmt_marker_group(f, jfmt_above_markers(markers), "#", true)
 }
 
-// Rust `sort_by_key(start)`: a stable sort on the authored offset.
+// A stable sort on the authored offset.
 jfmt_sort_members: fn(members: [JetFmtMember]) -> [JetFmtMember] Never! {
     sorted := members
     index := 1
@@ -197,7 +195,7 @@ jfmt_sort_members: fn(members: [JetFmtMember]) -> [JetFmtMember] Never! {
     sorted
 }
 
-// Rust `Option<Span>` lookup into `source_list_item_spans`.
+// An optional span lookup into `source_list_item_spans`.
 jfmt_span_at: fn(spans: [Span], index: Int, fallback: Span) -> Span Never! {
     if index < spans.len() -> return spans[index]
     fallback.copy()
@@ -208,7 +206,7 @@ jfmt_item_spans_for: fn(f: JetFmt, source: JetFmtSourceList?) -> [Span] {
     [Span]{}
 }
 
-// Byte search over source text; Rust `str.find`/`rfind` offsets.
+// Byte search over source text; forward and reverse find offsets.
 jfmt_items_find: fn(haystack: [U8], needle: [U8], from: Int) -> Int? Never! {
     if needle.len() == 0 -> return Val(from)
     index := from
@@ -242,7 +240,7 @@ jfmt_items_rfind: fn(haystack: [U8], needle: [U8], before: Int) -> Int? Never! {
     None
 }
 
-// The segment after the last `separator` (Rust `rsplit(sep).next()`).
+// The segment after the last `separator`.
 jfmt_last_segment: fn(text: String, separator: String) -> String Never! {
     bytes: text.bytes()
     position: jfmt_items_rfind(bytes, separator.bytes(), bytes.len()) ?? return text.copy()
@@ -256,7 +254,7 @@ jfmt_has_name: fn(entries: [NamedSpan], name: String) -> Bool Never! {
     false
 }
 
-// Rust `Type.name().is_empty()`: only a nameless type spells empty.
+// Only a nameless type spells empty.
 jfmt_type_name_is_empty: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name.len() == 0
@@ -266,7 +264,7 @@ jfmt_type_name_is_empty: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `Generics.substitute_type`, reduced to what decode wire shapes read:
+// Generic type substitution, reduced to what decode wire shapes read:
 // generic parameter names resolve to their arguments everywhere a shape can
 // see through.
 jfmt_substitute_type: fn(ty: Type, params: [TypeParam], args: [Type]) -> Type Never! {
@@ -320,7 +318,7 @@ jfmt_push_shape: fn(shapes: ^[SerdeWireShape], shape: SerdeWireShape) Never! {
     shapes.push(shape.copy())
 }
 
-// Rust `finish`: dedup; an empty shape set is no fact.
+// Dedup; an empty shape set is no fact.
 jfmt_finish_shapes: fn(shapes: [SerdeWireShape]) -> [SerdeWireShape]? Never! {
     out := [SerdeWireShape]{}
     loop shape in shapes -> jfmt_push_shape(out, shape)
@@ -328,7 +326,7 @@ jfmt_finish_shapes: fn(shapes: [SerdeWireShape]) -> [SerdeWireShape]? Never! {
     Val(out)
 }
 
-// Rust `UnitFamilyDef.type_name`: `m_per_s` -> `MPerS`.
+// `m_per_s` -> `MPerS`.
 jfmt_unit_type_name: fn(member: String) -> String Never! {
     out := ""
     loop segment in member.split("_") {
@@ -340,7 +338,7 @@ jfmt_unit_type_name: fn(member: String) -> String Never! {
     out
 }
 
-// Rust `UnitFamilyDef.distinct_defs`, reduced to the minted names and their
+// A unit family's distinct definitions, reduced to the minted names and their
 // `Decode` fact (base `Float`).
 jfmt_unit_family_decodes: fn(family: UnitFamilyDef, name: String) -> Bool? Never! {
     if family.family == "Time" && (family.resolved_owner ?? "") == "core.units" -> return None
@@ -363,14 +361,12 @@ jfmt_unit_family_decodes: fn(family: UnitFamilyDef, name: String) -> Bool? Never
     None
 }
 
-// Rust `Names.member_name(module_name, "")`.
 jfmt_member_name_prefix: fn(module_name: String) -> String Never! {
     stripped: if module_name.starts_with("__jet_") -> foundation_byte_text(module_name.bytes(), 6, module_name.bytes().len()) else -> module_name.copy()
     decoded: jfmt_decode_generated_suffix(stripped) ?? stripped
     jfmt_generated_path("{decoded}.")
 }
 
-// Rust `Syntax.generated_path`.
 jfmt_generated_path: fn(path: String) -> String Never! {
     hex: "0123456789abcdef".bytes()
     out := [U8]{}
@@ -407,7 +403,6 @@ jfmt_hex_value: fn(code: Int) -> Int Never! {
     }
 }
 
-// Rust `Syntax.decode_generated_path_suffix`.
 jfmt_decode_generated_suffix: fn(suffix: String) -> String? Never! {
     bytes: suffix.bytes()
     out := [U8]{}
@@ -442,14 +437,13 @@ jfmt_decode_generated_suffix: fn(suffix: String) -> String? Never! {
     Val(String.from_bytes(out) ?? return None)
 }
 
-// Rust `AST.resolved_decode_wire_shapes` `named`.
+// The resolved decode wire shapes' `named`.
 jfmt_decode_named_shapes: fn(items: [Item], name: String, args: [Type], seen: ^[String]) -> [SerdeWireShape]? {
     loop seen_name in seen {
         if seen_name == name -> return None
     }
     seen.push(name.copy())
     result: jfmt_decode_named_shapes_inner(items, name, args, seen)
-    // Rust `seen.remove(name)`.
     kept := [String]{}
     loop seen_name in seen {
         if seen_name != name -> kept.push(seen_name.copy())
@@ -550,7 +544,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
     None
 }
 
-// Rust `AST.resolved_decode_wire_shapes` `resolve`.
+// The resolved decode wire shapes' `resolve`.
 jfmt_decode_shapes: fn(items: [Item], ty: Type, seen: ^[String]) -> [SerdeWireShape]? {
     shapes := [SerdeWireShape]{}
     if ty == {
@@ -992,9 +986,9 @@ jfmt_derive_body_item_end: fn(f: JetFmt, body_item: DeriveBodyItem) -> Int {
     }
 }
 
-// Rust `ModuleBodyEntry`: module imports and items live in separate AST
-// vectors, so retain authored order while formatting. Each run of imports
-// with no item between them prints as one group (jfmt_fmt_import_groups).
+// Module imports and items live in separate AST vectors, so retain authored
+// order while formatting. Each run of imports with no item between them prints
+// as one group (jfmt_fmt_import_groups).
 jfmt_fmt_module_body: fn(f: ^JetFmt, imports: [ImportDecl], items: [Item], markers: [Marker], span_end: Int) {
     entries := [JetFmtMember]{}
     loop index in 0..<imports.len() {
@@ -1758,10 +1752,9 @@ jfmt_fmt_operator_head: fn(f: ^JetFmt, rhs: Type?, marker: OperatorMarker?, mark
     jfmt_write(f, " #Commutative")
 }
 
-// Emit an `impl` body in authored order (Rust `ImplBodyMember`).
-// `Name: Concrete` rows, `name: value` constants and methods arrive
-// in three vectors, so printing one vector and then another moves a row the
-// author wrote after a method.
+// Emit an `impl` body in authored order. `Name: Concrete` rows, `name: value`
+// constants and methods arrive in three vectors, so printing one vector and
+// then another moves a row the author wrote after a method.
 jfmt_fmt_impl_body: fn(f: ^JetFmt, assoc_types: [NamedType], constants: [ImplConstValue], methods: [Func], markers: [Marker]) {
     members := [JetFmtMember]{}
     loop index in 0..<assoc_types.len() {
@@ -1807,9 +1800,9 @@ jfmt_fmt_impl_body: fn(f: ^JetFmt, assoc_types: [NamedType], constants: [ImplCon
     }
 }
 
-// Rust `Registry.callable_marker_needs_line_break`: the rows that keep the
-// established readable layout on their own line above `fn`, the web bridge
-// `#Export(wasm)` among them (`#Export(c)` stays on the `fn` line).
+// The rows that keep the established readable layout on their own line above
+// `fn`, the web bridge `#Export(wasm)` among them (`#Export(c)` stays on the
+// `fn` line).
 jfmt_callable_marker_needs_line_break: fn(marker: Marker) -> Bool Never! {
     name: marker.name
     if name == "Export" {
@@ -1821,8 +1814,8 @@ jfmt_callable_marker_needs_line_break: fn(marker: Marker) -> Bool Never! {
     name == "Meta" || name == "Unsafe" || name == "FFI" || name == "Target"
 }
 
-// Rust `rsplit_once('{')` then `rsplit_once('}')`: does the declared body
-// between the last `{` and the last `}` after it stay on one plain line?
+// Does the declared body between the last `{` and the last `}` after it stay on
+// one plain line?
 jfmt_empty_body_inline: fn(f: JetFmt, span: Span) -> Bool Never! {
     if !jfmt_src_range_valid(f, span.start, span.end) -> return false
     bytes: f.src_bytes
@@ -2011,7 +2004,7 @@ jfmt_fmt_policy_rule: fn(f: ^JetFmt, declarations: [PolicyDeclaration]) {
     jfmt_write(f, ")")
 }
 
-// Rust `fmt_param_list`'s local `Entry`: a parameter or a zone separator.
+// A parameter list entry: a parameter or a zone separator.
 JetFmtParamEntry: struct {
     param: Int,
     zone: String,
@@ -2690,7 +2683,7 @@ jfmt_variant_source_end: fn(v: Variant) -[]> Int {
     }
 }
 
-// Rust `EnumFmtEntry`: a leaf variant or a nested group.
+// A leaf variant or a nested group.
 JetFmtEnumEntry: struct {
     is_group: Bool,
     index: Int,
@@ -2806,7 +2799,6 @@ jfmt_enum_entries_at_prefix: fn(e: EnumDef, prefix: String) -> [JetFmtEnumEntry]
             items.push(JetFmtEnumEntry{is_group: false, index: variant_index, order: variant_index})
         }
     }
-    // Rust `sort_by_key(idx)` (stable).
     sorted := items
     position_index := 1
     loop position_index < sorted.len() {
@@ -3097,7 +3089,7 @@ jfmt_fmt_import_row: fn(f: ^JetFmt, imp: ImportDecl) {
             source: jfmt_source_list_span_after(f, items_span.start, JFMT_DELIM_BRACKET)
             multiline: jfmt_comma_begin(f, items.len(), source)
             loop index in 0..<items.len() {
-                // Rust `ImportBinding`: `item_span`, else `local_span`.
+                // `item_span`, else `local_span`.
                 local_span: if index < imp.local_spans.len() -> imp.local_spans[index] else -> (if index < imp.item_spans.len() -> imp.item_spans[index] else -> module_alias_span)
                 item_span: if index < imp.item_spans.len() -> imp.item_spans[index] else -> local_span
                 jfmt_comma_before(f, index, multiline, item_span.start)

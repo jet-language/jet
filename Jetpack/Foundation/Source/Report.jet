@@ -1,10 +1,10 @@
-// The shared machine-report value model (jet_foundation::Report). Every
-// command `--json` result is one `jet.status/v1` object (`StatusEnvelope`)
-// whose `reports` are `jet.report/v4` findings (`ReportEnvelope`): the
-// compiler's one CompilerDiagnostic record, then the report extension. Both
-// render through Core JSON: each envelope builds one insertion-ordered `Dyn`
-// in the exact field order, and `json.to_string` writes it. Status field
-// values are Core `Dyn` values (Rust `StatusValue`).
+// The shared machine-report value model (jet_foundation::Report). Every command
+// `--json` result is one `jet.status/v1` object (`StatusEnvelope`) whose
+// `reports` are `jet.report/v4` findings (`ReportEnvelope`): the compiler's one
+// CompilerDiagnostic record, then the report extension. Both render through
+// Core JSON: each envelope builds one insertion-ordered `Dyn` in the exact
+// field order, and `json.to_string` writes it. Status field values are Core
+// `Dyn` values.
 use {
     json: core.encoding.json
     files: core.files
@@ -25,7 +25,7 @@ STATUS_VERSION: 1
 
 STATUS_SCHEMA: "jet.status/v1"
 
-// The report model's one failure carrier; the text is the Rust error string.
+// The report model's one failure carrier; the text is the error string.
 #Error
 ReportError: struct {
     message: String,
@@ -33,9 +33,9 @@ ReportError: struct {
     new: fn(message: String) -> ReportError Never! { ReportError{message: message} }
 }
 
-// Rust `char::is_control` over every scalar: C0, DEL, or C1 (U+0080..U+009F,
-// encoded 0xC2 0x80..0x9F). Foundation sits below every area, so the report
-// validators carry their own copy of this check.
+// C0, DEL, or C1 (U+0080..U+009F, encoded 0xC2 0x80..0x9F). Foundation sits
+// below every area, so the report validators carry their own copy of this
+// check.
 foundation_text_has_control: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     loop index in 0..<raw.len() {
@@ -163,8 +163,8 @@ StatusFields: struct {
 
     is_empty: fn(self) -> Bool Never! { self.entries.len() == 0 }
 
-    // Rust `StatusValue::parse`: status fields refuse duplicate names, so an
-    // object is re-inserted field by field in document order.
+    // Status fields refuse duplicate names, so an object is re-inserted field
+    // by field in document order.
     from_dyn_object: fn(value: [String:Dyn]) -> StatusFields ReportError! {
         fields := StatusFields.new()
         loop entry in value -> fields.insert(entry.key, entry.value)
@@ -172,7 +172,7 @@ StatusFields: struct {
     }
 }
 
-// Rust `StatusValue::parse`: a JSON text as a status field value.
+// A JSON text as a status field value.
 report_status_value_parse: fn(text: String) -> Dyn ReportError! {
     if json.parse(text) == {
         .Ok(tree) -> Ok(tree)
@@ -180,7 +180,6 @@ report_status_value_parse: fn(text: String) -> Dyn ReportError! {
     }
 }
 
-// Rust `StatusValue::object`.
 report_status_object: fn(fields: StatusFields) -> Dyn Never! {
     object := [String:Dyn]{}
     loop entry in fields.entries -> object[entry.name] = entry.value
@@ -341,7 +340,7 @@ ReportPath: struct {
     is_empty: fn(self) -> Bool Never! { self.value == "" }
 }
 
-// Rust `lexically_normalize`: drop `.`, pop on `..` (never above the root).
+// Drop `.`, pop on `..` (never above the root).
 report_lexically_normalize: fn(path: String) -> String Never! {
     absolute: path.starts_with("/")
     parts := [String]{}

@@ -267,10 +267,10 @@ foundation_read_file_nofollow: fn(path: String, max_bytes: Int) -[FS]> [U8] IOEr
     Ok(content)
 }
 
-// The one bounded byte loop over a held handle (Rust `take(max + 1)` then the
-// over-bound refusal), shared by path reads and held file authorities. Callers
-// supply the typed refusal: path reads use InvalidData, held authorities retain
-// InvalidInput (including the approved OCI size-limit mapping).
+// The one bounded byte loop over a held handle, shared by path reads and held
+// file authorities. Callers supply the typed refusal: path reads use
+// InvalidData, held authorities retain InvalidInput (including the approved OCI
+// size-limit mapping).
 foundation_read_handle_bounded: fn(handle: ^FileReader, max_bytes: Int, bound_error: IOError) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
@@ -313,7 +313,7 @@ foundation_open_or_create_directory: fn(parent: Directory, name: String) -[FS]> 
 }
 
 // Keep every ancestor open, not just the last parent: a rename must not publish
-// into a detached tree after a pathname swap. Rust rooted_authority::open_root.
+// into a detached tree after a pathname swap.
 FoundationPublicationDirectory: struct {
     handle: Directory,
     path: String,
@@ -365,8 +365,8 @@ FoundationPublicationError: struct {
     error: IOError,
 }
 
-// Rust SHA256::rooted_authority::write, with CmdPkg::write_package_source's
-// checked-source validation point. A checked edit passes the ORIGINAL held
+// The rooted authority write, with the package source write's checked-source
+// validation point. A checked edit passes the ORIGINAL held
 // source it was prepared from, as `Val(() -> source.revalidate())` over its
 // FoundationFileAuthority, never a freshly reopened source. The validator runs
 // after write/fsync, before the final authority checks and descriptor-relative
@@ -457,9 +457,8 @@ FoundationFileAuthority: struct {
     path: String,
     priv identity: Stat,
 
-    // Rust Authority::ensure_paths_current: every held directory and the file
-    // are still the objects bound at their paths (path metadata never follows
-    // the final link).
+    // Every held directory and the file are still the objects bound at their
+    // paths (path metadata never follows the final link).
     ensure_paths_current: fn(self) -[FS]> IOError! {
         loop directory in self.directories {
             current: files.stat(directory.path)
@@ -479,8 +478,8 @@ FoundationFileAuthority: struct {
         }
     }
 
-    // Rust Authority::read_bounded: the bytes come from the held handle, and
-    // the paths and handle identity must hold before and after the read.
+    // The bytes come from the held handle, and the paths and handle identity
+    // must hold before and after the read.
     read_bounded: fn(^self, max_bytes: Int) -[FS]> [U8] IOError! {
         self.ensure_paths_current()
         bound_error: foundation_io_error(false, self.relative, "file exceeds its read bound")
@@ -845,9 +844,9 @@ foundation_resolve_path_ancestors: fn(path: String, create: Bool{false}) -[FS, E
     Ok(files.join(parent, name))
 }
 
-// Rust rooted_authority::open: every parent component is a directory opened
-// relative to the held chain without following links; the final component
-// must be a single-link regular file.
+// Every parent component is a directory opened relative to the held chain
+// without following links; the final component must be a single-link regular
+// file.
 foundation_open_file_authority: fn(root: String, relative: String) -[FS, Env]> FoundationFileAuthority IOError! {
     components: foundation_normal_components(false, relative)
     directories := foundation_open_root_directories(root)
@@ -883,8 +882,8 @@ foundation_open_file_authority: fn(root: String, relative: String) -[FS, Env]> F
     Ok(FoundationFileAuthority{directories: directories, handle: handle, relative: relative, path: path, identity: opened})
 }
 
-// Rust `read_file_nofollow_at_root`: one regular file below `root`, read from
-// the held no-follow handle and bounded by `max_bytes`.
+// One regular file below `root`, read from the held no-follow handle and
+// bounded by `max_bytes`.
 foundation_read_file_nofollow_at_root: fn(root: String, relative: String, max_bytes: Int) -[FS, Env]> [U8] IOError! {
     if max_bytes > MAX_TREE_FILE_BYTES {
         return Err(foundation_io_error(false, relative, "file read bound exceeds the tree hashing bound"))
@@ -893,13 +892,12 @@ foundation_read_file_nofollow_at_root: fn(root: String, relative: String, max_by
     source.read_bounded(max_bytes)
 }
 
-// Rust rooted_authority::same_identity: device, inode, length, mtime, links.
+// Device, inode, length, mtime, links.
 foundation_same_authority_identity: fn(left: Stat, right: Stat) -> Bool Never! {
     foundation_same_file_identity(left, right) && left.links == right.links
 }
 
-// Rust rooted_authority::same_directory: path metadata (no-follow) and a held
-// handle name the same directory object.
+// Path metadata (no-follow) and a held handle name the same directory object.
 foundation_same_directory: fn(path_stat: Stat, held: Stat) -> Bool Never! {
     !path_stat.is_symlink && path_stat.is_dir && held.is_dir && path_stat.id == held.id
 }
@@ -1014,7 +1012,7 @@ foundation_reopen_held_chain: fn(held: [FoundationPublicationDirectory]) -[FS]> 
     Ok(chain)
 }
 
-// Rust rooted_authority::ensure_directories_current / same_directory.
+// Ensure the directories are current and the same directory.
 // Path metadata only checks binding; all mutation remains handle-relative.
 foundation_ensure_directories_current: fn(directories: [FoundationPublicationDirectory]) -[FS]> IOError! {
     loop directory in directories {
@@ -1025,8 +1023,7 @@ foundation_ensure_directories_current: fn(directories: [FoundationPublicationDir
     }
 }
 
-// Rust rooted_authority::normal_components: the plain components of a
-// relative path; `..` and absolute paths are refused.
+// The plain components of a relative path; `..` and absolute paths are refused.
 foundation_normal_components: fn(write: Bool, relative: String) -> [String] IOError! {
     if relative.starts_with("/") {
         return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))

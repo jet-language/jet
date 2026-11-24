@@ -6,7 +6,7 @@ use {
     jet_pkg_model.[PackagePolicy]
 }
 
-// Rust CaptureIdentity.exact/is_exact/matches. The sole constructor takes all
+// CaptureIdentity.exact/is_exact/matches. The sole constructor takes all
 // seven canonical facts; there is no three-field compatibility constructor.
 CaptureIdentity: struct {
     target_inputs_sha256: String,
@@ -32,7 +32,7 @@ capture_identity_field_is_exact: fn(value: String) -> Bool Never! {
     value != "" && !jettrace_has_control(value)
 }
 
-// Rust CaptureConsentScope.default/new/for_budget/canonicalize/digest and
+// CaptureConsentScope.default/new/for_budget/canonicalize/digest and
 // frame/frame_vec. Scope defaults legitimately have no disclosure lineage.
 CaptureConsentScope: struct {
     authorities: [String],
@@ -66,7 +66,7 @@ CaptureConsentScope: struct {
         capture_consent_sort_unique(self.hosts)
         capture_consent_sort_unique(self.streams)
         capture_consent_sort_unique(self.disclosures)
-        // Rust's derived enum order, not lexical order of Time/Rand/Input/Net.
+        // Declaration order, not lexical order of Time/Rand/Input/Net.
         loop index in 1..<self.source_kinds.len() {
             value: self.source_kinds[index].copy()
             cursor := index
@@ -137,7 +137,7 @@ capture_consent_frame_vec: fn(output: ^[U8], key: String, values: [String]) Neve
     loop (index, value) in values -> capture_consent_frame(output, "{key}.{index}", value)
 }
 
-// Rust SensitiveCaptureConsent.new/identity/scope/digest/matches. Private
+// SensitiveCaptureConsent.new/identity/scope/digest/matches. Private
 // binding cannot be changed through getters. Matching deliberately does NOT
 // require is_exact(): live consent and receipt validation are separate seams.
 #!Printable
@@ -173,7 +173,7 @@ SensitiveCaptureConsent: struct {
         self._identity == identity && self._scope == scope
     }
 
-    // Rust fmt.Debug: do not derive a raw private-scope formatter.
+    // Do not derive a raw private-scope formatter.
     impl Debug {
         debug: fn(self) -> String {
             digest: self.digest()
@@ -182,10 +182,10 @@ SensitiveCaptureConsent: struct {
     }
 }
 
-// Rust CaptureAttempt.new/safe_clock/with_sources/with_source/base_consent_scope.
-// #4449: native auto-Debug needs the Rust bridge for consent's custom Debug.
-// Production keeps the exact carrier and protected formatter. Even #!Debug is
-// ignored for native derives, so the focused proof excludes this carrier closure.
+// CaptureAttempt.new/safe_clock/with_sources/with_source/base_consent_scope.
+// #4449: native auto-Debug cannot derive consent's custom Debug. Production
+// keeps the exact carrier and protected formatter. Even #!Debug is ignored for
+// native derives, so the focused proof excludes this carrier closure.
 CaptureAttempt: struct {
     identity: CaptureIdentity,
     sources: [CaptureSourceFact],
@@ -201,7 +201,7 @@ CaptureAttempt: struct {
         CaptureAttempt.new(identity).with_source(CaptureSourceFact{source: CaptureSource.Clock, location: None})
     }
 
-    // Rust builders consume `mut self`: move every retained field once.
+    // Move every retained field once.
     with_sources: fn(^^self, sources: ^^[CaptureSourceFact]) -> CaptureAttempt Never! {
         updated := self.move()
         updated.sources = sources.move()
@@ -223,7 +223,7 @@ CaptureAttempt: struct {
     }
 }
 
-// Rust CaptureSkipReason.source/code/reason_text/Display and CaptureSkip
+// CaptureSkipReason.source/code/reason_text/Display and CaptureSkip
 // requires_sensitive_consent/reason_text/status_line; source location survives.
 CaptureSkipReason: enum {
     ReleaseMode,
@@ -296,7 +296,6 @@ CaptureSkip: struct {
     }
 }
 
-// Rust CaptureEligibility.is_allowed/is_sensitive/kind/budget/skip.
 CaptureEligibility: enum {
     SafeClock(budget: CaptureBudget),
     Sensitive(budget: CaptureBudget),

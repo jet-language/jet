@@ -2183,7 +2183,7 @@ ir_render_push: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, builder: Int, slot
         return
     }
     // A Core record renders through its runtime type's own JetDisplay /
-    // JetShow / JetDebug, as generated Rust does.
+    // JetShow / JetDebug.
     rendered: ir_record_render(m, p, b, ty, slot, mode, span)
     if ir_failed(b) {
         return
@@ -2878,10 +2878,9 @@ ir_three_way: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, left: Int, right: In
     dst
 }
 
-// `left <=> right` as a word -1, 0 or 1 for operands `<`, `<=`, `>` and `>=`
-// do not compare in place (the Rust derived Ord): an Option orders None
-// first, then its payloads; a List element by element, then by length; a
-// tuple member by member.
+// `left <=> right` as a word -1, 0 or 1 for operands `<`, `<=`, `>` and `>=` do
+// not compare in place: an Option orders None first, then its payloads; a List
+// element by element, then by length; a tuple member by member.
 ir_order_sign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     sign: ir_temp(m, b, word_row)
@@ -3072,10 +3071,9 @@ ir_key_impl: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, value: Int,
     dst
 }
 
-// The IR function giving the order word -1, 0 or 1 of two values of the
-// struct or payload enum type row `row` (the Rust derived Ord), built on
-// first use so a recursive type orders through its own helper; -1 when its
-// body cannot be built.
+// The IR function giving the order word -1, 0 or 1 of two values of the struct
+// or payload enum type row `row`, built on first use so a recursive type orders
+// through its own helper; -1 when its body cannot be built.
 ir_order_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, span: Span) -> Int Never! {
     helper_key: "#order<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
@@ -3241,8 +3239,7 @@ ir_compare_chain: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, operands: [Int],
     result
 }
 
-// `left == right` as a Bool slot (the Rust derived PartialEq), the outermost
-// type compared inline.
+// `left == right` as a Bool slot, the outermost type compared inline.
 ir_equal: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     same: ir_temp(m, b, bool_row)
@@ -5309,11 +5306,10 @@ ir_char_from_scalar: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, t
     found
 }
 
-// `x.count_ones()` and the other population counts (Rust
-// lower_numeric_method): an exact Int crosses borrowed to
-// jet_numeric_int_bit_count and a fixed word as its extended 64-bit word to
-// jet_numeric_bit_count, each with the operation code and the receiver's
-// width; the count is an Int.
+// `x.count_ones()` and the other population counts: an exact Int crosses
+// borrowed to jet_numeric_int_bit_count and a fixed word as its extended 64-bit
+// word to jet_numeric_bit_count, each with the operation code and the
+// receiver's width; the count is an Int.
 ir_bit_count: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, method: String, width: Int, target: Int, span: Span) -> Int Never! {
     operation: if method == {
         "count_ones" -> 0
@@ -5777,11 +5773,10 @@ ir_fixed_fits: fn(row: IRType, value: Int) -> Bool Never! {
     value >= lowest && value <= highest
 }
 
-// A NumericCast between scalar rows: exact Int to exact Int is an owned copy;
-// a fixed integer that already is the target's value is copied, a narrowing
-// one re-read at the target width through a frame cell (Rust `as`); a narrow
-// word or Char is its exact Int; I64 and exact Int cross through the owned
-// runtime adapters.
+// A NumericCast between scalar rows: exact Int to exact Int is an owned copy; a
+// fixed integer that already is the target's value is copied, a narrowing one
+// re-read at the target width through a frame cell; a narrow word or Char is
+// its exact Int; I64 and exact Int cross through the owned runtime adapters.
 ir_numeric_cast: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, target: Int, span: Span) -> Int Never! {
     source: m.types[b.f.slot_type[value]]
     destination: m.types[target]

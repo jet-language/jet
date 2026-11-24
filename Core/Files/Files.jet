@@ -2528,8 +2528,7 @@ lock_timeout: fn(path: String) -> IOError Never! {
 }
 
 // Contention: Linux EWOULDBLOCK=EAGAIN(11), macOS EWOULDBLOCK=EAGAIN(35),
-// Windows ERROR_LOCK_VIOLATION(33). The Rust originals use those same kernel
-// results.
+// Windows ERROR_LOCK_VIOLATION(33).
 lock_contended: fn(code: Int, platform: Int) -> Bool Never! {
     (platform == 1 && code == 11) || (platform == 2 && code == 35) || (platform == 3 && code == 33)
 }
@@ -3275,9 +3274,9 @@ file_utf8_error: fn(bytes: [U8]) -> String Never! {
     }
 }
 
-// The Rust original is the exact contract. The existing BufReader owns
-// refill/position and retries Interrupted reads; the source owns the public
-// fault checkpoint, EOF, UTF-8 error and file-specific terminator trimming.
+// The existing BufReader owns refill/position and retries Interrupted reads;
+// the source owns the public fault checkpoint, EOF, UTF-8 error and
+// file-specific terminator trimming.
 priv __reader_read_line: fn(reader: ^FileReader) -[FS.Read]> String? IOError! {
     if rt.fault_should_fail("FS.Read") {
         return Err(

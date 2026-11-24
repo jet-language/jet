@@ -1,11 +1,10 @@
 // Ported from jet_foundation.Authority: one rights tree and one holds
 // relation.
 //
-// A rights set (Rust `Holds`, a `BTreeSet<String>`) is a sorted,
-// duplicate-free `[String]`; `authority_holds` builds one. Host-import facts
-// need compiler types (checked facts, Diagnostic), so their owner lives in the
-// PackageModel area (Authority/SandboxAuthority.jet); this file stays
-// compiler-free.
+// A rights set is a sorted, duplicate-free `[String]`; `authority_holds` builds
+// one. Host-import facts need compiler types (checked facts, Diagnostic), so
+// their owner lives in the PackageModel area (Authority/SandboxAuthority.jet);
+// this file stays compiler-free.
 
 // jet_foundation.Syntax.EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
@@ -83,7 +82,7 @@ AuthorityVerdict: enum {
     Missing,
 }
 
-// A rights set: sorted with duplicates removed (Rust `Holds`).
+// A rights set: sorted with duplicates removed.
 authority_holds: fn(rights: [String]) -> [String] Never! {
     sorted := rights
     sorted.sort()
@@ -244,9 +243,9 @@ AuthorityTightenError: struct {
     }
 }
 
-// The canonical authority value (Rust `Authority`) projected to runtime
-// adapters. Sandbox wrappers must not keep a second grant set.
-// Shared consumers use this same public constructor and read-only holds field.
+// The canonical authority value projected to runtime adapters. Sandbox wrappers
+// must not keep a second grant set. Shared consumers use this same public
+// constructor and read-only holds field.
 CanonicalAuthority: struct {
     holds: [String],
 

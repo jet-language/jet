@@ -222,8 +222,8 @@ parser_expression_comparison_token: fn(kind: Int) -> Bool Never! {
     parser_is_relational(kind) || kind == TOKEN_EQ_EQ || kind == TOKEN_NOT_EQ || kind == TOKEN_COMPARE
 }
 
-// Rust `chained_eq_error`: a comparison after `==`, `!=` or `<=>`, or an
-// equality after a relational chain, is fatal.
+// A comparison after `==`, `!=` or `<=>`, or an equality after a relational
+// chain, is fatal.
 parser_report_chained_comparison: fn(state: ^JetParserState) {
     span: parser_current(state).span
     parser_add_error(state, span, "comparisons can't be chained", "`a < b < c` doesn't compare all three; check each pair and join with `&&`", "write `a < b && b < c`")
@@ -433,9 +433,9 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
         }
 
         if pattern_test {
-            // Rust `try_named_struct_pattern`: a `Point{…}` head that does
-            // not read as a pattern (`Envelope{ badge: dep.Badge{ … } }`) is
-            // the struct value it spells.
+            // A `Point{…}` head that does not read as a pattern
+            // (`Envelope{ badge: dep.Badge{ … } }`) is the struct value it
+            // spells.
             named: parser_named_struct_pattern_ahead(state, allow_struct_lit)
             saved_position: state.position
             saved_diagnostics: state.diagnostics.len()
@@ -461,8 +461,8 @@ parser_parse_operators: fn(state: ^JetParserState, minimum: Int, depth: Int, all
                 expr: Expr.Range{start: left.expr.move(), end: right.expr.move(), exclusive: operator == TOKEN_DOT_DOT_LT, span: span, id: parser_node_id(state)},
                 span: span,
             }
-            // Rust `expr_range`: one range, never chained (`1..2..3`); the
-            // second `..` is left for the enclosing construct to reject.
+            // One range, never chained (`1..2..3`); the second `..` is left for
+            // the enclosing construct to reject.
             if parser_current_kind(state) == TOKEN_DOT_DOT || parser_current_kind(state) == TOKEN_DOT_DOT_LT {
                 break
             }
@@ -1075,8 +1075,8 @@ parser_parse_prefix: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bo
         span := parser_cover(token.span, operand.span)
         return ParsedExpr{expr: Expr.Unary{op: UnOp.Not, operand: operand.expr, span: span, id: parser_node_id(state)}, span: span}
     }
-    // Rust has no unary `+`: `+1` falls through to "expected a value".
-    // Prefix `~` complements an integer's bits.
+    // `+1` falls through to "expected a value". Prefix `~` complements an
+    // integer's bits.
     if kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_TILDE {
         parser_bump(state)
         operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
@@ -1094,8 +1094,8 @@ parser_parse_prefix: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bo
         span := parser_cover(token.span, operand.span)
         return ParsedExpr{expr: Expr.RawOf{value: operand.expr, span: span, id: parser_node_id(state)}, span: span}
     }
-    // Rust `primary`: `if` and `loop` in value position are always the value
-    // forms (`if cond -> a else -> b`, tables, collecting or result loops).
+    // `if` and `loop` in value position are always the value forms
+    // (`if cond -> a else -> b`, tables, collecting or result loops).
     if kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP {
         return parser_parse_expression_form(state, depth + 1)
     }
@@ -1151,9 +1151,9 @@ parser_parse_prefix: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bo
         span: parser_cover(token.span, name_token.span)
         return ParsedExpr{expr: Expr.Ident{name: "#{parser_value(state, name_token)}", span: span, id: parser_node_id(state)}, span: span}
     }
-    // One marker read at expression position (Rust `primary`): the marker
-    // name is read first, then classified. Any name without its own value
-    // meaning is a declared tag applied to the value after it.
+    // One marker read at expression position: the marker name is read first,
+    // then classified. Any name without its own value meaning is a declared tag
+    // applied to the value after it.
     if kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT {
         return parser_parse_marker_value(state, depth + 1, allow_struct_lit, stop_before_comparison)
     }
@@ -1170,8 +1170,8 @@ parser_parse_prefix: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bo
         return parser_parse_typed_literal_body(state, None, token.span, depth + 1)
     }
 
-    // Optional constructors keep the contextual EnumLit shape used by Rust;
-    // sema supplies the payload type from the expected optional type.
+    // Optional constructors keep the contextual EnumLit shape; sema supplies
+    // the payload type from the expected optional type.
     // `Val` without `(` is still an ordinary identifier.
     if kind == TOKEN_IDENT && parser_token_decoded_is_id(token, state.words.id_val) && parser_kind_at(state, 1) == TOKEN_LPAREN {
         parser_bump(state)
@@ -1212,8 +1212,8 @@ parser_parse_prefix: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bo
     }
     if kind == TOKEN_UNIT_NUMBER {
         parser_bump(state)
-        // Rust `UnitNumber`: `raw` is the lexer's digit spelling and the
-        // suffix span covers only the suffix.
+        // `raw` is the lexer's digit spelling and the suffix span covers only
+        // the suffix.
         suffix: parser_suffix(state, token)
         suffix_span: Span{start: token.span.end - suffix.bytes().len(), end: token.span.end}
         return ParsedExpr{
@@ -1293,8 +1293,8 @@ parser_parse_marker_value: fn(state: ^JetParserState, depth: Int, allow_struct_l
     }
     named: parser_current_kind(state) == TOKEN_IDENT
     inner := parser_parse_prefix(state, depth + 1, allow_struct_lit, stop_before_comparison)
-    // Rust `expr_primary` reads a bare name's call or member call with the
-    // name, so `#Checked Die.from_int(1)` tags the call's value.
+    // A bare name's call or member call is read with the name, so
+    // `#Checked Die.from_int(1)` tags the call's value.
     if named && inner.expr == .Ident(_, _, _) {
         inner = parser_parse_postfix(state, inner, depth + 1, allow_struct_lit, true)
     }
@@ -1323,9 +1323,9 @@ parser_parse_string: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
     ParsedExpr{expr: Expr.Str{parts: parts, span: token.span, id: parser_node_id(state)}, span: token.span}
 }
 
-// Rust `str_expr_from_parts`: one value, an optional debug label `=`, one
-// optional selector, then the end of the hole. A failure is fatal for the
-// statement, as Rust returns it as `Err`; an unknown selector (E0914) is not.
+// A string hole: one value, an optional debug label `=`, one optional
+// selector, then the end of the hole. A failure is fatal for the statement;
+// an unknown selector (E0914) is not.
 parser_parse_interpolation: fn(state: ^JetParserState, part: StringPart, depth: Int, parts: ^[StrPart]) {
     nested := JetParserState{
         tokens: part.tokens,
@@ -1408,8 +1408,8 @@ parser_parse_interpolation: fn(state: ^JetParserState, part: StringPart, depth: 
     loop argument in computed.move() -> parts.push(StrPart.Interp{expr: argument, format: None})
 }
 
-// Rust's debug-label spelling of one token, or "" when the token cannot
-// appear in a label.
+// The debug-label spelling of one token, or "" when the token cannot appear
+// in a label.
 parser_debug_label_piece: fn(state: JetParserState, token: Token) -> String Never! {
     if token.kind == {
         TOKEN_IDENT -> parser_value(state, token)
@@ -1429,8 +1429,8 @@ parser_debug_label_piece: fn(state: JetParserState, token: Token) -> String Neve
     }
 }
 
-// A nested hole parser failed: its diagnostics reach the file and the
-// enclosing statement stops, as Rust's `Err(first)` does.
+// A nested hole parser failed: its diagnostics reach the file and the enclosing
+// statement stops.
 parser_take_nested_failure: fn(state: ^JetParserState, diagnostics: [Diagnostic]) {
     if parser_aborting(state) {
         return
@@ -1696,8 +1696,8 @@ parser_report_member_spread_entry: fn(state: ^JetParserState) {
     }
 }
 
-// Rust `Syntax.INTERNAL_TASK_*`: NUL-led compiler-private names the `task`
-// sugar lowers into, so no source name can collide with them.
+// NUL-led compiler-private names the `task` sugar lowers into, so no source
+// name can collide with them.
 parser_task_internal: fn(name: String) -> String Never! {
     nul: String.from_bytes([U8]{U8{0}}) ?? ""
     "{nul}jet.{name}"
@@ -1857,8 +1857,8 @@ parser_parse_collection: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
         span := parser_cover(open.span, close.span)
         return ParsedExpr{expr: Expr.ListLit{elements: [Expr]{}, span: span, id: parser_node_id(state)}, span: span}
     }
-    // Rust `list_or_map_lit`: the first element decides list or map; the
-    // retired `[:]` is an ordinary missing-value error at the `:`.
+    // The first element decides list or map; the retired `[:]` is an ordinary
+    // missing-value error at the `:`.
     first: parser_parse_expression(state, 1, depth + 1)
     if parser_current_kind(state) == TOKEN_COLON {
         parser_bump(state)
@@ -1928,13 +1928,13 @@ parser_reflect_subject: fn(expr: Expr) -> Expr? Never! {
 
 parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: Int, allow_struct_lit: Bool, primary_tail: Bool) -> ParsedExpr {
     expression := initial.move()
-    // Rust `expr_primary`: a capitalized name's own `<…>` (`Pool<T>.new()`)
-    // and call-site arguments (`decode<Order>(raw)`).
+    // A capitalized name's own `<…>` (`Pool<T>.new()`) and call-site
+    // arguments (`decode<Order>(raw)`).
     owner_type_args := [Type]{}
     call_type_args := [Type]{}
-    // `primary_tail` reads only what Rust `expr_primary` read after a bare
-    // name: one call (`name(…)`), or one member with its call
-    // (`name.member(…)`), with their `<…>` lists and a literal head.
+    // `primary_tail` reads only what follows a bare name: one call
+    // (`name(…)`), or one member with its call (`name.member(…)`), with their
+    // `<…>` lists and a literal head.
     tail_member := false
     tail_done := false
     loop {
@@ -1971,8 +1971,8 @@ parser_parse_postfix: fn(state: ^JetParserState, initial: ^^ParsedExpr, depth: I
             }
         }
         if kind == TOKEN_LT {
-            // Rust `ptr_from_addr`: `alias.Ptr<T>.from_addr(addr)` reads its
-            // `<…>` as the element type, not a comparison.
+            // `alias.Ptr<T>.from_addr(addr)` reads its `<…>` as the element
+            // type, not a comparison.
             if expression.expr == .Field(base, member, _, _) && member == "Ptr" {
                 if parser_dotted_ident_path(base) == .Val(path) {
                     expression = parser_parse_ptr_from_addr(state, path.name, path.span, depth)
@@ -2259,8 +2259,7 @@ parser_expression_is_call: fn(expression: Expr) -> Bool Never! {
     }
 }
 
-// Rust `ptr_from_addr`: the tail of `alias.Ptr<T>.from_addr(addr)`, with the
-// cursor at the `<`.
+// The tail of `alias.Ptr<T>.from_addr(addr)`, with the cursor at the `<`.
 parser_parse_ptr_from_addr: fn(state: ^JetParserState, alias: String, alias_span: Span, depth: Int) -> ParsedExpr {
     parser_bump(state)
     elem: parser_parse_type(state, depth + 1).ty
@@ -2339,8 +2338,8 @@ parser_turbofish_ahead: fn(state: ^JetParserState, following: Int) -> Bool Never
     false
 }
 
-// Rust `parse_turbofish` / the capitalized-name `<…>`: comma-separated
-// types, a trailing comma allowed, closed by `>` (or half of `>>`).
+// A turbofish or capitalized-name `<…>`: comma-separated types, a trailing
+// comma allowed, closed by `>` (or half of `>>`).
 parser_parse_call_type_args: fn(state: ^JetParserState, depth: Int) -> [Type] {
     parser_bump(state)
     args := [Type]{}
@@ -2531,8 +2530,8 @@ parser_parse_expression_fields: fn(state: ^JetParserState, depth: Int) -> Parsed
     ParsedExprFields{fields: fields.move(), span: parser_cover(open.span, close.span)}
 }
 
-// A record payload `.Case{…}` is read only where a struct literal may stand,
-// as in Rust: in an `if` or loop header the `{` opens the body.
+// A record payload `.Case{…}` is read only where a struct literal may stand:
+// in an `if` or loop header the `{` opens the body.
 parser_parse_variant_args: fn(state: ^JetParserState, depth: Int, allow_struct_lit: Bool) -> [EnumLitArg] {
     args := [EnumLitArg]{}
     if {
@@ -2613,7 +2612,7 @@ parser_parse_or_fallback: fn(state: ^JetParserState, depth: Int, allow_struct_li
     // `??` groups from the right, so `a ?? b ?? c`
     // is `a ?? (b ?? c)`: the fallback operand parses at `??`'s own level.
     value: parser_parse_expression_restricted(state, 1, depth + 1, allow_struct_lit, stop_before_comparison)
-    // Rust `parse_or_fallback`: a bare `panic(...)` call is the panic fallback.
+    // A bare `panic(...)` call is the panic fallback.
     if value.expr == .Call(call, _) {
         if call.name == "panic" {
             return OrFallback.Panic{name_span: call.name_span, args: call.args}

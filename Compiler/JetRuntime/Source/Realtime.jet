@@ -1,4 +1,4 @@
-// One Control160 owns cancel. No Rust box or callback registry ID crosses the
+// One Control160 owns cancel. No box or callback registry ID crosses the
 // native producer boundary.
 realtime_raise: fn(message: I64) {
     jet_rt_panic_message(sync_load(message), sync_load(wrapping(message + I64{8})))
@@ -173,11 +173,11 @@ realtime_join: fn(stream: I64) {
     sync_mutex_lock(wrapping(scratch + RT_MATH_MUTEX))
     high: sync_load(wrapping(stream + RT_INDEX_HIGH))
     low: if (high == I64{0}) -> sync_load(wrapping(stream + RT_INDEX_LOW)) else -> I64{-1}
-    // Rust next_callback publishes min(index,u64.MAX), then recomputes Instant.
+    // Publish min(index,u64.MAX) as the next callback, then recompute Instant.
     offset: jet_rt_native_realtime_deadline_offset(sync_load(wrapping(stream + RT_RATE)), sync_load(wrapping(stream + RT_FRAMES)), low, I64{0}, scratch)
     deadline: realtime_add(sync_load(wrapping(stream + RT_START)), offset)
     sync_mutex_unlock(wrapping(scratch + RT_MATH_MUTEX))
-    // Owned source Instant.start_ns field, NOT a Rust JetInstant handle.
+    // Owned source Instant.start_ns field, NOT an instant handle.
     jet_int_owned_from_i64(deadline)
 }
 
@@ -288,7 +288,7 @@ rt_realtime_worker_address: fn() -> I64 {
     loop !realtime_canceled(stream) {
         identity: sync_load(wrapping(stream + RT_DEADLINE_IDENTITY))
         remaining: realtime_remaining(deadline, realtime_now_ns())
-        // Persistent park is NOT on the control's cancel-wake list. Rust cancel
+        // Persistent park is NOT on the control's cancel-wake list. Cancel
         // waits for sleep's deadline before the callback-boundary check.
         if (remaining > I64{0}) { sync_park(wrapping(scratch + RT_SLEEP_PARK), remaining) }
         if realtime_canceled(stream) -> break
@@ -344,7 +344,7 @@ rt_realtime_worker_address: fn() -> I64 {
     I64{0}
 }
 
-// Raw native receipt snapshots bridge the ordinary source struct. No Rust glue.
+// Raw native receipt snapshots bridge the ordinary source struct.
 #Export(c) jet_rt_handle_drop_jet_realtime_receipt: fn(receipt: I64) {
     jet_rt_free(receipt, RT_RECEIPT_BYTES, I64{8})
 }

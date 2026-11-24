@@ -1,6 +1,6 @@
-// The Rust original owns file/stdin line policy and shared process state; the
-// Rust original owns encoding next/error/EOF policy. Lower supplies Jet callbacks
-// to those source methods, never a Rust Box or an FD72 projection. Borrowed
+// The file/stdin line policy, shared process state and encoding
+// next/error/EOF policy are fixed. Lower supplies Jet callbacks to those
+// source methods, never a box or an FD72 projection. Borrowed
 // adapter32: payload0, next8, release16, clone24. Copied before return.
 // next(payload, output) returns 0 EOF, 1 moved value, -1 stopped (out unwritten).
 // Errors render/panic at <core.prelude>:0 exactly as the source kernels do; no
@@ -39,8 +39,6 @@ iter_source_pull: fn(node: I64, output: I64) -> Bool {
 // A borrowed file or stdin reader stays lazy, as an owned one does: the line
 // stream cannot leave its loop (E2502), so the kept handle outlives every
 // pull, and each pull reads one line from it (iterator sources stay lazy).
-// The Rust original drained a borrowed reader into a List at
-// init, which held the whole input in memory before the body ran once.
 iter_line_source: fn(adapter: I64, by_value: I64, meta: I64) -> I64 {
     iter_source_node(adapter, by_value, meta, false)
 }
@@ -54,7 +52,7 @@ iter_line_source: fn(adapter: I64, by_value: I64, meta: I64) -> I64 {
 }
 
 #Export(c) jet_rt_native_iter_process_lines: fn(source: I64, by_value: I64, meta: I64) -> I64 {
-    // The Rust original retains the shared pipe, not the Child.
+    // Retain the shared pipe, not the Child.
     iter_source_node(source, by_value, meta, true)
 }
 

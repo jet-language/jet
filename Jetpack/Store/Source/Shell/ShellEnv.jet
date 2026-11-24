@@ -9,14 +9,14 @@ use {
     process: core.process
 }
 
-// Rust Platform::clean_path: the minimal host-independent PATH available to
-// clean child processes. Declared Jet bins are prepended by the caller.
+// The minimal host-independent PATH available to clean child processes.
+// Declared Jet bins are prepended by the caller.
 env_shell_clean_path: fn() -[Env]> String Never! {
     if sys.is_windows() -> return "C:\\Windows\\System32;C:\\Windows"
     "/usr/bin:/bin"
 }
 
-// Rust Platform::path_separator for the running host.
+// The path separator for the running host.
 env_shell_path_separator: fn() -[Env]> String Never! { pkg_path_separator_for_os(sys.name()) }
 
 // Append `dir` once, preserving first-seen order.
@@ -207,10 +207,9 @@ ShellEnv: struct {
         self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: false})
     }
 
-    // Stand in for the Jetpack process with a verified environment command
-    // (Rust replaced the process for a lease-resolved executable). Core has
-    // no process replacement, so the command is a waited child whose status,
-    // a signal death as 128+n, becomes this process's exit code.
+    // Stand in for the Jetpack process with a verified environment command.
+    // Core has no process replacement, so the command is a waited child whose
+    // status, a signal death as 128+n, becomes this process's exit code.
     exec_command: fn(^self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
         self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: true})
     }
@@ -288,7 +287,7 @@ ShellEnv: struct {
             }
         }
         spec = spec.stdin(.Inherit).stderr(.Inherit)
-        // Rust discards a silent child's stdout; Core has no null stream, so
+        // A silent child's stdout is discarded; Core has no null stream, so
         // the bytes are captured and dropped with the receipt.
         spec = if options.silent -> spec.stdout(.Capture) else -> spec.stdout(.Inherit)
         suffix: if options.clean -> " in a clean env" else -> ""
@@ -391,8 +390,8 @@ ShellLaunch: struct {
     }
 }
 
-// Rust `status.code().unwrap_or(...)`: a signal-terminated child has no exit
-// code, so the caller's fallback stands in for it.
+// A signal-terminated child has no exit code, so the caller's fallback stands
+// in for it.
 env_shell_exit_code: fn(receipt: ProcessReceipt, signaled: Int) -> Int Never! {
     if receipt.signal != None -> return signaled
     receipt.code

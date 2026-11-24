@@ -83,7 +83,7 @@ pkg_authority_package_error: fn(error: AuthorityError) -> PackageParseError Neve
     }
 }
 
-// Why an entry-resolution command failed (Rust `String` errors).
+// Why an entry-resolution command failed.
 #Error
 PackageEntryError: struct {
     message: String,
@@ -548,8 +548,8 @@ impl PackageFacts {
     is_config_file: fn(self, relative: String) -> Bool Never! {
         names := self.resolved_config_paths
         loop name in self.configs -> names.push(name.copy())
-        // Rust `candidate.extension().is_none()`: a leading dot alone is not
-        // an extension (`files.suffix` uses the same rule).
+        // A leading dot alone is not an extension (`files.suffix` uses the same
+        // rule).
         loop config_name in names {
             with_extension: "{config_name}.jet"
             if relative == config_name -> return true

@@ -1,8 +1,6 @@
-// Native process-edge stops. The Rust originals are the behavioral reference:
-// registered stops exit 70; IR Never is a defect (101). Text handles borrow the
-// one E4 JetText ABI: [ptr, byte length, capacity], three 8-byte words. No
-// String/Vec Rust layout is read here. These exports replace the corresponding
-// Rust exports when E2 cuts the pack over.
+// Native process-edge stops: registered stops exit 70; IR Never is a defect
+// (101). Text handles borrow the one E4 JetText ABI: [ptr, byte length,
+// capacity], three 8-byte words.
 
 // Word reads borrow an initialized word of a live JetText or static require
 // descriptor; byte reads borrow one initialized byte of a live UTF-8 carrier.
@@ -668,7 +666,7 @@ trap_native_index_range_root: fn() {
 }
 
 // Registered E3010 overflow: tasks carry the exact root message; the root
-// report stays unchanged even where the seed uses raw Rust arithmetic.
+// report stays unchanged.
 #Export(c) jet_rt_panic_overflow: fn() {
     message: trap_msg_overflow_text()
     trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
@@ -737,8 +735,8 @@ trap_native_index_range_root: fn() {
     trap_footer(I64{1})
 }
 
-// The Rust original supplies the one list-index reason, as an owned String.
-// Reuse the existing decimal formatter, including I64.MIN.
+// The one list-index reason, as an owned String. Reuse the existing decimal
+// formatter, including I64.MIN.
 trap_list_bounds_reason: fn(len: I64, index: I64) -> I64 {
     message: jet_rt_string_builder_new()
     trap_build_msg_list_head(message)
@@ -868,10 +866,10 @@ trap_bounds_locals: fn(area: I64, first: I64, second: I64, third: I64, labels: I
     trap_msg_report_list_end()
 }
 
-// An uncaught host payload is a defect, not an E3001 stop. Rust's
-// thread/source/backtrace panic-hook framing is host implementation detail;
-// retain the payload bytes and the host-fault exit class. Like
-// jet_rt_unreachable it exits at once: no program stop publication.
+// An uncaught host payload is a defect, not an E3001 stop. Panic-hook
+// thread/source/backtrace framing is host implementation detail; retain the
+// payload bytes and the host-fault exit class. Like jet_rt_unreachable it
+// exits at once: no program stop publication.
 trap_host_fault: fn(message: I64, length: I64) {
     trap_stop(I64{1}, message, length, I64{0}, I64{0})
     trap_defect_prepare()
@@ -882,8 +880,8 @@ trap_host_fault: fn(message: I64, length: I64) {
 }
 
 // IR Never and the runtime's own defects (a shared text written in place) are
-// not a program-side stop. The Rust host's thread/source/backtrace prefix is
-// not Jet semantics; preserve the unreachable! body and status 101.
+// not a program-side stop. A thread/source/backtrace prefix is not Jet
+// semantics; preserve the unreachable body and status 101.
 #Export(c) jet_rt_unreachable: fn(reason: I64, length: I64) {
     trap_stop(I64{1}, reason, length, I64{0}, I64{0})
     trap_defect_prepare()
@@ -894,11 +892,11 @@ trap_host_fault: fn(message: I64, length: I64) {
     trap_defect_exit(EXIT_ICE)
 }
 
-// Vec.with_capacity(capacity as usize) and growth overflow are foreign
-// Rust String panics under CAbi guard: body + newline, exit 101, not a Jet stop.
+// Capacity and growth overflow are foreign String panics under the CAbi
+// guard: body + newline, exit 101, not a Jet stop.
 // Every runtime capacity past I64's range ends here: a sequence's, a text's
 // (whose bytes could never be addressed) and an owner count's (more owners
-// than memory holds, where Rust's Arc aborts).
+// than memory holds).
 rt_seq_capacity_overflow_stop: fn() {
     reason: rt_static_text("capacity overflow")
     trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
@@ -1221,8 +1219,8 @@ trap_debug_short: fn(code: I64) -> I64 Never! {
     I64{-1}
 }
 
-// Jet text quoting shares the exact Rust debug escaper, except
-// NUL is \u{0} here rather than Rust's \0. One table, decoder and escape loop.
+// Jet text quoting shares the exact debug escaper, except NUL is \u{0} here
+// rather than \0. One table, decoder and escape loop.
 #Export(c) jet_rt_require_debug_string: fn(value: I64) -> I64 {
     capacity: rt_text_len(value) * I64{10} + I64{2}
     result: rt_text_builder_with_capacity(capacity)

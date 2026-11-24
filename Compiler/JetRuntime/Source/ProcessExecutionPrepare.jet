@@ -1,4 +1,4 @@
-// Plain ProcessSpec192 -> borrowed HostSpawn Spec256. No Rust layouts.
+// Plain ProcessSpec192 -> borrowed HostSpawn Spec256.
 process_execution_first: fn(spec: I64) -> I64 {
     cmd: fd_word(spec, PROCESS_SPEC_CMD)
     if (fd_word(cmd, I64{0}) == I64{0}) -> {
@@ -409,7 +409,7 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
         return I64{0}
     }
     // A NUL byte would end the word or directory at exec, so it is refused
-    // first, as invalid input (Rust's InvalidInput, Python's ValueError).
+    // first, as invalid input.
     at := I64{0}
     loop at < fd_word(cmd, I64{0}) {
         if process_execution_has(fd_word(fd_word(cmd, I64{16}), at * I64{8}), I64{0}) {
@@ -485,7 +485,7 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
     facts: jet_rt_alloc(I64{80}, I64{8})
     fd_put(facts, I64{0}, fd_word(candidates, I64{0}))
     fd_put(facts, I64{8}, candidate_columns)
-    fd_put(facts, I64{16}, I64{0})  // Rust Command does not run ENOEXEC scripts.
+    fd_put(facts, I64{16}, I64{0})  // ENOEXEC scripts do not run.
     fd_put(
         facts,
         I64{24},

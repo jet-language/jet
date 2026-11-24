@@ -52,7 +52,7 @@ StdinHandle: struct {
     fd: Int,
 
     // The declaration's fd is informational; every token reads shared stdin.
-    // The Rust original owns no independent unread buffer or close operation.
+    // There is no independent unread buffer or close operation.
     // The raw leaf already drops the line's trailing LF and CR bytes.
     read_line: fn(^self) -[IO, Time.Wait]> String? IOError! {
         stdio_checkpoint(.Read, "stdin", "IO.Read")
@@ -610,7 +610,7 @@ choose_index: fn(answer: String) -> Int? Never! {
 positive_dimension: fn(value: String?) -> Int? Never! {
     text: value ?? return None
     n: choose_index(text) ?? return None
-    // Rust parse::<i64> allows a leading +, but not surrounding whitespace.
+    // A leading + is allowed, but not surrounding whitespace.
     if text != text.trim() || n <= 0 -> return None
     Val(n)
 }

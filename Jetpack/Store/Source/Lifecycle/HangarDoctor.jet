@@ -63,7 +63,6 @@ DoctorScan: struct {
     repair_paths: [String:String],
 }
 
-// Rust `hangar_doctor`.
 store_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
     if !repair {
         scan: store_scan_hangar_doctor(verification, roots, false)
@@ -145,7 +144,6 @@ store_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoots, re
     Ok(scan.report)
 }
 
-// Rust `scan_hangar_doctor`.
 store_scan_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoots, write_seals: Bool) -[FS, Env]> DoctorScan StoreError! {
     hangar: roots.hangar_dir()
     scan := DoctorScan{report: HangarDoctorReport.empty(), repair_paths: [String:String]{}}
@@ -168,8 +166,7 @@ store_scan_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoot
     Ok(scan)
 }
 
-// Rust `doctor_finding_sort_key`: drift, then stale stages, then orphan CAS
-// files, each by subject.
+// Drift, then stale stages, then orphan CAS files, each by subject.
 store_doctor_finding_sort_key: fn(finding: HangarDoctorFinding) -> String Never! {
     rank: if finding.kind == {
         "drift" -> 0
@@ -187,8 +184,8 @@ store_doctor_sorted_entries: fn(path: String) -[FS]> [DirEntry] StoreError! {
     Ok(entries)
 }
 
-// Rust `scan_doctor_objects`: verify every canonical object's content digest
-// against its name; the CAS keys the object files would use.
+// Verify every canonical object's content digest against its name; the CAS keys
+// the object files would use.
 store_scan_doctor_objects: fn(verification: ^StoreVerification, hangar: String, report: ^HangarDoctorReport, write_seals: Bool) -[FS, Env]> [String] StoreError! {
     objects: files.join(hangar, STORE_OBJECTS_DIR)
     found: store_node_stat(objects)
@@ -230,8 +227,8 @@ store_scan_doctor_objects: fn(verification: ^StoreVerification, hangar: String, 
     Ok(cas_keys)
 }
 
-// Rust `collect_doctor_cas_keys`: `<sha256>-<permission bits, 8 hex digits>`
-// of every non-empty regular file in an object; unreadable files are skipped.
+// `<sha256>-<permission bits, 8 hex digits>` of every non-empty regular file in
+// an object; unreadable files are skipped.
 store_collect_doctor_cas_keys: fn(object: String, keys: ^[String]) -[FS, Env]> Never! {
     members: store_files_under(object)
     loop file in members {
@@ -252,8 +249,7 @@ store_doctor_hex8: fn(value: Int) -> String Never! {
     pkg_bytes_text(out, 0, out.len())
 }
 
-// Rust `scan_doctor_staging`: abandoned ingest and admission stages, and
-// partial objects under `objects/`.
+// Abandoned ingest and admission stages, and partial objects under `objects/`.
 store_scan_doctor_staging: fn(hangar: String, report: ^HangarDoctorReport) -[FS, Env]> StoreError! {
     store_scan_doctor_stage_dir(hangar, STORE_STAGE_DIR, false, report)
     store_scan_doctor_stage_dir(hangar, "stage", true, report)
@@ -269,7 +265,7 @@ store_scan_doctor_staging: fn(hangar: String, report: ^HangarDoctorReport) -[FS,
     }
 }
 
-// Rust `scan_doctor_stage_dir`. In the admission stage directory a native
+// Scan the doctor stage directory. In the admission stage directory a native
 // `nix-cache-` stage of a live process is not stale (Unix only).
 store_scan_doctor_stage_dir: fn(hangar: String, relative: String, admission_only: Bool, report: ^HangarDoctorReport) -[FS, Env]> StoreError! {
     stage: files.join(hangar, relative)
@@ -289,10 +285,10 @@ store_scan_doctor_stage_dir: fn(hangar: String, relative: String, admission_only
     }
 }
 
-// Rust `scan_doctor_cas`: CAS partials and files no object references. The
-// `.locks` namespace and the `.jetpack.lock` owner file belong to
-// RuntimePolicy and are never removed: removing either can split active
-// shared-CAS lock holders across lock-file inodes.
+// CAS partials and files no object references. The `.locks` namespace and the
+// `.jetpack.lock` owner file belong to RuntimePolicy and are never removed:
+// removing either can split active shared-CAS lock holders across lock-file
+// inodes.
 store_scan_doctor_cas: fn(hangar: String, referenced: [String], report: ^HangarDoctorReport) -[FS]> StoreError! {
     cas: files.join(hangar, STORE_CAS_DIR)
     found: store_node_stat(cas)
@@ -331,8 +327,8 @@ store_scan_doctor_cas: fn(hangar: String, referenced: [String], report: ^HangarD
     }
 }
 
-// Rust `doctor_repair_paths`: the first native `/nix/store` path recorded
-// for each primary and named-output digest of Nix-produced records.
+// The first native `/nix/store` path recorded for each primary and named-output
+// digest of Nix-produced records.
 store_doctor_repair_paths: fn(entries: [StoreEntry], paths: ^[String:String]) Never! {
     loop entry in entries {
         producer: ProducerRecord.decode(entry.producer_record) ?? next
@@ -359,12 +355,11 @@ store_doctor_repair_paths: fn(entries: [StoreEntry], paths: ^[String:String]) Ne
     }
 }
 
-// Rust `doctor_object_digest`.
 store_doctor_object_digest: fn(verification: ^StoreVerification, path: String, hangar: String, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
     store_verified_output_hash_with_options(verification, path, Val(hangar), false, false, write_seal)
 }
 
-// Rust `doctor_subject`: the path relative to the Hangar with `/` separators.
+// The path relative to the Hangar with `/` separators.
 store_doctor_subject: fn(hangar: String, path: String) -> String Never! {
     relative: store_path_strip_prefix(path, hangar) ?? path
     out := [U8]{}
@@ -375,8 +370,7 @@ store_doctor_subject: fn(hangar: String, path: String) -> String Never! {
     pkg_bytes_text(out, 0, out.len())
 }
 
-// Rust `doctor_remove_repair`: only a real directory or regular file is
-// offered for removal.
+// Only a real directory or regular file is offered for removal.
 store_doctor_remove_repair: fn(path: String) -[FS]> DoctorRepair Never! {
     metadata: files.stat(path) ?? return DoctorRepair.NoRepair
     if !metadata.is_symlink && (metadata.is_dir || metadata.is_file) {
@@ -385,8 +379,8 @@ store_doctor_remove_repair: fn(path: String) -[FS]> DoctorRepair Never! {
     DoctorRepair.NoRepair
 }
 
-// Rust `remove_doctor_node`: remove a repair path without following links; an
-// absent path is already repaired.
+// Remove a repair path without following links; an absent path is already
+// repaired.
 store_remove_doctor_node: fn(path: String) -[FS]> StoreError! {
     found: store_node_stat(path)
     metadata: found ?? return

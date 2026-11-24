@@ -1,4 +1,4 @@
-// Real runtime C-ABI client; no Rust driver/runtime-layout interpretation.
+// Real runtime C-ABI client.
 // Mirrors the retired native_backend_stop_and_euclid_exports contract and
 // retains allocator process modes for RunAllocParity.jet.
 #define _POSIX_C_SOURCE 200809L

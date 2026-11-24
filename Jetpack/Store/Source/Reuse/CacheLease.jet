@@ -20,7 +20,7 @@ use {
 // it are the standard streams and the descriptors Core hands to children.
 STORE_LEASE_CHILD_FD: Shared{ProcessSequence{next: 64}}
 
-// Rust `SEQ`: the per-process lease sequence used in lease names.
+// The per-process lease sequence used in lease names.
 STORE_LEASE_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 // Reserve the next process-unique child descriptor.
@@ -770,7 +770,7 @@ CacheLease: struct {
         }
     }
 
-    // Rust `Drop`. The local lock copy closes before probing: a launched
+    // Release. The local lock copy closes before probing: a launched
     // descendant may still hold the inherited lease lock, in which case
     // recovery owns cleanup and the whole container stays intact.
     release: fn(^^self) Never! {
@@ -870,8 +870,8 @@ store_lease_validate_wrappers: fn(actual: [String], root_fd: Int, bin: String, e
     }
 }
 
-// Rust `file_name`: the last normal component, or None for an empty path,
-// the root, or a path ending in `..`.
+// The last normal component, or None for an empty path, the root, or a path
+// ending in `..`.
 store_reuse_file_name: fn(path: String) -> String? Never! {
     components: store_path_components(path)
     if components.len() == 0 -> return None
@@ -900,8 +900,8 @@ store_reuse_path_variants: fn(path: String) -> [String] Never! {
     variants
 }
 
-// Rust `lexical_normalize`: drop `.`, pop `..` over a normal component, and
-// keep a leading `..` only on a relative path.
+// Drop `.`, pop `..` over a normal component, and keep a leading `..` only on a
+// relative path.
 store_reuse_lexical_normalize: fn(path: String) -> String Never! {
     absolute: path.starts_with("/")
     parts := [String]{}

@@ -1,5 +1,5 @@
 // #4881: link only the freshly composed full Jet runtime pack. These entries
-// are non-unwinding machine/C callers, not Rust panic or scheduler-test shims.
+// are non-unwinding machine/C callers, not panic or scheduler-test shims.
 // A shared pipe observes the required buffered-stdout-before-report ordering.
 #include <assert.h>
 #include <stdbool.h>
@@ -39,7 +39,7 @@ extern void jet_rt_native_atexit(int64_t);
 extern bool jet_stdio_stdout_tty_raw(void);
 
 // A real closure in the canonical Jet exit queue; no manually invoked cleanup
-// and no Rust unwind across this C callback. The production queue owns release.
+// and no unwind across this C callback. The production queue owns release.
 static int64_t cleanup_body(int64_t closure) {
     (void)closure;
     static const unsigned char bytes[] = "cleanup";
@@ -106,7 +106,7 @@ static void entry(void) {
         assert(jet_rt_root_publish_rendered(empty, 0, 0));
     }
     // Consume the existing native propagation fact before any further body
-    // work. No Rust unwind may cross this entry or a foreign callback frame.
+    // work. No unwind may cross this entry or a foreign callback frame.
     assert(jet_scheduler_native_propagate() != 0);
 }
 

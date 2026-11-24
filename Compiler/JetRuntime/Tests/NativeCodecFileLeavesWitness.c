@@ -1,5 +1,5 @@
-// C client of the published RC runtime object; no fixture exports, Rust
-// provider, alternate runtime, or guessed Rust enum/Box layout is required.
+// C client of the published RC runtime object; no fixture exports, alternate
+// runtime, or guessed enum/Box layout is required.
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <fcntl.h>

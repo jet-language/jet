@@ -2092,8 +2092,7 @@ ir_list_float_extremum: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, list: Int,
 }
 
 // binary_search(needle) over an ascending List: Some(an index whose element
-// equals the needle; which one among duplicates is unspecified), else None
-// (Rust slice.binary_search).
+// equals the needle; which one among duplicates is unspecified), else None.
 ir_list_binary_search: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, list: Int, element: Int, needle: Int, kind: String, result_row: Int) -> Int Never! {
     result: ir_fresh_temp(m, b, result_row)
     ir_option_none(m, b, result)
@@ -2850,9 +2849,8 @@ ir_closure_list_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, 
             b.fresh[accumulator] = true
             return accumulator
         }
-        // scan(seed, f) (Rust jet_iter_scan): the Iter of the accumulator
-        // after each step, in order (the seed itself is not an item), over
-        // the List of their copies.
+        // scan(seed, f): the Iter of the accumulator after each step, in order
+        // (the seed itself is not an item), over the List of their copies.
         .Scan -> {
             if operands.len() != 2 -> return ir_fail_slot(b, span, "scan without an initial value")
             state_ty := ir_iter_element(ty) ?? return ir_fail_slot(b, span, "scan producing {ir_type_name(ty)}")
@@ -4055,11 +4053,10 @@ ir_float_is_whole: fn(m: ^IRModule, b: ^IRBuilder, floating: Int) -> Int Never! 
     whole
 }
 
-// `F32.from(x)` on a Float (Rust jet_numeric_float_narrow): Ok holds the
-// nearest F32 when `x` is finite and within ±F32 max, else Err holds the
-// text "value doesn't fit in F32". NaN fails both ordered bounds. The
-// infallible `F32{x}` is the same check, and an out-of-range value stops
-// instead of becoming infinity.
+// `F32.from(x)` on a Float: Ok holds the nearest F32 when `x` is finite and
+// within ±F32 max, else Err holds the text "value doesn't fit in F32". NaN
+// fails both ordered bounds. The infallible `F32{x}` is the same check, and an
+// out-of-range value stops instead of becoming infinity.
 ir_float_narrow: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
     unsupported: "Prelude conversion float_narrow of this shape is not lowered at O0 yet"
     if m.types[b.f.slot_type[value]].kind != .Float -> return ir_fail_slot(b, span, unsupported)
@@ -4331,11 +4328,10 @@ ir_route_inline: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, name: String, inp
         return Val(root)
     }
     // `core.devtools.__publish_payload(source, entity, fields, field, value)`:
-    // The Rust original builds a JetDevtoolsEvent and hands it to
-    // jet_devtools_publish_event, which reaches only installed event sinks; the
-    // native runtime installs none (RouteACore.jet
-    // jet_job_queue_publish_parts), so the publication has no observer to build
-    // for and the fresh arguments it consumed end here.
+    // the publication reaches only installed event sinks; the native runtime
+    // installs none (RouteACore.jet jet_job_queue_publish_parts), so the
+    // publication has no observer to build for and the fresh arguments it
+    // consumed end here.
     if name == "jet_devtools_publish_payload" {
         loop slot in inputs -> ir_release(m, b, slot)
         return Val(-1)
@@ -4793,8 +4789,8 @@ ir_list_min_max: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list: I
     found
 }
 
-// `xs.split(n)` (Rust jet_iter_split_at): `(left: [T], right: [T])` of copies
-// of the elements before and from index n, n clamped into 0...len.
+// `xs.split(n)`: `(left: [T], right: [T])` of copies of the elements before and
+// from index n, n clamped into 0...len.
 ir_list_split: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list: Int, row: Int, count_value: Int, span: Span) -> Int Never! {
     fields: if ir_untag(ty) == .Tuple(checked) -> checked else -> {
         return ir_fail_slot(b, span, "split producing {ir_type_name(ty)}")

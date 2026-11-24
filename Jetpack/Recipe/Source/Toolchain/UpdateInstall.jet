@@ -1,11 +1,10 @@
-// Verified toolchain resolution and safe self-installation, ported from
-// jetpack::ToolchainUpdate: `run`, `resolve`, staged installation with an
-// atomic rename and health-checked rollback on Unix, and the deferred
-// Windows helper that replaces the running executable after it exits.
+// Verified toolchain resolution and safe self-installation: `run`,
+// `resolve`, staged installation with an atomic rename and health-checked
+// rollback on Unix, and the deferred Windows helper that replaces the
+// running executable after it exits.
 //
-// Rust scheduled the Windows helper's own copy for deletion at reboot
-// (MoveFileExW with MOVEFILE_DELAY_UNTIL_REBOOT). Core has no such call, so
-// the helper copy is left in the temporary directory.
+// Core has no call to schedule a file's deletion at reboot, so the helper
+// copy is left in the temporary directory.
 use {
     files: core.files
     sys: core.sys

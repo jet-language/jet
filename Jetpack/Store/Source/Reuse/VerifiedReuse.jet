@@ -35,7 +35,7 @@ store_reuse_newest: fn(entries: [StoreEntry], reference: String) -> StoreEntry? 
     best
 }
 
-// Rust `max_by(last_used_at, then id)`: a later equal element wins.
+// A later equal element wins.
 store_reuse_newer: fn(candidate: StoreEntry, current: StoreEntry) -> Bool Never! {
     if candidate.last_used_at != current.last_used_at {
         return candidate.last_used_at > current.last_used_at
@@ -73,7 +73,7 @@ CacheVerification: struct {
         self.output_exists && self.output_digest && self.source && self.recipe && self.platform && self.policy && (self.signature_verified || self.unsigned_local_allowed)
     }
 
-    // Rust `{:?}` of the proof for the verification trace.
+    // The `Debug` form of the proof for the verification trace.
     debug: fn(self) -> String Never! {
         "CacheVerification {{ output_exists: {self.output_exists}, output_digest: {self.output_digest}, source: {self.source}, recipe: {self.recipe}, platform: {self.platform}, policy: {self.policy}, signature_verified: {self.signature_verified}, unsigned_local_allowed: {self.unsigned_local_allowed}, closure: {self.closure} }}"
     }
@@ -130,7 +130,7 @@ store_reuse_output_hash_matches: fn(verification: ^StoreVerification, roots: Han
     }
 }
 
-// Rust `{:?}` of the output-hash probe result.
+// The `Debug` form of the output-hash probe result.
 store_reuse_hash_probe: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -> String Never! {
     if store_try_entry_output_hash(verification, roots, entry) == {
         .Ok(hash) -> "Ok(\"{hash}\")"
@@ -146,8 +146,8 @@ store_reuse_lexists: fn(path: String) -> Bool Never! {
     }
 }
 
-// Rust `Path` equality: component-wise, ignoring repeated and trailing
-// separators and interior `.` components.
+// Component-wise, ignoring repeated and trailing separators and interior `.`
+// components.
 store_reuse_same_path: fn(left: String, right: String) -> Bool Never! {
     left.starts_with("/") == right.starts_with("/") && store_path_components(left) == store_path_components(right)
 }
@@ -200,9 +200,9 @@ store_reuse_producer_authority_verified: fn(roots: HangarRoots, entry: StoreEntr
     valid && provenance.reference == entry.reference && provenance.source == producer.immutable_source && provenance.builder == builder && provenance.action == store_cache_action_identity(producer, entry.reference, entry.cache_identity, entry.references) && provenance.output == entry.envelope.output_hash && provenance.platform == identity.platform && provenance.sandbox == "sandbox:policy-bound" && provenance.policy == identity.policy_fingerprint && !revoked
 }
 
-// Rust `enforce_manifest_provenance_floor`: a package trust manifest that
-// requires a provenance rung rejects the package before provider, cache, or
-// remote bytes become usable unless `.jet/lock` proves that rung.
+// A package trust manifest that requires a provenance rung rejects the package
+// before provider, cache, or remote bytes become usable unless `.jet/lock`
+// proves that rung.
 store_enforce_manifest_provenance_floor: fn(project: String?, package: String) RealizeError! {
     root: project ?? return
     manifest: if PackageFacts.load(root) == {
@@ -389,7 +389,7 @@ store_snapshot_leases_with_entries_unlocked: fn(verification: ^StoreVerification
     Ok(leases)
 }
 
-// Rust `required_child_pipe`: a piped child stream that must be present.
+// A piped child stream that must be present.
 store_required_child_pipe: fn<T>(pipe: T?, message: String) -> T StoreError! {
     value: pipe ?? return Err(StoreError.Other(message))
     Ok(value)

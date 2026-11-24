@@ -68,8 +68,7 @@ ReceiptRecord: struct {
     // A hit requires every one to still hash to the recorded digest.
     inputs: [ReceiptInput],
     diagnostics: [Diagnostic],
-    // Verb-owned typed projections of the checked program, ordered by name
-    // (Rust `BTreeMap<String, String>`).
+    // Verb-owned typed projections of the checked program, ordered by name.
     facts: [ReceiptFact],
 
     // Inputs sorted and deduplicated, facts keyed by name in name order (a
@@ -140,7 +139,7 @@ ReceiptRecord: struct {
     }
 }
 
-// Rust `Vec::sort` then `dedup` over `(path, digest)`.
+// Sort, then drop adjacent duplicates, over `(path, digest)`.
 store_receipt_sorted_inputs: fn(inputs: [ReceiptInput]) -> [ReceiptInput] Never! {
     sorted := inputs
     sorted.sort_by(fn(left: ReceiptInput, right: ReceiptInput) { (left.path <=> right.path).then(left.digest <=> right.digest) })
@@ -151,7 +150,7 @@ store_receipt_sorted_inputs: fn(inputs: [ReceiptInput]) -> [ReceiptInput] Never!
     unique
 }
 
-// Rust `BTreeMap` insertion: name order, the last value for a name wins.
+// Name order, the last value for a name wins.
 store_receipt_sorted_facts: fn(facts: [ReceiptFact]) -> [ReceiptFact] Never! {
     by_name := [String:String]{}
     loop fact in facts -> by_name[fact.name] = fact.value

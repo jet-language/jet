@@ -1,15 +1,15 @@
-// core.log host cells and sinks. Rust providers: (state cells, flush, spans,
-// JSON/text records), (trace id), (record emit, span allocate) and the AOT
+// core.log host cells and sinks. (state cells, flush, spans, JSON/text
+// records), (trace id), (record emit, span allocate) and the AOT
 // jet_log_write_line/jet_log_process_exit leaves. Each OS thread owns one
 // LogState80 block (allocated on first use, freed by the TLS destructor):
-// level0 disabled8 sample_every16 sample_count24 next_span32 trace40 (owned
-// E4 or 0) spans: data48 len56 cap64, each span a LOG_SPAN_SLOT {id0, owned
-// name E4 8, start16: its monotonic ns when `jet perf run` keeps spans, else
-// 0}, and the code's level filter72 (owned E4 or 0). The sink and the
-// record format are the process's (log_process), so a sink one thread sets
-// receives the records of every thread. The
-// devtools publication (:316-590) reaches only installed event sinks; the
-// native runtime installs none, so it has no native counterpart.
+// level0 disabled8 sample_every16 sample_count24 next_span32 trace40 (owned E4
+// or 0) spans: data48 len56 cap64, each span a LOG_SPAN_SLOT {id0, owned name
+// E4 8, start16: its monotonic ns when `jet perf run` keeps spans, else 0}, and
+// the code's level filter72 (owned E4 or 0). The sink and the record format are
+// the process's (log_process), so a sink one thread sets receives the records
+// of every thread. The devtools publication (:316-590) reaches only installed
+// event sinks; the native runtime installs none, so it has no native
+// counterpart.
 LOG_STATE_BYTES: I64{80}
 
 LOG_STATE_LEVEL: I64{0}

@@ -48,10 +48,9 @@ priv JSONRowSource: struct {
     row: Int,
 }
 
-// Typed CSV rows over a consumed file (Rust `jet_data_csv_reader` and
-// `jet_data_stream_scan`). The stream pulls one record at a time: the first
-// record names the fields, and every later record must carry exactly that
-// many. A row failure carries its 1-based data row and stays latched.
+// Typed CSV rows over a consumed file. The stream pulls one record at a time:
+// the first record names the fields, and every later record must carry exactly
+// that many. A row failure carries its 1-based data row and stays latched.
 csv_reader: fn<T: Decode>(reader: ^^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     core.data.data_limits_check(limits) ?? return Err(err)
     records: csv_codec.reader<FileReader>(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
@@ -86,8 +85,7 @@ csv_reader_next: fn<T: Decode>(state: Shared<CSVRowSource>) -> T? DataError! {
     }
 }
 
-// One data record as header-named Text cells (Rust
-// `jet_data_stream_decode_csv_row`). The cells decode as text, so a
+// One data record as header-named Text cells. The cells decode as text, so a
 // `Float` field reads "10.0".
 csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T DataError! {
     if fields.len() != header.len() {
@@ -115,8 +113,7 @@ csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T
     }
 }
 
-// An encoding failure keeps its kind family, column and cause (Rust
-// `jet_data_from_encoding`).
+// An encoding failure keeps its kind family, column and cause.
 data_from_encoding: fn(operation: String, row: Int?, cause: EncodingError) -> DataError Never! {
     kind: if cause.kind == {
         .Limit -> DataErrorKind.Limit
@@ -127,11 +124,9 @@ data_from_encoding: fn(operation: String, row: Int?, cause: EncodingError) -> Da
     DataError{kind: kind, operation: operation, row: row, column: cause.column, index: None, reason: cause.reason.copy(), cause: Val(cause)}
 }
 
-// Typed rows of one top-level JSON array over a consumed file (Rust
-// `jet_data_json_reader` and the JSON arm of `jet_data_stream_scan`;
-// core-library.md `json_reader<T: Decode>(reader, limits)`). Numbers keep
-// their typed lexemes, each array element folds to one tree under the
-// reader's allocation budget, and a failure stays latched.
+// Typed rows of one top-level JSON array over a consumed file. Numbers keep
+// their typed lexemes, each array element folds to one tree under the reader's
+// allocation budget, and a failure stays latched.
 json_reader: fn<T: Decode>(reader: ^^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     core.data.data_limits_check(limits) ?? return Err(err)
     parser := encoding_stream.json_reader<FileReader>(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))

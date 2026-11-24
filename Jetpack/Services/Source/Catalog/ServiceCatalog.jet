@@ -10,7 +10,7 @@ use {
     process: core.process
 }
 
-// Every Services failure is final diagnostic text (Rust `Result<_, String>`).
+// Every Services failure is final diagnostic text.
 #Error
 ServicesError: struct {
     message: String,
@@ -494,7 +494,7 @@ services_tcp_readiness: fn(port: Int) -> ReadyProbe Never! {
     ReadyProbe.TCP{host: "127.0.0.1", port: if port >= 0 && port <= 65535 -> port else -> 0}
 }
 
-// Rust `i64::saturating_add` for the few derived preset ports.
+// Saturating i64 addition for the few derived preset ports.
 services_saturating_add: fn(value: Int, delta: Int) -> Int Never! {
     if value > 9223372036854775807 - delta -> return 9223372036854775807
     value + delta

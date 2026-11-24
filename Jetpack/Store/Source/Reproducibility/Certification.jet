@@ -83,7 +83,7 @@ RootWorkspace: struct {
         Ok(RootWorkspace{path: path, roots: independent})
     }
 
-    // Remove the private root (Rust `Drop`).
+    // Remove the private root.
     remove: fn(self) -[FS]> Never! {
         if !files.lexists(self.path) {
             return
@@ -113,9 +113,9 @@ store_repro_copy_nix_cache_configuration: fn(target: HangarRoots, source: Hangar
     }
 }
 
-// A provider result that has not crossed the Hangar registration boundary.
-// The workspaces stay alive until the caller has promoted `realized`, then
-// the caller calls `release()` (Rust drops the guards).
+// A provider result that has not crossed the Hangar registration boundary. The
+// workspaces stay alive until the caller has promoted `realized`, then the
+// caller calls `release()`.
 PreparedRealization: struct {
     realized: Realized,
     action_key: String?,
@@ -463,7 +463,7 @@ store_repro_compare_registration_entries: fn(verification: ^StoreVerification, l
     Ok(None)
 }
 
-// Rust `{:?}` of a `Vec<String>`: `["a", "b"]`.
+// `["a", "b"]`.
 store_repro_debug_list: fn(values: [String]) -> String Never! {
     quoted := [String]{}
     loop value in values -> quoted.push(json.to_string(Dyn.Text(value.copy())) ?? "\"{value}\"")
@@ -710,7 +710,7 @@ store_repro_decode_producer: fn(entry: StoreEntry) -> ProducerRecord StoreError!
     }
 }
 
-// Rust `(output_hash, id) <= (output_hash, id)` tuple order.
+// `(output_hash, id)` tuple order.
 store_repro_sorts_first: fn(left: StoreEntry, right: StoreEntry) -> Bool Never! {
     if left.envelope.output_hash != right.envelope.output_hash {
         return left.envelope.output_hash < right.envelope.output_hash

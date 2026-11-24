@@ -16,20 +16,19 @@ use {
 
 SEMANTIC_LOCK_SCOPE: "semantic-lock"
 
-// Rust `live_path`: the project's `.jet/lock`.
+// The project's `.jet/lock`.
 trust_semantic_lock_live_path: fn(project: String) -> String Never! { pkg_lock_path(project) }
 
-// Rust `load`: the semantic sections of the live lock, or None when the lock
-// cannot be read. A lock without semantic content reads as an empty
-// semantic lock (the Rust marker check returns the same empty value).
+// The semantic sections of the live lock, or None when the lock cannot be read.
+// A lock without semantic content reads as an empty semantic lock.
 trust_semantic_lock_load: fn(project: String) -[FS]> SemanticLockFile? {
     raw: files.read(trust_semantic_lock_live_path(project)) ?? return None
     Val(trust_parse_semantic_lock(raw))
 }
 
-// Rust `atomic_commit`: revalidate, then splice the semantic sections into
-// `.jet/lock` atomically under the project lock. A missing or unstamped
-// machine half gains a build stamp first.
+// Revalidate, then splice the semantic sections into `.jet/lock` atomically
+// under the project lock. A missing or unstamped machine half gains a build
+// stamp first.
 trust_semantic_lock_atomic_commit: fn(project: String, lock: SemanticLockFile) -[FS, Env, Exec, Time, Time.Wait]> TrustError! {
     trust_revalidate_semantic_lock(lock)
     path: trust_semantic_lock_live_path(project)
@@ -56,8 +55,8 @@ trust_semantic_lock_atomic_commit: fn(project: String, lock: SemanticLockFile) -
     pkg_lock_write_atomically(project, body.bytes()) ?? return Err(trust_lock_error(err))
 }
 
-// Rust `merge_revalidate_commit`: merge three ways, refuse conflicts before
-// any write, then commit the merged lock.
+// Merge three ways, refuse conflicts before any write, then commit the merged
+// lock.
 trust_semantic_lock_merge_revalidate_commit: fn(project: String, base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -[FS, Env, Exec, Time, Time.Wait]> SemanticLockFile TrustError! {
     merged: trust_merge_for_commit(base, left, right)
     trust_semantic_lock_atomic_commit(project, merged)

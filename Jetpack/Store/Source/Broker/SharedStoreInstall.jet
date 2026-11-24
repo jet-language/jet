@@ -97,7 +97,7 @@ store_broker_status_uid: fn(position: Int) -> Int? {
     None
 }
 
-// Rust `symlink_metadata` with NotFound as None; other failures propagate.
+// The node's own metadata, with NotFound as None; other failures propagate.
 store_broker_lstat: fn(path: String) -> Stat? StoreError! {
     if files.stat(path) == {
         .Ok(info) -> Ok(Val(info))
@@ -122,7 +122,7 @@ store_broker_is_effective_root: fn() -> Bool {
     (store_broker_status_uid(1) ?? -1) == 0
 }
 
-// Rust `current_uid` (getuid): the caller's real uid, Linux only.
+// The caller's real uid, Linux only.
 store_broker_current_uid: fn() -> Int StoreError! {
     if sys.name() != "linux" {
         return Err(store_broker_invalid("shared-store enrollment is unsupported on this host"))
@@ -138,8 +138,8 @@ store_broker_owner_uid: fn(path: String) -> Int StoreError! {
     Ok(owner)
 }
 
-// Rust `shared_store_config`: an installed administrator descriptor wins; a
-// malformed one is never ignored. Otherwise the caller's private broker.
+// An installed administrator descriptor wins; a malformed one is never ignored.
+// Otherwise the caller's private broker.
 store_shared_store_config: fn(roots: HangarRoots) -> SharedStoreConfig? StoreError! {
     layout: store_broker_layout(roots)
     if !layout.admin {
@@ -217,9 +217,8 @@ store_broker_render_config: fn(config: SharedStoreConfig) -> String StoreError! 
     Ok(text)
 }
 
-// Rust `install_shared_store`: the administrator descriptor and the
-// socket-activation units. No resident daemon exists; systemd starts the
-// one-request service on demand.
+// The administrator descriptor and the socket-activation units. No resident
+// daemon exists; systemd starts the one-request service on demand.
 store_install_shared_store: fn(roots: HangarRoots) -> SharedStoreInstallReport StoreError! {
     if !store_broker_is_effective_root() {
         return Err(store_broker_invalid("shared-store install requires administrator authority; run `sudo jetpack hangar shared install`"))
@@ -262,7 +261,6 @@ store_broker_parent_or_root: fn(path: String) -> String Never! {
     parent
 }
 
-// Rust `systemd_escape_path`.
 store_broker_systemd_escape_path: fn(path: String) -> String Never! {
     path.replace("\\", "\\\\").replace(" ", "\\x20")
 }
@@ -272,7 +270,7 @@ store_broker_socket_unit_text: fn(config: SharedStoreConfig, admin: Bool) -> Str
     "[Unit]\nDescription=Jet shared-store broker socket\n\n[Socket]\nListenStream={store_broker_systemd_escape_path(config.socket)}\n{modes}\nRemoveOnStop=yes\n\n[Install]\nWantedBy=sockets.target\n"
 }
 
-// Rust `admin_service_unit_text`. StateDirectory creates the root and each
+// The admin service unit text. StateDirectory creates the root and each
 // nested write target before systemd applies the filesystem namespace;
 // ReadWritePaths does not create missing mount points.
 store_broker_admin_service_unit_text: fn(executable: String, config: SharedStoreConfig) -> String Never! {
@@ -288,7 +286,7 @@ store_broker_admin_service_unit_text: fn(executable: String, config: SharedStore
     "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={store_broker_systemd_escape_path(executable)} hangar shared broker --fd 3\nDynamicUser=yes\nStateDirectory={state_directories}\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{store_broker_systemd_escape_path(config.trust_key)}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={readonly.join(" ")}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={writable.join(" ")}\n"
 }
 
-// Rust `activate_admin_socket`: reload units, then enable the socket now.
+// Reload units, then enable the socket now.
 store_broker_activate_admin_socket: fn() StoreError! {
     commands: [[String]]{[String]{"daemon-reload"}, [String]{"enable", "--now", "jet-shared-store.socket"}}
     loop args in commands {
@@ -301,8 +299,8 @@ store_broker_activate_admin_socket: fn() StoreError! {
     }
 }
 
-// Rust `validate_config_paths`: every configured path is exactly the
-// installed layout, and every directory keeps its ownership and mode law.
+// Every configured path is exactly the installed layout, and every directory
+// keeps its ownership and mode law.
 store_broker_validate_config_paths: fn(layout: BrokerLayout, config: SharedStoreConfig) StoreError! {
     base: files.canonicalize(layout.base) ?? return Err(store_broker_invalid("could not resolve shared-store directory: {err}"))
     socket: if layout.admin -> STORE_BROKER_ADMIN_SOCKET else -> files.join(base, "broker.sock")
@@ -383,7 +381,7 @@ store_broker_require_private_mode_followed: fn(path: String, label: String) Stor
     }
 }
 
-// Rust `user_systemd_unit_dir`: `$XDG_CONFIG_HOME` or `$HOME/.config`.
+// `$XDG_CONFIG_HOME` or `$HOME/.config`.
 store_broker_user_systemd_unit_dir: fn() -> String StoreError! {
     base: if sys.get("XDG_CONFIG_HOME") == {
         .Val(config) -> config
@@ -516,8 +514,8 @@ store_broker_require_admin_descriptor: fn(path: String) StoreError! {
     }
 }
 
-// Rust `ensure_secret`: an existing private secret of at least 32 bytes, or
-// 32 fresh random bytes written privately. The local copy is zeroed.
+// An existing private secret of at least 32 bytes, or 32 fresh random bytes
+// written privately. The local copy is zeroed.
 store_broker_ensure_secret: fn(path: String) StoreError! {
     found: store_broker_lstat(path)
     if found == {
@@ -548,8 +546,8 @@ store_broker_ensure_secret: fn(path: String) StoreError! {
     }
 }
 
-// Rust `atomic_write`: an exclusive private sibling, synced, then renamed
-// over `path`. A failed attempt removes its partial file.
+// An exclusive private sibling, synced, then renamed over `path`. A failed
+// attempt removes its partial file.
 store_broker_atomic_write: fn(path: String, bytes: [U8]) StoreError! {
     parent: files.dirname(path)
     if parent == "" -> return Err(store_broker_invalid("shared-store file has no parent"))
@@ -588,7 +586,7 @@ store_broker_discard_remove: fn(path: String) Never! {
     }
 }
 
-// Rust `bounded_file`: at most `limit` bytes; one more is "too large".
+// At most `limit` bytes; one more is "too large".
 store_broker_bounded_file: fn(path: String, limit: Int, label: String) -> [U8] StoreError! {
     input := files.open(path)
     bytes := [U8]{}

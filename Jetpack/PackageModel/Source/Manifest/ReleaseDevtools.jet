@@ -45,7 +45,7 @@ pkg_release_inspect_parse: fn(value: String) -> JetReleaseInspect? Never! {
     }
 }
 
-// Canonical Jet source spelling (also the Rust `Display`).
+// Canonical Jet source spelling.
 pkg_release_inspect_as_str: fn(inspect: JetReleaseInspect) -> String Never! {
     if inspect == {
         .Local -> ".Local"
@@ -117,7 +117,7 @@ pkg_release_parse_ip: fn(text: String) -> ReleaseIPAddress? Never! {
     Val(ReleaseIPAddress{v4: true, parts: [Int]{address.a, address.b, address.c, address.d}})
 }
 
-// The Rust `IpAddr` display: dotted IPv4, RFC 5952 compressed IPv6.
+// The IP address display: dotted IPv4, RFC 5952 compressed IPv6.
 pkg_release_ip_display: fn(address: ReleaseIPAddress) -> String Never! {
     if address.v4 {
         parts := [String]{}
@@ -210,7 +210,7 @@ pkg_release_network_contains: fn(network: JetReleaseDevtoolsNetwork, candidate: 
     pkg_release_prefix_matches(base, address, network.prefix)
 }
 
-// The Rust `Display`: `address/prefix`.
+// The `Display`: `address/prefix`.
 pkg_release_network_display: fn(network: JetReleaseDevtoolsNetwork) -> String Never! {
     "{network.address}/{network.prefix}"
 }
@@ -264,7 +264,7 @@ pkg_release_deployment_from_env: fn() -[Env]> JetReleaseDevtoolsDeployment Relea
     Ok(JetReleaseDevtoolsDeployment{enabled: enabled, token: token, allowlist: allowlist})
 }
 
-// The Rust `Debug` of a deployment: the bearer token is always redacted.
+// The `Debug` of a deployment: the bearer token is always redacted.
 pkg_release_deployment_debug: fn(deployment: JetReleaseDevtoolsDeployment) -> String Never! {
     token: if deployment.token == {
         .Val(_) -> "Some(\"<redacted>\")"

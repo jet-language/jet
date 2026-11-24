@@ -1,17 +1,16 @@
 // core.game headless runtime (headless substrate; Foundation frame budget and
 // transcript hash; Every handle is an I64 address; text slots own E4 strings.
 //
-// GameState128 (shared by a scene's assets and input; Rust Rc<GameState>):
-// refs0 assetKinds@8 assetPaths@32 bindingActions@56 bindingKeys@80
-// components@104, each a native [len, cap, data] header of owned strings.
-// JetGameAssets and JetGameInputMap handles are the state address itself.
-// JetGameScene56: assets0 input8 (the IR reads these two as fields) refs16
-// name24 callbacks@32 ([len, cap, data] of env/invoke/release triples).
+// GameState128: refs0 assetKinds@8 assetPaths@32 bindingActions@56
+// bindingKeys@80 components@104, each a native [len, cap, data] header of owned
+// strings. JetGameAssets and JetGameInputMap handles are the state address
+// itself. JetGameScene56: assets0 input8 (the IR reads these two as fields)
+// refs16 name24 callbacks@32 ([len, cap, data] of env/invoke/release triples).
 // JetGameFrame24: index0 (exact Int) input8 (snapshot) refs16.
-// JetGameInputSnapshot32: refs0 pressed@8 (owned strings).
-// JetGameBackend24: remaining0 (-1 live) nextIndex8 inFlight16; a value, so
-// clone copies it and present edits the caller's own copy.
-// JetGameReplay16 / JetGameImage16 / JetGameSound16: refs0 path8.
+// JetGameInputSnapshot32: refs0 pressed@8 (owned strings). JetGameBackend24:
+// remaining0 (-1 live) nextIndex8 inFlight16; a value, so clone copies it and
+// present edits the caller's own copy. JetGameReplay16 / JetGameImage16 /
+// JetGameSound16: refs0 path8.
 
 GAME_DEFAULT_HEADLESS_FRAMES: I64{3}
 
@@ -180,9 +179,8 @@ game_state_release: fn(state: I64) {
     }
 }
 
-// One synthetic entity row of default component data when every named
-// component is registered (Rust jet_game_scene_query: no names is one empty
-// row), else no rows.
+// One synthetic entity row of default component data when every named component
+// is registered (no names is one empty row), else no rows.
 #Export(c) jet_game_scene_query: fn(scene: I64, names: I64, out_data: I64) -> I64 {
     components: wrapping(game_word(scene) + I64{104})
     row: jet_rt_string_builder_new()
@@ -648,15 +646,14 @@ game_pairs_line: fn(target: I64, label: I64, left: I64, right: I64, joiner: I64)
     }
 }
 
-// Runs the checked frame budget (Rust jet_game_run): the transcript header,
-// then per issued frame its replayed input, every callback in registration
-// order with the frame lent, and the frame line; the transcript hash closes a
-// run with an explicit `frames` budget. `replay` and `backend` are Option
-// boxes (null when absent), `frames` an Option<Int> word. An observed run
-// relays each callback's wall time and each frame's thread CPU to its live
-// snapshot (ObserveLive.jet observe_game_record), a callback by the code
-// address its closure box holds at 8 and that code's function line
-// (game_callback_name).
+// Runs the checked frame budget: the transcript header, then per issued frame
+// its replayed input, every callback in registration order with the frame lent,
+// and the frame line; the transcript hash closes a run with an explicit
+// `frames` budget. `replay` and `backend` are Option boxes (null when absent),
+// `frames` an Option<Int> word. An observed run relays each callback's wall
+// time and each frame's thread CPU to its live snapshot (ObserveLive.jet
+// observe_game_record), a callback by the code address its closure box holds at
+// 8 and that code's function line (game_callback_name).
 #Export(c) jet_game_run: fn(scene: I64, replay: I64, backend: I64, frames: I64) -> I64 {
     requested: frames != GAME_OPTION_INT_NONE
     count: if requested -> jet_int_owned_to_i64(frames) else -> I64{0}

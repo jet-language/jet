@@ -88,7 +88,7 @@ jetos_is_linux_kernel_image: fn(path: String) -[FS]> Bool Never! {
     jetos_is_linux_kernel_image_bytes(bytes)
 }
 
-// Rust is_linux_kernel_image's byte predicate, shared with its path entry.
+// The Linux kernel image byte predicate, shared with its path entry.
 jetos_is_linux_kernel_image_bytes: fn(bytes: [U8]) -> Bool Never! {
     if bytes.len() >= 4 && bytes[0] == 127 && bytes[1] == 69 && bytes[2] == 76 && bytes[3] == 70 {
         return true
@@ -107,14 +107,14 @@ jetos_is_initrd_image: fn(path: String) -[FS]> Bool Never! {
     jetos_is_initrd_image_bytes(bytes)
 }
 
-// Rust is_initrd_image's byte predicate, shared with its path entry.
+// The initrd image byte predicate, shared with its path entry.
 jetos_is_initrd_image_bytes: fn(bytes: [U8]) -> Bool Never! {
     if bytes.len() >= 2 && bytes[0] == 31 && bytes[1] == 139 -> return true
     bytes.len() >= 6 && bytes[0] == 48 && bytes[1] == 55 && bytes[2] == 48 && bytes[3] == 55 && bytes[4] == 48 && (bytes[5] == 49 || bytes[5] == 50)
 }
 
-// Rust render_boot_facts's ordered fields; the caller provides the actual
-// boot profile and the kernel package object (or null).
+// The boot facts' ordered fields; the caller provides the actual boot profile
+// and the kernel package object (or null).
 jetos_render_boot_facts_parts: fn(boot: JetOSBootProfile, kernel_package: Dyn) -> String Never! {
     pkg_json_render(
         Dyn.Object(
@@ -184,7 +184,7 @@ jetos_kernel_source_dyn: fn(entry: JetOSRealizedPackage) -[FS]> Dyn Never! {
     Dyn.Object(["mode": Dyn.Text("source-built"), "files": Dyn.Array(source_files)])
 }
 
-// Rust boot_artifact: lease-projected consumption; projection refusal is None.
+// Lease-projected consumption; projection refusal is None.
 jetos_boot_artifact: fn(entry: JetOSRealizedPackage, candidates: [String]) -[FS, Env, Rand]> String? Never! {
     out: entry.consumption_path(entry.entry.out) ?? return None
     loop relative in candidates {

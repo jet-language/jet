@@ -216,8 +216,8 @@ ToolGenerationMetadata: struct {
     }
 }
 
-// `sha256-<hex>` over the metadata digest and every distinct target digest
-// in byte order (Rust `profile_generation_witness` / `generation_witness`).
+// `sha256-<hex>` over the metadata digest and every distinct target digest in
+// byte order.
 cli_profile_generation_witness: fn(metadata: String, digests: [String]) -> String Never! {
     sorted := cli_sorted_unique(digests)
     lines := [String]{"jet-profile-generation-witness-v1\nmetadata\t{pkg_sha256_hex(metadata.bytes())}\n"}
@@ -390,14 +390,13 @@ cli_json_string_array: fn(object: [String:Dyn], key: String, max_len: Int, forbi
 
 // ── Small text helpers shared by the CLI profile slices ──
 
-// Rust `strip_prefix`.
 cli_strip_prefix: fn(value: String, prefix: String) -> String? Never! {
     if !value.starts_with(prefix) -> return None
     Val(value.removeprefix(prefix))
 }
 
-// Rust `str::parse::<u64>`: an optional `+` and one or more ASCII digits
-// that fit the signed 64-bit range.
+// An optional `+` and one or more ASCII digits that fit the signed 64-bit
+// range.
 cli_parse_u64: fn(text: String) -> Int? Never! {
     digits := text
     if digits.starts_with("+") -> digits = digits.removeprefix("+")

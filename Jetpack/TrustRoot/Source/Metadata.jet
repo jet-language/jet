@@ -27,7 +27,7 @@ MetadataRole: enum {
         }
     }
 
-    // Declaration order, the order Rust's derived `Ord` walks role maps.
+    // Declaration order, the derived order role maps are walked in.
     all: fn() -> [MetadataRole] Never! {
         [MetadataRole]{MetadataRole.Root, MetadataRole.Targets, MetadataRole.Snapshot, MetadataRole.Timestamp}
     }
@@ -309,7 +309,7 @@ trust_public_trust_manifest: fn(domain: String, bootstrap: RootBootstrap?, keys:
     Ok("{text}\n")
 }
 
-// Rust `str::parse::<u64>`: ASCII digits only, no sign.
+// ASCII digits only, no sign.
 trust_parse_u64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return None

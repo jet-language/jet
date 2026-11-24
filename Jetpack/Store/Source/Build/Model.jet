@@ -1,22 +1,18 @@
-// The typed build-graph model behind `jet cc` / `jet c++`, ported 1:1 from
-// crates/jet-comptime Build/{handles,targets,actions_policy,
-// provenance_toolchains,errors_keys}.rs. Rust `BuildCapability` is
-// Foundation `BuildEffect`.
+// The typed build-graph model behind `jet cc` / `jet c++`. The build
+// capability is Foundation `BuildEffect`.
 //
 // Jet reserves `Build`, `BuildPlan`, `BuildStepHandle`, `BuildTarget`,
 // `BuildToolchain`, `BuildProbe`, `BuildSigningIdentity` and `BuildError`
 // for the `build: fn` surface (SEMA_RESERVED_TYPES), and the Jetpack unit
 // already owns `ActionHandle` (the artifact store's action record handle).
-// These executor types carry the `Hermetic` prefix the Rust sandbox tests
-// alias them to (`Build as HermeticBuildContext`).
+// These executor types carry the `Hermetic` prefix.
 //
 // Ported surface: the graph `jet cc` builds (toolchains, probes, signing
 // identities, actions, targets, plans) and its executor. Not ported here:
 // WebAssembly build plugins, generated modules, legacy-wrapper imports,
 // computed fact contributions, compiler-owned package actions and the remote
 // builder; they belong to the `build: fn` driver path, and the action key
-// encodes each one in its empty form exactly as Rust does for a plan that has
-// none.
+// encodes each one in its empty form for a plan that has none.
 use {
     jet_foundation.[foundation_debug_quoted]
     jetpack_foundation.[BuildEffect]
@@ -24,8 +20,7 @@ use {
 
 BUILD_MAX_ACTIONS: 100000
 
-// A target within one context (Rust `TargetRef`; the typed `ExecutableTarget`
-// family converts into it, so every `add_*` returns this reference).
+// A target within one context.
 TargetRef: struct {
     id: Int,
     context: Int,
@@ -61,7 +56,7 @@ TargetKind: enum {
     Package,
     Publish,
 
-    // Rust derived `Debug`.
+    // The derived `Debug` form.
     debug_name: fn(self) -> String Never! {
         if self == {
             .Executable -> "Executable"
@@ -76,15 +71,15 @@ TargetKind: enum {
     }
 }
 
-// Rust `BuildPath::new`: non-blank, relative, with no `..`, root or prefix.
+// Non-blank, relative, with no `..`, root or prefix.
 build_path_new: fn(path: String) -> String HermeticBuildError! {
     if path.trim() == "" -> return Err(HermeticBuildError.EmptyPath)
     if !build_path_is_relative_normal(path) -> return Err(HermeticBuildError.InvalidPath(path))
     Ok(path)
 }
 
-// Rust `Path` component rules for a declared build path: not absolute and no
-// `..` component (`.` and empty components are dropped by `components()`).
+// The component rules for a declared build path: not absolute and no `..`
+// component (`.` and empty components are dropped).
 build_path_is_relative_normal: fn(path: String) -> Bool Never! {
     if path.starts_with("/") -> return false
     loop part in path.split("/") {
@@ -207,7 +202,7 @@ BuildResourcePool: enum {
         }
     }
 
-    // Rust derived `Ord`: variant order, then the custom name.
+    // Variant order, then the custom name.
     rank: fn(self) -> Int Never! {
         if self == {
             .CPU -> 0
@@ -289,12 +284,10 @@ ActionSpec: struct {
     argv: [String],
     env: [String:String],
     // Only allowlisted env keys enter the action identity. Empty means the
-    // declared `env` map itself is the allowlist. Kept sorted and unique
-    // (Rust `BTreeSet`).
+    // declared `env` map itself is the allowlist. Kept sorted and unique.
     env_allowlist: [String],
-    // Sorted by canonical effect rank and unique (Rust `BTreeSet`). The
-    // action is reused exactly when none of them is ambient
-    // (build_effects_reusable).
+    // Sorted by canonical effect rank and unique. The action is reused exactly
+    // when none of them is ambient (build_effects_reusable).
     caps: [BuildEffect],
     kind: ActionKind,
     toolchain: ToolchainHandle?,
@@ -302,7 +295,7 @@ ActionSpec: struct {
     signing_identity: SigningIdentityHandle?,
     labels: [String:String],
     helper_versions: [String:String],
-    // Sorted by rank, then custom name, and unique (Rust `BTreeSet`).
+    // Sorted by rank, then custom name, and unique.
     resource_pools: [BuildResourcePool],
     variant_identity: String?,
     // How long the action may run, in milliseconds; None takes the
@@ -486,7 +479,6 @@ build_effects_reusable: fn(caps: [BuildEffect]) -> Bool Never! {
     true
 }
 
-// Rust `BTreeSet<String>::insert`.
 build_insert_sorted_text: fn(values: ^[String], value: String) Never! {
     if values.contains(value) {
         return
@@ -495,7 +487,6 @@ build_insert_sorted_text: fn(values: ^[String], value: String) Never! {
     values.sort()
 }
 
-// Rust `BTreeSet<BuildCapability>::insert`.
 build_insert_effect: fn(values: ^[BuildEffect], ability: BuildEffect) Never! {
     if values.contains(ability) {
         return
@@ -504,7 +495,6 @@ build_insert_effect: fn(values: ^[BuildEffect], ability: BuildEffect) Never! {
     values.sort_by(fn(written) { written.rank() })
 }
 
-// Rust `BTreeSet<BuildResourcePool>::insert`.
 build_insert_pool: fn(values: ^[BuildResourcePool], pool: BuildResourcePool) Never! {
     loop existing in values {
         if existing == pool {
@@ -724,7 +714,7 @@ ReproducibilityClass: enum {
     Reproducible,
     Ambient,
 
-    // Rust derived `Debug`.
+    // The derived `Debug` form.
     debug_name: fn(self) -> String Never! {
         if self == {
             .Reproducible -> "Reproducible"
@@ -821,15 +811,15 @@ BuildNameKind: enum {
 DependencyCycle: struct {
     nodes: [String],
 
-    // The rendered loop: `` `a` -> `b` -> `a` ``. Rust `Debug` prints it too.
+    // The rendered loop: `` `a` -> `b` -> `a` ``. `Debug` prints it too.
     chain: fn(self) -> String Never! {
         rendered: loop node in self.nodes -> "`{node}`"
         rendered.join(" -> ")
     }
 }
 
-// The graph refusals reachable from the ported surface, with their Rust
-// variant names (`PackagedPlugin` carries the action-budget refusal).
+// The graph refusals reachable from the ported surface (`PackagedPlugin`
+// carries the action-budget refusal).
 #Error
 HermeticBuildError: enum {
     EmptyTargetName,
@@ -870,7 +860,7 @@ HermeticBuildError: enum {
     // An output inside a folder the action reads whole, whose read-only
     // mount would hide it.
 
-    // Rust derived `Debug` (`{error:?}`), the text graph reports print.
+    // The derived `Debug` form (`{error:?}`), the text graph reports print.
     debug_text: fn(self) -> String Never! {
         if self == {
             .EmptyTargetName -> "EmptyTargetName"
@@ -909,10 +899,10 @@ HermeticBuildError: enum {
     }
 }
 
-// Rust `{:?}` of a `String`.
+// The `Debug` form of a `String`.
 build_debug_quote: fn(text: String) -> String Never! { foundation_debug_quoted(text, 34) }
 
-// Rust `dependency_cycle_text`: the whole loop, why it cannot build, the fix.
+// The whole loop, why it cannot build, the fix.
 build_dependency_cycle_text: fn(kind: String, cycle: DependencyCycle) -> String Never! {
     "{kind} dependency graph contains a cycle: {cycle.chain()}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain"
 }

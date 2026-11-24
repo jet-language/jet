@@ -1,5 +1,5 @@
 // Real Jet-object client. No runtime providers.
-// Layout assertions mirror EncodingABI.jet, never Rust layout.
+// Layout assertions mirror EncodingABI.jet.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -82,7 +82,7 @@ static void watch_error(Error *e) { watch(e,80,8); watch_text(e->path); watch_te
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(memcmp(t->data,s,(size_t)t->length)==0); }
 static void rendered(Error *e,const char *golden) {
-    // Rust cites: CommonTypes182-217 -> Core/EncodingError8-28.
+    // CommonTypes182-217 -> Core/EncodingError8-28.
     Text *a=jet_rt_handle_show_encoding_error(e), *b=jet_rt_handle_display_encoding_error(e), *c=jet_rt_handle_debug_encoding_error(e);
     text_is(a,golden); text_is(b,golden); text_is(c,golden);
     assert(a!=b && b!=c && a!=c);

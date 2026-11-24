@@ -90,7 +90,7 @@ int_new: fn(cap: I64) -> I64 {
 }
 
 // One probe per fallible operation is owned by the Atomic caller, not by each
-// physical allocation. Report native failing bytes; never fake Rust Vec sizes.
+// physical allocation. Report native failing bytes.
 int_try_new: fn(cap: I64, requested: I64) -> I64 {
     if (cap <= I64{0} || cap > I64{2305843009213693951}) {
         int_store(requested, I64{9223372036854775807})
@@ -470,8 +470,8 @@ int_stop: fn(file: I64, file_len: I64, line: I64, reason: I64) {
         trap_native_index_range_stop()
         return
     }
-    // The Rust originals own these raw reasons. Root rendering below remains
-    // byte-for-byte unchanged.
+    // These raw reasons are fixed. Root rendering below remains byte-for-byte
+    // unchanged.
     if (reason < I64{0} || reason > I64{3}) {
         jet_rt_unreachable(I64{0}, I64{0})
         return
@@ -806,7 +806,7 @@ int_shift_count: fn(count: I64, file: I64, len: I64, line: I64) -> I64 {
         return if ((int_limb(exponent, I64{0}) & I64{1}) == I64{0}) -> I64{1} else -> I64{-1}
     }
     // Exponents are arbitrary precision too; dividing their private copy by
-    // two avoids imposing an I64/u32 restriction absent in the Rust kernel.
+    // two avoids imposing an I64/u32 restriction.
     small: int_inline(exponent)
     power: if small -> I64{0} else -> int_copy(exponent, I64{0})
     remaining := if small -> exponent else -> I64{0}
@@ -998,8 +998,8 @@ int_bitwise: fn(left: I64, right: I64, kind: I64) -> I64 {
     return if (int_negative(value)) -> -result else -> result
 }
 
-// The nearest Float to an inline Int, ties to even (Rust `as f64`);
-// `Float{n}` itself only takes a word the Float holds exactly.
+// The nearest Float to an inline Int, ties to even; `Float{n}` itself only
+// takes a word the Float holds exactly.
 int_inline_to_f64: fn(value: I64) -> Float {
     magnitude: if (value < I64{0}) -> -value else -> value
     width: int_word_bits(magnitude)

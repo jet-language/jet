@@ -1,4 +1,4 @@
-// The Rust original owns one OnceLock<RwLock<JetEnvEntries>>. Native main
+// One process-wide logical environment cell. Native main
 // captures startup before threads and creates the process default cell; the
 // first writer, or a reader of every pair (each calls jet_rt_logical_env_seed),
 // seeds it, once, from the immutable startup byte index, which logical writes
@@ -57,7 +57,7 @@ logical_environment_remove: fn(root: I64, entry: I64) {
 }
 
 logical_environment_append: fn(root: I64, key: I64, key_length: I64, value: I64, value_length: I64) {
-    // Rust removes an existing match, then pushes the new pair at the end.
+    // Remove an existing match, then push the new pair at the end.
     old: logical_environment_find(root, key, key_length)
     if (old != I64{0}) { logical_environment_remove(root, old) }
     entry: jet_rt_alloc(I64{40}, I64{8})
@@ -181,8 +181,8 @@ logical_environment_text: fn(bytes: I64, length: I64) -> I64 {
     rt_text_copy(bytes, length)
 }
 
-// The Rust original is Option<String>, not Result: absent and a present
-// non-Unicode value both return None. Raw OS lookup preserves bytes.
+// An option, not a Result: absent and a present non-Unicode value both return
+// None. Raw OS lookup preserves bytes.
 #Export(c) jet_rt_logical_env_get: fn(key: I64) -> I64 {
     rt_test_reads_text(I64{69}, key)
     row: logical_environment_startup_row(rt_text_data(key), rt_text_len(key))

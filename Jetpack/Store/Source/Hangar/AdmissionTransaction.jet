@@ -1,9 +1,8 @@
-// The one Hangar commit boundary (Rust `jetpack::Store::Transaction`)
-// shared by native ingest, Nix admission, and realized-package publication.
-// Adapters stage and certify format-specific input, then hand this type
-// canonical object identities and candidate records. It owns the durable
-// publication order and the rollback state. Rust rolled back from `Drop`;
-// here `commit` rolls back its own failures and a caller that abandons a
+// The one Hangar commit boundary shared by native ingest, Nix admission, and
+// realized-package publication. Adapters stage and certify format-specific
+// input, then hand this type canonical object identities and candidate
+// records. It owns the durable publication order and the rollback state:
+// `commit` rolls back its own failures, and a caller that abandons a
 // transaction before `commit` calls `rollback` on that path.
 use {
     files: core.files
@@ -12,8 +11,8 @@ use {
 
 STORE_TRANSACTION_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
-// Test seam (Rust thread-local ADMISSION_FAILURE): 0 = none, else the
-// 1-based `AdmissionFailurePoint` tag that fails after that step.
+// Test seam: 0 = none, else the 1-based `AdmissionFailurePoint` tag that fails
+// after that step.
 AdmissionFailureSeam: struct {
     armed: Int,
 }
@@ -428,8 +427,7 @@ AdmissionTransaction: struct {
         store_transaction_remove_node(self.stage).drop("the stage is swept by the next admission recovery")
     }
 
-    // Undo every publication step in reverse order. Rust ran this from
-    // `Drop` for an uncommitted transaction.
+    // Undo every publication step in reverse order.
     rollback: fn(^self) Never! {
         verification := self.verification.copy()
         if self.committed {
@@ -522,7 +520,7 @@ store_transaction_publish_receipt: fn(partial: String, path: String, receipts: S
     Ok(true)
 }
 
-// One normal path component (Rust `Component::Normal` exactly once).
+// One normal path component.
 store_transaction_validate_digest: fn(digest: String) StoreError! {
     if digest == "" || digest == "." || digest == ".." || digest.contains("/") {
         return Err(StoreError.InvalidInput("invalid Hangar object digest `{digest}`"))

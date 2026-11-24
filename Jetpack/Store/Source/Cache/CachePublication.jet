@@ -415,7 +415,7 @@ store_cache_ensure_reproducible_for_shared_cache: fn(roots: HangarRoots, entry: 
     }
 }
 
-// The last `/` segment of a store path (Rust `rsplit('/').next()`).
+// The last `/` segment of a store path.
 store_cache_store_name: fn(store_path: String) -> String Never! {
     store_path.cut_last("/")?.after ?? store_path
 }
@@ -472,7 +472,7 @@ store_cache_deriver: fn(entry: StoreEntry) -> String StoreError! {
     }
     loop value in values -> store_cache_put_field(canonical, value)
     store_cache_put_be_u64(canonical, entry.named_outputs.len())
-    // Rust iterates the BTreeMap in key order.
+    // Iterate in key order.
     loop name in store_archive_sorted_unique(entry.named_outputs.keys().to_list()) {
         store_cache_put_field(canonical, name)
         store_cache_put_field(canonical, entry.named_outputs[name])
@@ -845,7 +845,7 @@ store_cache_read_receipt_pin: fn(path: String) -> CacheReceiptPin StoreError! {
     Ok(CacheReceiptPin{version: version_number, expires_unix: expires_number})
 }
 
-// Rust `str::parse::<u64>`: an optional `+` and ASCII digits.
+// An optional `+` and ASCII digits.
 store_cache_parse_u64: fn(text: String) -> Int? Never! {
     digits: text.removeprefix("+")
     if digits == "" -> return None

@@ -1,8 +1,7 @@
-// Whole-invocation receipts for `jet check` (Rust ReceiptStore
-// `run_if_needed`, `lookup_context`, `replay_receipt`). A check whose context
-// and input closure match its last receipt replays the receipt's output and
-// status without compiling; otherwise the check runs and its outcome is
-// published as an immutable receipt, and the invocation's context pointer
+// Whole-invocation receipts for `jet check`. A check whose context and input
+// closure match its last receipt replays the receipt's output and status
+// without compiling; otherwise the check runs and its outcome is published as
+// an immutable receipt, and the invocation's context pointer
 // (`.jet/receipts/contexts/<context key>`) moves to it. Receipts are off: a
 // check replays or publishes one only while saved work is reused
 // (BUILD_REUSE_SAVED_WORK), so every check compiles. JET_RECEIPT_BYPASS also
@@ -48,9 +47,8 @@ jet_cli_check_receipt_target: fn(owned: [String]) -> String? Never! {
     None
 }
 
-// Rust `collect_tree_inputs` for `check`: every `.jet` source and lock under
-// `path`, skipping `.git`, `target` and `build`; under `.jet` only the lock and
-// the generated tree count.
+// Every `.jet` source and lock under `path`, skipping `.git`, `target` and
+// `build`; under `.jet` only the lock and the generated tree count.
 jet_cli_check_tree_inputs: fn(path: String, out: ^[String]) -[FS]> Never! {
     info: cli_files.stat(path) ?? return
     if info.is_symlink {
@@ -84,11 +82,11 @@ jet_cli_check_tree_inputs: fn(path: String, out: ^[String]) -[FS]> Never! {
     }
 }
 
-// Rust `input_paths_for`/`project_check_input_paths`: a bare check reads the
-// whole authority tree of the working directory, a directory target its own
-// tree, and a file target the file plus its owning authorities (manifests,
-// lock, stock entry candidates and generated inputs). The compiled sources a
-// file check reads beyond these join at publication from its snapshot.
+// A bare check reads the whole authority tree of the working directory, a
+// directory target its own tree, and a file target the file plus its owning
+// authorities (manifests, lock, stock entry candidates and generated inputs).
+// The compiled sources a file check reads beyond these join at publication from
+// its snapshot.
 jet_cli_check_receipt_paths: fn(cache: ^WorkspaceDeclarationCache, cwd: String, target: String?, file: String) -[FS, Env]> [String] Never! {
     paths := [String]{}
     raw: target ?? {
@@ -117,8 +115,7 @@ jet_cli_check_receipt_paths: fn(cache: ^WorkspaceDeclarationCache, cwd: String, 
     paths
 }
 
-// Rust `append_context_path`: a label, the canonical path and what is there
-// now (a file by its digest).
+// A label, the canonical path and what is there now (a file by its digest).
 jet_cli_check_context_path: fn(identity: ^[U8], label: String, path: String) -[FS]> Never! {
     jet_driver_run_receipt_frame(identity, label.bytes())
     jet_driver_run_receipt_frame(identity, (cli_files.realpath(path) ?? path).bytes())
@@ -141,9 +138,9 @@ jet_cli_check_context_path: fn(identity: ^[U8], label: String, path: String) -[F
     }
 }
 
-// Rust `append_check_context_identity`: a check claim includes its authority
-// and entry-selection state, so a newly created higher-priority entry
-// candidate or authority changes the claim even before it is an input.
+// A check claim includes its authority and entry-selection state, so a newly
+// created higher-priority entry candidate or authority changes the claim even
+// before it is an input.
 jet_cli_check_context_identity: fn(cache: ^WorkspaceDeclarationCache, cwd: String, identity: ^[U8]) -[FS, Env]> Never! {
     jet_driver_run_receipt_frame(identity, "check-context-v2".bytes())
     jet_cli_check_context_path(identity, "working-directory", cwd)
@@ -212,8 +209,7 @@ jet_cli_check_receipt_stored: fn(project_root: String, context_key: String) -[FS
     Ok(Val(receipt))
 }
 
-// Rust `changed_receipt_inputs`: paths whose digest changed, vanished or
-// newly appeared, sorted and unique.
+// Paths whose digest changed, vanished or newly appeared, sorted and unique.
 jet_cli_check_receipt_changes: fn(old: [JetDriverRunReceiptInput], new: [JetDriverRunReceiptInput]) -> [String] Never! {
     changed := [String]{}
     loop input in old {
@@ -239,8 +235,8 @@ jet_cli_check_receipt_changes: fn(old: [JetDriverRunReceiptInput], new: [JetDriv
     jet_cli_lock_canonical(changed)
 }
 
-// Rust `replay_receipt`: the stored output under the current secret values,
-// then (verbose) the replay notice.
+// The stored output under the current secret values, then (verbose) the replay
+// notice.
 jet_cli_check_receipt_replay: fn(receipt: JetDriverRunReceipt, argv: [String], notice: String, verbose: Bool) -[Env]> JetDriverVerbOutput? Never! {
     secrets: jet_cli_receipt_secret_values(argv)
     stdout_bytes: jet_cli_receipt_redact_bytes(receipt.stdout, secrets) ?? return None
@@ -251,9 +247,9 @@ jet_cli_check_receipt_replay: fn(receipt: JetDriverRunReceipt, argv: [String], n
     Val(JetDriverVerbOutput{stdout: stdout, stderr: "{notice}{stderr}{current}", exit_code: receipt.status})
 }
 
-// Rust `lookup_context` after the pointer: the stored closure is checked as
-// it stands now, with the authority paths rediscovered so a new entry
-// candidate cannot hide behind it. A mismatch says why under `--verbose`.
+// The stored closure is checked as it stands now, with the authority paths
+// rediscovered so a new entry candidate cannot hide behind it. A mismatch says
+// why under `--verbose`.
 jet_cli_check_receipt_current: fn(receipt: JetDriverRunReceipt, identity: [U8], paths: [String], args: [String], notice: String, verbose: Bool) -> JetDriverVerbOutput? {
     current_paths := paths
     loop input in receipt.claim.inputs {
@@ -282,9 +278,9 @@ jet_cli_check_receipt_current: fn(receipt: JetDriverRunReceipt, identity: [U8], 
     jet_cli_check_receipt_replay(receipt, args, notice, verbose)
 }
 
-// Rust `run_if_needed` up to the act: a `jet check` plan replays its current
-// receipt, or runs with the claim its outcome publishes. Store failures are
-// optional-history notices; the check then runs unrecorded.
+// Up to the act: a `jet check` plan replays its current receipt, or runs with
+// the claim its outcome publishes. Store failures are optional-history
+// notices; the check then runs unrecorded.
 jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheckReceiptStep {
     if !BUILD_REUSE_SAVED_WORK || cli_sys.get(ENV_JET_RECEIPT_BYPASS) != None {
         return JetCLICheckReceiptStep.Run{recording: None}
@@ -298,7 +294,7 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
         }
         .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> return JetCLICheckReceiptStep.Run{recording: None}
     }
-    // Rust `OutputFlags.parse(argv).verbose`: the flag, whatever the target.
+    // The flag, whatever the target.
     owned: jet_cli_owned_flags(args)
     verbose: owned.contains("--verbose") || owned.contains("-v")
     cwd: cli_sys.current_dir() ?? {
@@ -349,9 +345,9 @@ jet_cli_check_snapshot_inputs: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -
     Val(inputs)
 }
 
-// Rust `persist_published_receipt` and `index_published_receipt`. The claim
-// is the pre-compile inputs plus each `compiled` source outside them;
-// publication refuses a closure that changed meanwhile.
+// Persist and index a published receipt. The claim is the pre-compile inputs
+// plus each `compiled` source outside them; publication refuses a closure that
+// changed meanwhile.
 jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriverVerbOutput, compiled: [JetDriverRunReceiptInput]) -[FS, Env, Time]> JetCLIReadError! {
     inputs := recording.inputs
     known := [String]{}

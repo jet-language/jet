@@ -561,7 +561,6 @@ FlakeModuleVisit: struct {
     root_module: Bool,
 }
 
-// Rust `path.parent().unwrap_or(".")`.
 trust_flake_project_dir: fn(path: String) -> String Never! {
     parent: files.dirname(path)
     if parent == "" -> return "."
@@ -576,8 +575,7 @@ trust_path_has_parent_component: fn(path: String) -> Bool Never! {
     false
 }
 
-// Rust `Path::starts_with`: `path` is `root` or lies below it by whole
-// components.
+// `path` is `root` or lies below it by whole components.
 trust_path_within: fn(path: String, root: String) -> Bool Never! {
     if path == root -> return true
     prefix: if root.ends_with("/") -> root.copy() else -> "{root}/"

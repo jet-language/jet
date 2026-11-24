@@ -1,4 +1,4 @@
-// Rust cols/rows are i64, not exact-Int owners. Narrow only at constructors;
+// cols/rows are i64, not exact-Int owners. Narrow only at constructors;
 // getters return fresh exact Int owners, while clone/eq/drop use raw words.
 ui_carrier_terminal_size_new: fn(cols: I64, rows: I64) -> I64 {
     result: jet_rt_alloc(UI_CARRIER_TERMINAL_SIZE_BYTES, I64{8})
@@ -35,9 +35,9 @@ ui_carrier_terminal_size_new: fn(cols: I64, rows: I64) -> I64 {
     jet_int_owned_from_i64(ui_carrier_word(wrapping(value + UI_CARRIER_TERMINAL_SIZE_ROWS)))
 }
 
-// The Rust original consumes its boxed Size before checking Mode. Copy raw
-// words and free that input before tag rejection, matching the seed ownership.
-// Policy stores Size inline, not a second heap owner (RJ13 layout approval).
+// The boxed Size is consumed before Mode is checked. Copy raw words and free
+// that input before tag rejection, matching the seed ownership. Policy stores
+// Size inline, not a second heap owner (RJ13 layout approval).
 ui_carrier_terminal_policy_new: fn(cols: I64, rows: I64, mode: I64) -> I64 {
     result: jet_rt_alloc(UI_CARRIER_TERMINAL_POLICY_BYTES, I64{8})
     ui_carrier_store(wrapping(wrapping(result + UI_CARRIER_TERMINAL_POLICY_SIZE) + UI_CARRIER_TERMINAL_SIZE_COLS), cols)

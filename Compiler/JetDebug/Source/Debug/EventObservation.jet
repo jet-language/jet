@@ -1,14 +1,13 @@
 // Debugger projection of the runtime-owned Event observation sequence. Runtime
 // records are payload-free; this consumer accepts only the closed schema and
 // preserves every numeric and runtime enum fact exactly. The closed value lists
-// below are Rust's own consumer validators; the runtime producer
+// below are the consumer's validators; the runtime producer
 // (Observe/jet_event_observe) has no Jet owner yet, so no real feed runs here.
 use {
     core.encoding.[Dyn]
     jet_foundation.[foundation_parse_protocol_json, foundation_json_integer]
 }
 
-// Rust MAX_SNAPSHOT_BYTES / MAX_EVENTS.
 DEBUG_EVENT_MAX_SNAPSHOT_BYTES: 1048576
 
 DEBUG_EVENT_MAX_EVENTS: 256
@@ -24,7 +23,6 @@ debug_event_error: fn(message: String) -> DebugEventObservationError Never! {
     DebugEventObservationError{message: message}
 }
 
-// Rust `render`, public as `render_event_observations`.
 render_event_observations: fn(snapshot: String) -> String DebugEventObservationError! {
     if snapshot.bytes().len() > DEBUG_EVENT_MAX_SNAPSHOT_BYTES {
         return Err(debug_event_error("runtime observation exceeds the 1 MiB debugger limit"))
@@ -49,7 +47,7 @@ render_event_observations: fn(snapshot: String) -> String DebugEventObservationE
     }
 }
 
-// Rust `render` record loop: rows are read in place, never copied out.
+// Rows are read in place, never copied out.
 debug_render_event_rows: fn(events: [Dyn]) -> String DebugEventObservationError! {
     previous := 0
     lines := [String]{}
@@ -94,7 +92,7 @@ debug_render_event_rows: fn(events: [Dyn]) -> String DebugEventObservationError!
     Ok(lines.join("\n"))
 }
 
-// Rust KEYS: the exact fifteen payload-free observation fields.
+// The exact fifteen payload-free observation fields.
 debug_event_known_field: fn(key: String) -> Bool Never! {
     if key == {
         "sequence" | "source" | "event_id" | "owner_id" | "subscription_id" | "dispatch_id" | "lifecycle" | "queued" | "blocked" | "running" | "capacity" | "overflow" | "priority" | "failure" | "terminal" -> true
@@ -102,7 +100,7 @@ debug_event_known_field: fn(key: String) -> Bool Never! {
     }
 }
 
-// Rust `closed` allowed lists for source/lifecycle/overflow/failure/terminal.
+// The closed allowed lists for source/lifecycle/overflow/failure/terminal.
 debug_event_allowed: fn(key: String, value: String) -> Bool Never! {
     if key == {
         "source" -> if value == {
@@ -142,28 +140,26 @@ debug_event_field: fn(object: Dyn, key: String) -> Dyn? Never! {
     None
 }
 
-// Rust `integer`: a protocol integer.
+// A protocol integer.
 debug_event_integer: fn(object: Dyn, key: String) -> Int DebugEventObservationError! {
     value: debug_event_field(object, key) ?? return Err(debug_event_error("runtime event observation has invalid `{key}`"))
     number: foundation_json_integer(value) ?? return Err(debug_event_error("runtime event observation has invalid `{key}`"))
     Ok(number)
 }
 
-// Rust `unsigned`.
 debug_event_unsigned: fn(object: Dyn, key: String) -> Int DebugEventObservationError! {
     value: debug_event_integer(object, key) ?? return Err(err)
     if value < 0 -> return Err(debug_event_error("runtime event observation has negative `{key}`"))
     Ok(value)
 }
 
-// Rust `count`: -1 is the published "unavailable" count.
+// -1 is the published "unavailable" count.
 debug_event_count: fn(object: Dyn, key: String) -> Int DebugEventObservationError! {
     value: debug_event_integer(object, key) ?? return Err(err)
     if value < -1 -> return Err(debug_event_error("runtime event observation has invalid `{key}`"))
     Ok(value)
 }
 
-// Rust `closed`.
 debug_event_closed: fn(object: Dyn, key: String) -> String DebugEventObservationError! {
     value: debug_event_field(object, key) ?? return Err(debug_event_error("runtime event observation has invalid `{key}`"))
     if value == .Text(text) {
