@@ -1,0 +1,419 @@
+#!/usr/bin/env jet
+// Dead row sweep: Core's call tables keep no row for a member nothing calls.
+//
+// Core.rows dispatcher rows, the typed host and platform signature rows
+// (CoreHostSignatures.jet and CorePlatformSignatures.jet, in
+// JetFoundation's Registry) and the surface inventory's `fixed_sig` lists
+// each name a Core member. A member is dead when its name is a word of no
+// Jet source under Core, Compiler, Tools, Examples or Tests outside those
+// tables and the generated views, other than a line that declares it
+// (`name: fn`; a declaration under a marker such as `#Builtin.Role` counts
+// as a call), and no compiler source derives it: a string literal of the
+// compiler that opens with a name prefix and an interpolation
+// (`"process_spec_{leaf}"`) builds a host leaf's name from a method's, so
+// every member under that prefix is called. Each dead row is the member's
+// own: its dispatcher row and its name in its module's `exports` and `owns`
+// lists, in signature rows and in `fixed_sig` lists.
+// Usage: jet Tools/Agent/DeadRowSweep.jet [--check|--write]
+// --check lists the dead members and fails when there is one; --write
+// deletes their rows and names each dead source-owned member, whose Core
+// declaration goes by hand.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+CORE_ROWS: "Compiler/Prelude/Core.rows"
+
+INVENTORY_ROWS: "Compiler/Prelude/CoreSurfaceInventory.rows"
+
+// The row-form signature tables, each a `rows: """` block whose rows are
+// `<module> <member>|<member>... <parameters> <return>` (core_sig_row_lookup).
+SIGNATURE_TABLES: [String]{
+    "Compiler/JetFoundation/Source/Registry/CoreHostSignatures.jet",
+    "Compiler/JetFoundation/Source/Registry/CorePlatformSignatures.jet",
+}
+
+// The roots whose Jet sources call Core.
+CALLER_ROOTS: [String]{"Core", "Compiler", "Tools", "Examples", "Tests"}
+
+// The root whose sources derive Core member names (derived_prefixes).
+DERIVING_ROOT: "Compiler/"
+
+// Sources that name members without calling them: the code-form signature
+// table and the views generated from Core's declarations.
+NOT_CALLERS: [String]{
+    "Compiler/JetFoundation/Source/Registry/CoreSignatures.jet",
+    "Compiler/JetSema/Source/Sema/PreludeRows.jet",
+    "Tools/Agent/DeadRowSweep.jet",
+}
+
+WORD: Regex{"[A-Za-z_][A-Za-z0-9_]*"}
+
+#Error
+DeadRowSweepError: struct {
+    message: String,
+}
+
+sweep_fail: fn(message: String) -> DeadRowSweepError Never! {
+    DeadRowSweepError{message: "dead row sweep: {message}"}
+}
+
+// The Jet sources that may call Core: tracked `.jet` and `.case` files under
+// CALLER_ROOTS, less the tables and NOT_CALLERS.
+caller_sources: fn() -[Exec, IO, Time.Wait]> [String] DeadRowSweepError! {
+    argv := [String]{"git", "ls-files", "--"}
+    loop root in CALLER_ROOTS -> argv.push(root.copy())
+    receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(sweep_fail("cannot run git ls-files: {err}"))
+    if receipt.code != 0 -> return Err(sweep_fail("git ls-files failed ({receipt.code}): {receipt.errors}"))
+    paths := [String]{}
+    loop path in receipt.output.split("\n") {
+        if !path.ends_with(".jet") && !path.ends_with(".case") -> next
+        if NOT_CALLERS.contains(path) || SIGNATURE_TABLES.contains(path) -> next
+        paths.push(path.copy())
+    }
+    Ok(paths)
+}
+
+// The member a line declares (`name: fn`, `pub name: fn`), or "".
+declared_member: fn(line: String) -> String Never! {
+    text := line.trim_start()
+    if text.starts_with("pub ") -> text = text.remove_prefix("pub ")
+    if text.starts_with("priv ") -> text = text.remove_prefix("priv ")
+    if text.split_once(": fn") == .Val(parts) {
+        if WORD.find(parts.before) == .Val(word) && word == parts.before -> return word
+    }
+    ""
+}
+
+// Adds to `calls` each member of `candidates` that `source` names, by its
+// count of words less its count of declarations. A declaration under a
+// marker (`#Builtin.Role(…)`) counts as a call: the compiler finds it by the
+// marker, not by its name.
+member_calls: fn(source: String, candidates: [String:Bool], calls: ^[String:Int]) Never! {
+    loop word in WORD.find_all(source) {
+        if candidates.get(word) != None -> calls[word] = (calls.get(word) ?? 0) + 1
+    }
+    if !source.contains(": fn") -> return
+    marked := false
+    loop line in source.split("\n") {
+        if !line.contains(": fn") {
+            marked = line.trim_start().starts_with("#")
+            next
+        }
+        declared: declared_member(line)
+        if !marked && candidates.get(declared) != None -> calls[declared] = (calls.get(declared) ?? 1) - 1
+        marked = false
+    }
+}
+
+// A byte of a name: a letter, a digit or `_`.
+name_byte: fn(value: Int) -> Bool Never! {
+    value == 95 || (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122)
+}
+
+// Adds to `prefixes` each name prefix `source` derives members under: a
+// string literal that opens with a lowercase name ending in `_` and then
+// an interpolation (`"process_spec_{leaf}"` gives `process_spec_`).
+derived_prefixes: fn(source: String, prefixes: ^[String:Bool]) Never! {
+    bytes: source.bytes()
+    loop index in 2..<bytes.len() {
+        at: Int{bytes[index]}
+        before: Int{bytes[index - 1]}
+        after: if index + 1 < bytes.len() -> Int{bytes[index + 1]} else -> 0
+        if at != 123 || before != 95 || after == 123 -> next
+        start := index - 1
+        loop start > 0 && name_byte(Int{bytes[start - 1]}) -> start -= 1
+        if start == 0 -> next
+        quote: Int{bytes[start - 1]}
+        first: Int{bytes[start]}
+        if quote != 34 || first < 97 || first > 122 -> next
+        prefix: String.from_bytes(bytes[start..(index - 1)]) ?? next
+        prefixes[prefix] = true
+    }
+}
+
+// Whether `member` lies under one of `prefixes`, with a name of its own after it.
+derived_member: fn(member: String, prefixes: [String:Bool]) -> Bool Never! {
+    loop (prefix, _) in prefixes {
+        if member.len() > prefix.len() && member.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// One table member: its module, its name and where it is written.
+TableMember: struct {
+    module_name: String,
+    member: String,
+    place: String,
+}
+
+// The `module member` rows of Core.rows's dispatcher table.
+dispatcher_members: fn(text: String) -> [TableMember] Never! {
+    members := [TableMember]{}
+    loop (index, line) in text.split("\n").to_list() {
+        if !line.starts_with("dispatcher_row ") -> next
+        fields: line.split(" ").to_list()
+        if fields.len() < 4 -> next
+        members.push(TableMember{module_name: fields[2].copy(), member: fields[3].copy(), place: "{CORE_ROWS}:{index + 1}"})
+    }
+    members
+}
+
+// Whether line `line` of a signature table is a row: inside a `rows: """`
+// block, given whether the block is open before it.
+signature_rows_open: fn(line: String, open: Bool) -> Bool Never! {
+    if line.trim() == "rows: \"\"\"" -> return true
+    if line.trim() == "\"\"\"" -> return false
+    open
+}
+
+// The members of the row-form signature table `text` at `path`.
+signature_members: fn(path: String, text: String) -> [TableMember] Never! {
+    members := [TableMember]{}
+    open := false
+    loop (index, line) in text.split("\n").to_list() {
+        was_open: open
+        open = signature_rows_open(line, open)
+        if !was_open || !open -> next
+        fields: line.trim().split(" ").to_list()
+        if fields.len() < 3 -> next
+        loop member in fields[1].split("|") {
+            members.push(TableMember{module_name: fields[0].copy(), member: member.copy(), place: "{path}:{index + 1}"})
+        }
+    }
+    members
+}
+
+// The `{ a, b }` list of `line` after `opening`, as its names.
+braced_names: fn(line: String, opening: String) -> [String] Never! {
+    after: line.split_once(opening) ?? return [String]{}
+    inside: after.after.split_once("}}") ?? return [String]{}
+    names := [String]{}
+    loop name in inside.before.split(",") {
+        if name.trim() != "" -> names.push(name.trim())
+    }
+    names
+}
+
+// The members of the surface inventory's `fixed_sig <module> { … }` lines.
+inventory_members: fn(text: String) -> [TableMember] Never! {
+    members := [TableMember]{}
+    loop (index, line) in text.split("\n").to_list() {
+        if !line.starts_with("fixed_sig ") -> next
+        fields: line.split(" ").to_list()
+        loop member in braced_names(line, "{{") {
+            members.push(TableMember{module_name: fields[1].copy(), member: member.copy(), place: "{INVENTORY_ROWS}:{index + 1}"})
+        }
+    }
+    members
+}
+
+// Every table's members.
+table_members: fn() -[FS]> [TableMember] DeadRowSweepError! {
+    rows: files.read(CORE_ROWS) ?? return Err(sweep_fail("cannot read {CORE_ROWS}: {err}"))
+    members := dispatcher_members(rows)
+    loop path in SIGNATURE_TABLES {
+        text: files.read(path) ?? return Err(sweep_fail("cannot read {path}: {err}"))
+        members.extend(signature_members(path, text))
+    }
+    inventory: files.read(INVENTORY_ROWS) ?? return Err(sweep_fail("cannot read {INVENTORY_ROWS}: {err}"))
+    members.extend(inventory_members(inventory))
+    Ok(members)
+}
+
+// The dead members of `members` as `module member` pairs: those no caller
+// source names and no compiler source derives.
+dead_members: fn(members: [TableMember]) -[Exec, FS, IO, Time.Wait]> [String:Bool] DeadRowSweepError! {
+    candidates := [String:Bool]{}
+    loop member in members -> candidates[member.member.copy()] = true
+    calls := [String:Int]{}
+    prefixes := [String:Bool]{}
+    loop path in caller_sources() ?? return Err(err) {
+        source: files.read(path) ?? next
+        member_calls(source, candidates, calls)
+        if path.starts_with(DERIVING_ROOT) -> derived_prefixes(source, prefixes)
+    }
+    dead := [String:Bool]{}
+    loop member in members {
+        if (calls.get(member.member) ?? 0) > 0 || derived_member(member.member, prefixes) -> next
+        dead["{member.module_name} {member.member}"] = true
+    }
+    Ok(dead)
+}
+
+// `line` less the dead members of `module_name` in its `{ … }` list after
+// `opening`, unchanged when it names none; None when `drop_empty` and the
+// list is left empty.
+without_dead: fn(line: String, opening: String, module_name: String, dead: [String:Bool], drop_empty: Bool) -> String? Never! {
+    after: line.split_once(opening) ?? return Val(line.copy())
+    inside: after.after.split_once("}}") ?? return Val(line.copy())
+    kept := [String]{}
+    removed := false
+    loop name in inside.before.split(",") {
+        if name.trim() == "" -> next
+        if dead.get("{module_name} {name.trim()}") == None -> kept.push(name.trim()) else -> removed = true
+    }
+    if !removed -> return Val(line.copy())
+    if kept.len() == 0 {
+        if drop_empty -> return None
+        return Val("{after.before}{opening} }}{inside.after}")
+    }
+    Val("{after.before}{opening} {kept.join(", ")} }}{inside.after}")
+}
+
+// Core.rows without the dead members' dispatcher rows and their names in
+// their modules' `exports` and `owns` lists.
+sweep_core_rows: fn(text: String, dead: [String:Bool]) -> String Never! {
+    out := [String]{}
+    loop line in text.split("\n") {
+        fields: line.split(" ").to_list()
+        if fields.len() > 3 && fields[0] == "dispatcher_row" && dead.get("{fields[2]} {fields[3]}") != None -> next
+        if fields.len() > 1 && fields[0] == "module" {
+            out.push(without_dead(line, "exports {{", fields[1], dead, false) ?? line.copy())
+            next
+        }
+        if fields.len() > 1 && fields[0] == "source_module" {
+            out.push(without_dead(line, "owns {{", fields[1], dead, false) ?? line.copy())
+            next
+        }
+        out.push(line.copy())
+    }
+    out.join("\n")
+}
+
+// A signature table without the dead members' names in its rows, and
+// without a row left naming none.
+sweep_signature_table: fn(text: String, dead: [String:Bool]) -> String Never! {
+    out := [String]{}
+    open := false
+    loop line in text.split("\n") {
+        was_open: open
+        open = signature_rows_open(line, open)
+        fields: line.trim().split(" ").to_list()
+        if !was_open || !open || fields.len() < 3 {
+            out.push(line.copy())
+            next
+        }
+        kept := [String]{}
+        loop member in fields[1].split("|") {
+            if dead.get("{fields[0]} {member}") == None -> kept.push(member.copy())
+        }
+        if kept.len() == 0 -> next
+        indent: line.split_once(fields[0]) ?? return text.copy()
+        rest := [String]{}
+        loop (index, field) in fields {
+            if index > 1 -> rest.push(field.copy())
+        }
+        out.push("{indent.before}{fields[0]} {kept.join("|")} {rest.join(" ")}")
+    }
+    out.join("\n")
+}
+
+// The surface inventory without the dead members in its `fixed_sig` lists,
+// and without a list left empty.
+sweep_inventory: fn(text: String, dead: [String:Bool]) -> String Never! {
+    out := [String]{}
+    loop line in text.split("\n") {
+        fields: line.split(" ").to_list()
+        if fields.len() > 1 && fields[0] == "fixed_sig" {
+            if without_dead(line, "{{", fields[1], dead, true) == .Val(kept) -> out.push(kept)
+            next
+        }
+        out.push(line.copy())
+    }
+    out.join("\n")
+}
+
+// Writes `path` as `swept` when it differs from `text`; whether it did.
+sweep_write: fn(path: String, text: String, swept: String) -[FS]> Bool DeadRowSweepError! {
+    if swept == text -> return Ok(false)
+    files.write(path, swept) ?? return Err(sweep_fail("cannot write {path}: {err}"))
+    Ok(true)
+}
+
+dead_row_sweep_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> String DeadRowSweepError! {
+    mode: if args.len() == 0 -> "--check" else -> args[0]
+    if args.len() > 1 || (mode != "--check" && mode != "--write") {
+        return Err(sweep_fail("usage: jet Tools/Agent/DeadRowSweep.jet [--check|--write]"))
+    }
+    members: table_members() ?? return Err(err)
+    dead: dead_members(members) ?? return Err(err)
+    if dead.len() == 0 -> return Ok("dead row sweep: no dead rows")
+    if mode == "--check" {
+        count := 0
+        loop member in members {
+            if dead.get("{member.module_name} {member.member}") != None {
+                print("{member.place}: {member.module_name} {member.member}")
+                count += 1
+            }
+        }
+        return Err(sweep_fail("{count} dead row(s) of {dead.len()} member(s); run jet Tools/Agent/DeadRowSweep.jet --write"))
+    }
+    rows: files.read(CORE_ROWS) ?? return Err(sweep_fail("cannot read {CORE_ROWS}: {err}"))
+    loop line in rows.split("\n") {
+        fields: line.split(" ").to_list()
+        if fields.len() > 3 && fields[0] == "dispatcher_row" && line.contains("source_owned") && dead.get("{fields[2]} {fields[3]}") != None {
+            print("{fields[2]} {fields[3]} is source-owned: delete its declaration from the module's Core source")
+        }
+    }
+    written := 0
+    if sweep_write(CORE_ROWS, rows, sweep_core_rows(rows, dead)) ?? return Err(err) -> written += 1
+    loop path in SIGNATURE_TABLES {
+        text: files.read(path) ?? return Err(sweep_fail("cannot read {path}: {err}"))
+        if sweep_write(path, text, sweep_signature_table(text, dead)) ?? return Err(err) -> written += 1
+    }
+    inventory: files.read(INVENTORY_ROWS) ?? return Err(sweep_fail("cannot read {INVENTORY_ROWS}: {err}"))
+    if sweep_write(INVENTORY_ROWS, inventory, sweep_inventory(inventory, dead)) ?? return Err(err) -> written += 1
+    Ok("dead row sweep: deleted the rows of {dead.len()} member(s) from {written} file(s)")
+}
+
+run: fn() {
+    if dead_row_sweep_main(process.args()) == {
+        .Ok(message) -> { print(message) }
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(1)
+        }
+    }
+}
+
+#Test("a member's declaration is no call, unless a marker names it") {
+    candidates := [String:Bool]{}
+    candidates["spare"] = true
+    candidates["kept"] = true
+    candidates["role"] = true
+    calls := [String:Int]{}
+    member_calls("pub spare: fn() {{ kept() }}\npriv kept: fn() {{}}\n#Builtin.Role(.Copy)\nrole: fn() {{}}\n", candidates, calls)
+    assert_eq(calls.get("spare") ?? 0, 0)
+    assert_eq(calls.get("kept") ?? 0, 1)
+    assert_eq(calls.get("role") ?? 0, 1)
+}
+
+#Test("a literal that opens with a prefix and an interpolation derives the members under it") {
+    prefixes := [String:Bool]{}
+    derived_prefixes("leaf: core_call(m, \"process_spec_{{leaf}}\")\nx: \"__{{id}}\"\ny: \"text a_{{b}}\"\nz: \"kept_{{{{brace\"\n", prefixes)
+    assert_eq(prefixes.len(), 1)
+    assert(derived_member("process_spec_env", prefixes))
+    assert(!derived_member("process_spec_", prefixes))
+    assert(!derived_member("process_child_id", prefixes))
+}
+
+#Test("a dead member leaves its dispatcher row, its export and its ownership") {
+    dead := [String:Bool]{}
+    dead["core.x gone"] = true
+    rows: "module core.x exports {{ Kept, gone, kept }} depends_on []\nsource_module core.x path Core/X.jet alias x owns {{ gone }} types {{ Kept }}\ndispatcher_row plain core.x gone | CoreCallRecord.new(\"core.x\", \"gone\", \"jet_gone\", true, &[false])\ndispatcher_row plain core.x kept | CoreCallRecord.new(\"core.x\", \"kept\", \"jet_kept\", true, &[false])\n"
+    assert_eq(sweep_core_rows(rows, dead), "module core.x exports {{ Kept, kept }} depends_on []\nsource_module core.x path Core/X.jet alias x owns {{ }} types {{ Kept }}\ndispatcher_row plain core.x kept | CoreCallRecord.new(\"core.x\", \"kept\", \"jet_kept\", true, &[false])\n")
+    assert_eq(sweep_core_rows("module core.y exports {{  }}", dead), "module core.y exports {{  }}")
+}
+
+#Test("a dead member leaves its signature rows and fixed_sig lists, and an emptied row goes") {
+    dead := [String:Bool]{}
+    dead["core.x gone"] = true
+    dead["core.x lone"] = true
+    table: "a: fn() {{\n    rows: \"\"\"\n    core.x gone|kept Int Int\n    core.x lone - Unit\n    core.y gone Int Int\n    \"\"\"\n}}\n"
+    assert_eq(sweep_signature_table(table, dead), "a: fn() {{\n    rows: \"\"\"\n    core.x kept Int Int\n    core.y gone Int Int\n    \"\"\"\n}}\n")
+    inventory: "fixed_sig core.x {{ gone, kept }}\nfixed_sig core.x {{ lone }}\n"
+    assert_eq(sweep_inventory(inventory, dead), "fixed_sig core.x {{ kept }}\n")
+}

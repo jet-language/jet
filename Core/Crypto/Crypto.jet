@@ -276,12 +276,6 @@ priv __vault_wrapped_from_bytes: fn(bytes: ^^[U8]) -> WrappedVaultKey KeyWrapErr
     }
 }
 
-priv __vault_wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! {
-    #Unsafe("vault key import: expose the authenticated wrapped carrier, not plaintext key material") {
-        return core.crypto.vault.__wrapped_bytes(wrapped)
-    }
-}
-
 priv __vault_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
     #Unsafe("vault key import: construct the typed recipient unlock request") {
         return core.crypto.vault.__key_unlock_recipient(identity)
