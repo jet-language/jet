@@ -1,0 +1,10 @@
+use process: core.process
+
+// A list holding a tagged value carries the tag to every read.
+send_all: fn(email: #PII String) {
+    words: [String]{"to", email.copy()}
+    receipt: process.cmd(["echo", words[0]]).run() ?? return
+    receipt.drop("only the argument flow matters here")
+}
+
+run: fn() { send_all("ann@example.com") }

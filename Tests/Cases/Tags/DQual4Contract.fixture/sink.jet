@@ -1,0 +1,10 @@
+use process: core.process
+
+// The type-position tag is the value's own: a `#PII String` parameter's
+// value is refused at a sink `PII` denies.
+send: fn(email: #PII String) {
+    receipt: process.cmd(["echo", email]).run() ?? return
+    receipt.drop("only the argument flow matters here")
+}
+
+run: fn() { send("ann@example.com") }

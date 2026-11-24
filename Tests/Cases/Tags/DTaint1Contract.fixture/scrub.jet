@@ -1,0 +1,12 @@
+use process: core.process
+
+// Only an exact-tag `#Scrub(PII)` function removes the tag: its result
+// reaches the sink.
+#Scrub(PII) domain_only: fn(email: #PII String) -> String { email.split("@").to_list()[1] }
+
+send: fn(email: #PII String) {
+    receipt: process.cmd(["echo", domain_only(email)]).run() ?? return
+    receipt.drop("only the argument flow matters here")
+}
+
+run: fn() { send("ann@example.com") }

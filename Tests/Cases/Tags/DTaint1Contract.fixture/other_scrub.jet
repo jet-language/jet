@@ -1,0 +1,11 @@
+use process: core.process
+
+// A scrubber for another tag leaves `PII` on the value.
+#Scrub(Input) trimmed: fn(raw: #Input String) -> String { raw.trim() }
+
+send: fn(email: #PII String) {
+    receipt: process.cmd(["echo", trimmed(email)]).run() ?? return
+    receipt.drop("only the argument flow matters here")
+}
+
+run: fn() { send("ann@example.com") }

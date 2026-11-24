@@ -1,0 +1,42 @@
+# Tag facts propagate through branches, containers
+# and calls; a sink the tag's declaration denies refuses a tagged value with
+# E0721 (Jet.TaggedValueDenied); only a checked `#Scrub(Tag)` removes a tag.
+# Each refused file has exactly one report, at the sink. The checks:
+# - Propagation: a branch whose value may be the tagged one (branch), a list
+#   holding one (list), a tagged struct field (field) and a call computed
+#   from one (call) each reach `process.cmd`, which `PII` denies (`!Exec`).
+# - Removal: an exact-tag `#Scrub(PII)` function's result reaches the sink
+#   (scrub); a scrubber for another tag leaves `PII` on the value
+#   (other_scrub); a `#Scrub(PII)` that doesn't take the tag is refused, so
+#   every scrubber is checked (unchecked_scrub).
+# - Control: the same shapes over values that never held the tag check clean
+#   (untagged).
+fixture: DTaint1Contract.fixture
+env: NO_COLOR=1
+step branch: jet check branch.jet
+exit: 1
+stderr: ~ "A `PII` value is denied at `process.cmd`" # the branch value carries the tag
+stderr: count "Error: Jet.TaggedValueDenied" = 1 # one report, at the sink
+step list: jet check list.jet
+exit: 1
+stderr: ~ "A `PII` value is denied at `process.cmd`" # a read out of the list carries the tag
+stderr: count "Error: Jet.TaggedValueDenied" = 1 # one report, at the sink
+step field: jet check field.jet
+exit: 1
+stderr: ~ "A `PII` value is denied at `process.cmd`" # a read of the tagged field carries the tag
+stderr: count "Error: Jet.TaggedValueDenied" = 1 # one report, at the sink
+step call: jet check call.jet
+exit: 1
+stderr: ~ "A `PII` value is denied at `process.cmd`" # the call's result carries its argument's tag
+stderr: count "Error: Jet.TaggedValueDenied" = 1 # one report, at the sink
+step scrub: jet check scrub.jet
+exit: 0
+step other_scrub: jet check other_scrub.jet
+exit: 1
+stderr: ~ "A `PII` value is denied at `process.cmd`" # an Input scrubber does not remove PII
+stderr: count "Error: Jet.TaggedValueDenied" = 1 # one report, at the sink
+step unchecked_scrub: jet check unchecked_scrub.jet
+exit: 1
+stderr: ~ "Jet.ScrubSignatureMismatch" # a scrubber must take the tag it removes
+step untagged: jet check untagged.jet
+exit: 0
