@@ -1377,12 +1377,17 @@ sema_function_normalize_owner_type: fn(graph: SemaRegistrationGraph, owner_type:
         .Named(name) -> {
             nominal_row: sema_type_resolve_nominal_row(graph, owner_type, caller_module_identity) ?? return owner_type
             nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            // An impl of an imported type (`impl math.Decimal.Shown`) names it
+            // through the caller's import; its methods' owner is the type's
+            // own identity, the one its values carry, as the impl row's
+            // self type is (sema_checked_impl_row).
+            owner_name: if name.contains(".") && sema_type_resolve_declared(graph, owner_type, caller_module_identity) == .Named(resolved) -> resolved else -> name
             // copy: the normalized owner type is a new owned Type. For a non-generic nominal it
             // equals `owner_type`, the caller's owner type (a read parameter), which the caller
             // keeps.
-            if nominal.generic_params.len() == 0 -> return owner_type.copy()
+            if nominal.generic_params.len() == 0 -> return Type.Named{name: owner_name}
             args: loop parameter in nominal.generic_params -> Type.Named{name: parameter.name}
-            return Type.Apply{name: name, args: args}
+            return Type.Apply{name: owner_name, args: args}
         }
         // copy: the normalized owner type is a new owned Type. For other kinds it equals
         // `owner_type`, the caller's owner type (a read parameter), which the caller keeps.

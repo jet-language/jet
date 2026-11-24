@@ -579,12 +579,20 @@ sema_trait_value_unimplemented: fn(required: Type, offered: Type, span: Span) ->
             name: type_name(offered)
             closure: offered == .Fn(_, _, _, _, _, _)
             why: if closure -> "a closure has no declared type, so no impl can make it `{bound}`" else -> "`{name}` would need to implement `{bound}` before it can be used here"
-            fix: if closure -> "pass a value of a type that implements `{bound}`" else -> "write `impl {name}.{bound} {{ … }}` with every required method"
+            fix: if closure -> "pass a value of a type that implements `{bound}`" else -> sema_trait_impl_fix(name, bound)
             row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
             return Val(sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why_text}}", why), row.fix.replace("{{fix_text}}", fix)))
         }
     }
     None
+}
+
+// The impl that makes `name` meet trait `bound`. An exact number (`2.5` is a
+// Decimal) is core.math's type, which a program implements through that
+// import (`impl math.Decimal.Shown`); a bare `impl Decimal.Shown` is E0301.
+sema_trait_impl_fix: fn(name: String, bound: String) -> String Never! {
+    if name == "Decimal" || name == "Fraction" -> return "write `use core.math`, then `impl math.{name}.{bound} {{ … }}` with every required method"
+    "write `impl {name}.{bound} {{ … }}` with every required method"
 }
 
 // E0108: a write whose value doesn't fit the binding or field it lands in;
