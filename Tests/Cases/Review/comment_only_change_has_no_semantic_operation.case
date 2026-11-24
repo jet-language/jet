@@ -1,7 +1,10 @@
 # PORT tests/review.rs::comment_only_change_has_no_semantic_operation
 # PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+# The two sides are one module at two revisions (base/run.jet, head/run.jet), as
+# in every other review case: a file's name is part of its module identity, so
+# loose before.jet and after.jet would be two different modules.
 fixture: CommentOnlyChangeHasNoSemanticOperation.fixture
-step: jet review {work}/before.jet {work}/after.jet --json
+step: jet review {work}/base/run.jet {work}/head/run.jet --json
 exit: 0
 stdout: ~ "\"semantic_ops\":[]" # Original contains predicate.
 stdout: ~ "\"changes\":[]" # Original contains predicate.
