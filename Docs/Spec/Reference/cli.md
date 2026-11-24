@@ -318,21 +318,28 @@ around the report passes through. A report without the build line is E2114;
 no side file for its build is E2115. The command takes no arguments.
 
 Normal `jet fix <file|dir>` consumes the same checked diagnostic edits as
-editor code actions. Without `--all`, both the applicability and safety class
-must permit an unattended formatting or behavior-preserving change. Exact
-duplicate edits apply once; overlapping edits are deferred and rechecked for
-at most sixteen rounds. Each round's edited file is checked again: when it
-has more errors than the file had before `jet fix`, each edit is retried on
-top of the ones kept, and an edit that adds an error is rolled back and
-reported with that error. One fix may carry several edits, some in other
-files of the program: they apply together or not at all. A fix whose edits
-overlap each other, or that names a file `jet fix` can't read, is refused
-whole and reported; a fix with one edit overlapping an edit already kept
-waits whole for the next round. The other files' errors count in the recheck,
-the dry-run diff shows every changed file, and one transaction publishes them
-all. Editor code actions offer a fix only when all its edits are in the open
-file. The receipt's `skipped` rows record every edit left
-out (one needing review, one rolled back, or one refused) with its reason. A `#Deprecated`
+editor code actions. A directory fixes every source file of its package, not
+its entry alone: the one check of the package gives each file's fixes and
+errors, and the status names each file it fixes with its count, then the
+total (`pkg: applied 5 fixes in 2 files`). `--markers`, `--style` and
+`--pin-failures` on a directory still edit its entry. Without `--all`, both
+the applicability and safety class must permit an unattended formatting or
+behavior-preserving change. Exact duplicate edits apply once; overlapping
+edits are deferred and rechecked for at most sixteen rounds. Each round's
+edited files are checked again: when they have more errors than before
+`jet fix`, the fixes of each file are retried together on top of the ones
+kept (when the round edits more than one file), each edit of a file whose
+set adds an error is retried alone, and an edit that adds an error is rolled
+back and reported with that error and its file. One fix may carry several
+edits, some in other files of the program: they apply together or not at
+all. A fix whose edits overlap each other, or that names a file `jet fix`
+can't read, is refused whole and reported; a fix with one edit overlapping
+an edit already kept waits whole for the next round. The other files' errors
+count in the recheck, the dry-run diff shows every changed file, and one
+transaction publishes them all. Editor code actions offer a fix only when
+all its edits are in the open file. The receipt's `skipped` rows record
+every edit left out (one needing review, one rolled back, or one refused)
+with its reason. A `#Deprecated`
 `use:` replacement is offered as an edit only when it is a plain rename, a
 declared function that takes the same call; otherwise L2001's Fix says to edit
 the use by hand. `--dry-run` renders the diff without publishing. A retired

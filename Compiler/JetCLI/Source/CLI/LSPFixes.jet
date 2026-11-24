@@ -1,17 +1,19 @@
 // The fix projections shared by CLI fixes and code actions.
-use jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
+use jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticOrigin, Span, TextEdit]
 
 // `edits` are the fix's other edits, applied with `edit` all together or
-// not at all. An edit names the file it changes by TextEdit.path until
-// jet_cli_fix_resolve takes the path into `jet fix`'s file table; then
-// `file` is the row of the file `edit` changes and `files` the row of each of
-// `edits`, -1 being the fixed file.
+// not at all. An edit names the file it changes by TextEdit.path, or else
+// changes `home`, the file of the diagnostic that offers the fix (None: the
+// fixed file), until jet_cli_fix_resolve takes the paths into `jet fix`'s
+// file table; then `file` is the row of the file `edit` changes and `files`
+// the row of each of `edits`, -1 being the fixed file.
 JetCLIFix: struct {
     title: String,
     edit: TextEdit,
     applicability: DiagnosticFixApplicability,
     safety: DiagnosticFixSafety,
     edits: [TextEdit]{[TextEdit]{}},
+    home: String?{None},
     file: Int{-1},
     files: [Int]{[Int]{}},
 }
@@ -26,13 +28,14 @@ JetCLIFixFile: struct {
 }
 
 // `texts`: by row of the file table, a file's text with the applied fixes,
-// None where they change nothing. `refused`: the fixes none of whose edits
-// apply, and why.
+// None where they change nothing. `fixes`: the index of each applied fix.
+// `refused`: the fixes none of whose edits apply, and why.
 JetCLIFixApply: struct {
     source: String,
     applied: Int,
     deferred: Int,
     texts: [String?]{[String?]{}},
+    fixes: [Int]{[Int]{}},
     refused: [JetCLIFixRefusal]{[JetCLIFixRefusal]{}},
 }
 
@@ -51,16 +54,19 @@ JetCLIFixEditRef: struct {
 
 // A fix `jet fix` did not apply (FixCommands.jet), and why: one that needs
 // review (`--all` applies it), or one whose edited file no longer checks.
+// `file` is the row of the file table its edit changes, -1 the fixed file.
 // The fix log records each (jet_cli_fix_log).
 JetCLIFixSkip: struct {
     title: String,
     edit: TextEdit,
     reason: String,
+    file: Int{-1},
 }
 
 // `jet fix` applies a diagnostic's primary edit with the edits beside it;
 // its alternative edits are the other choices an editor offers as code
-// actions. A fix sema left pending is no fix.
+// actions. A fix sema left pending is no fix. A fix's home is its
+// diagnostic's file.
 jet_cli_fixes_from_diagnostics: fn(diagnostics: ^^[Diagnostic]) -> [JetCLIFix] Never! {
     fixes := [JetCLIFix]{}
     loop diagnostic in diagnostics.move() {
@@ -68,9 +74,15 @@ jet_cli_fixes_from_diagnostics: fn(diagnostics: ^^[Diagnostic]) -> [JetCLIFix] N
         safety: diagnostic.safety ?? next
         if diagnostic.fix_calls != None -> next
         edit := diagnostic.edit.move() ?? next
-        fixes.push(JetCLIFix{title: diagnostic.fix.move(), edit: edit.move(), applicability: applicability, safety: safety, edits: diagnostic.fix_edits.move()})
+        fixes.push(JetCLIFix{title: diagnostic.fix.move(), edit: edit.move(), applicability: applicability, safety: safety, edits: diagnostic.fix_edits.move(), home: jet_cli_fix_origin_path(diagnostic.origin.move())})
     }
     fixes
+}
+
+// The path of `origin`, None without one.
+jet_cli_fix_origin_path: fn(origin: ^^DiagnosticOrigin?) -> String? Never! {
+    found: origin.move() ?? return None
+    Val(found.path.move())
 }
 
 jet_cli_safe_fixes: fn(fixes: [JetCLIFix]) -> [JetCLIFix] Never! {
@@ -130,6 +142,7 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
     }
     kept := [JetCLIFixEditRef]{}
     applied := 0
+    applied_fixes := [Int]{}
     deferred := 0
     refused := [JetCLIFixRefusal]{}
     loop index in order {
@@ -155,6 +168,7 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
         if fresh.len() == 0 -> next
         kept.extend(fresh.move())
         applied += 1
+        applied_fixes.push(index)
     }
     texts := [String?]{}
     loop row in 0..<files.len() {
@@ -164,7 +178,7 @@ jet_cli_fix_apply_non_overlapping: fn(source: String, files: [JetCLIFixFile], fi
             texts.push(jet_cli_fix_edited_file(original, fixes, kept, row))
         } else { texts.push(None) }
     }
-    JetCLIFixApply{source: jet_cli_fix_edited(source, fixes, kept, -1), applied: applied, deferred: deferred, texts: texts.move(), refused: refused.move()}
+    JetCLIFixApply{source: jet_cli_fix_edited(source, fixes, kept, -1), applied: applied, deferred: deferred, texts: texts.move(), fixes: applied_fixes.move(), refused: refused.move()}
 }
 
 // Why the edits of fix `index` can't apply at all: two of them overlap, or

@@ -1,0 +1,16 @@
+# `jet fix <folder>` fixes every source file of the folder's package, not
+# its entry alone: one check collects the fixes of each file, each file's
+# fixes must leave the package checking no worse, and the report names each
+# file it fixes, then the total. A second run changes nothing.
+fixture: FixDirFixesEveryFileOfThePackage.fixture
+env: NO_COLOR=1
+step: jet fix pkg
+exit: 0
+stderr: ~ "pkg/run.jet: applied 1 fix\n" # the entry's binding
+stderr: ~ "pkg/helper.jet: applied 1 fix\n" # the other file's binding
+stderr: ~ "pkg: applied 2 fixes in 2 files" # the total
+file: pkg/run.jet = fix_dir_fixes_every_file_of_the_package.run.fixed
+file: pkg/helper.jet = fix_dir_fixes_every_file_of_the_package.helper.fixed
+step: jet fix pkg
+exit: 0
+stderr: ~ "pkg: no changes made" # nothing is left in either file
