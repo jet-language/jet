@@ -1500,6 +1500,8 @@ RustConstKind: enum {
     Static,
 }
 
+// The kind of one `outputs:` entry, for the compiler's checked outputs and
+// Jetpack's package facts alike.
 OutputKind: enum {
     Library,
     Executable,
@@ -1510,6 +1512,21 @@ OutputKind: enum {
     Bundle,
     System,
     Fleet,
+
+    // The variant name, as `package.jet` spells it after the dot.
+    debug_name: fn(self) -> String Never! {
+        if self == {
+            .Library -> "Library"
+            .Executable -> "Executable"
+            .Service -> "Service"
+            .Check -> "Check"
+            .Environment -> "Environment"
+            .Image -> "Image"
+            .Bundle -> "Bundle"
+            .System -> "System"
+            .Fleet -> "Fleet"
+        }
+    }
 }
 
 OutputCallableAuthority: enum {

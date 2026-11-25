@@ -458,26 +458,19 @@ cli_import_toml_string: fn(raw: String, key: String) -> String? Never! {
     None
 }
 
-// The quoting state while scanning a TOML value for a comment.
-ImportTOMLQuote: enum {
-    Unquoted,
-    Double,
-    Single,
-}
-
-// The value text before an unquoted `#` comment, unquoted.
+// The value text before an unquoted `#` comment, unquoted. `quote` is the
+// open quote's byte, `"` or `'`, or 0 outside quotes.
 cli_import_toml_value_text: fn(value: String) -> String Never! {
     bytes: value.bytes()
-    quote := ImportTOMLQuote.Unquoted
+    quote := 0
     escaped := false
     loop index in 0..<bytes.len() {
         code: Int{bytes[index]}
         if {
-            quote == ImportTOMLQuote.Double && code == 34 && !escaped -> quote = ImportTOMLQuote.Unquoted
-            quote == ImportTOMLQuote.Single && code == 39 -> quote = ImportTOMLQuote.Unquoted
-            quote == ImportTOMLQuote.Unquoted && code == 34 -> quote = ImportTOMLQuote.Double
-            quote == ImportTOMLQuote.Unquoted && code == 39 -> quote = ImportTOMLQuote.Single
-            quote == ImportTOMLQuote.Unquoted && code == 35 -> return cli_import_unquote_toml_value(String.from_bytes(bytes.slice(0, index)) ?? "")
+            quote == 34 && code == 34 && !escaped -> quote = 0
+            quote == 39 && code == 39 -> quote = 0
+            quote == 0 && (code == 34 || code == 39) -> quote = code
+            quote == 0 && code == 35 -> return cli_import_unquote_toml_value(String.from_bytes(bytes.slice(0, index)) ?? "")
             else -> {}
         }
         escaped = code == 92 && !escaped

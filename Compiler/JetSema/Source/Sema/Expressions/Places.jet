@@ -21,6 +21,7 @@ use {
         TFieldRef,
         TGenericParam,
         TIndexKind,
+        TERMINAL_FACTS,
         TagMarker,
         TextEdit,
         Type,
@@ -1127,13 +1128,10 @@ sema_expression_refuse_computed_receiver: fn(call: TExpr, check: ^SemaBodyCheck)
     }
 }
 
-// The stable keys of the terminal fact report; mirrors TERMINAL_FACTS in
-// Compiler/JetFoundation/Data/Syntax/CoreSurface.jet.
-SEMA_TERMINAL_FACTS: [String]{"terminal", "resize", "raw"}
-
 sema_expression_terminal_fact: fn(member: String, member_span: Span, expected: Type?, check: ^SemaBodyCheck) -> TExpr? {
-    if !SEMA_TERMINAL_FACTS.contains(member) {
-        fix: if sema_suggest_field(member, SEMA_TERMINAL_FACTS) == .Val(fact) -> "did you mean `TerminalFact.{fact}`?" else -> "write `TerminalFact.terminal`, `TerminalFact.resize` or `TerminalFact.raw`"
+    if !TERMINAL_FACTS.contains(member) {
+        keys: loop fact in TERMINAL_FACTS -> "`TerminalFact.{fact}`"
+        fix: if sema_suggest_field(member, TERMINAL_FACTS) == .Val(fact) -> "did you mean `TerminalFact.{fact}`?" else -> "write one of {keys.join(", ")}"
         check.diagnostics.push(sema_error("E0302", member_span, "`TerminalFact` has no key `{member}`", "stable terminal fact keys use the checked TerminalFact namespace", fix))
         return None
     }

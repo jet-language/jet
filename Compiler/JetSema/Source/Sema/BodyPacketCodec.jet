@@ -1404,8 +1404,8 @@ body_codec_put_diagnosticfixsafety: fn(out: ^BodyCodecOut, value: DiagnosticFixS
         .Formatting -> { body_codec_put_tag(out, 0) }
         .BehaviorPreserving -> { body_codec_put_tag(out, 1) }
         .APIChanging -> { body_codec_put_tag(out, 2) }
-        .TargetChanging -> { body_codec_put_tag(out, 3) }
-        .NeedsReview -> body_codec_put_tag(out, 4)
+        .NeedsReview -> { body_codec_put_tag(out, 3) }
+        .TargetChanging -> body_codec_put_tag(out, 4)
     }
 }
 
@@ -1414,8 +1414,8 @@ body_codec_get_diagnosticfixsafety: fn(bytes: [U8], input: ^BodyCodecIn) -> Diag
     if position == {
         1 -> DiagnosticFixSafety.BehaviorPreserving
         2 -> DiagnosticFixSafety.APIChanging
-        3 -> DiagnosticFixSafety.TargetChanging
-        4 -> DiagnosticFixSafety.NeedsReview
+        3 -> DiagnosticFixSafety.NeedsReview
+        4 -> DiagnosticFixSafety.TargetChanging
         else -> DiagnosticFixSafety.Formatting
     }
 }
@@ -1433,8 +1433,8 @@ body_codec_get_diagnosticnofixreason: fn(bytes: [U8], input: ^BodyCodecIn) -> Di
 
 body_codec_put_diagnosticnofixreasonkind: fn(out: ^BodyCodecOut, value: DiagnosticNoFixReasonKind) Never! {
     if value == {
-        .Behavior -> { body_codec_put_tag(out, 0) }
-        .Design -> { body_codec_put_tag(out, 1) }
+        .Design -> { body_codec_put_tag(out, 0) }
+        .Behavior -> { body_codec_put_tag(out, 1) }
         .Ambiguous -> body_codec_put_tag(out, 2)
     }
 }
@@ -1442,9 +1442,9 @@ body_codec_put_diagnosticnofixreasonkind: fn(out: ^BodyCodecOut, value: Diagnost
 body_codec_get_diagnosticnofixreasonkind: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticNoFixReasonKind Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
-        1 -> DiagnosticNoFixReasonKind.Design
+        1 -> DiagnosticNoFixReasonKind.Behavior
         2 -> DiagnosticNoFixReasonKind.Ambiguous
-        else -> DiagnosticNoFixReasonKind.Behavior
+        else -> DiagnosticNoFixReasonKind.Design
     }
 }
 

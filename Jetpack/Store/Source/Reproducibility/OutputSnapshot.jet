@@ -67,22 +67,8 @@ FirstDifference: struct {
     right: String,
 }
 
-ObservedNodeKind: enum {
-    Directory,
-    Symlink,
-    File,
-
-    label: fn(self) -> String Never! {
-        if self == {
-            .Directory -> "directory"
-            .Symlink -> "symlink"
-            .File -> "file"
-        }
-    }
-}
-
 NodeObservation: struct {
-    kind: ObservedNodeKind,
+    kind: SealRootKind,
     mode: Int,
     digest: String?,
     target: String?,
@@ -94,7 +80,7 @@ NodeObservation: struct {
         digest: self.digest ?? "<none>"
         target: self.target ?? "<none>"
         hardlink: self.hardlink ?? "<none>"
-        "kind={self.kind.label()};mode={self.mode};digest={digest};target={target};hardlink={hardlink};xattrs={self.xattrs.join(",")}"
+        "kind={self.kind.as_str()};mode={self.mode};digest={digest};target={target};hardlink={hardlink};xattrs={self.xattrs.join(",")}"
     }
 }
 

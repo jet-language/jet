@@ -1,5 +1,5 @@
-// Producer statuses, callable policy display, identifier classes and the
-// typed compiler-fact reads.
+// Callable policy display, identifier classes and the typed compiler-fact
+// reads.
 use jet_foundation.[
     CallablePolicy,
     Dimension,
@@ -8,7 +8,6 @@ use jet_foundation.[
     FactRead,
     IdentifierClass,
     Measure,
-    MetadataProducerStatus,
     Name,
     UnitScaleProvenance,
     ViewProvenance,
@@ -21,18 +20,6 @@ use jet_foundation.[
     fact_read_reflection_kind,
     fact_read_source_member,
 ]
-
-#Test("metadata producer statuses remain three distinct obligations") {
-    statuses: [MetadataProducerStatus]{MetadataProducerStatus.ContractOnly, MetadataProducerStatus.NotImplemented, MetadataProducerStatus.ExistingCallableProducerNeedsExtension}
-    loop index in 0..<statuses.len() {
-        actual: if statuses[index] == {
-            .ContractOnly -> 0
-            .NotImplemented -> 1
-            .ExistingCallableProducerNeedsExtension -> 2
-        }
-        assert(actual == index)
-    }
-}
 
 #Test("callable policy display preserves already textual arguments") {
     assert(callable_policy_display(CallablePolicy{name: "retry", arguments: [String]{}}) == "retry()")

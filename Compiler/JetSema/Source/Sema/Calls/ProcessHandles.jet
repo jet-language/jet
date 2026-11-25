@@ -12,6 +12,7 @@ use jet_foundation.[
     InternalTag,
     ParamZone,
     Span,
+    TERMINAL_FACTS,
     TFailureCarrier,
     TagMarker,
     Type,
@@ -506,7 +507,7 @@ sema_call_try_process_handle_method: fn(receiver: Expr, receiver_value: TExpr, m
     // that fact; any other string key stays an open preview fact.
     if method == "has" && args.len() == 1 && receiver_value.ty == .Tagged(marker, _) && marker == (TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}) {
         if args[0].expr == .Str(parts, key_span, _) && parts.len() == 1 && parts[0] == .Lit(key) {
-            if sema_suggest_field(key, SEMA_TERMINAL_FACTS) == .Val(fact) {
+            if sema_suggest_field(key, TERMINAL_FACTS) == .Val(fact) {
                 check.diagnostics.push(sema_error("E0302", key_span, "terminal fact key `{key}` looks like `{fact}`", "preview string keys stay open, but close spellings of stable facts are probably typos", "write `TerminalFact.{fact}`"))
                 sema_process_infer_args(args, check)
                 return SemaMethodSpecialCheck{handled: true, value: None}

@@ -35,25 +35,11 @@ PACKAGE_PROFILE_MAX_NODES: 100000
 
 PACKAGE_PROFILE_LOCK_PREFIX: "package-profile-"
 
-PackageOutputNodeKind: enum {
-    File,
-    Directory,
-    Symlink,
-
-    as_str: fn(self) -> String Never! {
-        if self == {
-            .File -> "file"
-            .Directory -> "directory"
-            .Symlink -> "symlink"
-        }
-    }
-}
-
 // One filesystem node of a realized package output, relative to its root.
 PackageOutputNode: struct {
     package: String,
     path: String,
-    kind: PackageOutputNodeKind,
+    kind: SealRootKind,
     // `sha256-…` of a file's bytes or a symlink's target; empty for a directory.
     digest: String,
     link_target: String?,
@@ -277,10 +263,10 @@ cli_choose_output_nodes: fn(plan: PackageProfilePlan, groups: [String:[PackageOu
         has_symlink := false
         loop node in nodes {
             if !kinds.contains(node.kind.as_str()) -> kinds.push(node.kind.as_str())
-            if node.kind != PackageOutputNodeKind.Directory && !digests.contains(node.digest) {
+            if node.kind != SealRootKind.Directory && !digests.contains(node.digest) {
                 digests.push(node.digest)
             }
-            if node.kind == PackageOutputNodeKind.Symlink -> has_symlink = true
+            if node.kind == SealRootKind.Symlink -> has_symlink = true
         }
         if kinds.len() != 1 {
             return Err(CLIError.ProviderFacts("collision at `{path}` has a file/directory or symlink-target type mismatch; contenders: {cli_contender_text(nodes)}"))
@@ -471,10 +457,10 @@ cli_collect_output_nodes_inner: fn(lease: ^CacheLease, prefix: String, package: 
             info.is_symlink -> {
                 target: lease.read_output_link(path)
                 digest: "sha256-{pkg_sha256_hex("symlink:{target}".bytes())}"
-                nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.Symlink, digest: digest, link_target: Val(target)})
+                nodes.push(PackageOutputNode{package: package, path: path, kind: SealRootKind.Symlink, digest: digest, link_target: Val(target)})
             }
             info.is_dir -> {
-                nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.Directory, digest: "", link_target: None})
+                nodes.push(PackageOutputNode{package: package, path: path, kind: SealRootKind.Directory, digest: "", link_target: None})
                 cli_collect_output_nodes_inner(lease, path, package, nodes)
             }
             info.is_file -> {
@@ -485,7 +471,7 @@ cli_collect_output_nodes_inner: fn(lease: ^CacheLease, prefix: String, package: 
                     if chunk.len() == 0 -> break
                     hasher.update(chunk)
                 }
-                nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.File, digest: "sha256-{hasher.finalize_hex()}", link_target: None})
+                nodes.push(PackageOutputNode{package: package, path: path, kind: SealRootKind.File, digest: "sha256-{hasher.finalize_hex()}", link_target: None})
             }
             else -> {
                 return Err(CLIError.ProviderFacts("profile output contains unsupported node `{path}`"))
