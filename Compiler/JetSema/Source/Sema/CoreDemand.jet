@@ -639,7 +639,7 @@ sema_check_demand_module_lent: fn(environment: ^SemaScopeEnvironment, program: S
             }
             started: if timed -> sema_core_bound_clock(trace_sink) else -> 0
             count: result.functions.len()
-            sema_check_registration_top_level(module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready, ready_deltas, host_hooks, comptime_functions, comptime_rows, result, prelude_demands, scopes_changed, keep_going, pending_obligations, false, trace_sink, item_count, false, functions_checked)
+            sema_check_registration_top_level(program.registration_graph, module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready, ready_deltas, host_hooks, comptime_functions, comptime_rows, result, prelude_demands, scopes_changed, keep_going, pending_obligations, false, trace_sink, item_count, false, functions_checked)
             if timed -> sema_core_bound_charge(trace_sink, started, count, result)
         }
     }

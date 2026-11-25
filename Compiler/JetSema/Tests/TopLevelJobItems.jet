@@ -1,0 +1,102 @@
+// A top-level job names its function by item index. When that item is not a
+// function, the job entry reads it once and leaves the result incomplete with
+// a reason; it never stops the compiler. Both job entries are covered: the
+// module check (sema_check_registration_top_level) and the debugger's re-check
+// (sema_script_probe_recheck).
+use {
+    jet_foundation.[InternerDelta, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
+    jet_parser.[parse_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_sema.[
+        SemaBodyJob,
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaForeignProviderInput,
+        SemaParallelBody,
+        SemaPreludeConversionDemand,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationGraph,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaScriptProbe,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_check_registration_module_start,
+        sema_check_registration_top_level,
+        sema_collect_comptime_declarations,
+        sema_comptime_checked_function_rows,
+        sema_function_memory_plan_new,
+        sema_registration_prepare_graph,
+        sema_script_probe_open,
+        sema_script_probe_recheck,
+    ]
+}
+
+TOP_LEVEL_JOB_SOURCE: "Point: struct {{ x: Int }}\nanswer: fn() -> Int {{ 42 }}\n"
+
+// A probe of TOP_LEVEL_JOB_SOURCE's module after its declaration pass.
+top_level_job_probe: fn() -> SemaScriptProbe {
+    source: TOP_LEVEL_JOB_SOURCE
+    parsed := parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("fixture did not parse: {parsed.diagnostics:Debug}")
+    table := module_table()
+    main_id: module_intern(table, "user/main")
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
+    effects_id: effects.module_identity
+    file: "user/main.jet"
+    facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: file, source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "user", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: file, source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "user", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}")
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed {err}")
+    sema_script_probe_open(stage) ?? panic("the declaration pass kept no registration graph")
+}
+
+// The index of the first top-level item of `graph`'s module `module_index`
+// that is a function when `function`, else the first that is not.
+top_level_job_item: fn(graph: SemaRegistrationGraph, module_index: Int, function: Bool) -> Int {
+    loop index in 0..<graph.modules[module_index].program.items.len() {
+        if graph.modules[module_index].program.items[index] == .Func(_) {
+            if function -> return index
+        } else if !function {
+            return index
+        }
+    }
+    panic("the fixture's module has no such top-level item")
+}
+
+#Test("a module check's top-level job whose item is not a function leaves the module incomplete") {
+    probe := top_level_job_probe()
+    module_index: probe.module_index
+    other: top_level_job_item(probe.program.registration_graph, module_index, false)
+    result := sema_check_registration_module_start(probe.environment, probe.program, module_index, [SemaComptimeItemValue]{}, probe.scopes)
+    reasons_before: result.incomplete_reasons.len()
+    return_view_rows := [U32:Int]{}
+    ready := [SemaParallelBody]{}
+    ready_deltas := [InternerDelta?]{}
+    prelude_demands := [Int:[SemaPreludeConversionDemand]]{}
+    scopes_changed := false
+    functions_checked := 0
+    sema_check_registration_top_level(probe.program.registration_graph, module_index, other, sema_function_memory_plan_new(), probe.environment, probe.program, probe.scopes, return_view_rows, ready, ready_deltas, None, [SemaComptimeFunctionResult]{}, sema_comptime_checked_function_rows([SemaComptimeFunctionResult]{}), result, prelude_demands, scopes_changed, false, false, false, None, 1, false, functions_checked)
+    assert(!result.complete, "a top-level job on a struct left the module complete")
+    assert_eq(result.incomplete_reasons.len(), reasons_before + 1)
+    assert_eq(result.incomplete_reasons[reasons_before], "top-level item {other}: it is not a function")
+    assert_eq(ready.len(), 0)
+    assert_eq(functions_checked, 0)
+}
+
+#Test("the debugger's re-check of a top-level job whose item is not a function is incomplete") {
+    probe := top_level_job_probe()
+    module_index: probe.module_index
+    other: top_level_job_item(probe.program.registration_graph, module_index, false)
+    missed := sema_script_probe_recheck(probe, sema_function_memory_plan_new(), SemaBodyJob.TopLevel{item_index: other})
+    assert(!missed.complete, "a re-check of a struct's job came back complete")
+    assert(missed.value == None, "a re-check of a struct's job gave a body")
+    assert(missed.incomplete_reasons == [String]{"top-level item {other}: it is not a function"}, "{missed.incomplete_reasons:Debug}")
+    function: top_level_job_item(probe.program.registration_graph, module_index, true)
+    checked := sema_script_probe_recheck(probe, sema_function_memory_plan_new(), SemaBodyJob.TopLevel{item_index: function})
+    assert(checked.complete, "the re-check of `answer` is incomplete: {checked.incomplete_reasons:Debug}")
+    assert(checked.value != None, "the re-check of `answer` gave no body")
+}

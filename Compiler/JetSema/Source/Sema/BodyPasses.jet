@@ -131,12 +131,13 @@ sema_check_body_demand_replay: fn(program: SemaProgramTables, body: SemaParallel
     sema_demand_capture_replay(graph, body.codec_demand, body.derive_demand)
 }
 
-sema_check_module_function: fn(ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], count_work: Bool, functions_checked: ^Int) -> SemaFunctionResult {
+// `declaration`: the function `job` checks (sema_function_check_registered).
+sema_check_module_function: fn(ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], count_work: Bool, functions_checked: ^Int) -> SemaFunctionResult {
     if sema_check_take_body(ready, ready_deltas, job_index, scopes.type_delta) == .Val(body) {
         if !scopes_changed && !body.wanted_hooks {
             // Preserve the original method side effect.
             if function_kind != TFuncKind.TopLevel {
-                sema_function_check_registered_name(job, module_index, memory_plan, memory_position, environment, program)
+                sema_function_check_registered_name(declaration, memory_plan, memory_position, environment)
             }
             sema_check_body_demand_replay(program, body)
             return sema_check_drain_body(body, diagnostics, call_facts, comptime_requests, name_references)
@@ -144,7 +145,7 @@ sema_check_module_function: fn(ready: ^[SemaParallelBody], ready_deltas: ^[Inter
         scopes.type_delta = [InternerDelta]{}
     }
     if count_work -> functions_checked += 1
-    sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    sema_function_check_registered(job, declaration, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
 }
 
 // A compiler thread is admitted for at least this many bytes of function
@@ -464,17 +465,18 @@ sema_check_walk_prelude_demands: fn(checked: ^^SemaFunctionResult, module_identi
     walked
 }
 
-sema_check_prepare_method_body: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ordinal: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, wanted: Shared<SemaHostHookWanted>) -> SemaParallelBody {
-    memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
+// `declaration`: the method row's declaration, which job names.
+sema_check_prepare_method_body: fn(job: SemaBodyJob, declaration: Func, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ordinal: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, wanted: Shared<SemaHostHookWanted>) -> SemaParallelBody {
+    memory_position: sema_check_registered_memory_position(job, declaration, module_index, memory_plan, environment, program)
     input := sema_check_method_input(job, module_index, memory_plan, memory_position, environment, program)
     diagnostics := input.diagnostics.move()
     input.diagnostics = [Diagnostic]{}
     call_facts := [SemaCallSiteFact]{}
     comptime_requests := [SemaComptimeRequest]{}
     name_references := [SemaNameReferenceFact]{}
-    owner_id: sema_check_registered_function_id(job, module_index, environment, program)
+    owner_id: sema_check_registered_function_id(job, declaration, module_index, environment, program)
     raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
-    checked := sema_function_check_registered_on_thread(job, module_index, memory_plan, memory_position, owner_id, input.function_kind, raw_protocol_return, input.generic_params, environment, program, scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
+    checked := sema_function_check_registered_on_thread(job, declaration, module_index, memory_plan, memory_position, owner_id, input.function_kind, raw_protocol_return, input.generic_params, environment, program, scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
     checked = sema_check_walk_prelude_demands(checked, sema_check_registered_module_text(program, sema_check_registered_module_identity(environment, program, module_index)))
     SemaParallelBody{job_index: ordinal, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: Val(input.move()), wanted_hooks: sema_host_hook_was_wanted(wanted)}
 }
@@ -771,27 +773,13 @@ sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProg
     packet_at: part.bodies.len()
     part.scopes.type_delta = [InternerDelta]{}
     if claim.job == {
-        .TopLevel(item_index) -> {
-            // The function's span is read through a read parameter:
-            // a pattern over the payload binding copied the function.
-            if sema_registered_top_level_func_span(graph, module_index, item_index) == .Val(func_span) {
-                memory_position: sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", sema_registered_job_function_name(graph, claim.job, module_index), func_span)
-                diagnostics := [Diagnostic]{}
-                call_facts := [SemaCallSiteFact]{}
-                comptime_requests := [SemaComptimeRequest]{}
-                name_references := [SemaNameReferenceFact]{}
-                checked := sema_function_check_registered_on_thread(claim.job, module_index, memory_plan, memory_position, sema_check_registered_function_id(claim.job, module_index, environment, program), TFuncKind.TopLevel, false, environment.generic_params, environment, program, part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
-                checked = sema_check_walk_prelude_demands(checked, module_text(graph.module_table, graph.modules[module_index].module_identity))
-                body: SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), memory_position: memory_position, memory_known: true}
-                part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
-            }
-        }
-        .NominalMethod(ordinal, _, _) -> {
-            body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+        .TopLevel(item_index) -> sema_check_body_claimed_top_level(program.registration_graph, item_index, environment, program, memory_plan, part, claim, module_index, wanted)
+        .NominalMethod(ordinal, owner, row) -> {
+            body: sema_check_prepare_method_body(claim.job, graph.modules[module_index].nominals[owner].methods[row].declaration, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
             part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
         }
-        .ImplMethod(ordinal, _, _) -> {
-            body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+        .ImplMethod(ordinal, owner, row) -> {
+            body: sema_check_prepare_method_body(claim.job, graph.modules[module_index].impls[owner].methods[row].declaration, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
             part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
         }
     }
@@ -803,6 +791,25 @@ sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProg
         }
     }
     1
+}
+
+// A claimed top-level job (sema_check_body_claimed), its function read once
+// through `graph`, `program`'s registration graph as a read parameter: a
+// pattern over the caller's payload binding copied the function. An item that
+// is not a function gets no packet; the module check reports it
+// (sema_check_registration_top_level).
+sema_check_body_claimed_top_level: fn(graph: SemaRegistrationGraph, item_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: ^SemaBodyPart, claim: SemaBodyClaim, module_index: Int, wanted: Shared<SemaHostHookWanted>) {
+    if graph.modules[module_index].program.items[item_index] == .Func(declaration) {
+        memory_position: sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", declaration.name, declaration.span)
+        diagnostics := [Diagnostic]{}
+        call_facts := [SemaCallSiteFact]{}
+        comptime_requests := [SemaComptimeRequest]{}
+        name_references := [SemaNameReferenceFact]{}
+        checked := sema_function_check_registered_on_thread(claim.job, declaration, module_index, memory_plan, memory_position, sema_check_registered_function_id(claim.job, declaration, module_index, environment, program), TFuncKind.TopLevel, false, environment.generic_params, environment, program, part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
+        checked = sema_check_walk_prelude_demands(checked, module_text(graph.module_table, graph.modules[module_index].module_identity))
+        body: SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), memory_position: memory_position, memory_known: true}
+        part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
+    }
 }
 
 // Claims the next rank of `queue` (one atomic add) and reads its job from
@@ -835,12 +842,6 @@ sema_check_body_progress: fn(trace_sink: CompilerTraceSink?, rank: Int, count: I
     }
 }
 
-// The span of the top-level function item `item_index`, when it is one.
-sema_registered_top_level_func_span: fn(graph: SemaRegistrationGraph, module_index: Int, item_index: Int) -> Span? Never! {
-    if graph.modules[module_index].program.items[item_index] == .Func(func) -> return Val(func.span)
-    None
-}
-
 // Only compiler-generated nominal methods relocate their diagnostics to the
 // author-facing nominal span. Implementation methods retain their own spans.
 sema_check_generated_method_author_span: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span? {
@@ -869,27 +870,33 @@ sema_check_generated_codec_method: fn(job: SemaBodyJob, module_index: Int, progr
 }
 
 sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
-    ordinal: if job == {
-        .NominalMethod(position, _, _) -> position
-        .ImplMethod(position, _, _) -> position
+    graph: program.registration_graph
+    if job == {
+        .NominalMethod(ordinal, owner, row) -> sema_check_apply_method_declared(module_index, memory_plan, job, graph.modules[module_index].nominals[owner].methods[row].declaration, ordinal, ready, ready_deltas, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+        .ImplMethod(ordinal, owner, row) -> sema_check_apply_method_declared(module_index, memory_plan, job, graph.modules[module_index].impls[owner].methods[row].declaration, ordinal, ready, ready_deltas, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
         .TopLevel(_) -> panic("a top-level job entered method application")
     }
+}
+
+// Method job `job` at body ordinal `ordinal`; `declaration` is its method
+// row's declaration (sema_check_apply_method_job).
+sema_check_apply_method_declared: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, declaration: Func, ordinal: Int, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     author_span: sema_check_generated_method_author_span(job, module_index, environment, program)
     if author_span == .Val(span) {
         generated_diagnostics := [Diagnostic]{}
-        complete := sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+        complete := sema_check_registration_method(job, declaration, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
         sema_author_facing_diagnostics(span, generated_diagnostics, diagnostics)
         return complete
     }
     if sema_check_generated_codec_method(job, module_index, program) {
         generated_diagnostics := [Diagnostic]{}
-        complete := sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+        complete := sema_check_registration_method(job, declaration, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
         loop diagnostic in generated_diagnostics {
             if diagnostic.severity == DIAGNOSTIC_ERROR -> diagnostics.push(diagnostic)
         }
         return complete
     }
-    sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+    sema_check_registration_method(job, declaration, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
 }
 
 // The module scope the body loop of module `module_index` checks against:
