@@ -2135,9 +2135,13 @@ sema_call_written_arg_for_slot: fn(slots: [Int], slot: Int) -> Int? Never! {
     None
 }
 
-// A direct call hears the `check` rules of its callee's markers before its
-// arguments bind (Calls/CheckRules.jet).
+// A direct call is recorded when its callee carries `#Recorded`
+// (Calls/Recorded.jet), and hears the `check` rules of its callee's markers
+// before its arguments bind (Calls/CheckRules.jet).
 sema_call_check_direct_target_owned: fn(check: ^SemaBodyCheck, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?) -> SemaCallChecked? {
+    if sema_recorded_here(check, target.symbol.id) {
+        sema_recorded_note(check, target.symbol.id, call.name, call.name_span, call.args, target.type_args, None)
+    }
     ^rules: [SemaCallRule]{}
     graph: check.program.registration_graph
     if sema_call_rules_heard_here(check.scopes) {
@@ -2146,7 +2150,7 @@ sema_call_check_direct_target_owned: fn(check: ^SemaBodyCheck, target: SemaCallD
     if rules.len() == 0 {
         return sema_call_direct_checked_from_target(check, target, call, defaults, expected)
     }
-    hearing: sema_call_rules_hear(rules, Val(target.symbol.id), call.name, call.name_span, call.args, None, None, None, call.name_span, None, "", check.scopes.current, check)
+    hearing: sema_call_rules_hear(rules, Val(target.symbol.id), call.name, call.name_span, call.args, target.type_args, None, None, None, call.name_span, None, "", check.scopes.current, check)
     if hearing.rejected -> return None
     if !hearing.staged {
         return sema_call_direct_checked_from_target(check, target, call, defaults, expected)

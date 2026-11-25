@@ -21,6 +21,7 @@ use jet_foundation.[
     MARKER_ON,
     MARKER_OVERFLOW,
     MARKER_REACTIVE,
+    MARKER_RECORDED,
     MARKER_RUNTIME,
     MARKER_STATE,
     MARKER_TARGET,
@@ -360,9 +361,10 @@ sema_function_header_default_idents: fn(value: Expr, found: ^[Expr]) {
 // that apply them (CallablePolicies.jet), and the body checker, which reads
 // `#Overflow(mode)` as the function's arithmetic policy
 // (sema_function_arithmetic_policy) and `#Runtime(mode)` as its run-time
-// policy (sema_function_runtime_policy).
+// policy (sema_function_runtime_policy). `#Recorded` is read at each call
+// of its function, which its caller's check records (Calls/Recorded.jet).
 sema_function_header_marker_projected: fn(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy" || name == MARKER_MAX_DEPTH || name == MARKER_OVERFLOW || name == MARKER_RUNTIME
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy" || name == MARKER_MAX_DEPTH || name == MARKER_OVERFLOW || name == MARKER_RUNTIME || name == MARKER_RECORDED
 }
 
 // The first `#Overflow(mode)` of a function or method opens its lexical

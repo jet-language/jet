@@ -4890,7 +4890,9 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if rules.len() == 0 {
         return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, check)
     }
-    hearing: sema_call_rules_hear(rules, None, method, method_span, args, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, check), receiver_value.span, None, "", check.scopes.current, check)
+    ^written_types: [Type]{}
+    loop ty in type_args -> written_types.push(sema_type_resolve_declared(graph, ty, check.environment.module_identity))
+    hearing: sema_call_rules_hear(rules, None, method, method_span, args, written_types, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, check), receiver_value.span, None, "", check.scopes.current, check)
     if hearing.rejected -> return None
     if !hearing.staged {
         return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, check)

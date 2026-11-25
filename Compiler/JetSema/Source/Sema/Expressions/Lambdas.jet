@@ -3125,6 +3125,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, o
     loop call_index in generic_call_start..<lambda_context.generic_calls.len() {
         check.context.generic_calls.push(lambda_context.generic_calls[call_index])
     }
+    // A call of a `#Recorded` callee in the body is the enclosing function's
+    // (Calls/Recorded.jet); the body's context began with none.
+    check.context.recorded_calls.extend(lambda_context.recorded_calls.move())
     // A state write in the body belongs to the function that writes the
     // lambda, as its effects do: the body runs on the function's behalf, so
     // a pure function may not hide a write in a lambda (E3401).

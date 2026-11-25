@@ -119,6 +119,15 @@ Post: struct {
     }
 }
 
+// Each call of a `#Recorded` function or method is listed in its caller's
+// FunctionInfo as the CompilerCall a `check` rule hears (`recorded`), and
+// in `returns` too when a return path of the caller returns its value.
+Recorded: struct {
+    impl Marker {
+        sites: [.Function, .Method],
+    }
+}
+
 // These rows stay separate. Kernel requests a checked
 // worker-boundary proof; Inline(Always) is a guarantee, not a hint.
 // `#Kernel(.parallel) name: fn …`: the mode is a closed argument, so another

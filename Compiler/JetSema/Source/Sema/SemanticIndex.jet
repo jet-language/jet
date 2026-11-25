@@ -590,8 +590,8 @@ sema_compiler_index_call: fn(call: SemaCallSiteFact, registration: SemaRegistrat
 
 // A CompilerCall a build watches or the semantic index lists. Its call fact
 // keeps no argument facts, so its name is the callee's own over the call's
-// span and it holds no arguments or receiver; a call a marker's `check` rule
-// hears carries all three (sema_rule_call_value).
+// span and it holds no arguments, receiver or type arguments; a call a
+// marker's `check` rule hears carries all of them (sema_rule_call_value).
 sema_compiler_call_heard: fn(caller: String, callee: String, module_name: String, span: Span, file: String) -> TComptimeValue Never! {
     path: sema_compiler_identity_path(callee)
     leaf: if path.cut_last(".") == .Val(parts) -> "{parts.after}" else -> path
@@ -606,6 +606,7 @@ sema_compiler_call_heard: fn(caller: String, callee: String, module_name: String
             TComptimeField{name: "args", value: TComptimeValue.List{values: [TComptimeValue]{}}},
             TComptimeField{name: "receiver", value: sema_comptime_reflection_none(Type.Named{name: "CompilerArg"})},
             TComptimeField{name: "source", value: sema_comptime_reflection_none(Type.String)},
+            TComptimeField{name: "type_args", value: TComptimeValue.List{values: [TComptimeValue]{}}},
         },
     }
 }

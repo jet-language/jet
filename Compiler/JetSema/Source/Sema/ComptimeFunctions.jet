@@ -218,6 +218,9 @@ SemaComptimeFunctionResult: struct {
     // which a body pass that takes this result records again.
     codec_demand: [SemaCodecWant]{[SemaCodecWant]{}},
     derive_demand: [String]{[String]{}},
+    // The calls of `#Recorded` callees the body makes, which a body pass
+    // that takes this result records again (Calls/Recorded.jet).
+    recorded_calls: [SemaRecordedCall]{[SemaRecordedCall]{}},
     // The Prelude error conversion routines the body's propagation sites
     // demand, checked under its module (sema_check_comptime_function); a
     // closure that builds the body builds them too.
@@ -637,6 +640,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
         obligations_pending: settled && !complete && !sema_check_function_failed(diagnostics, 0, true),
         codec_demand: demand.codecs.move(),
         derive_demand: demand.derived.move(),
+        recorded_calls: checked.recorded_calls.move(),
         conversions: conversions,
         type_delta: fn_delta.move(),
     }

@@ -2663,6 +2663,8 @@ sema_comptime_reflection_method_failure_type: fn(method: Func) -> TComptimeValue
 // (MarkerInfo rows) and where it is written. `module_name`, `identity` and
 // `package` are the names its reader shows. For a specialization, `function` is
 // already specialized and `bindings` are the signature's `generic_bindings`.
+// Its `recorded` and `returns` calls come from its body's check, which a rule
+// reads (Calls/Recorded.jet); here they are none.
 sema_comptime_reflection_function_info: fn(registration: SemaRegistrationGraph, types: ^[InternerDelta], caller: Int, function: Func, module_name: String, identity: String, package: String, registered_module: SemaRegistrationModule, markers: [TComptimeValue], bindings: [SemaInferenceBinding]) -> TComptimeValue {
     ^declared: sema_comptime_reflection_callable_signature(registration, types, caller, function, None, registered_module.source_file)
     signature: sema_comptime_reflection_bound_signature(registration, types, caller, declared, bindings)
@@ -2681,6 +2683,8 @@ sema_comptime_reflection_function_info: fn(registration: SemaRegistrationGraph, 
             SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(function, registered_module.source_file)}},
             SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_declared_function_facts(function, function.name)}},
             SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: markers}},
+            SemaComptimeReflectionField{name: "recorded", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+            SemaComptimeReflectionField{name: "returns", value: TComptimeValue.List{values: [TComptimeValue]{}}},
         },
     )
     sema_comptime_reflection_located(info, registered_module.source_segments, sema_comptime_reflection_module_of(registered_module), sema_comptime_reflection_doc_source(registered_module.source, registered_module.source_file))

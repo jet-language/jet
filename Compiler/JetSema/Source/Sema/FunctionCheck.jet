@@ -1034,6 +1034,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     name_references.extend(check.context.name_references.move())
     check.context.name_references = [SemaNameReferenceFact]{}
+    // Each recorded call a return path returns is marked so
+    // (Calls/Recorded.jet).
+    if stand_in == None && check.context.recorded_calls.len() > 0 {
+        sema_recorded_mark_returned(func.body, check.context.recorded_calls)
+    }
     if stand_in == None -> sema_single_use_leave_scope(check) else {
         sema_scope_leave(check.scopes, check.state)
     }

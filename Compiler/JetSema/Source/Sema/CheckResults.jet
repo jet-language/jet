@@ -74,6 +74,10 @@ SemaGraphModuleResult: struct {
     complete: Bool,
     // #3708: the failure rows of this module's checked top-level functions.
     failure_facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}},
+    // The calls of `#Recorded` callees its checked top-level functions make,
+    // which fill their FunctionInfos (Calls/Recorded.jet). They stay past
+    // sema_graph_modules_take_checked_facts: the compiler services read them.
+    recorded_calls: [SemaRecordedCall]{[SemaRecordedCall]{}},
     // Why `complete` is false, one line per cause, so a no-diagnostic
     // incomplete module still names what stopped it.
     incomplete_reasons: [String]{[String]{}},
@@ -310,6 +314,8 @@ SemaFunctionResult: struct {
     failed_locals: SymbolLocalKeys?{None},
     // The answers of the debugger's probes inside the body (EvalProbe.jet).
     eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
+    // The calls of `#Recorded` callees the body makes (Calls/Recorded.jet).
+    recorded_calls: [SemaRecordedCall]{[SemaRecordedCall]{}},
 }
 
 sema_function_compute_facts: fn(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts Never! {
@@ -359,6 +365,7 @@ sema_function_result: fn(value: ^^FnBody?, function_key: String, context: ^^Sema
         incomplete_reasons: if complete -> [String]{} else -> context.incomplete_reasons.move(),
         failed_locals: if complete -> None else -> Val(context.arena.tree.symbols.move()),
         eval_answers: context.eval_walk.answers.move(),
+        recorded_calls: context.recorded_calls.move(),
     }
 }
 

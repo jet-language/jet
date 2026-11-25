@@ -1033,8 +1033,12 @@ sema_call_method_checked_from_value: fn(check: ^SemaBodyCheck, receiver: Expr, r
             return None
         }
     }
-    // A method call hears the `check` rules of its method's markers before
-    // its arguments bind (Calls/CheckRules.jet).
+    // A method call is recorded when its method carries `#Recorded`
+    // (Calls/Recorded.jet), and hears the `check` rules of its method's
+    // markers before its arguments bind (Calls/CheckRules.jet).
+    if sema_recorded_here(check, candidate.method.symbol) {
+        sema_recorded_note(check, candidate.method.symbol, candidate.method.name, span, args, candidate.type_args, Val(receiver_value))
+    }
     ^rules: [SemaCallRule]{}
     if sema_call_rules_heard_here(check.scopes) {
         rules = sema_call_rules_of_callee(graph, candidate.method.symbol)
@@ -1042,7 +1046,7 @@ sema_call_method_checked_from_value: fn(check: ^SemaBodyCheck, receiver: Expr, r
     if rules.len() == 0 {
         return sema_call_method_checked_visible(check, receiver, receiver_value, candidate, args, defaults, expected, span)
     }
-    hearing: sema_call_rules_hear(rules, Val(candidate.method.symbol), candidate.method.name, span, args, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, check), receiver_value.span, None, "", check.scopes.current, check)
+    hearing: sema_call_rules_hear(rules, Val(candidate.method.symbol), candidate.method.name, span, args, candidate.type_args, Val(receiver), Val(receiver_value.ty), sema_rule_known(receiver_value, check), receiver_value.span, None, "", check.scopes.current, check)
     if hearing.rejected -> return None
     if !hearing.staged {
         return sema_call_method_checked_visible(check, receiver, receiver_value, candidate, args, defaults, expected, span)
