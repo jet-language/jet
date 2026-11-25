@@ -1,0 +1,15 @@
+// `jet.runtime.mem`: the storage behind core.mem's Arena, Bump and
+// Pool constructors, in Jet types. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (MemStorage.jet). Each is `priv`: only core.mem calls them. A negative
+// capacity or slot count stops as an out-of-range index does.
+mem: module {
+    // An arena whose first block holds `capacity` bytes.
+    #Import(c) priv arena: fn(capacity: Int) -> Arena = "jet_arena_with_capacity"
+
+    // A bump allocator whose first block holds `capacity` bytes.
+    #Import(c) priv bump: fn(capacity: Int) -> Bump = "jet_bump_with_capacity"
+
+    // A slot allocator with `slots` slots.
+    #Import(c) priv pool: fn(slots: Int) -> Pool = "jet_pool_with_slots"
+}
