@@ -2459,11 +2459,12 @@ It samples that observer under the storage guard, and expires only when
 `now > deadline`; at equality the credential remains available. Expiry takes
 the payload out of its slot and ends the owned payload's scope, so its
 `Close` follows the same zeroization path as dropping still-live storage.
-The sole wipe host operation is the plain-byte `crypto.__wipe` kernel beneath `crypto.wipe`.
+The sole wipe host operation is the plain-byte runtime wipe (`jet.runtime.crypto`
+`wipe`) beneath `crypto.wipe`.
 No observer or loan callback crosses that host boundary.
 A `Secret` made by `Secret.from_bytes`, `Secret.from_text` or a Core crypto
-function records its buffer through the plain-byte `crypto.__secret_keep`
-leaf, so a crash dump zeroes every run of its bytes and a process end wipes
+function records its buffer through the plain-byte runtime `secret_keep`
+binding, so a crash dump zeroes every run of its bytes and a process end wipes
 them ([observability](../observability.md)); its `Close`, through
 `crypto.wipe`, drops the record.
 Fields are private; `expires_at_ms()` reads the deadline and `.with(...)`
